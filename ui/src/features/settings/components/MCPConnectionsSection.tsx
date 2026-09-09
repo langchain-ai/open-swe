@@ -6,13 +6,13 @@ import { SettingsSection } from "@/components/AppShell"
 import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
-import type { WorkspaceMCP, WorkspaceMCPUpdate } from "@/lib/api"
-import { WorkspaceMCPImport } from "./WorkspaceMCPImport"
-import type { ImportedMCP } from "./WorkspaceMCPImport"
-import { WorkspaceMCPOAuthFields } from "./WorkspaceMCPOAuthFields"
+import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
+import { MCPImport } from "./MCPImport"
+import type { ImportedMCP } from "./MCPImport"
+import { MCPOAuthFields } from "./MCPOAuthFields"
 
 type Header = { name: string; value: string; revealed?: boolean }
-type Draft = Omit<WorkspaceMCPUpdate, "headers"> & { existing: boolean }
+type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
 type Catalog = { name: string; description: string }[]
 
 export type MCPScope = "workspace" | "user"
@@ -21,11 +21,11 @@ type MCPScopeConfig = {
   title: string
   description: string
   queryKey: string[]
-  list: () => Promise<WorkspaceMCP[]>
-  save: (body: WorkspaceMCPUpdate) => Promise<WorkspaceMCP>
+  list: () => Promise<MCPConnection[]>
+  save: (body: MCPConnectionUpdate) => Promise<MCPConnection>
   remove: (name: string) => Promise<void>
   revealHeaders: (name: string) => Promise<Record<string, string>>
-  discover: (body: WorkspaceMCPUpdate) => Promise<Catalog>
+  discover: (body: MCPConnectionUpdate) => Promise<Catalog>
 }
 
 const scopes: Record<MCPScope, MCPScopeConfig> = {
@@ -105,7 +105,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
     setError(null)
   }
 
-  const edit = (connection?: WorkspaceMCP) => {
+  const edit = (connection?: MCPConnection) => {
     setImporting(false)
     setPendingImports([])
     openEditor(
@@ -194,7 +194,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
         connections.data?.some((c) => c.name === draft.name)
       )
         throw new Error("A connection with this name already exists")
-      const update: WorkspaceMCPUpdate = {
+      const update: MCPConnectionUpdate = {
         name: draft.name,
         url: draft.url,
         transport: draft.transport,
@@ -205,7 +205,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
       }
       const discovered = discover ? await client.discover(update) : []
       const saved = await client.save(update)
-      qc.setQueryData<WorkspaceMCP[]>(queryKey, (current) => [
+      qc.setQueryData<MCPConnection[]>(queryKey, (current) => [
         ...(current ?? []).filter(
           (connection) => connection.name !== saved.name
         ),
@@ -305,7 +305,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
             onChange={(e) =>
               setDraft({
                 ...draft,
-                transport: e.target.value as WorkspaceMCP["transport"],
+                transport: e.target.value as MCPConnection["transport"],
               })
             }
           >
@@ -340,7 +340,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
           </select>
         </label>
         {draft.oauth && (
-          <WorkspaceMCPOAuthFields
+          <MCPOAuthFields
             key={draft.name}
             value={draft.oauth}
             hasSavedSecret={Boolean(
@@ -707,7 +707,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
           )
         })}
         {importing ? (
-          <WorkspaceMCPImport
+          <MCPImport
             onImport={([first, ...rest]) => {
               if (!first) return
               setImporting(false)
