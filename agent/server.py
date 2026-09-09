@@ -806,9 +806,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         cfg = RunConfig.parse(configurable)
         if self._engine_validation:
             async with aphase(self._thread_id, "prepare.await_sandbox"):
-                sandbox_backend = await get_or_create_sandbox_backend_proxy(
-                    self._thread_id
-                ).ready()
+                sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
@@ -949,9 +947,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
-    engine_validation_requested = (
-        cfg.engine_validation is True or cfg.source == "engine_validation"
-    )
+    engine_validation_requested = cfg.engine_validation is True or cfg.source == "engine_validation"
     engine_validation = cfg.is_engine_validation
     if engine_validation_requested and not engine_validation:
         raise RuntimeError("Engine validation requires authenticated service context")
@@ -965,9 +961,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(bindable_config(config))
 
-    profile_login = (
-        None if engine_validation else resolve_github_login(as_json_object(config))
-    )
+    profile_login = None if engine_validation else resolve_github_login(as_json_object(config))
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
@@ -1130,8 +1124,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "model_routing_enabled": adaptive_model_routing,
         "repo_instructions": repo_instructions,
     }
-    if not local_run and not engine_validation and (
-        settings_changed or {**thread_settings, **resolved_settings} != thread_settings
+    if (
+        not local_run
+        and not engine_validation
+        and (settings_changed or {**thread_settings, **resolved_settings} != thread_settings)
     ):
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
@@ -1193,9 +1189,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Plan mode enabled for thread %s", thread_id)
 
     async with aphase(thread_id, "factory.admin_thread"):
-        admin_thread = (
-            False if engine_validation else await _admin_thread(config, profile_login)
-        )
+        admin_thread = False if engine_validation else await _admin_thread(config, profile_login)
     if admin_thread:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
@@ -1304,12 +1298,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             integration_tool_groups["Browser"] = browser_tools
     # Corridor's catalog is a static allowlist, so the MCP handshake that used to
     # run before every first model call now waits until the agent asks for it.
-    if (
-        not stop_summary_mode
-        and not local_run
-        and not engine_validation
-        and corridor_configured()
-    ):
+    if not stop_summary_mode and not local_run and not engine_validation and corridor_configured():
         integration_tool_groups["Corridor"] = IntegrationGroup(
             tool_names=CORRIDOR_TOOL_NAMES,
             load=_load_corridor_mcp_tools,
@@ -1323,9 +1312,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             dynamic_tool_middleware = candidate
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    agent_backend: BackendProtocol = (
-        ReadOnlyBackend(backend) if engine_validation else backend
-    )
+    agent_backend: BackendProtocol = ReadOnlyBackend(backend) if engine_validation else backend
     skill_routes: dict[str, BackendProtocol] = {
         BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
             FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
@@ -1450,11 +1437,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     initial_delay=1.0,
                     max_delay=10.0,
                 ),
-                *(
-                    []
-                    if local_run or engine_validation
-                    else [PullRequestCreationGuardMiddleware()]
-                ),
+                *([] if local_run or engine_validation else [PullRequestCreationGuardMiddleware()]),
                 *([] if engine_validation else [WorkflowPushGuardMiddleware()]),
                 *([] if engine_validation else [refresh_github_proxy_before_model]),
                 *(
@@ -1463,11 +1446,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     else [check_message_queue_before_model]
                 ),
                 TimeoutWrapupMiddleware(),
-                *(
-                    []
-                    if engine_validation
-                    else [notify_step_limit_reached, record_run_usage]
-                ),
+                *([] if engine_validation else [notify_step_limit_reached, record_run_usage]),
                 *model_selection_middleware,
                 *fallback_middleware,
                 PlanModeMiddleware(
