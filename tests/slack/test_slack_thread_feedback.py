@@ -44,6 +44,7 @@ def context(monkeypatch: pytest.MonkeyPatch, fake_store: Any) -> dict[str, Any]:
         AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
     monkeypatch.setattr(feedback, "post_slack_ephemeral_message", AsyncMock(return_value=True))
+    monkeypatch.setattr(feedback, "replace_slack_interaction_message", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "open_slack_modal", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "create_langsmith_thread_feedback", AsyncMock(return_value=True))
     client = AsyncMock()
@@ -70,6 +71,7 @@ def _action(action_id: str = "open_swe_feedback_rate_5", value: str = "run-1") -
         "trigger_id": "trigger-1",
         "channel": {"id": "C1"},
         "user": {"id": "U1"},
+        "response_url": "https://hooks.slack.com/actions/T1/B1/token",
         "actions": [{"action_id": action_id, "value": value, "action_ts": "3.0"}],
     }
 
@@ -100,10 +102,10 @@ async def test_rating_is_saved_privately_without_starting_agent(
             "run_id": "run-1",
         },
     )
-    call = feedback.post_slack_ephemeral_message.await_args
-    assert call.args[:2] == ("C1", "U1")
-    assert call.kwargs["thread_ts"] == "1.0"
-    assert call.kwargs["blocks"][0]["accessory"]["action_id"] == "open_swe_feedback_comment"
+    feedback.replace_slack_interaction_message.assert_awaited_once_with(
+        "https://hooks.slack.com/actions/T1/B1/token", "Thanks — your feedback was saved."
+    )
+    feedback.post_slack_ephemeral_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -156,7 +158,11 @@ async def test_comment_modal_opens_with_saved_rating_and_comment(
     feedback.open_slack_modal.assert_awaited_once()
     trigger_id, view = feedback.open_slack_modal.await_args.args
     assert trigger_id == "trigger-1"
-    assert json.loads(view["private_metadata"]) == {"channel_id": "C1", "run_id": "run-1"}
+    assert json.loads(view["private_metadata"]) == {
+        "channel_id": "C1",
+        "run_id": "run-1",
+        "response_url": "https://hooks.slack.com/actions/T1/B1/token",
+    }
     assert view["blocks"][-1]["element"]["initial_value"] == "Useful"
 
 
@@ -180,7 +186,13 @@ def _submission(comment: str = "Please run the tests next time.") -> dict[str, A
         "user": {"id": "U1"},
         "view": {
             "callback_id": "open_swe_feedback_comment",
-            "private_metadata": json.dumps({"channel_id": "C1", "run_id": "run-1"}),
+            "private_metadata": json.dumps(
+                {
+                    "channel_id": "C1",
+                    "run_id": "run-1",
+                    "response_url": "https://hooks.slack.com/actions/T1/B1/token",
+                }
+            ),
             "state": {"values": {"feedback_comment": {"comment": {"value": comment}}}},
         },
     }
@@ -216,6 +228,10 @@ async def test_comment_submission_updates_same_feedback(context: Any, fake_store
         == "Please run the tests next time."
     )
     await tasks()
+    feedback.replace_slack_interaction_message.assert_awaited_once_with(
+        "https://hooks.slack.com/actions/T1/B1/token", "Thanks — your feedback was saved."
+    )
+    feedback.post_slack_ephemeral_message.assert_not_awaited()
     assert feedback.create_langsmith_thread_feedback.await_args.args == (
         "thread-1",
         "slack_rating:C1:U1:run-1",
@@ -372,6 +388,7 @@ async def test_rating_failure_does_not_acknowledge_success(
     await routes.slack_interactivity(_request(_action()), tasks)
     await tasks()
     feedback.create_langsmith_thread_feedback.assert_not_awaited()
+    feedback.replace_slack_interaction_message.assert_not_awaited()
     assert "could not be saved" in feedback.post_slack_ephemeral_message.await_args.args[2]
 
 

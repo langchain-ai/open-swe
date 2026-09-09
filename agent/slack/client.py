@@ -789,6 +789,43 @@ async def stop_slack_stream(
             raise
 
 
+def _validate_slack_response_url(url: str) -> tuple[bool, str]:
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or (parsed.hostname or "").lower() not in {"hooks.slack.com", "hooks.slack-gov.com"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in (None, 443)
+    ):
+        return False, "Slack returned an invalid response URL"
+    return True, ""
+
+
+async def replace_slack_interaction_message(response_url: str, text: str) -> bool:
+    """Replace the message that originated a Slack interaction."""
+    if not response_url:
+        return False
+    block = {"type": "section", "text": {"type": "plain_text", "text": text}}
+    try:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+            response, blocked = await request_with_safe_redirects(
+                http_client,
+                "POST",
+                response_url,
+                json={"replace_original": True, "text": text, "blocks": [block]},
+                validate_url=_validate_slack_response_url,
+            )
+        if blocked or response is None:
+            logger.warning("Slack interaction response URL was blocked")
+            return False
+        response.raise_for_status()
+        return True
+    except httpx2.HTTPError:
+        logger.exception("Slack interaction message replacement failed")
+        return False
+
+
 async def update_slack_message(
     channel_id: str,
     message_ts: str,

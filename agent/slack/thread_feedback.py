@@ -16,6 +16,7 @@ from agent.slack.client import (
     lookup_slack_run_message_mapping,
     open_slack_modal,
     post_slack_ephemeral_message,
+    replace_slack_interaction_message,
     slack_channel_allows_operations,
     slack_thread_mutation_lock,
 )
@@ -201,7 +202,7 @@ async def _load_feedback(channel_id: str, run_id: str, user_id: str) -> ThreadFe
     return record if slack_channel_allows_operations(context) else None
 
 
-def comment_modal(record: ThreadFeedback) -> dict[str, Any]:
+def comment_modal(record: ThreadFeedback, response_url: str = "") -> dict[str, Any]:
     element: dict[str, Any] = {
         "type": "plain_text_input",
         "action_id": "comment",
@@ -214,7 +215,9 @@ def comment_modal(record: ThreadFeedback) -> dict[str, Any]:
     return {
         "type": "modal",
         "callback_id": _COMMENT_ACTION,
-        "private_metadata": json.dumps({"channel_id": record.channel_id, "run_id": record.run_id}),
+        "private_metadata": json.dumps(
+            {"channel_id": record.channel_id, "run_id": record.run_id, "response_url": response_url}
+        ),
         "title": {"type": "plain_text", "text": "Open SWE feedback"},
         "submit": {"type": "plain_text", "text": "Save"},
         "close": {"type": "plain_text", "text": "Cancel"},
@@ -279,16 +282,11 @@ async def _export_current_feedback(record: ThreadFeedback) -> None:
         )
 
 
-async def _acknowledge(record: ThreadFeedback, *, with_comment_button: bool) -> None:
+async def _acknowledge(record: ThreadFeedback, response_url: str = "") -> None:
     text = "Thanks — your feedback was saved."
-    block: dict[str, Any] = {"type": "section", "text": {"type": "plain_text", "text": text}}
-    if with_comment_button:
-        block["accessory"] = {
-            "type": "button",
-            "text": {"type": "plain_text", "text": "Add comments"},
-            "action_id": _COMMENT_ACTION,
-            "value": record.run_id,
-        }
+    if response_url and await replace_slack_interaction_message(response_url, text):
+        return
+    block = {"type": "section", "text": {"type": "plain_text", "text": text}}
     await post_slack_ephemeral_message(
         record.channel_id,
         record.user_id,
@@ -332,7 +330,7 @@ async def _process_rating(payload: dict[str, Any]) -> None:
                 channel_id, user_id, "Your rating could not be saved. Please try again."
             )
         return
-    await _acknowledge(record, with_comment_button=True)
+    await _acknowledge(record, str(payload.get("response_url") or ""))
     await _export_feedback(record)
 
 
@@ -374,7 +372,7 @@ async def handle_slack_feedback_interaction(
         except Exception:
             logger.warning("Could not save Slack feedback comment", exc_info=True)
             return _comment_error("Your comment could not be saved. Please try again.")
-        background_tasks.add_task(_acknowledge, record, with_comment_button=False)
+        background_tasks.add_task(_acknowledge, record, str(metadata.get("response_url") or ""))
         background_tasks.add_task(_export_feedback, record)
         return {}
 
@@ -393,7 +391,9 @@ async def handle_slack_feedback_interaction(
             if (
                 isinstance(trigger_id, str)
                 and trigger_id
-                and await open_slack_modal(trigger_id, comment_modal(record))
+                and await open_slack_modal(
+                    trigger_id, comment_modal(record, str(payload.get("response_url") or ""))
+                )
             ):
                 return {}
     except Exception:

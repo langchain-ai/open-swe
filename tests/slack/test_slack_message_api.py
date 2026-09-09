@@ -69,6 +69,33 @@ async def test_ephemeral_feedback_sends_blocks_and_thread(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
+async def test_replace_interaction_message_removes_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_cm = _async_client_cm(_ok_response())
+    safe_request = AsyncMock(return_value=(_ok_response(), None))
+    monkeypatch.setattr(slack_utils, "request_with_safe_redirects", safe_request)
+
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        assert await slack_utils.replace_slack_interaction_message(
+            "https://hooks.slack.com/actions/T1/B1/token", "Feedback saved"
+        )
+
+    assert safe_request.await_args.args[1:3] == (
+        "POST",
+        "https://hooks.slack.com/actions/T1/B1/token",
+    )
+    assert safe_request.await_args.kwargs["json"] == {
+        "replace_original": True,
+        "text": "Feedback saved",
+        "blocks": [{"type": "section", "text": {"type": "plain_text", "text": "Feedback saved"}}],
+    }
+    validate = safe_request.await_args.kwargs["validate_url"]
+    assert validate("https://hooks.slack.com/actions/T1/B1/token")[0]
+    assert not validate("https://example.com/actions/T1/B1/token")[0]
+
+
+@pytest.mark.asyncio
 async def test_modal_sends_trigger_and_view(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
     client_cm = _async_client_cm(_ok_response())
