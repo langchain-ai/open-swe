@@ -62,6 +62,7 @@ from ..review.publish import (
     settle_review_check_run,
 )
 from ..review.reconcile import reconcile_findings_with_review_threads
+from ..utils.auth import refresh_github_token
 from ..utils.dashboard_links import dashboard_review_url, dashboard_thread_url
 from ..utils.github_checks import (
     CheckConclusion,
@@ -178,7 +179,7 @@ async def publish_review(
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
 
-    token = get_github_token()
+    token = get_github_token() or await refresh_github_token(config, get_thread_id_from_runtime())
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 

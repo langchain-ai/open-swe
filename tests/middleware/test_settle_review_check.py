@@ -286,3 +286,37 @@ async def test_settle_review_check_on_exit_preserves_completed_owned_check() -> 
 
     assert result is None
     settle.assert_not_awaited()
+
+
+async def test_settle_review_check_on_exit_refreshes_an_expired_token() -> None:
+    state: AgentState = {"messages": []}
+    refresh = AsyncMock(return_value="fresh-token")
+    with (
+        patch(
+            "agent.middleware.settle_review_check.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "thread-1",
+                    "repo": {"owner": "acme", "name": "widgets"},
+                    "review_check_run_id": 42,
+                }
+            },
+        ),
+        patch(
+            "agent.middleware.settle_review_check.get_thread_metadata",
+            new_callable=AsyncMock,
+            return_value={"review_check_run_id": 42},
+        ),
+        patch("agent.middleware.settle_review_check.get_github_token", return_value=None),
+        patch("agent.middleware.settle_review_check.refresh_github_token", refresh),
+        patch(
+            "agent.middleware.settle_review_check.settle_review_check_run",
+            new_callable=AsyncMock,
+        ) as settle,
+    ):
+        await settle_review_check_on_exit.aafter_agent(state, MagicMock())
+
+    refresh.assert_awaited_once()
+    settle.assert_awaited_once()
+    assert settle.await_args is not None
+    assert settle.await_args.kwargs["token"] == "fresh-token"

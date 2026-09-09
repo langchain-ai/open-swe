@@ -120,7 +120,7 @@ def _cached_token_if_fresh(
         token, expires_at, cached_at = cached
         if _entry_expired(expires_at, cached_at, now=datetime.now(UTC)):
             _GITHUB_TOKEN_CACHE.pop(key, None)
-            logger.info("Cached GitHub token for thread %s has expired; re-resolving", thread_id)
+            logger.info("Cached GitHub token for thread %s has expired", thread_id)
             continue
         return token, expires_at
     return None, None

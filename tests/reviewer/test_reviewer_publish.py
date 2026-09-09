@@ -659,6 +659,72 @@ async def test_publish_review_forwards_trace_link_config_override() -> None:
 
 
 @pytest.mark.asyncio
+async def test_publish_review_refreshes_a_token_that_expired_during_the_run() -> None:
+    from agent.tools.publish_review import publish_review
+
+    publish_async = AsyncMock(return_value={"success": True})
+    refresh = AsyncMock(return_value="fresh-token")
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "reviewer-thread-id",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                },
+                "metadata": {},
+            },
+        ),
+        patch(
+            "agent.tools.publish_review.get_thread_id_from_runtime",
+            return_value="reviewer-thread-id",
+        ),
+        patch("agent.tools.publish_review.get_github_token", return_value=None),
+        patch("agent.tools.publish_review.refresh_github_token", refresh),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+    ):
+        result = await publish_review()
+
+    assert result == {"success": True}
+    refresh.assert_awaited_once()
+    assert refresh.await_args is not None
+    assert refresh.await_args.args[1] == "reviewer-thread-id"
+    assert publish_async.call_args is not None
+    assert publish_async.call_args.kwargs["token"] == "fresh-token"
+
+
+@pytest.mark.asyncio
+async def test_publish_review_reports_when_no_token_can_be_minted() -> None:
+    from agent.tools.publish_review import publish_review
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "reviewer-thread-id",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                },
+                "metadata": {},
+            },
+        ),
+        patch(
+            "agent.tools.publish_review.get_thread_id_from_runtime",
+            return_value="reviewer-thread-id",
+        ),
+        patch("agent.tools.publish_review.get_github_token", return_value=None),
+        patch("agent.tools.publish_review.refresh_github_token", AsyncMock(return_value=None)),
+    ):
+        result = await publish_review()
+
+    assert result == {"success": False, "error": "No GitHub token available"}
+
+
+@pytest.mark.asyncio
 async def test_resolve_review_trace_url_enabled_by_team_setting() -> None:
     from agent.tools.publish_review import _resolve_review_trace_url
 

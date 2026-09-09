@@ -94,3 +94,19 @@ async def resolve_github_token(
             f"GitHub auth failed for thread {thread_id}: missing trusted repository context"
         )
     return await _resolve_bot_installation_token(thread_id, *trusted)
+
+
+async def refresh_github_token(
+    config: Mapping[str, Any] | RunnableConfig, thread_id: str
+) -> str | None:
+    """Mint a fresh installation token after the cached one expired mid-run.
+
+    Installation tokens last an hour; a review that runs longer finds an empty
+    cache when it publishes (MASTRA-417).
+    """
+    try:
+        token, _expires_at = await resolve_github_token(config, thread_id)
+    except RuntimeError:
+        logger.warning("GitHub token refresh failed for thread %s", thread_id, exc_info=True)
+        return None
+    return token
