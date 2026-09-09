@@ -36,7 +36,14 @@ def _content_with_instruction(
         return instruction
     content = message.content
     if isinstance(content, list):
+        if any(
+            instruction in (block if isinstance(block, str) else str(block.get("text", "")))
+            for block in content
+        ):
+            return content
         return [*content, {"type": "text", "text": instruction}]
+    if instruction in content:
+        return content
     return f"{content}\n\n{instruction}" if content else instruction
 
 
