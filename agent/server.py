@@ -45,7 +45,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from agent.dashboard.admin import is_admin, is_workspace_mcp_authorized
+from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -432,21 +432,6 @@ def _general_purpose_subagent(
     return subagent
 
 
-async def _workspace_mcp_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether the triggering user may use workspace MCP tools."""
-    cfg = RunConfig.from_config(config)
-    candidate_login = profile_login or cfg.github_login
-    candidate_emails = [
-        cfg.user_email,
-        cfg.slack_thread.triggering_user_email if cfg.slack_thread else None,
-    ]
-    if any(is_workspace_mcp_authorized(email, login=candidate_login) for email in candidate_emails):
-        return True
-    return is_workspace_mcp_authorized(
-        await email_for_login(candidate_login), login=candidate_login
-    )
-
-
 _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
     "id": "system:sender-context",
     "display_name": "Sender context",
@@ -526,12 +511,6 @@ async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any],
         ),
     )
     return currents_tools, notion_tools
-
-
-async def _workspace_mcp_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
-    if not await _workspace_mcp_authorized(config, profile_login):
-        return []
-    return await load_workspace_mcp_tools()
 
 
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
@@ -1086,7 +1065,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             _phase_result(
                 thread_id,
                 "factory.workspace_mcp_tools",
-                lambda: _workspace_mcp_tools_for(config, profile_login),
+                load_workspace_mcp_tools,
             ),
             _phase_result(
                 thread_id,

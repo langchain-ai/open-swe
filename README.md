@@ -108,7 +108,7 @@ Cloud tasks run in isolated Linux sandboxes with the development tooling supplie
 
 ### Tools stay curated
 
-Deep Agents supplies the core filesystem, shell, and subagent tools. Open SWE adds focused capabilities for GitHub delivery, Linear, Slack, thread management, web research, browser-based application verification, planning, review, CI monitoring, and connected services. Connected services and workspace MCP integrations are loaded only when configured and authorized.
+Deep Agents supplies the core filesystem, shell, and subagent tools. Open SWE adds focused capabilities for GitHub delivery, Linear, Slack, thread management, web research, browser-based application verification, planning, review, CI monitoring, and connected services. Personal integrations load using the user's connections. Admin-configured workspace MCP tools are available to all coding-agent users.
 
 ## Work where your team works
 

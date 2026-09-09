@@ -163,9 +163,9 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
             patch.object(server, "make_model", return_value=MagicMock()),
             patch.object(
                 server,
-                "_workspace_mcp_authorized",
+                "load_workspace_mcp_tools",
                 new_callable=AsyncMock,
-                return_value=False,
+                return_value=[],
             ),
             patch.object(server, "corridor_configured", return_value=configured),
             patch.object(

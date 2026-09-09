@@ -305,9 +305,6 @@ ENV.var(
     secret=True,
 )
 ENV.var("CONFIGURED_ADMINS", "Comma-separated GitHub logins or emails with admin access.")
-ENV.var(
-    "OBSERVABILITY_AUTHORIZED_EMAILS", "Comma-separated emails allowed to use workspace MCP tools."
-)
 ENV.var("ADMIN_OIDC_SUBJECTS", "Comma-separated GitHub Actions OIDC subjects allowed as admins.")
 ENV.var("ADMIN_OIDC_AUDIENCE", "Audience required on admin OIDC tokens.", default="open-swe")
 ENV.var(

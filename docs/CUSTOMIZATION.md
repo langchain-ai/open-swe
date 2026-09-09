@@ -234,8 +234,10 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 
 Admins can connect generic remote MCP servers under **Admin → Workspace MCPs**.
 Connections belong to this Open SWE deployment and are shared across repositories
-and remote coding-agent threads. The existing `CONFIGURED_ADMINS` and
-`OBSERVABILITY_AUTHORIZED_EMAILS` access rules control which users can load them.
+and remote coding-agent threads. Enabled connections provide baseline tools for
+all users, limited to the tools selected by an admin. Only admins can manage
+connections or reveal saved credentials. Plan mode continues to block workspace
+MCP tools.
 
 1. Choose **Add MCP server** and enter a unique lowercase connection name, an
    HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
