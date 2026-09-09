@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from langgraph_sdk.errors import ConflictError
 
@@ -59,7 +59,7 @@ class _Threads:
 
     async def create(self, *, thread_id: str, **_kwargs: Any) -> None:
         if thread_id in self.lock_ids:
-            response = httpx.Response(409, request=httpx.Request("POST", "http://test/threads"))
+            response = httpx2.Response(409, request=httpx2.Request("POST", "http://test/threads"))
             raise ConflictError("already exists", response=response, body=None)
         self.lock_ids.add(thread_id)
 

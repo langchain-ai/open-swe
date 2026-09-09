@@ -24,6 +24,7 @@ from agent.dashboard.oauth import (
 )
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
+    NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     model_supports_effort,
     provider_fallback_pair,
@@ -68,6 +69,10 @@ class ProfileUpdate(BaseModel):
         return self
 
     def validate_pairing(self) -> None:
+        if self.default_model in NON_DEFAULT_MODEL_IDS:
+            raise ValueError(f"{self.default_model!r} cannot be a default model")
+        if self.default_subagent_model in NON_DEFAULT_MODEL_IDS:
+            raise ValueError(f"{self.default_subagent_model!r} cannot be a default model")
         if not model_supports_effort(self.default_model, self.reasoning_effort):
             raise ValueError(
                 f"effort {self.reasoning_effort!r} not supported by {self.default_model!r}"
@@ -106,7 +111,7 @@ def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     ):
         model = value.get(model_field)
         effort = value.get(effort_field)
-        if model in DEPRECATED_MODEL_IDS:
+        if model in DEPRECATED_MODEL_IDS or model in NON_DEFAULT_MODEL_IDS:
             value.pop(model_field, None)
             value.pop(effort_field, None)
         elif isinstance(model, str):

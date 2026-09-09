@@ -235,7 +235,8 @@ export interface AgentSchedule {
 export interface QueuedThreadMessage {
   id: string
   content: string
-  images?: Array<ImageChunk>
+  /** Attachments as stored refs from the server; base64 only for a message this browser just sent. */
+  images?: Array<ImageChunk | AttachmentChunk>
   createdAt: number
 }
 
@@ -258,6 +259,7 @@ export interface WorkflowPushApproval {
   diffStats: WorkflowDiffStats
   diffPreview: string
   diffPreviewTruncated: boolean
+  inheritedFrom: string | null
   approvalUrl: string | null
   requestedAt: string | null
   decidedAt: string | null

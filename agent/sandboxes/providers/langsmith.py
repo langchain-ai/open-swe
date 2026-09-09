@@ -4,11 +4,11 @@ import asyncio
 import base64
 import json
 import logging
-import os
 from abc import ABC, abstractmethod
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
-import httpx
+import httpx2
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langsmith.sandbox import (
@@ -19,6 +19,8 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
+from agent.config import ENV
+from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
 
@@ -48,15 +50,16 @@ PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 PROXY_MODEL_KEY_PLACEHOLDER = "proxy-injected"
+PROXY_LANGSMITH_KEY_PLACEHOLDER = "sandbox-proxy-injected"
+_MANAGED_PROXY_RULE_NAMES = frozenset({"open-swe-langsmith"})
 
 
 def _get_langsmith_api_key() -> str | None:
     """Get LangSmith API key from environment.
 
-    Checks LANGSMITH_API_KEY first, then falls back to LANGSMITH_API_KEY_PROD
-    for LangGraph Cloud deployments where LANGSMITH_API_KEY is reserved.
+    Same resolution as the rest of the app (``LANGSMITH_API_KEY``).
     """
-    return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
+    return ENV.LANGSMITH_API_KEY.optional()
 
 
 def _get_sandbox_api_key() -> str | None:
@@ -66,7 +69,7 @@ def _get_sandbox_api_key() -> str | None:
     LangSmith workspace than the one used for tracing/other API calls; falls
     back to the standard key.
     """
-    return os.environ.get("SANDBOX_LANGSMITH_API_KEY") or _get_langsmith_api_key()
+    return ENV.SANDBOX_LANGSMITH_API_KEY.optional() or _get_langsmith_api_key()
 
 
 def _get_sandbox_endpoint() -> str:
@@ -78,8 +81,8 @@ def _get_sandbox_endpoint() -> str:
     proxy-config URL; the SDK clients take :func:`_get_sandbox_api_endpoint`.
     """
     return (
-        os.environ.get("SANDBOX_LANGSMITH_ENDPOINT")
-        or os.environ.get("LANGSMITH_ENDPOINT")
+        ENV.SANDBOX_LANGSMITH_ENDPOINT.optional()
+        or ENV.LANGSMITH_ENDPOINT.optional()
         or "https://api.smith.langchain.com"
     )
 
@@ -96,7 +99,7 @@ def _get_sandbox_api_endpoint() -> str:
 
 
 def _parse_optional_int(name: str, default: int) -> int:
-    raw = os.environ.get(name)
+    raw = ENV[name].optional()
     if not raw:
         return default
     try:
@@ -115,7 +118,7 @@ def _execute_client_grace_seconds() -> int:
 
 def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]:
     """Get sandbox snapshot configuration from environment."""
-    snapshot_id = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID")
+    snapshot_id = ENV.DEFAULT_SANDBOX_SNAPSHOT_ID.optional()
     fs_capacity_bytes = _parse_optional_int(
         "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
     )
@@ -141,7 +144,7 @@ def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]
 def _get_sandbox_create_extra_fields() -> dict[str, Any]:
     """Parse SANDBOX_CREATE_EXTRA_JSON into extra fields merged into the
     sandbox-create request body, e.g. ``{"_internal_runtime": "v2"}``."""
-    raw = os.environ.get("SANDBOX_CREATE_EXTRA_JSON")
+    raw = ENV.SANDBOX_CREATE_EXTRA_JSON.optional()
     if not raw or not raw.strip():
         return {}
     try:
@@ -169,12 +172,7 @@ def _get_sandbox_proxy_config(
 
 
 def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
-    """Merge ``extra`` into the JSON body of the sandbox-create request.
-
-    The SDK's ``create_sandbox`` builds a fixed payload with no passthrough, so
-    wrap the HTTP client's ``post`` to inject the fields on the ``POST /boxes``
-    request only (other endpoints post to ``/boxes/{name}/...``).
-    """
+    """Merge extra fields until the SDK exposes create-payload passthrough."""
     if not extra:
         return
     original_post = client._http.post
@@ -185,7 +183,39 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
             kwargs["json"] = {**payload, **extra}
         return await original_post(url, *args, **kwargs)
 
-    client._http.post = post_with_extra
+    # RFC moving this into the SDK if it adds a public arbitrary create-fields API.
+    client._http.post = post_with_extra  # ty: ignore[invalid-assignment]
+
+
+def _langsmith_proxy_rule(credentials: LangSmithCredentials) -> dict[str, Any]:
+    endpoint = urlsplit(credentials.endpoint)
+    if (
+        endpoint.scheme != "https"
+        or not endpoint.hostname
+        or endpoint.username is not None
+        or endpoint.password is not None
+        or endpoint.query
+        or endpoint.fragment
+    ):
+        raise ValueError(
+            "LangSmith endpoint must be an absolute HTTPS URL without credentials, query, or fragment"
+        )
+    try:
+        port = endpoint.port
+    except ValueError as exc:
+        raise ValueError("LangSmith endpoint has an invalid port") from exc
+    host = endpoint.hostname.lower()
+    match_host = f"{host}:{port}" if port and port != 443 else host
+    normalized_endpoint = urlunsplit(("https", match_host, endpoint.path.rstrip("/"), "", ""))
+    return {
+        "name": "open-swe-langsmith",
+        "match_hosts": [match_host],
+        "headers": [{"name": "x-api-key", "type": "opaque", "value": credentials.api_key}],
+        "env_vars": {
+            "LANGSMITH_API_KEY": PROXY_LANGSMITH_KEY_PLACEHOLDER,
+            "LANGSMITH_ENDPOINT": normalized_endpoint,
+        },
+    }
 
 
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
@@ -220,12 +250,12 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
 
 
 def _stagehand_proxy_rules() -> list[dict[str, Any]]:
-    model = os.getenv("STAGEHAND_MODEL", "anthropic/claude-sonnet-4-5")
+    model = ENV.STAGEHAND_MODEL.get()
     provider = model.split("/", 1)[0].split(":", 1)[0]
     key = (
-        os.getenv("STAGEHAND_MODEL_API_KEY")
-        or os.getenv("MODEL_API_KEY")
-        or os.getenv("ANTHROPIC_API_KEY")
+        ENV.STAGEHAND_MODEL_API_KEY.optional()
+        or ENV.MODEL_API_KEY.optional()
+        or ENV.ANTHROPIC_API_KEY.optional()
     )
     if not key:
         return []
@@ -245,7 +275,7 @@ def _stagehand_proxy_rules() -> list[dict[str, Any]]:
     ]
 
 
-def _retry_after_seconds(response: httpx.Response | None) -> float | None:
+def _retry_after_seconds(response: httpx2.Response | None) -> float | None:
     if response is None:
         return None
     raw = response.headers.get("Retry-After")
@@ -259,9 +289,9 @@ def _retry_after_seconds(response: httpx.Response | None) -> float | None:
 
 
 def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
-    if isinstance(exc, httpx.HTTPStatusError):
+    if isinstance(exc, httpx2.HTTPStatusError):
         return exc.response.status_code in PROXY_CONFIG_RETRYABLE_STATUS_CODES
-    return isinstance(exc, httpx.TransportError)
+    return isinstance(exc, httpx2.TransportError)
 
 
 def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
@@ -327,18 +357,18 @@ async def _create_sandbox_with_retry(
     raise RuntimeError("unreachable sandbox retry state")
 
 
-def _with_response_body(exc: BaseException) -> httpx.HTTPStatusError | None:
+def _with_response_body(exc: BaseException) -> httpx2.HTTPStatusError | None:
     """Re-raisable copy of ``exc`` carrying the response body, or ``None`` to re-raise as-is.
 
     ``raise_for_status`` builds its message from the status line and an MDN link
     only, so the API's own explanation of a rejection never reaches the logs.
     """
-    if not isinstance(exc, httpx.HTTPStatusError):
+    if not isinstance(exc, httpx2.HTTPStatusError):
         return None
     body = exc.response.text.strip()[:PROXY_CONFIG_ERROR_BODY_CHARS]
     if not body:
         return None
-    return httpx.HTTPStatusError(
+    return httpx2.HTTPStatusError(
         f"{exc}\nResponse body: {body}",
         request=exc.request,
         response=exc.response,
@@ -346,7 +376,7 @@ def _with_response_body(exc: BaseException) -> httpx.HTTPStatusError | None:
 
 
 async def _patch_proxy_config(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     url: str,
     payload: dict[str, Any],
     api_key: str,
@@ -371,7 +401,7 @@ async def _patch_proxy_config(
                 raise
             retry_after = (
                 _retry_after_seconds(exc.response)
-                if isinstance(exc, httpx.HTTPStatusError)
+                if isinstance(exc, httpx2.HTTPStatusError)
                 else None
             )
             delay = (
@@ -412,8 +442,9 @@ async def _configure_github_proxy(
     github_token: str,
     *,
     base_proxy_config: dict[str, Any] | None = None,
+    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> None:
-    """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
+    """Configure sandbox proxy to inject managed credentials for outbound traffic.
 
     Uses the LangSmith proxy-config API to set up header injection so that
     git operations (clone, pull, push) authenticate via the proxy rather than
@@ -423,6 +454,7 @@ async def _configure_github_proxy(
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
         github_token: GitHub token to inject as Authorization header.
         base_proxy_config: Additional persisted proxy settings to preserve.
+        langsmith_credentials: Triggering user's LangSmith credentials, if connected.
     """
     api_key = _get_sandbox_api_key()
     if not api_key:
@@ -432,16 +464,22 @@ async def _configure_github_proxy(
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
+    preserved_rules = [
+        rule
+        for rule in (custom_rules if isinstance(custom_rules, list) else [])
+        if not isinstance(rule, dict) or rule.get("name") not in _MANAGED_PROXY_RULE_NAMES
+    ]
     proxy_config["rules"] = [
-        *(custom_rules if isinstance(custom_rules, list) else []),
+        *preserved_rules,
+        *([_langsmith_proxy_rule(langsmith_credentials)] if langsmith_credentials else []),
         *_github_proxy_rules(github_token),
         *_stagehand_proxy_rules(),
     ]
     payload = {"proxy_config": proxy_config}
-    async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
+    async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
                 raise
             logger.warning(
@@ -708,7 +746,7 @@ class LangSmithProvider(SandboxProvider):
         self._api_key = api_key or _get_sandbox_api_key()
         self._api_endpoint = _get_sandbox_api_endpoint()
         if not self._api_key:
-            msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
+            msg = "LANGSMITH_API_KEY not set"
             raise ValueError(msg)
 
     @classmethod
@@ -721,8 +759,8 @@ class LangSmithProvider(SandboxProvider):
             "DEFAULT_SANDBOX_IDLE_TTL_SECONDS",
             "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS",
         ):
-            raw = os.environ.get(name)
-            if raw is None or raw == "":
+            raw = ENV[name].optional()
+            if raw is None:
                 continue
             try:
                 value = int(raw)
@@ -774,8 +812,10 @@ class LangSmithProvider(SandboxProvider):
 
             effective_snapshot_id = snapshot_id or ""
             extra_fields = _merge_sandbox_create_extra_fields(create_params)
-            if not effective_snapshot_id:
-                extra_fields["snapshot_id"] = ""
+            # The API boots its default root snapshot only when the key is absent:
+            # `snapshot_id` is a UUID server-side, so "" is rejected with a 422.
+            if not extra_fields.get("snapshot_id"):
+                extra_fields.pop("snapshot_id", None)
             _install_create_extra_fields(client, extra_fields)
 
             try:

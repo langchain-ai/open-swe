@@ -8,22 +8,22 @@ user can only ever link their own Slack identity (no self-asserted spoofing).
 """
 
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 
+from agent.config import ENV
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-SLACK_CLIENT_ID = os.environ.get("SLACK_CLIENT_ID", "")
-SLACK_CLIENT_SECRET = os.environ.get("SLACK_CLIENT_SECRET", "")
+SLACK_CLIENT_ID = ENV.SLACK_CLIENT_ID.get()
+SLACK_CLIENT_SECRET = ENV.SLACK_CLIENT_SECRET.get()
 # Optional: restrict linking to a single workspace (the Slack team id, T...).
-SLACK_TEAM_ID = os.environ.get("SLACK_TEAM_ID", "")
+SLACK_TEAM_ID = ENV.SLACK_TEAM_ID.get()
 
 SLACK_STATE_COOKIE_NAME = "osw_slack_oauth_state"
 SLACK_OIDC_SCOPES = "openid email profile"
@@ -88,7 +88,7 @@ def verify_team(identity: SlackIdentity) -> None:
 
 async def exchange_slack_code(code: str, redirect_uri: str) -> str:
     """Exchange an authorization code for a user access token."""
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.post(
             _TOKEN_URL,
             data={
@@ -108,7 +108,7 @@ async def exchange_slack_code(code: str, redirect_uri: str) -> str:
 
 async def fetch_slack_identity(access_token: str) -> SlackIdentity:
     """Resolve the signed-in Slack user's verified identity."""
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.get(
             _USERINFO_URL,
             headers={"Authorization": f"Bearer {access_token}"},

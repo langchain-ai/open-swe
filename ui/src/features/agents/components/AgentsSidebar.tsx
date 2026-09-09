@@ -109,6 +109,7 @@ interface AgentsSidebarProps {
 
 interface HydratedProjectGroup extends SidebarProjectGroup {
   repoFullName: string | null
+  localProjectPath?: string
   updatedAt: number
   activeThread?: AgentThread
 }
@@ -220,6 +221,17 @@ export function AgentsSidebar({
     void desktop.getUpdateState().then(setUpdateState)
     return desktop.onUpdateState(setUpdateState)
   }, [])
+  const installUpdate = useCallback(async () => {
+    const desktop = window.openSweDesktop
+    if (!desktop || updateState.status !== "ready") return
+    const readyState = updateState
+    setUpdateState({ ...readyState, status: "installing" })
+    if (await desktop.installUpdate().catch(() => false)) return
+    setUpdateState((current) =>
+      current.status === "installing" ? readyState : current
+    )
+  }, [updateState])
+  const updateInstalling = updateState.status === "installing"
   const projectMode = prefs.organize === "project"
   const includeAutomations =
     prefs.filters.includeAutomations ||
@@ -386,6 +398,9 @@ export function AgentsSidebar({
           .map((group) => ({
             ...group,
             repoFullName: null,
+            localProjectPath: group.threads.find(
+              (thread) => thread.location === "local"
+            )?.thread.cwd,
             updatedAt: group.threads[0]?.updatedAt ?? 0,
           })),
       ].sort((left, right) => right.updatedAt - left.updatedAt)
@@ -513,7 +528,6 @@ export function AgentsSidebar({
           value={prefs.sortChats}
           onValueChange={(value) => setView({ sortChats: value as ChatSort })}
         >
-          <MenuRadioItem value="priority">Priority</MenuRadioItem>
           <MenuRadioItem value="updated">Last updated</MenuRadioItem>
         </MenuRadioGroup>
       </MenuGroup>
@@ -558,6 +572,15 @@ export function AgentsSidebar({
       hydrate={hydrateProjectThreads}
       onToggleCollapsed={() => toggleProjectCollapsed(group.key)}
       onExpand={() => expandProject(group.key)}
+      onCompose={() => {
+        layout.closeOnMobile()
+        void navigate({
+          to: "/agents",
+          search: group.repoFullName
+            ? { repo: group.repoFullName }
+            : { localProject: group.localProjectPath },
+        })
+      }}
       onTogglePin={() => toggleProjectPin(group.key)}
       renderRow={(item, live) => (
         <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
@@ -594,7 +617,11 @@ export function AgentsSidebar({
           to={localOnly ? "/agents" : "/my-settings"}
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
-          <img src="/logo-mark.png" alt="" className="size-5" />
+          <img
+            src={`${import.meta.env.BASE_URL}logo-mark.png`}
+            alt=""
+            className="size-5"
+          />
           Open SWE
         </Link>
         <div className="flex items-center gap-1">
@@ -618,7 +645,7 @@ export function AgentsSidebar({
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
           <NotePencilIcon className="size-4" />
           New Thread
@@ -635,8 +662,8 @@ export function AgentsSidebar({
           )}
           {scrollEdges.bottom && (
             <>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-px bg-border" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-px z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
             </>
           )}
           <div
@@ -658,10 +685,9 @@ export function AgentsSidebar({
                       key={item.to}
                       to={item.to}
                       onClick={layout.closeOnMobile}
-                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover"
                       activeProps={{
-                        className:
-                          "bg-sidebar-row-hover !text-foreground font-medium",
+                        className: "bg-sidebar-row-hover font-medium",
                       }}
                     >
                       <Icon className="size-4" />
@@ -718,9 +744,6 @@ export function AgentsSidebar({
                             setView({ sortPinned: value as PinnedSort })
                           }
                         >
-                          <MenuRadioItem value="priority">
-                            Priority
-                          </MenuRadioItem>
                           <MenuRadioItem value="updated">
                             Last updated
                           </MenuRadioItem>
@@ -833,27 +856,29 @@ export function AgentsSidebar({
             </Link>
           )}
         </div>
-        {updateState.status !== "idle" && (
+        {(updateState.status === "ready" || updateInstalling) && (
           <button
             type="button"
-            title={
-              updateState.status === "ready" ? "Update" : "Downloading update…"
-            }
-            aria-label={
-              updateState.status === "ready" ? "Update" : "Downloading update"
-            }
-            disabled={updateState.status !== "ready"}
-            onClick={() => void window.openSweDesktop?.installUpdate()}
-            className="group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60"
-          >
-            {updateState.status === "downloading" ? (
-              <CircleNotchIcon className="size-4 animate-spin group-hover:hidden" />
-            ) : (
-              <DownloadSimpleIcon className="size-4 group-hover:hidden" />
+            title={updateInstalling ? "Installing update…" : "Update"}
+            aria-label={updateInstalling ? "Installing update" : "Update"}
+            disabled={updateInstalling}
+            onClick={() => void installUpdate()}
+            className={cn(
+              "group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60",
+              updateInstalling && "w-auto gap-2 px-3"
             )}
-            <span className="hidden group-hover:inline">
-              {updateState.status === "ready" ? "Update" : "Downloading…"}
-            </span>
+          >
+            {updateInstalling ? (
+              <>
+                <CircleNotchIcon className="size-4 animate-spin" />
+                <span>Installing…</span>
+              </>
+            ) : (
+              <>
+                <DownloadSimpleIcon className="size-4 group-hover:hidden" />
+                <span className="hidden group-hover:inline">Update</span>
+              </>
+            )}
           </button>
         )}
       </div>
@@ -875,6 +900,7 @@ function ProjectGroup({
   hydrate,
   onToggleCollapsed,
   onExpand,
+  onCompose,
   onTogglePin,
   renderRow,
 }: {
@@ -891,6 +917,7 @@ function ProjectGroup({
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
+  onCompose: () => void
   onTogglePin: () => void
   renderRow: (
     item: SidebarThreadItem,
@@ -934,7 +961,7 @@ function ProjectGroup({
 
   return (
     <div className="mb-1">
-      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground">
+      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -956,6 +983,15 @@ function ProjectGroup({
           ) : (
             <PushPinIcon className="size-3.5" />
           )}
+        </button>
+        <button
+          type="button"
+          aria-label={`Compose message in ${group.label}`}
+          title="Compose message"
+          onClick={onCompose}
+          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
+        >
+          <NotePencilIcon className="size-3.5" />
         </button>
       </div>
       {!collapsed && (
@@ -1213,7 +1249,7 @@ export function AgentsShell({
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}
         />
-        <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-background">
+        <main className="relative flex min-w-0 flex-1 overflow-hidden bg-background">
           {children}
         </main>
       </div>

@@ -6,15 +6,16 @@ configuration in one place. Per-repo style prompts live in
 """
 
 import logging
-import os
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
+from agent.config import ENV
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
+    NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     default_model_pair,
@@ -23,7 +24,7 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.store import get_value, now_iso, put_value
-from agent.utils.gateway import resolve_gateway_enabled
+from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ ORG_GUIDELINES_MAX_CHARS = 10_000
 REVIEW_TRACING_PROJECT_MAX_CHARS = 256
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
+ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
+# Titles are a one-shot classification; no extended thinking needed.
+ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
 DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
 TRANSCRIPTION_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
@@ -182,7 +186,12 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
             self.default_thread_title_reasoning_effort,
             "thread title",
         )
-        if not self.fable_enabled:
+        if self.fable_enabled:
+            for model_field, _ in _MODEL_PAIR_FIELDS:
+                model = getattr(self, model_field)
+                if model in NON_DEFAULT_MODEL_IDS:
+                    raise ValueError(f"{model!r} cannot be a default model")
+        else:
             # Disabling Fable is the ZDR kill switch and must always succeed: rather
             # than reject a payload that still carries a Fable default, swap each
             # Fable default to its safe non-Fable fallback (mirrors the runtime
@@ -253,8 +262,8 @@ def normalize_team_settings_for_response(settings: dict[str, Any]) -> dict[str, 
 
 
 def _env_default_repo() -> str | None:
-    owner = os.environ.get("DEFAULT_REPO_OWNER", "").strip()
-    name = os.environ.get("DEFAULT_REPO_NAME", "").strip()
+    owner = ENV.DEFAULT_REPO_OWNER.get("").strip()
+    name = ENV.DEFAULT_REPO_NAME.get().strip()
     return f"{owner}/{name}" if owner and name else None
 
 
@@ -445,6 +454,7 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
         isinstance(model, str)
         and isinstance(effort, str)
         and model in SUPPORTED_MODEL_IDS
+        and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
         return _resolve_default_pair(model, effort)
@@ -452,6 +462,28 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
         settings.get("default_reviewer_subagent_model"),
         settings.get("default_reviewer_subagent_reasoning_effort"),
     )
+
+
+def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) -> tuple[str, str]:
+    """Swap an OpenAI title model for Haiku on Anthropic-only deployments.
+
+    Title generation is the one model choice users rarely revisit, so an
+    Anthropic-only install would otherwise fail every title with a missing
+    OPENAI_API_KEY.
+    """
+    if not pair[0].startswith("openai:"):
+        return pair
+    # The toggle alone isn't enough: without a LangSmith key the gateway is
+    # bypassed and the call still needs a real OpenAI credential.
+    if gateway_enabled and gateway_overrides(pair[0]) is not None:
+        return pair
+    from agent.utils.openai_oauth import desktop_openai_oauth_available
+
+    if ENV.OPENAI_API_KEY.optional() or desktop_openai_oauth_available():
+        return pair
+    if not ENV.ANTHROPIC_API_KEY.optional():
+        return pair
+    return ANTHROPIC_THREAD_TITLE_MODEL, ANTHROPIC_THREAD_TITLE_REASONING_EFFORT
 
 
 async def get_team_default_thread_title_model() -> tuple[str, str]:
@@ -462,10 +494,15 @@ async def get_team_default_thread_title_model() -> tuple[str, str]:
         isinstance(model, str)
         and isinstance(effort, str)
         and model in SUPPORTED_MODEL_IDS
+        and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
-        return _resolve_default_pair(model, effort)
-    return DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
+        pair = _resolve_default_pair(model, effort)
+    else:
+        pair = DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
+    return _gate_openai_title_model(
+        pair, gateway_enabled=resolve_gateway_enabled(settings.get("gateway_enabled"))
+    )
 
 
 async def get_team_review_trace_links_enabled() -> bool:
@@ -549,6 +586,7 @@ def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
         isinstance(model, str)
         and isinstance(effort, str)
         and model in SUPPORTED_MODEL_IDS
+        and model not in NON_DEFAULT_MODEL_IDS
         and model_supports_effort(model, effort)
     ):
         return model, effort

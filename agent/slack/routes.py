@@ -453,58 +453,48 @@ async def slack_webhook(
     if channel_context is None:
         return {"status": "ignored", "reason": "Slack channel is not eligible"}
 
-    if await common._is_docs_plz_slack_channel(channel_id, channel_context):
-        if await common.claim_slack_event(event_id, channel_id, event_ts):
-            background_tasks.add_task(
-                common.post_slack_thread_reply,
+    if not is_message_update:
+        try:
+            thread_id = await common.resolve_slack_thread_id(
+                langgraph_client, channel_id, thread_ts
+            )
+        except common.SlackThreadMappingError:
+            common.logger.exception("Could not resolve explicit Slack thread mapping")
+            await common.post_slack_thread_reply(
                 channel_id,
                 thread_ts,
-                common.DOCS_PLZ_SLACK_GATE_REPLY,
+                "Open SWE found conflicting state for this Slack thread and will not guess which agent thread to use.",
             )
-            return {"status": "accepted", "message": "Slack mention gated for docs-plz"}
-    else:
-        if not is_message_update:
-            try:
-                thread_id = await common.resolve_slack_thread_id(
-                    langgraph_client, channel_id, thread_ts
-                )
-            except common.SlackThreadMappingError:
-                common.logger.exception("Could not resolve explicit Slack thread mapping")
-                await common.post_slack_thread_reply(
-                    channel_id,
-                    thread_ts,
-                    "Open SWE found conflicting state for this Slack thread and will not guess which agent thread to use.",
-                )
-                return {"status": "error", "message": "Conflicting Slack thread mapping"}
-        event_data = {
-            "channel_id": channel_id,
-            "channel_context": channel_context,
-            "thread_ts": thread_ts,
-            "event_ts": event_ts,
-            "original_message_ts": original_message_ts,
-            "user_id": user_id,
-            "text": text,
-            "attachments": attachments,
-            "bot_user_id": bot_user_id,
-            "thread_id": thread_id,
-            "treat_all_messages_as_mentions": is_direct_message or in_code_channel,
-            "untagged_reply": is_untagged_two_party_reply,
-            "message_update": is_message_update,
-            "code_channel": in_code_channel,
-            "reply_thread_ts": reply_thread_ts if in_code_channel else "",
-            "team_id": team_id,
-            "app_context": updated_message.get("app_context") or event.get("app_context"),
-        }
-        repo_config = await common.get_slack_repo_config(
-            channel_id,
-            thread_ts,
-            slack_user_id=user_id,
-            channel_context=channel_context,
-            thread_id=thread_id,
-        )
-        if await common.claim_slack_event(event_id, channel_id, event_ts):
-            background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
-            return {"status": "accepted", "message": "Slack mention queued"}
+            return {"status": "error", "message": "Conflicting Slack thread mapping"}
+    event_data = {
+        "channel_id": channel_id,
+        "channel_context": channel_context,
+        "thread_ts": thread_ts,
+        "event_ts": event_ts,
+        "original_message_ts": original_message_ts,
+        "user_id": user_id,
+        "text": text,
+        "attachments": attachments,
+        "bot_user_id": bot_user_id,
+        "thread_id": thread_id,
+        "treat_all_messages_as_mentions": is_direct_message or in_code_channel,
+        "untagged_reply": is_untagged_two_party_reply,
+        "message_update": is_message_update,
+        "code_channel": in_code_channel,
+        "reply_thread_ts": reply_thread_ts if in_code_channel else "",
+        "team_id": team_id,
+        "app_context": updated_message.get("app_context") or event.get("app_context"),
+    }
+    repo_config = await common.get_slack_repo_config(
+        channel_id,
+        thread_ts,
+        slack_user_id=user_id,
+        channel_context=channel_context,
+        thread_id=thread_id,
+    )
+    if await common.claim_slack_event(event_id, channel_id, event_ts):
+        background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
+        return {"status": "accepted", "message": "Slack mention queued"}
 
     common.logger.info("Ignoring duplicate delivery of Slack event %s", event_id)
     return {"status": "ignored", "reason": "Duplicate Slack event delivery"}

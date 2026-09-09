@@ -7,25 +7,11 @@ import {
   agentThreadKeys,
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
-import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
-
-/**
- * Construct the message content for the LangGraph run.
- *
- * @param vars - The variables for the message.
- * @returns The message content.
- */
-function messageContent(vars: SendAgentMessageVariables) {
-  const text = vars.content.trim()
-  const imageBlocks =
-    vars.images?.map((image) => ({
-      type: "image",
-      base64: image.base64,
-      mime_type: image.mimeType,
-      ...(image.fileName ? { file_name: image.fileName } : {}),
-    })) ?? []
-  return [...imageBlocks, ...(text ? [{ type: "text", text }] : [])]
-}
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import {
+  modelConfigurable,
+  promptMessage,
+} from "@/features/agents/lib/stream/promptMessage"
 
 function appendQueuedMessage(
   thread: AgentThread,
@@ -72,7 +58,7 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
  */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
-  const stream = useAgentThreadRuntime()
+  const stream = useAgentStream()
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
@@ -124,14 +110,11 @@ export function useSubmitAgentMessage(threadId: string) {
         }
       }
 
-      const configurable: Record<string, unknown> = {}
-      if (vars.model_id && vars.effort) {
-        configurable.agent_model_id = vars.model_id
-        configurable.agent_effort = vars.effort
-      }
-      if (vars.plan_mode) {
-        configurable.plan_mode = true
-      }
+      const configurable: Record<string, unknown> = modelConfigurable({
+        modelId: vars.model_id,
+        effort: vars.effort,
+      })
+      if (vars.plan_mode) configurable.plan_mode = true
       const config =
         Object.keys(configurable).length > 0 ? { configurable } : undefined
 
@@ -141,7 +124,7 @@ export function useSubmitAgentMessage(threadId: string) {
       // follow-up while it streams.
       void stream
         .submit(
-          { messages: [{ type: "human", content: messageContent(vars) }] },
+          { messages: [promptMessage(vars.content, vars.images)] },
           { config }
         )
         .catch(() => {

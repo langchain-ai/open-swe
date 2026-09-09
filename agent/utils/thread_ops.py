@@ -8,13 +8,13 @@ run that's already in flight" path (``thread_api.send_dashboard_message``).
 """
 
 import logging
-import os
 from collections.abc import Mapping
 from typing import Any, Self, cast
 
 from langgraph_sdk import get_client
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from agent.config import ENV
 from agent.input_messages import PersonIdentity
 from agent.media import MediaRef
 
@@ -24,9 +24,7 @@ MAX_QUEUED_MESSAGES = 100
 
 
 def langgraph_url() -> str:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get(
-        "LANGGRAPH_URL_PROD", "http://localhost:2024"
-    )
+    return ENV.LANGGRAPH_URL.get()
 
 
 def langgraph_client():
@@ -72,6 +70,8 @@ class QueuedMessage(BaseModel):
 
     text: str = ""
     source: str | None = None
+    queue_id: str | None = None
+    created_at_ms: int | None = None
     sender: QueuedSender | None = None
     media: list[MediaRef] = Field(default_factory=list)
 

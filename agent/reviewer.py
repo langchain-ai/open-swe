@@ -95,6 +95,7 @@ from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
+    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
@@ -119,7 +120,6 @@ from agent.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from agent.utils.api_standards_skill import fetch_api_standards_skill
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from agent.utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review thread.** A
   "Pre-existing PR review threads" block below (when present) lists every
@@ -1252,7 +1252,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             skill_update = (
                 await skill_middleware.abefore_agent(
                     cast(SkillsState, {}),
-                    cast(Runtime[None], runtime),
+                    runtime,
                     self._config,
                 )
                 or {}
@@ -1310,7 +1310,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
     if cfg.reviewer_model_id:
         model_id = cfg.reviewer_model_id
@@ -1411,7 +1411,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 settle_review_check_on_exit,
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
-traced_reviewer_agent = traced_graph_factory(get_reviewer_agent, REVIEW_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_reviewer_agent = get_reviewer_agent

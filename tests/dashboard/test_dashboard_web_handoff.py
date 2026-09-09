@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import HTTPException
@@ -57,6 +57,14 @@ async def _inactive_thread(thread_id: str) -> bool:
 
 async def _active_thread(thread_id: str) -> bool:
     return True
+
+
+def _queued_message_without_metadata(queued_messages: list[object]) -> QueuedMessage:
+    assert len(queued_messages) == 1
+    queued_message = cast(QueuedMessage, queued_messages[0])
+    assert (queued_message.queue_id or "").startswith("queued-")
+    assert isinstance(queued_message.created_at_ms, int)
+    return queued_message.model_copy(update={"queue_id": None, "created_at_ms": None})
 
 
 async def _noop_token_check(login: str) -> None:
@@ -169,18 +177,16 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
     )
 
     assert client.threads.updates[0]["source"] == "dashboard"
-    assert queued_messages == [
-        QueuedMessage(
-            text="continue in web",
-            source="dashboard",
-            sender=QueuedSender(
-                id="github:octocat",
-                platform="github",
-                github_login="octocat",
-                email="octocat@example.com",
-            ),
-        )
-    ]
+    assert _queued_message_without_metadata(queued_messages) == QueuedMessage(
+        text="continue in web",
+        source="dashboard",
+        sender=QueuedSender(
+            id="github:octocat",
+            platform="github",
+            github_login="octocat",
+            email="octocat@example.com",
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -227,18 +233,16 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
         email="octocat@example.com",
     )
 
-    assert queued_messages == [
-        QueuedMessage(
-            text="continue in web",
-            source="dashboard",
-            sender=QueuedSender(
-                id="github:octocat",
-                platform="github",
-                github_login="octocat",
-                email="octocat@example.com",
-            ),
-        )
-    ]
+    assert _queued_message_without_metadata(queued_messages) == QueuedMessage(
+        text="continue in web",
+        source="dashboard",
+        sender=QueuedSender(
+            id="github:octocat",
+            platform="github",
+            github_login="octocat",
+            email="octocat@example.com",
+        ),
+    )
     assert handoff_updates == [
         {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
     ]
@@ -333,14 +337,12 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
 
     # Bytes go to the sandbox at ingestion; the queue carries only the reference.
     assert [upload.data for upload in attached] == [b"image"]
-    assert queued_messages == [
-        QueuedMessage(
-            text="continue in web",
-            source="dashboard",
-            sender=QueuedSender(id="github:octocat", platform="github", github_login="octocat"),
-            media=[ref],
-        )
-    ]
+    assert _queued_message_without_metadata(queued_messages) == QueuedMessage(
+        text="continue in web",
+        source="dashboard",
+        sender=QueuedSender(id="github:octocat", platform="github", github_login="octocat"),
+        media=[ref],
+    )
 
 
 @pytest.mark.asyncio

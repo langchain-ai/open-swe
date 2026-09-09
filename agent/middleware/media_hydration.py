@@ -6,17 +6,17 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.dashboard.options import model_supports_images
 from agent.media import MediaRef, download_media, media_refs_from_content
+from agent.middleware.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 
 
-class MediaHydrationMiddleware(AgentMiddleware):
+class MediaHydrationMiddleware(OpenSWEMiddleware):
     """Swap envelope media references for the bytes they point at.
 
     State and checkpoints keep only the reference; the copy handed to the

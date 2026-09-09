@@ -24,6 +24,7 @@ from agent.input_messages import (
     visible_dynamic_context_hashes,
 )
 from agent.media import MediaRef, media_data
+from agent.middleware.trace import scrub_middleware_inputs
 from agent.run_config import RunConfig
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.thread_ops import QueuedMessage
@@ -161,6 +162,7 @@ async def _take_queued_messages(store: BaseStore, thread_id: str) -> list[Queued
     return queued
 
 
+@scrub_middleware_inputs
 @before_model(state_schema=LinearNotifyState)
 async def check_message_queue_before_model(
     state: LinearNotifyState,

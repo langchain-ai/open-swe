@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from agent.dashboard.options import (
+    NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     model_supports_effort,
@@ -102,6 +103,7 @@ def _normalize_profile_model_pair(
     if (
         isinstance(model_id, str)
         and model_id in SUPPORTED_MODEL_IDS
+        and model_id not in NON_DEFAULT_MODEL_IDS
         and isinstance(effort, str)
         and model_supports_effort(model_id, effort)
     ):

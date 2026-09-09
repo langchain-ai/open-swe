@@ -2,13 +2,13 @@
 
 import logging
 import mimetypes
-import os
 import posixpath
 import re
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 
+from agent.config import ENV
 from agent.media import (
     IMAGE_EXTENSIONS,
     MAX_MEDIA_BYTES,
@@ -53,11 +53,11 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
     if provider is None or _image_provider(current_url) != provider:
         return None
     if provider == "linear":
-        linear_api_key = os.environ.get("LINEAR_API_KEY", "")
+        linear_api_key = ENV.LINEAR_API_KEY.get()
         if linear_api_key:
             return {"Authorization": linear_api_key}
     else:
-        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+        slack_bot_token = ENV.SLACK_BOT_TOKEN.get()
         if slack_bot_token:
             return {"Authorization": f"Bearer {slack_bot_token}"}
     logger.warning(
@@ -67,7 +67,7 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
     return None
 
 
-async def fetch_image(image_url: str, client: httpx.AsyncClient) -> MediaUpload | None:
+async def fetch_image(image_url: str, client: httpx2.AsyncClient) -> MediaUpload | None:
     """Download one linked image, or None when it is unusable."""
     try:
         response, blocked = await request_with_safe_redirects(
@@ -124,7 +124,7 @@ async def fetch_images(image_urls: list[str]) -> dict[str, MediaUpload]:
     if not image_urls:
         return {}
     uploads: dict[str, MediaUpload] = {}
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         for image_url in dedupe_urls(image_urls):
             upload = await fetch_image(image_url, client)
             if upload is not None:

@@ -5,6 +5,7 @@ reviewer thread for the PR. The reviewer thread id is seeded into the run config
 by the dashboard chat proxy.
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 from agent.review.findings import list_findings as list_findings_async
@@ -27,7 +28,7 @@ _COMPACT_FIELDS = (
 )
 
 
-def _compact(finding: dict[str, Any]) -> dict[str, Any]:
+def _compact(finding: Mapping[str, Any]) -> dict[str, Any]:
     return {key: finding.get(key) for key in _COMPACT_FIELDS if finding.get(key) is not None}
 
 

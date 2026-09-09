@@ -38,16 +38,26 @@ const FAILED_PAGE = page(
   "Sign-in failed",
   "Open SWE did not receive a sign-in code. Try again from the app.",
 );
+// The app still has to redeem this code, and that can fail — so this says
+// what actually happened here rather than claiming the account is connected.
+const CONNECTED_PAGE = page(
+  "Approval received",
+  "You can close this tab. Open SWE is finishing the connection.",
+);
+const CONNECT_FAILED_PAGE = page(
+  "Connection failed",
+  "Open SWE did not receive a code. Try again from the app.",
+);
 
 /**
- * Bind a loopback listener for one GitHub sign-in, so the login itself can run
- * in the user's own browser and hand the result back to the app.
+ * Bind a loopback listener for one browser handoff, so the OAuth leg itself can
+ * run in the user's own browser and hand the result back to the app.
  *
  * Resolves to the flow's PKCE material, the bound port, and a `code` promise
  * that yields the handoff code — or `null` if the flow timed out or was
  * superseded by `cancel()`.
  */
-async function beginLogin() {
+async function beginLogin({ connect = false } = {}) {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
 
@@ -55,6 +65,10 @@ async function beginLogin() {
   const code = new Promise<string | null>((resolve) => {
     resolveCode = resolve;
   });
+
+  const [okPage, failedPage] = connect
+    ? [CONNECTED_PAGE, CONNECT_FAILED_PAGE]
+    : [SIGNED_IN_PAGE, FAILED_PAGE];
 
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
@@ -64,7 +78,7 @@ async function beginLogin() {
     }
     const value = url.searchParams.get("code");
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(value ? SIGNED_IN_PAGE : FAILED_PAGE);
+    response.end(value ? okPage : failedPage);
     finish(value || null);
   });
 

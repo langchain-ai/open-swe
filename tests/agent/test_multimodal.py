@@ -2,7 +2,7 @@ import socket
 from typing import Any, cast
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 
 import agent.utils.multimodal as multimodal
 import agent.utils.url_safety as url_safety
@@ -131,10 +131,10 @@ class FakeImageResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise httpx.HTTPStatusError(
+            raise httpx2.HTTPStatusError(
                 f"{self.status_code} error",
-                request=httpx.Request("GET", self.url),
-                response=httpx.Response(self.status_code, request=httpx.Request("GET", self.url)),
+                request=httpx2.Request("GET", self.url),
+                response=httpx2.Response(self.status_code, request=httpx2.Request("GET", self.url)),
             )
 
 
@@ -174,7 +174,7 @@ async def test_fetch_image_blocks_redirect_to_internal_url(monkeypatch: Any) -> 
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image("https://example.com/start.png", cast(httpx.AsyncClient, client))
+    result = await fetch_image("https://example.com/start.png", cast(httpx2.AsyncClient, client))
 
     assert result is None
     assert len(client.calls) == 1
@@ -194,7 +194,7 @@ async def test_fetch_image_tries_each_validated_address(monkeypatch: Any) -> Non
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
         if urlparse(url).hostname == "93.184.216.34":
-            raise httpx.ConnectError("address unreachable")
+            raise httpx2.ConnectError("address unreachable")
         return FakeImageResponse(
             status_code=200,
             url=url,
@@ -204,7 +204,7 @@ async def test_fetch_image_tries_each_validated_address(monkeypatch: Any) -> Non
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image("https://example.com/image.png", cast(httpx.AsyncClient, client))
+    result = await fetch_image("https://example.com/image.png", cast(httpx2.AsyncClient, client))
 
     assert isinstance(result, MediaUpload)
     assert (result.data, result.mime_type) == (b"png", "image/png")
@@ -227,7 +227,7 @@ async def test_fetch_image_accepts_image_at_size_limit(monkeypatch: Any) -> None
         )
 
     result = await fetch_image(
-        "https://example.com/image.png", cast(httpx.AsyncClient, FakeImageClient(responder))
+        "https://example.com/image.png", cast(httpx2.AsyncClient, FakeImageClient(responder))
     )
 
     assert isinstance(result, MediaUpload)
@@ -247,7 +247,7 @@ async def test_fetch_image_warns_about_image_above_size_limit(monkeypatch: Any) 
         )
 
     result = await fetch_image(
-        "https://example.com/image.png", cast(httpx.AsyncClient, FakeImageClient(responder))
+        "https://example.com/image.png", cast(httpx2.AsyncClient, FakeImageClient(responder))
     )
 
     assert result is None
@@ -276,7 +276,9 @@ async def test_fetch_image_does_not_forward_slack_auth_to_redirect_host(
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image("https://files.slack.com/image.png", cast(httpx.AsyncClient, client))
+    result = await fetch_image(
+        "https://files.slack.com/image.png", cast(httpx2.AsyncClient, client)
+    )
 
     assert isinstance(result, MediaUpload)
     assert (result.data, result.mime_type) == (b"png", "image/png")
@@ -308,7 +310,7 @@ async def test_fetch_image_does_not_add_slack_auth_after_untrusted_redirect(
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image("https://example.com/start.png", cast(httpx.AsyncClient, client))
+    result = await fetch_image("https://example.com/start.png", cast(httpx2.AsyncClient, client))
 
     assert isinstance(result, MediaUpload)
     assert (result.data, result.mime_type) == (b"png", "image/png")
@@ -336,7 +338,9 @@ async def test_fetch_image_keeps_auth_within_slack_host_family(monkeypatch: Any)
 
     client = FakeImageClient(responder)
 
-    result = await fetch_image("https://files.slack.com/image.png", cast(httpx.AsyncClient, client))
+    result = await fetch_image(
+        "https://files.slack.com/image.png", cast(httpx2.AsyncClient, client)
+    )
 
     assert isinstance(result, MediaUpload)
     assert (result.data, result.mime_type) == (b"png", "image/png")

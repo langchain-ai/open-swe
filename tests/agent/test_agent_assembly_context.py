@@ -135,6 +135,11 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
     SANDBOX_BACKENDS.pop("thread-ctx", None)
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
+        patch(
+            "agent.server.get_sandbox_langsmith_credentials",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
         patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
@@ -504,6 +509,15 @@ async def test_task_retry_wraps_inside_tool_error_middleware() -> None:
     names = [type(m).__name__ for m in middleware]
 
     assert names.index("ToolErrorMiddleware") < names.index("ToolRetryMiddleware")
+
+
+@pytest.mark.asyncio
+async def test_general_purpose_subagent_guards_workflow_pushes() -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
+    gp = next(s for s in subagents if s["name"] == "general-purpose")
+    assert any(type(m).__name__ == "WorkflowPushGuardMiddleware" for m in gp["middleware"])
 
 
 @pytest.mark.asyncio
