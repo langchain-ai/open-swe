@@ -27,7 +27,7 @@ MAX_INLINE_OUTPUT_BYTES = 65_536
 TASK_TTL_SECONDS = 604_800
 
 
-def _encoded(value: str) -> str:
+def encoded(value: str) -> str:
     return base64.b64encode(value.encode()).decode()
 
 
@@ -42,7 +42,7 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
         state_path = os.path.join(task_dir, "state.json")
         output_path = os.path.join(task_dir, "output.log")
         stop_path = os.path.join(task_dir, "stop")
-        command = base64.b64decode({_encoded(command)!r}).decode()
+        command = base64.b64decode({encoded(command)!r}).decode()
         try:
             os.remove(__file__)
         except OSError:
@@ -146,7 +146,7 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
 
 def _launch_command(task_id: str, command: str, timeout: int) -> str:
     task_dir = f"{TASK_ROOT}/{task_id}"
-    runner = _encoded(_runner(task_id, command, timeout))
+    runner = encoded(_runner(task_id, command, timeout))
     lock = shlex.quote(LAUNCH_LOCK)
     return (
         "command -v setsid >/dev/null || { echo 'background execution requires setsid' >&2; exit 69; }; "
@@ -165,7 +165,7 @@ def _launch_command(task_id: str, command: str, timeout: int) -> str:
     )
 
 
-def _control_script(action: str, task_id: str | None) -> str:
+def control_script(action: str, task_id: str | None) -> str:
     return textwrap.dedent(
         f"""
         import json, os, shutil, signal, sys, time
@@ -265,7 +265,7 @@ def _control_script(action: str, task_id: str | None) -> str:
     ).strip()
 
 
-async def _execute(backend: Any, command: str, *, timeout: int = 15) -> Any:
+async def execute(backend: Any, command: str, *, timeout: int = 15) -> Any:
     response = await backend.aexecute(command, timeout=timeout)
     output = getattr(response, "output", "")
     exit_code = getattr(response, "exit_code", None)
@@ -299,9 +299,9 @@ async def background_execute(
         return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
     try:
         thread_id, backend = _current_backend()
-        script = _control_script("list", None)
-        current = await _execute(
-            backend, f"printf %s {shlex.quote(_encoded(script))} | base64 -d | python3"
+        script = control_script("list", None)
+        current = await execute(
+            backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
         )
         active = sum(task.get("status") == "running" for task in current.get("tasks", []))
         if active >= MAX_ACTIVE_TASKS:
@@ -313,7 +313,7 @@ async def background_execute(
         if getattr(wait, "exit_code", None) != 0:
             raise RuntimeError("background-task monitor is busy")
         task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
-        state = await _execute(backend, _launch_command(task_id, command, timeout))
+        state = await execute(backend, _launch_command(task_id, command, timeout))
         wait = await backend.aexecute(wait_for_monitor, timeout=15)
         if getattr(wait, "exit_code", None) != 0:
             return {
@@ -350,10 +350,8 @@ def owns_task(task_id: str) -> bool:
 
 async def _control(action: str, task_id: str | None) -> dict[str, Any]:
     _, backend = _current_backend()
-    script = _control_script(action, task_id)
-    return await _execute(
-        backend, f"printf %s {shlex.quote(_encoded(script))} | base64 -d | python3"
-    )
+    script = control_script(action, task_id)
+    return await execute(backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3")
 
 
 async def task_status(task_id: str) -> dict[str, Any]:

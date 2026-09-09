@@ -36,7 +36,7 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
 ) -> None:
     root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
     client = _LangSmithClient(
-        [SimpleNamespace(end_time=root_end)],
+        [SimpleNamespace(id="trace-1", end_time=root_end)],
         SimpleNamespace(total_cost=1.234, last_end_time=root_end + timedelta(seconds=1)),
     )
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
@@ -50,8 +50,8 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
     assert result.total_cost == 1.234
     assert client.list_kwargs["is_root"] is True
     assert "prepare_run_id" in client.list_kwargs["filter"]
-    assert client.list_kwargs["select"] == ["end_time"]
-    assert client.list_kwargs["limit"] == 20
+    assert client.list_kwargs["select"] == ["id", "end_time"]
+    assert "limit" not in client.list_kwargs
     assert client.threads.calls == [
         {
             "thread_id": "thread-1",
@@ -66,7 +66,7 @@ async def test_langsmith_run_cost_filters_thread_stats(
 ) -> None:
     root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
     client = _LangSmithClient(
-        [SimpleNamespace(end_time=root_end)],
+        [SimpleNamespace(id="trace-1", end_time=root_end)],
         SimpleNamespace(total_cost=0.25, last_end_time=root_end),
     )
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
@@ -78,7 +78,31 @@ async def test_langsmith_run_cost_filters_thread_stats(
 
     assert result is not None
     assert result.total_cost == 0.25
-    assert "prepare_run_id" in client.threads.calls[0]["filter"]
+    assert client.threads.calls[0]["filter"] == 'eq(trace_id, "trace-1")'
+
+
+async def test_langsmith_run_cost_filters_multiple_traces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
+    client = _LangSmithClient(
+        [
+            SimpleNamespace(id="trace-1", end_time=root_end),
+            SimpleNamespace(id="trace-2", end_time=root_end),
+        ],
+        SimpleNamespace(total_cost=0.5, last_end_time=root_end),
+    )
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
+    monkeypatch.setattr(
+        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
+    )
+
+    result = await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1", run_only=True)
+
+    assert result is not None
+    assert client.threads.calls[0]["filter"] == (
+        'or(eq(trace_id, "trace-1"), eq(trace_id, "trace-2"))'
+    )
 
 
 async def test_langsmith_cost_waits_for_thread_stats_freshness(
@@ -86,7 +110,7 @@ async def test_langsmith_cost_waits_for_thread_stats_freshness(
 ) -> None:
     root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
     client = _LangSmithClient(
-        [SimpleNamespace(end_time=root_end)],
+        [SimpleNamespace(id="trace-1", end_time=root_end)],
         SimpleNamespace(total_cost=2.0, last_end_time=root_end - timedelta(seconds=1)),
     )
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)

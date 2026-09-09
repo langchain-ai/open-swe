@@ -138,7 +138,7 @@ def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
 
 WORKING_ENV_SECTION = """### Working Environment
 
-You are operating in a remote Linux sandbox at `{working_dir}` — use it as your working directory for all operations. The sandbox starts clean; no repo is pre-cloned."""
+You are operating in a remote Linux sandbox at `{working_dir}` — use it as your working directory for all operations. Managed environments may preload repositories and tools, so inspect the existing contents before cloning or installing anything."""
 
 DESKTOP_WORKING_ENV_SECTION = """### Working Environment
 
@@ -192,6 +192,10 @@ SCHEDULE_SLACK_SOURCE_GUIDANCE = """This is a scheduled automation run with a va
 - After a concrete requested action, call `notify_automation_channel` once with a concise outcome and link.
 - Use Slack thread tools only when the scheduled task explicitly requires interaction in that destination."""
 
+BACKGROUND_TASK_SOURCE_GUIDANCE = """A background sandbox command completed and this run is continuing the existing request.
+- Do not send an initial acknowledgement or treat the completion as a new user request.
+- Inspect the bounded output only if needed, continue the existing work, and communicate only when the existing request requires it."""
+
 GENERIC_SOURCE_GUIDANCE = """No interactive source channel is available.
 - Communicate through normal assistant responses and include the complete answer or final outcome there.
 - When a plan is ready, share its review link in the normal assistant response."""
@@ -209,7 +213,9 @@ conversation back."""
 
 
 def _render_source_guidance(source: str, slack_context: bool) -> str:
-    if source == "slack" and slack_context:
+    if source == "background_task":
+        guidance = BACKGROUND_TASK_SOURCE_GUIDANCE
+    elif source == "slack" and slack_context:
         guidance = SLACK_SOURCE_GUIDANCE
     elif source == "linear":
         guidance = LINEAR_SOURCE_GUIDANCE
@@ -399,12 +405,18 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 def _render_collaboration_section(
     identity: CollaboratorIdentity | None,
     thread_url: str | None = None,
+    model_id: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     if identity is None:
         return ""
     return COLLABORATION_TEMPLATE.format(
         display_name=identity.display_name,
-        pr_attribution_footer=build_pr_attribution_footer(thread_url),
+        pr_attribution_footer=build_pr_attribution_footer(
+            thread_url,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+        ),
         bot_coauthor_trailer=f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>",
     )
 
@@ -506,6 +518,8 @@ def construct_sender_context(
     user_custom_instructions: str | None = None,
     draft_prs: bool = True,
     thread_url: str | None = None,
+    model_id: str | None = None,
+    reasoning_effort: str | None = None,
     workspace_admin: bool = False,
     participant_identities: Sequence[CollaboratorIdentity] = (),
 ) -> str:
@@ -525,7 +539,12 @@ def construct_sender_context(
         f"Workspace admin: {'yes' if workspace_admin else 'no'}.",
         f"Sender's git identity command: `{_git_identity_command(resolved_identity)}`",
         _render_participant_identities(identities),
-        _render_collaboration_section(resolved_identity, thread_url),
+        _render_collaboration_section(
+            resolved_identity,
+            thread_url,
+            model_id,
+            reasoning_effort,
+        ),
         f"New PRs are created {'as drafts' if draft_prs else 'ready for review'} for this sender.",
         _render_user_instructions_section(user_custom_instructions),
     ]
@@ -584,7 +603,7 @@ def construct_system_prompt(
         working_dir=working_dir,
         working_environment_section=(
             DESKTOP_WORKING_ENV_SECTION if source == "desktop" else WORKING_ENV_SECTION
-        ),
+        ).format(working_dir=working_dir),
         dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         source_guidance=_render_source_guidance(source, slack_context),
         linear_project_id=linear_project_id or "<PROJECT_ID>",

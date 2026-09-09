@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-import httpx
+import httpx2
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langsmith.sandbox import (
@@ -164,7 +164,7 @@ def _merge_sandbox_create_extra_fields(
     return {**_get_sandbox_create_extra_fields(), **(create_params or {})}
 
 
-def _get_sandbox_proxy_config(
+def get_sandbox_proxy_config(
     create_params: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     proxy_config = _merge_sandbox_create_extra_fields(create_params).get("proxy_config")
@@ -175,7 +175,7 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
     """Merge extra fields until the SDK exposes create-payload passthrough."""
     if not extra:
         return
-    original_post = client._http.post
+    original_post = client._http.post  # noqa: SLF001
 
     async def post_with_extra(url: Any, *args: Any, **kwargs: Any) -> Any:
         payload = kwargs.get("json")
@@ -184,7 +184,7 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
         return await original_post(url, *args, **kwargs)
 
     # RFC moving this into the SDK if it adds a public arbitrary create-fields API.
-    client._http.post = post_with_extra  # ty: ignore[invalid-assignment]
+    client._http.post = post_with_extra  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
 def _langsmith_proxy_rule(credentials: LangSmithCredentials) -> dict[str, Any]:
@@ -235,7 +235,9 @@ async def capture_snapshot_with_tag(
     Drop this for a plain ``capture_snapshot(..., tag=...)`` once
     langchain-ai/langsmith-sdk#3447 ships.
     """
-    original_post = client._http.post
+    # Reaching into the SDK's transport is the whole mechanism: there is no public
+    # seam for a field the client does not model.
+    original_post = client._http.post  # noqa: SLF001
 
     async def post_with_tag(url: Any, *args: Any, **kwargs: Any) -> Any:
         payload = kwargs.get("json")
@@ -243,11 +245,11 @@ async def capture_snapshot_with_tag(
             kwargs["json"] = {**payload, "tag": tag}
         return await original_post(url, *args, **kwargs)
 
-    client._http.post = post_with_tag  # ty: ignore[invalid-assignment]
+    client._http.post = post_with_tag  # noqa: SLF001 # ty: ignore[invalid-assignment]
     try:
         return await client.capture_snapshot(sandbox_id, name, timeout=timeout)
     finally:
-        client._http.post = original_post  # ty: ignore[invalid-assignment]
+        client._http.post = original_post  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
@@ -307,7 +309,7 @@ def _stagehand_proxy_rules() -> list[dict[str, Any]]:
     ]
 
 
-def _retry_after_seconds(response: httpx.Response | None) -> float | None:
+def _retry_after_seconds(response: httpx2.Response | None) -> float | None:
     if response is None:
         return None
     raw = response.headers.get("Retry-After")
@@ -321,9 +323,9 @@ def _retry_after_seconds(response: httpx.Response | None) -> float | None:
 
 
 def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
-    if isinstance(exc, httpx.HTTPStatusError):
+    if isinstance(exc, httpx2.HTTPStatusError):
         return exc.response.status_code in PROXY_CONFIG_RETRYABLE_STATUS_CODES
-    return isinstance(exc, httpx.TransportError)
+    return isinstance(exc, httpx2.TransportError)
 
 
 def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
@@ -389,18 +391,18 @@ async def _create_sandbox_with_retry(
     raise RuntimeError("unreachable sandbox retry state")
 
 
-def _with_response_body(exc: BaseException) -> httpx.HTTPStatusError | None:
+def _with_response_body(exc: BaseException) -> httpx2.HTTPStatusError | None:
     """Re-raisable copy of ``exc`` carrying the response body, or ``None`` to re-raise as-is.
 
     ``raise_for_status`` builds its message from the status line and an MDN link
     only, so the API's own explanation of a rejection never reaches the logs.
     """
-    if not isinstance(exc, httpx.HTTPStatusError):
+    if not isinstance(exc, httpx2.HTTPStatusError):
         return None
     body = exc.response.text.strip()[:PROXY_CONFIG_ERROR_BODY_CHARS]
     if not body:
         return None
-    return httpx.HTTPStatusError(
+    return httpx2.HTTPStatusError(
         f"{exc}\nResponse body: {body}",
         request=exc.request,
         response=exc.response,
@@ -408,7 +410,7 @@ def _with_response_body(exc: BaseException) -> httpx.HTTPStatusError | None:
 
 
 async def _patch_proxy_config(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     url: str,
     payload: dict[str, Any],
     api_key: str,
@@ -433,7 +435,7 @@ async def _patch_proxy_config(
                 raise
             retry_after = (
                 _retry_after_seconds(exc.response)
-                if isinstance(exc, httpx.HTTPStatusError)
+                if isinstance(exc, httpx2.HTTPStatusError)
                 else None
             )
             delay = (
@@ -469,7 +471,7 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
-async def _configure_github_proxy(
+async def configure_github_proxy(
     sandbox_name: str,
     github_token: str,
     *,
@@ -508,10 +510,10 @@ async def _configure_github_proxy(
         *_stagehand_proxy_rules(),
     ]
     payload = {"proxy_config": proxy_config}
-    async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
+    async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
                 raise
             logger.warning(
@@ -640,15 +642,15 @@ async def create_langsmith_sandbox(
     )
 
     if sandbox_id is None and github_token:
-        proxy_config = _get_sandbox_proxy_config(create_params)
+        proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:
-            await _configure_github_proxy(
+            await configure_github_proxy(
                 backend.id,
                 github_token,
                 base_proxy_config=proxy_config,
             )
         else:
-            await _configure_github_proxy(backend.id, github_token)
+            await configure_github_proxy(backend.id, github_token)
 
     return backend
 

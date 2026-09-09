@@ -32,9 +32,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import anthropic
-import httpx
+import httpx2
 import openai
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.exceptions import ModelError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 
@@ -54,7 +55,7 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.APITimeoutError,
     openai.RateLimitError,
     openai.InternalServerError,
-    httpx.TransportError,
+    httpx2.TransportError,
     # Includes ``ModelCallTimeoutMiddleware``'s deadline: a wedged provider call
     # is exactly the case where trying the other provider is worthwhile.
     TimeoutError,
@@ -77,9 +78,18 @@ MODEL_OUTAGE_MESSAGE = (
 )
 
 
+def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
+    return exc.__class__.__module__.partition(".")[0] == "httpx" and any(
+        cls.__name__ == "TransportError" and cls.__module__.partition(".")[0] == "httpx"
+        for cls in exc.__class__.__mro__
+    )
+
+
 def _should_fallback(exc: BaseException) -> bool:
-    if isinstance(exc, _TRANSIENT_EXCEPTIONS):
+    if isinstance(exc, _TRANSIENT_EXCEPTIONS) or _is_legacy_httpx_transport_error(exc):
         return True
+    if isinstance(exc, ModelError):
+        return exc.is_retryable
     # Catches OverloadedError (529) and other 5xx/429 surfaced as APIStatusError.
     if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
         status = getattr(exc, "status_code", None)

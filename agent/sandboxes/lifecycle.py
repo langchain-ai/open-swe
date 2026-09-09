@@ -28,9 +28,9 @@ from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.sandboxes.providers.langsmith import (
-    _configure_github_proxy,
-    _get_sandbox_proxy_config,
+    configure_github_proxy,
     create_langsmith_sandbox_from_params,
+    get_sandbox_proxy_config,
 )
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
@@ -86,7 +86,7 @@ class SandboxCreateConfig:
 
     @property
     def proxy_config(self) -> dict[str, Any] | None:
-        return _get_sandbox_proxy_config(self.create_params)
+        return get_sandbox_proxy_config(self.create_params)
 
     async def run_update_script(
         self, sandbox_backend: SandboxBackendProtocol, thread_id: str | None
@@ -216,7 +216,7 @@ async def _configure_proxy(
         kwargs["base_proxy_config"] = base_proxy_config
     if langsmith_credentials is not None:
         kwargs["langsmith_credentials"] = langsmith_credentials
-    await _configure_github_proxy(sandbox_id, token, **kwargs)
+    await configure_github_proxy(sandbox_id, token, **kwargs)
 
 
 async def _refresh_github_proxy(
@@ -513,7 +513,7 @@ async def reset_sandbox_for_thread(
     if new_sandbox.id == old_sandbox_id:
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")
 
-    proxy_config = _get_sandbox_proxy_config(create_params)
+    proxy_config = get_sandbox_proxy_config(create_params)
     token, expires_at, permissions = await _resolve_proxy_token(None)
     if not token:
         raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")

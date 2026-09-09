@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Any, Literal, Protocol, TypeVar
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
-import httpx
+import httpx2
 from fastapi import (
     APIRouter,
     Depends,
@@ -172,34 +172,43 @@ from agent.dashboard.team_settings import (
     update_team_transcription_model,
     upsert_team_settings,
 )
-from agent.dashboard.thread_api import (
-    ThreadMessageBody,
-    ThreadResolveBody,
+from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
-    get_dashboard_thread_branch_diff,
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
-    get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
+    rename_dashboard_thread,
+    resolve_dashboard_thread,
+    send_dashboard_message,
+)
+from agent.dashboard.threads.diffs import (
+    get_dashboard_thread_branch_diff,
+    get_dashboard_thread_recovery_patch,
     get_dashboard_thread_working_tree_diff,
+)
+from agent.dashboard.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_projects,
     list_dashboard_threads,
     list_dashboard_threads_page,
     pin_dashboard_thread,
+    unpin_dashboard_thread,
+)
+from agent.dashboard.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
-    resolve_dashboard_thread,
-    send_dashboard_message,
-    stream_dashboard_thread,
-    unpin_dashboard_thread,
+)
+from agent.dashboard.threads.runs import (
+    ThreadMessageBody,
+    ThreadRenameBody,
+    ThreadResolveBody,
 )
 from agent.dashboard.user_credentials import (
     CurrentsCredentialsUpdate,
@@ -233,6 +242,14 @@ from agent.dashboard.user_mappings import (
     upsert_mapping,
 )
 from agent.dashboard.voice import transcribe_audio
+from agent.dashboard.workspace_mcps import (
+    WorkspaceMCPRoute,
+    WorkspaceMCPUpdate,
+    delete_workspace_mcp,
+    get_workspace_mcp,
+    list_workspace_mcps,
+    save_workspace_mcp,
+)
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
 from agent.review.analyzer_cron import remove_continual_cron
@@ -259,6 +276,7 @@ from agent.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from agent.tool_loaders.workspace_mcp import discover_workspace_mcp
 from agent.utils.dashboard_links import (
     dashboard_api_base_url,
     dashboard_base_url,
@@ -274,7 +292,7 @@ router = APIRouter(
     tags=["dashboard"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
-_GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+_GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
 # Module-level so a local harness can point the browser leg at a fake consent
@@ -982,6 +1000,61 @@ async def api_get_team_credentials(
     return await get_team_credentials_status()
 
 
+workspace_mcp_router = APIRouter(route_class=WorkspaceMCPRoute)
+
+
+@workspace_mcp_router.get("/workspace-mcps")
+async def api_list_workspace_mcps(_admin: dict[str, Any] = _ADMIN_DEP) -> list[dict[str, Any]]:
+    return await list_workspace_mcps()
+
+
+@workspace_mcp_router.put("/workspace-mcps/{name}")
+async def api_save_workspace_mcp(
+    name: str,
+    update: WorkspaceMCPUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    try:
+        return await save_workspace_mcp(name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@workspace_mcp_router.delete("/workspace-mcps/{name}", status_code=204)
+async def api_delete_workspace_mcp(name: str, _admin: dict[str, Any] = _ADMIN_DEP) -> None:
+    await delete_workspace_mcp(name)
+
+
+@workspace_mcp_router.post("/workspace-mcps/{name}/headers/reveal")
+async def api_reveal_workspace_mcp_headers(
+    name: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> JSONResponse:
+    record = await get_workspace_mcp(name)
+    if record is None:
+        raise HTTPException(404, "MCP connection not found")
+    try:
+        headers = record.connection_headers()
+    except ValueError:
+        raise HTTPException(400, "MCP authentication headers could not be decrypted") from None
+    return JSONResponse(content=headers, headers={"Cache-Control": "no-store"})
+
+
+@workspace_mcp_router.post("/workspace-mcps/{name}/discover")
+async def api_discover_workspace_mcp(
+    name: str,
+    update: WorkspaceMCPUpdate | None = None,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[dict[str, str]]:
+    try:
+        return await discover_workspace_mcp(name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+router.include_router(workspace_mcp_router)
+
+
 @router.put("/team-credentials/datadog")
 async def api_connect_datadog(
     update: DatadogCredentialsUpdate,
@@ -1209,7 +1282,7 @@ def _github_api_http_exception(status_code: int) -> HTTPException:
 
 
 async def _paginate(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     url: str,
     *,
     headers: dict[str, str],
@@ -1230,15 +1303,15 @@ async def _paginate(
         params = {"per_page": "100"} if first else None
         try:
             r = await client.get(next_url, headers=headers, params=params)
-        except httpx.TimeoutException as exc:
+        except httpx2.TimeoutException as exc:
             logger.warning("GitHub API timed out while paginating %s", next_url)
             raise HTTPException(503, "github API request timed out") from exc
-        except httpx.RequestError as exc:
+        except httpx2.RequestError as exc:
             logger.warning("GitHub API request failed while paginating %s: %s", next_url, exc)
             raise HTTPException(502, "github API request failed") from exc
         try:
             r.raise_for_status()
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             logger.warning(
                 "GitHub API returned %s while paginating %s",
                 r.status_code,
@@ -1272,7 +1345,7 @@ async def _fetch_user_installations_and_repos(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
         try:
             installations = await _paginate(
                 client,
@@ -2329,6 +2402,20 @@ async def api_send_thread_message(
     return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
 
 
+@router.patch("/threads/{thread_id}")
+async def api_rename_thread(
+    thread_id: str,
+    body: ThreadRenameBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await rename_dashboard_thread(
+        thread_id,
+        session["sub"],
+        title=body.title,
+        email=session.get("email"),
+    )
+
+
 @router.post("/threads/{thread_id}/resolve")
 async def api_resolve_thread(
     thread_id: str,
@@ -2456,24 +2543,3 @@ async def api_thread_history(
         content_type=request.headers.get("content-type", "application/json"),
     )
     return Response(content=content, status_code=status_code, media_type=media_type)
-
-
-@router.get("/threads/{thread_id}/stream")
-async def api_stream_thread(
-    thread_id: str,
-    request: Request,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> StreamingResponse:
-    last_event_id = request.headers.get("last-event-id")
-
-    async def event_generator():
-        async for chunk in stream_dashboard_thread(
-            thread_id, session["sub"], email=session.get("email"), last_event_id=last_event_id
-        ):
-            yield chunk
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )

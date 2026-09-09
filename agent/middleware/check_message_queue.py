@@ -8,7 +8,7 @@ human messages before the next model call.
 import logging
 from typing import Any, cast
 
-import httpx
+import httpx2
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
@@ -79,7 +79,7 @@ async def _build_blocks_from_payload(
                 "text": text + vision_not_supported_warning(model_id, len(image_urls)),
             }
         return blocks
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:
@@ -301,6 +301,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                         injected_dynamic_context_hashes=injected,
                     )
                     _flush_blocks(queued_updates, content_blocks, injected)
+                    queue_id = content.get("queue_id")
+                    if isinstance(queue_id, str) and structured:
+                        structured[-1]["id"] = queue_id
                     queued_updates.extend(cast(list[dict[str, Any]], structured))
                 else:
                     content_blocks.extend(blocks)

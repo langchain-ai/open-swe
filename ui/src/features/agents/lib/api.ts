@@ -32,6 +32,7 @@ export interface ThreadMessageRequest {
   model_id?: string | null
   effort?: string | null
   plan_mode?: boolean
+  client_message_id?: string
 }
 
 export interface ScheduleCreateRequest {
@@ -275,6 +276,11 @@ export const agentsApi = {
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  renameThread: (threadId: string, title: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
   resolveThread: (threadId: string, resolved: boolean) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/resolve`,
@@ -397,8 +403,6 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
     ),
-  streamUrl: (threadId: string) =>
-    `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
 }
 
 export type ThreadGroup = "today" | "last7" | "last30" | "older"

@@ -14,7 +14,7 @@ from agent.dashboard.options import gate_fable_model, normalize_model_choice
 from agent.dashboard.profiles import get_profile, get_valid_access_token
 from agent.dashboard.repo_access import repo_config_for_user, require_repo_access_for_user
 from agent.dashboard.team_settings import get_team_fable_enabled
-from agent.dashboard.thread_api import _agent_version_metadata, _resolve_run_email
+from agent.dashboard.threads.access import agent_version_metadata, resolve_run_email
 from agent.dashboard.user_mappings import slack_id_for_login
 from agent.dispatch import create_durable_run
 from agent.input_messages import InputMessageContext, build_run_input
@@ -276,7 +276,7 @@ async def _create_cron(record: dict[str, Any]) -> str:
             "kind": "agent_schedule",
             "schedule_id": record["id"],
             "github_login": record.get("created_by"),
-            **_agent_version_metadata(),
+            **agent_version_metadata(),
         },
     )
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
@@ -332,7 +332,7 @@ async def create_agent_schedule(
         "scope": "workspace",
         "created_by": login,
         "updated_by": login,
-        "user_email": (await _resolve_run_email(login, profile) or email or "").strip().lower(),
+        "user_email": (await resolve_run_email(login, profile) or email or "").strip().lower(),
         "created_at": now,
         "updated_at": now,
     }
@@ -547,7 +547,7 @@ async def _agent_run_config(
         )
         configurable["agent_model_id"] = model
         configurable["agent_effort"] = effort
-    return {"configurable": configurable, "metadata": _agent_version_metadata()}
+    return {"configurable": configurable, "metadata": agent_version_metadata()}
 
 
 async def _launch_agent_schedule_record(

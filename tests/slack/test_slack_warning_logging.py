@@ -31,7 +31,7 @@ async def test_slack_warning_post_logs_error(
 
     with (
         caplog.at_level(logging.ERROR, logger=slack_utils.logger.name),
-        patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm),
+        patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm),
     ):
         result = await slack_utils._post_slack_message_with_ts(
             "C1",
@@ -54,7 +54,7 @@ async def test_plain_slack_post_does_not_log_warning_error(
 
     with (
         caplog.at_level(logging.ERROR, logger=slack_utils.logger.name),
-        patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm),
+        patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm),
     ):
         result = await slack_utils._post_slack_message_with_ts(
             "C1",

@@ -1,10 +1,10 @@
 """Shared GitHub HTTP helper with sane timeouts, retries, and rate-limit handling.
 
 All GitHub API calls in the reviewer publish path (and gradually everywhere else)
-should go through ``github_request`` instead of raw ``httpx.AsyncClient`` calls.
+should go through ``github_request`` instead of raw ``httpx2.AsyncClient`` calls.
 This centralises:
 
-- **Timeouts**: httpx defaults to 5 s which is too aggressive for paginated
+- **Timeouts**: httpx2 defaults to 5 s which is too aggressive for paginated
   GitHub/GraphQL fetches.  The default here is 30 s read / 10 s connect.
 - **Retries**: exponential backoff with jitter for retryable HTTP status codes
   and transport errors, gated by method idempotency to prevent duplicate writes.
@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-import httpx
+import httpx2
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ GITHUB_API_BASE = "https://api.github.com"
 GITHUB_GRAPHQL = "https://api.github.com/graphql"
 GITHUB_HEADERS_VERSION = "2022-11-28"
 
-DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0, pool=5.0)
+DEFAULT_TIMEOUT = httpx2.Timeout(30.0, connect=10.0, pool=5.0)
 DEFAULT_MAX_RETRIES = 3
 
 _ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
@@ -52,7 +52,7 @@ def github_headers(token: str) -> dict[str, str]:
     }
 
 
-def _is_secondary_rate_limit(response: httpx.Response) -> bool:
+def _is_secondary_rate_limit(response: httpx2.Response) -> bool:
     if response.status_code != 403:
         return False
     if response.headers.get("X-RateLimit-Remaining") == "0":
@@ -61,7 +61,7 @@ def _is_secondary_rate_limit(response: httpx.Response) -> bool:
     return any(marker in body for marker in _SECONDARY_RATE_LIMIT_MARKERS)
 
 
-def _is_retryable_response(response: httpx.Response, method: str) -> bool:
+def _is_retryable_response(response: httpx2.Response, method: str) -> bool:
     if response.status_code in _ALWAYS_RETRYABLE_STATUS:
         return True
     if response.status_code in _IDEMPOTENT_RETRYABLE_STATUS:
@@ -69,7 +69,7 @@ def _is_retryable_response(response: httpx.Response, method: str) -> bool:
     return _is_secondary_rate_limit(response)
 
 
-def _retry_after_seconds(response: httpx.Response) -> float | None:
+def _retry_after_seconds(response: httpx2.Response) -> float | None:
     retry_after = response.headers.get("Retry-After")
     if retry_after:
         try:
@@ -79,7 +79,7 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
     return None
 
 
-def _compute_backoff(response: httpx.Response | None, attempt: int) -> float:
+def _compute_backoff(response: httpx2.Response | None, attempt: int) -> float:
     if response is not None:
         retry_after = _retry_after_seconds(response)
         if retry_after is not None:
@@ -93,10 +93,10 @@ def _compute_backoff(response: httpx.Response | None, attempt: int) -> float:
 async def github_client(
     *,
     token: str | None = None,
-    timeout: httpx.Timeout | float | None = None,
+    timeout: httpx2.Timeout | float | None = None,
     headers: dict[str, str] | None = None,
-) -> AsyncIterator[httpx.AsyncClient]:
-    """Yield an ``httpx.AsyncClient`` with sane GitHub defaults.
+) -> AsyncIterator[httpx2.AsyncClient]:
+    """Yield an ``httpx2.AsyncClient`` with sane GitHub defaults.
 
     The token (when provided) is baked into the default headers so callers
     don't need to pass headers on every request.  A custom ``timeout`` can
@@ -107,7 +107,7 @@ async def github_client(
         merged_headers.update(github_headers(token))
     if headers:
         merged_headers.update(headers)
-    async with httpx.AsyncClient(
+    async with httpx2.AsyncClient(
         headers=merged_headers or None,
         timeout=timeout or DEFAULT_TIMEOUT,
     ) as client:
@@ -115,16 +115,16 @@ async def github_client(
 
 
 async def github_request(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     method: str,
     url: str,
     *,
     max_retries: int = DEFAULT_MAX_RETRIES,
     **kwargs: Any,
-) -> httpx.Response:
+) -> httpx2.Response:
     """Execute a single GitHub API request with retries and rate-limit handling.
 
-    Returns the ``httpx.Response`` for non-retryable status codes and for
+    Returns the ``httpx2.Response`` for non-retryable status codes and for
     retryable status codes that have exhausted retries (caller should call
     ``raise_for_status()``).
 
@@ -149,7 +149,7 @@ async def github_request(
     for attempt in range(max_retries + 1):
         try:
             response = await method_func(url, **kwargs)
-        except (httpx.TimeoutException, httpx.TransportError) as exc:
+        except (httpx2.TimeoutException, httpx2.TransportError) as exc:
             last_exc = exc
             if retry_transport and attempt < max_retries:
                 delay = _compute_backoff(None, attempt)
@@ -189,4 +189,4 @@ async def github_request(
             )
         return response
 
-    raise last_exc or httpx.HTTPError("Max retries exceeded")
+    raise last_exc or httpx2.HTTPError("Max retries exceeded")

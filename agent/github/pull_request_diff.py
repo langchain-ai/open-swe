@@ -12,7 +12,7 @@ import asyncio
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 
 _GITHUB_API = "https://api.github.com"
@@ -23,7 +23,7 @@ PR_DIFF_FETCH_CONCURRENCY = 5
 
 
 async def _fetch_file_at_ref(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     semaphore: asyncio.Semaphore,
     full_name: str,
     path: str,
@@ -48,7 +48,7 @@ async def _fetch_file_at_ref(
 
 
 async def build_pr_diff_files(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     full_name: str,
     pr_number: int,
 ) -> dict[str, Any]:
@@ -83,7 +83,7 @@ async def build_pr_diff_files(
 
 
 async def build_compare_diff_files(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     full_name: str,
     base_ref: str,
     head_ref: str,
@@ -124,7 +124,7 @@ async def build_compare_diff_files(
 
 
 async def _build_diff_files(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     full_name: str,
     raw_files: list[Any],
     base_ref: str,
