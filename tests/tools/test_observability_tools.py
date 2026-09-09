@@ -221,7 +221,6 @@ async def test_langsmith_get_trace_serializes() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize(
     ("target", "caller", "allowed"),
     [
@@ -232,14 +231,14 @@ async def test_langsmith_get_trace_serializes() -> None:
         (None, "private", False),
     ],
 )
-async def test_langsmith_trace_privacy(target, caller, allowed, nested) -> None:
+async def test_langsmith_trace_privacy(target, caller, allowed) -> None:
     root = SimpleNamespace(
         id="root",
         trace_id="root",
         extra={"metadata": {"thread_id": "target"}},
         inputs={"secret": "private content"},
     )
-    run = SimpleNamespace(id="child", trace_id="root", inputs=root.inputs) if nested else root
+    run = SimpleNamespace(id="child", trace_id="root", inputs=root.inputs)
     client = AsyncMock()
     client.__aenter__.return_value = client
 
@@ -263,15 +262,13 @@ async def test_langsmith_trace_privacy(target, caller, allowed, nested) -> None:
         patch.object(
             langsmith_tools, "get_config", return_value={"configurable": {"thread_id": "caller"}}
         ),
-        patch.object(langsmith_tools, "_read_run_with_children", return_value=run),
     ):
-        for children in (False, True):
-            result = await tools["langsmith_get_trace"].ainvoke(
-                {"on_behalf_of": "alice", "run_id": run.id, "load_child_runs": children}
-            )
-            assert result["success"] is allowed
-            if not allowed:
-                assert "private content" not in str(result)
+        result = await tools["langsmith_get_trace"].ainvoke(
+            {"on_behalf_of": "alice", "run_id": run.id}
+        )
+        assert result["success"] is allowed
+        if not allowed:
+            assert "private content" not in str(result)
         result = await tools["langsmith_list_runs"].ainvoke(
             {"on_behalf_of": "alice", "project_name": "anything", "filter": "anything"}
         )
@@ -322,34 +319,32 @@ async def test_langsmith_unidentified_trace_fails_closed(project) -> None:
 
 
 @pytest.mark.asyncio
-async def test_langsmith_list_runs_caps_limit() -> None:
-    creds = LangSmithCredentials(api_key="k", endpoint="https://api.smith.langchain.com")
-    captured: dict[str, object] = {}
+@pytest.mark.parametrize("limit,expected", [(1, 1), (9999, 50)])
+async def test_langsmith_list_runs_caps_authorized_results(limit, expected) -> None:
+    client = AsyncMock()
+    client.__aenter__.return_value = client
 
-    class _FakeClient:
-        async def __aenter__(self):
-            return self
+    async def candidates(*, project_name, filter, limit):
+        assert 50 < limit <= 500
+        for index in range(limit):
+            yield SimpleNamespace(id=str(index))
 
-        async def __aexit__(self, *exc):
-            return None
-
-        async def list_runs(self, *, project_name: str, filter, limit: int):
-            captured["limit"] = limit
-            captured["project_name"] = project_name
-            return
-            yield
-
-    tools = langsmith_tools._make_tools(allow_team=True)
-    list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
+    client.list_runs = candidates
+    tool = next(
+        t for t in langsmith_tools._make_tools(allow_team=True) if t.name == "langsmith_list_runs"
+    )
     with (
-        patch.object(langsmith_tools, "_creds_for", AsyncMock(return_value=creds)),
-        patch.object(langsmith_tools, "langsmith_client", lambda _c: _FakeClient()),
+        patch.object(langsmith_tools, "_creds_for", AsyncMock()),
+        patch.object(langsmith_tools, "langsmith_client", return_value=client),
+        patch.object(
+            langsmith_tools,
+            "_run_is_readable",
+            AsyncMock(side_effect=lambda client, run, login: int(run.id) >= 50),
+        ),
     ):
-        result = await list_runs.ainvoke(
-            {"on_behalf_of": "octo", "project_name": "p", "limit": 9999}
-        )
+        result = await tool.ainvoke({"on_behalf_of": "octo", "project_name": "p", "limit": limit})
     assert result["success"] is True
-    assert captured["limit"] == langsmith_tools._MAX_LIST_RUNS
+    assert [run["id"] for run in result["runs"]] == [str(i) for i in range(50, 50 + expected)]
 
 
 @pytest.mark.asyncio

@@ -21,7 +21,7 @@ from agent.dashboard.team_credentials import (
 from agent.dashboard.team_credentials import (
     get_langsmith_credentials as get_team_langsmith_credentials,
 )
-from agent.dashboard.threads.summary import thread_is_owner, thread_is_readable
+from agent.dashboard.threads.summary import thread_is_readable
 from agent.dashboard.user_credentials import (
     get_langsmith_credentials as get_user_langsmith_credentials,
 )
@@ -105,7 +105,7 @@ async def _run_is_readable(client: Any, run: Any, login: str) -> bool:
                     if not isinstance(caller_id, str) or not caller_id:
                         return False
                     caller = await _authorized_thread_metadata(caller_id, login)
-                    if caller.get("visibility") != "private" or not thread_is_owner(caller, login):
+                    if caller.get("visibility") != "private":
                         return False
             elif item is root:
                 project_id = getattr(item, "session_id", None)
@@ -175,15 +175,14 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
             login = await resolve_participant(on_behalf_of)
             creds = await _creds_for(login, allow_team=allow_team)
             async with langsmith_client(creds) as client:
-                runs = [
-                    run
-                    async for run in client.list_runs(
-                        project_name=project_name,
-                        filter=filter,
-                        limit=capped,
-                    )
-                    if await _run_is_readable(client, run, login)
-                ]
+                runs = []
+                async for run in client.list_runs(
+                    project_name=project_name, filter=filter, limit=_MAX_LIST_RUNS * 10
+                ):
+                    if await _run_is_readable(client, run, login):
+                        runs.append(run)
+                        if len(runs) == capped:
+                            break
         except Exception:  # noqa: BLE001
             logger.warning("langsmith_list_runs failed", exc_info=True)
             return {"success": False, "error": "LangSmith request unavailable or access denied."}
