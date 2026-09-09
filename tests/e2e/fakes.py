@@ -133,6 +133,7 @@ def update_code_channel(channel_id: str, **values: Any) -> dict[str, Any] | None
 PULLS: list[dict[str, Any]] = []
 REPO_PRIVATE = [False]
 _pr_seq = [0]
+_seed_seq = [0]
 _REMOTES = {
     (OWNER, REPO): BARE_REMOTE,
     (SECOND_OWNER, SECOND_REPO): SECOND_BARE_REMOTE,
@@ -256,6 +257,55 @@ def create_pull(
     }
     PULLS.append(pr)
     return pr
+
+
+def seed_pull(
+    owner: str,
+    repo: str,
+    *,
+    title: str,
+    draft: bool = False,
+    mergeable: bool = True,
+    check_conclusion: str | None = None,
+    additions: int = 0,
+    deletions: int = 0,
+    files: int = 0,
+    author: str = "octocat",
+) -> dict[str, Any]:
+    """Put a pull request in the store directly, with no agent run behind it."""
+    _seed_seq[0] += 1
+    pull = create_pull(
+        owner,
+        repo,
+        head=f"seed-{_seed_seq[0]}",
+        base=BASE_BRANCH,
+        title=title,
+        body="",
+        draft=draft,
+    )
+    pull["files"] = [
+        {
+            "filename": f"file{index}.py",
+            "additions": additions if index == 0 else 0,
+            "deletions": deletions if index == 0 else 0,
+        }
+        for index in range(max(files, 0))
+    ]
+    pull["additions"] = additions
+    pull["deletions"] = deletions
+    pull["mergeable"] = mergeable
+    pull["mergeable_state"] = "clean" if mergeable else "dirty"
+    pull["author"] = author
+    if check_conclusion is not None:
+        pull["check_runs"] = [
+            {
+                "name": "ci",
+                "status": "completed",
+                "conclusion": check_conclusion,
+                "html_url": "https://checks.example/ci",
+            }
+        ]
+    return pull
 
 
 def find_pull(
@@ -412,4 +462,5 @@ def reset() -> None:
     DELETED_SNAPSHOTS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
+    _seed_seq[0] = 0
     seed_bare_remotes()

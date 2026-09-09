@@ -505,6 +505,43 @@ export interface ReviewListPayload {
   has_more: boolean
 }
 
+export type ReviewQueueDecision =
+  | "APPROVED"
+  | "CHANGES_REQUESTED"
+  | "REVIEW_REQUIRED"
+
+export interface ReviewQueueAiReview {
+  status: "running" | "error" | "idle"
+  counts: { bugs: number; flags: number }
+}
+
+export interface ReviewQueueItem {
+  repo_full_name: string
+  owner: string
+  repo: string
+  number: number
+  title: string
+  url: string
+  author: string | null
+  additions: number
+  deletions: number
+  changed_files: number
+  review_decision: ReviewQueueDecision | null
+  updated_at: string
+  ai_review: ReviewQueueAiReview | null
+}
+
+export interface ReviewQueueReposPayload {
+  repos: Array<string>
+  updated_at: string
+}
+
+export interface ReviewQueuePayload {
+  repos: Array<string>
+  items: Array<ReviewQueueItem>
+  fetched_at: string
+}
+
 export interface ReviewUserRef {
   login: string
   avatar_url?: string | null
@@ -830,6 +867,14 @@ export const api = {
       `/admin/user-mappings/${encodeURIComponent(github_login)}`,
       { method: "DELETE" }
     ),
+  getReviewQueueRepos: () =>
+    request<ReviewQueueReposPayload>("/review-queue/repos"),
+  setReviewQueueRepos: (repos: Array<string>) =>
+    request<ReviewQueueReposPayload>("/review-queue/repos", {
+      method: "PUT",
+      body: JSON.stringify({ repos }),
+    }),
+  getReviewQueue: () => request<ReviewQueuePayload>("/review-queue"),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   getReview: (owner: string, repo: string, number: number) =>

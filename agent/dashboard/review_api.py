@@ -261,6 +261,15 @@ def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
     }
 
 
+async def review_summary_for_pull(owner: str, repo: str, pr_number: int) -> dict[str, Any] | None:
+    """Summary of the automated review for one PR, or ``None`` when it was never reviewed."""
+    try:
+        thread = await langgraph_client().threads.get(reviewer_thread_id(owner, repo, pr_number))
+    except Exception:  # noqa: BLE001
+        return None
+    return _thread_review_summary(thread) if isinstance(thread, dict) else None
+
+
 async def list_reviews(
     limit: int = 20,
     *,

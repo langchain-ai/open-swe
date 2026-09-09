@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -63,6 +64,8 @@ from langgraph_sdk import get_client  # noqa: E402
 
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
+from agent.dashboard.review_queue import clear_cache as clear_review_queue_cache  # noqa: E402
+from agent.dashboard.user_data import REVIEW_QUEUE_REPOS  # noqa: E402
 from agent.slack.client import lookup_slack_thread_id  # noqa: E402
 from agent.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
@@ -96,6 +99,11 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    # The Store outlives the process, so per-user dashboard state a spec writes
+    # has to be dropped here or the next run starts with the last one's repos.
+    for user in TEST_USERS:
+        await REVIEW_QUEUE_REPOS.delete(user["login"])
+    clear_review_queue_cache()
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
@@ -147,6 +155,35 @@ async def control_pull_request_health(request: Request) -> JSONResponse:
     if pull is None:
         raise HTTPException(404, "Pull request not found")
     return JSONResponse({"ok": True, "pull_request": fakes.pull_health_json(pull)})
+
+
+@app.post("/control/seed-pull")
+async def control_seed_pull(request: Request) -> JSONResponse:
+    """Add a pull request to the fake GitHub without running the agent."""
+    body = await request.json()
+    owner = body.get("owner")
+    repo = body.get("repo")
+    title = body.get("title")
+    if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(title, str):
+        raise HTTPException(400, "owner, repo and title are required")
+    check_conclusion = body.get("check_conclusion")
+    if check_conclusion is not None and not isinstance(check_conclusion, str):
+        raise HTTPException(400, "check_conclusion must be a string or null")
+    pull = fakes.seed_pull(
+        owner,
+        repo,
+        title=title,
+        draft=bool(body.get("draft", False)),
+        mergeable=bool(body.get("mergeable", True)),
+        check_conclusion=check_conclusion,
+        additions=int(body.get("additions", 0)),
+        deletions=int(body.get("deletions", 0)),
+        files=int(body.get("files", 0)),
+        author=str(body.get("author") or "octocat"),
+    )
+    return JSONResponse(
+        {"ok": True, "number": pull["number"], "pull_request": fakes.pull_health_json(pull)}
+    )
 
 
 @app.get("/control/queued")
@@ -657,10 +694,66 @@ async def gh_get_commit_status(owner: str, repo: str, sha: str) -> JSONResponse:
     return JSONResponse({"state": "pending", "sha": sha, "statuses": pr["statuses"]})
 
 
+# GitHub's own rollup semantics, which the review queue filters on.
+_FAILING_CHECK_CONCLUSIONS = {"failure", "timed_out", "action_required", "startup_failure"}
+_FAILING_STATUS_STATES = {"failure", "error"}
+_REPO_QUALIFIER = re.compile(r"repo:(\S+)")
+
+
+def _status_check_rollup(pr: dict[str, Any]) -> dict[str, str] | None:
+    checks = pr["check_runs"]
+    statuses = pr["statuses"]
+    if not checks and not statuses:
+        return None
+    failing = any(
+        str(check.get("conclusion") or "").lower() in _FAILING_CHECK_CONCLUSIONS for check in checks
+    ) or any(
+        str(status.get("state") or "").lower() in _FAILING_STATUS_STATES for status in statuses
+    )
+    if failing:
+        return {"state": "FAILURE"}
+    pending = any(check.get("status") != "completed" for check in checks) or any(
+        str(status.get("state") or "").lower() == "pending" for status in statuses
+    )
+    return {"state": "PENDING" if pending else "SUCCESS"}
+
+
+def _search_node(pr: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "number": pr["number"],
+        "title": pr["title"],
+        "url": _pr_html_url(pr),
+        "isDraft": pr["draft"],
+        "mergeable": "MERGEABLE" if pr["mergeable"] else "CONFLICTING",
+        "reviewDecision": pr["review_decision"],
+        "updatedAt": pr["created_at"],
+        "additions": pr["additions"],
+        "deletions": pr["deletions"],
+        "changedFiles": len(pr["files"]),
+        "author": {"login": pr["author"]},
+        "repository": {"nameWithOwner": f"{pr['owner']}/{pr['repo']}"},
+        "commits": {"nodes": [{"commit": {"statusCheckRollup": _status_check_rollup(pr)}}]},
+    }
+
+
 @app.post("/fake-gh/graphql")
 async def gh_graphql(request: Request) -> JSONResponse:
     body = await request.json()
     variables = body.get("variables", {})
+    query = body.get("query", "")
+    if "ReviewQueueSearch" in query:
+        # Only the repo qualifiers are honoured; the rest of the search string
+        # (author, sort, state) is filtered here or irrelevant to the fake.
+        search = variables.get("q")
+        if not isinstance(search, str):
+            return JSONResponse({"errors": [{"message": "Invalid variables"}]}, status_code=400)
+        wanted = {name.lower() for name in _REPO_QUALIFIER.findall(search)}
+        nodes = [
+            _search_node(pull)
+            for pull in fakes.PULLS
+            if pull["state"] == "open" and f"{pull['owner']}/{pull['repo']}".lower() in wanted
+        ]
+        return JSONResponse({"data": {"search": {"nodes": nodes}}})
     owner = variables.get("owner")
     repo = variables.get("repo")
     number = variables.get("number")
@@ -674,7 +767,6 @@ async def gh_graphql(request: Request) -> JSONResponse:
         "pageInfo": {"hasNextPage": False, "endCursor": None},
     }
     pull_request: dict[str, Any] = {"reviewThreads": review_threads}
-    query = body.get("query", "")
     if "PullRequestFixReviews" in query:
         pull_request.update(
             {

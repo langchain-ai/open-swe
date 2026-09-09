@@ -76,6 +76,30 @@ export async function setPullRequestHealth(
   expect(res.ok()).toBeTruthy();
 }
 
+export type SeedPullValues = {
+  owner: string;
+  repo: string;
+  title: string;
+  draft?: boolean;
+  mergeable?: boolean;
+  check_conclusion?: "success" | "failure" | null;
+  additions?: number;
+  deletions?: number;
+  files?: number;
+  author?: string;
+};
+
+// Puts a pull request straight into the fake GitHub and returns its number.
+export async function seedPull(
+  page: Page,
+  values: SeedPullValues,
+): Promise<number> {
+  const res = await page.request.post("/control/seed-pull", { data: values });
+  expect(res.ok()).toBeTruthy();
+  const { number } = (await res.json()) as { number: number };
+  return number;
+}
+
 // Hold the fake run open long enough to load its busy composer and queue a
 // follow-up. It may finish while the UI observes the next server refresh.
 export async function openRunningThreadViaSlackLink(page: Page) {
