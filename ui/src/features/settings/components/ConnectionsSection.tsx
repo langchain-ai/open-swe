@@ -238,7 +238,7 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
       <ApiKeyRow
         queryKey="myLangSmith"
         label="LangSmith"
-        description="Use your LangSmith account to provision personal sandboxes. Encrypted at rest and scoped to your account."
+        description="Let code in your sandbox access LangSmith through the credential proxy. Encrypted at rest and scoped to your account."
         placeholder="LangSmith API key"
         load={api.getMyLangSmithStatus}
         connect={(apiKey) => api.connectMyLangSmith({ api_key: apiKey })}

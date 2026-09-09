@@ -281,7 +281,9 @@ legacy saved Datadog credentials are not migrated automatically. Use the JSON
 import or connection form to add LangSmith and Linear MCP servers as needed.
 
 LangSmith credentials under **PR Trace Resolution** still support reviewer trace
-lookup. Personal LangSmith credentials still provision sandboxes. Linear webhook
+lookup. Personal LangSmith credentials let code inside a sandbox call LangSmith
+through the credential proxy. Sandbox provisioning uses the deployment
+`SANDBOX_LANGSMITH_API_KEY`, falling back to `LANGSMITH_API_KEY`. Linear webhook
 intake and the reply tool remain available through the existing Linear app setup.
 
 Use the endpoint for your Datadog site (this example uses US5). Replace the key
