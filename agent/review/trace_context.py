@@ -9,11 +9,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
+from langsmith import AsyncClient as AsyncLangSmithClient
 
 from agent.dashboard.team_credentials import get_langsmith_credentials
 from agent.dashboard.team_settings import get_team_review_tracing_project
 from agent.run_config import RunConfig
-from agent.tool_loaders.langsmith import langsmith_client
 from agent.utils.langsmith import get_langsmith_trace_url, langsmith_host_url, resolve_tenant_id
 
 logger = logging.getLogger(__name__)
@@ -207,7 +207,7 @@ async def _resolve_session(
     # ``async with`` so the client's connection pool is released here rather than
     # whenever the cycle collector happens to run: httpcore's pool graph is
     # cyclic, so dropping the client leaves its socket open until then.
-    async with langsmith_client(creds) as client:
+    async with AsyncLangSmithClient(api_key=creds.api_key, api_url=creds.endpoint) as client:
         thread_id, evidence = await _resolve_thread(client, project, pr_context)
         if thread_id is None:
             detail = f"No coding-agent thread matched (tried {_attempted_keys(pr_context)})."

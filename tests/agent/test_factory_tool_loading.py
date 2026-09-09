@@ -44,7 +44,7 @@ def _config() -> RunnableConfig:
 async def test_tool_loaders_run_concurrently_and_gate_workspace_mcps(
     initial_plan_mode: bool,
 ) -> None:
-    barrier = asyncio.Barrier(3)
+    barrier = asyncio.Barrier(2)
 
     async def delete_incident() -> str:
         return "deleted"
@@ -94,13 +94,29 @@ async def test_tool_loaders_run_concurrently_and_gate_workspace_mcps(
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
-        patch("agent.server._observability_tools_for", side_effect=rendezvous([])),
         patch("agent.server._workspace_mcp_tools_for", side_effect=rendezvous([mcp_tool])),
         patch("agent.server._load_integration_tools", side_effect=rendezvous(([], []))),
     ):
         config = _config()
         config["configurable"]["plan_mode"] = initial_plan_mode
         await get_agent(config)
+
+    tool_names = {
+        tool.name if hasattr(tool, "name") else tool.__name__
+        for tool in build_agent.call_args.kwargs["tools"]
+    }
+    assert "linear_comment" in tool_names
+    assert not tool_names.intersection(
+        {
+            "linear_create_issue",
+            "linear_delete_issue",
+            "linear_get_issue",
+            "linear_get_issue_comments",
+            "linear_list_teams",
+            "linear_search_issues",
+            "linear_update_issue",
+        }
+    )
 
     middleware = build_agent.call_args.kwargs["middleware"]
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))

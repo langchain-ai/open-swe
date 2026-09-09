@@ -149,11 +149,8 @@ from agent.dashboard.skills import (
     update_skill,
 )
 from agent.dashboard.team_credentials import (
-    DatadogCredentialsUpdate,
     LangSmithCredentialsUpdate,
-    connect_datadog,
     connect_langsmith,
-    disconnect_datadog,
     disconnect_langsmith,
     get_team_credentials_status,
 )
@@ -1048,21 +1045,6 @@ async def api_discover_workspace_mcp(
 
 
 router.include_router(workspace_mcp_router)
-
-
-@router.put("/team-credentials/datadog")
-async def api_connect_datadog(
-    update: DatadogCredentialsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await connect_datadog(update)
-
-
-@router.delete("/team-credentials/datadog")
-async def api_disconnect_datadog(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await disconnect_datadog()
 
 
 @router.put("/team-credentials/langsmith")

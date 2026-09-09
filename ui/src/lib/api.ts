@@ -198,14 +198,12 @@ export interface TeamSettings {
 
 export interface ProviderCredentialStatus {
   connected: boolean
-  site?: string
   endpoint?: string
   api_key_last4?: string
   updated_at?: string | null
 }
 
 export interface TeamCredentialsStatus {
-  datadog: ProviderCredentialStatus
   langsmith: ProviderCredentialStatus
 }
 
@@ -241,12 +239,6 @@ export interface WorkspaceMCPUpdate {
   allowed_tools: string[]
   headers?: Record<string, string> | null
   oauth?: WorkspaceMCPOAuthUpdate | null
-}
-
-export interface DatadogConnectBody {
-  site: string
-  api_key: string
-  app_key: string
 }
 
 export interface LangSmithConnectBody {
@@ -817,15 +809,6 @@ export const api = {
       `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  connectDatadog: (body: DatadogConnectBody) =>
-    request<TeamCredentialsStatus>("/team-credentials/datadog", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  disconnectDatadog: () =>
-    request<TeamCredentialsStatus>("/team-credentials/datadog", {
-      method: "DELETE",
-    }),
   connectLangSmith: (body: LangSmithConnectBody) =>
     request<TeamCredentialsStatus>("/team-credentials/langsmith", {
       method: "PUT",

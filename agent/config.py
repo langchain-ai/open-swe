@@ -308,7 +308,7 @@ ENV.var(
 )
 ENV.var("CONFIGURED_ADMINS", "Comma-separated GitHub logins or emails with admin access.")
 ENV.var(
-    "OBSERVABILITY_AUTHORIZED_EMAILS", "Comma-separated emails allowed to use observability tools."
+    "OBSERVABILITY_AUTHORIZED_EMAILS", "Comma-separated emails allowed to use workspace MCP tools."
 )
 ENV.var("ADMIN_OIDC_SUBJECTS", "Comma-separated GitHub Actions OIDC subjects allowed as admins.")
 ENV.var("ADMIN_OIDC_AUDIENCE", "Audience required on admin OIDC tokens.", default="open-swe")
@@ -348,7 +348,6 @@ ENV.var(
     default="/usr/bin/chromium",
 )
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
-ENV.var("DATADOG_MCP_TOOLSETS", "Datadog MCP toolsets to load.", default="core")
 ENV.var("CORRIDOR_MCP_URL", "Corridor MCP server URL.", aliases=("CORRIDOR_MCP_SERVER_URL",))
 ENV.var(
     "CORRIDOR_API_TOKEN",

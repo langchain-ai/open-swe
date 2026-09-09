@@ -424,11 +424,6 @@ def _langsmith_credentials(record: object) -> LangSmithCredentials | None:
     return LangSmithCredentials(api_key=api_key, endpoint=DEFAULT_LANGSMITH_ENDPOINT)
 
 
-async def get_langsmith_credentials(login: str) -> LangSmithCredentials | None:
-    """Return decrypted LangSmith credentials, failing soft for optional tools."""
-    return _langsmith_credentials(await _provider_for_tool_loading(login, LANGSMITH_KEY))
-
-
 async def get_sandbox_langsmith_credentials(login: str) -> LangSmithCredentials | None:
     """Return sandbox credentials while surfacing lookup failures."""
     return _langsmith_credentials(await _get_provider(login, LANGSMITH_KEY))

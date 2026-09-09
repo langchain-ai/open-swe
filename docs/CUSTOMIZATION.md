@@ -274,6 +274,16 @@ Alternatively, choose **Import JSON** and paste a Claude-style configuration:
 }
 ```
 
+Datadog, LangSmith, and Linear agent tools are configured through Workspace MCPs.
+The dedicated Datadog credentials form and built-in LangSmith trace and Linear
+issue tools have been removed. Reconnect Datadog using the MCP configuration above;
+legacy saved Datadog credentials are not migrated automatically. Use the JSON
+import or connection form to add LangSmith and Linear MCP servers as needed.
+
+LangSmith credentials under **PR Trace Resolution** still support reviewer trace
+lookup. Personal LangSmith credentials still provision sandboxes. Linear webhook
+intake and the reply tool remain available through the existing Linear app setup.
+
 Use the endpoint for your Datadog site (this example uses US5). Replace the key
 placeholders directly in the dashboard. Import supports multiple named servers,
 optional `type` (`http` by default, or `sse`), and string authentication headers.

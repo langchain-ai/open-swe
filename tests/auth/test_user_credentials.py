@@ -108,15 +108,15 @@ async def test_langsmith_roundtrip_redaction_and_isolation(fake_store: _FakeStor
     assert record["encrypted_api_key"] != "alice-langsmith-abcd"
     assert "alice-langsmith-abcd" not in str(status)
 
-    alice = await uc.get_langsmith_credentials("alice")
-    bob = await uc.get_langsmith_credentials("bob")
+    alice = await uc.get_sandbox_langsmith_credentials("alice")
+    bob = await uc.get_sandbox_langsmith_credentials("bob")
     assert alice and alice.api_key == "alice-langsmith-abcd"
     assert alice.endpoint == uc.DEFAULT_LANGSMITH_ENDPOINT
     assert bob and bob.api_key == "bob-langsmith-wxyz"
 
     await uc.disconnect_langsmith("alice")
-    assert await uc.get_langsmith_credentials("alice") is None
-    assert await uc.get_langsmith_credentials("bob") == bob
+    assert await uc.get_sandbox_langsmith_credentials("alice") is None
+    assert await uc.get_sandbox_langsmith_credentials("bob") == bob
 
 
 @pytest.mark.asyncio
