@@ -1,22 +1,30 @@
 """Shared builders for dashboard ("Open in Web") URLs."""
 
-import os
 from urllib.parse import quote, unquote, urlsplit
 
-_DEFAULT_DASHBOARD_BASE_URL = "https://openswe.vercel.app"
+from agent.config import ENV
+from agent.utils.dashboard_ui import is_single_origin
 
 
 def dashboard_base_url() -> str:
-    """Return the configured dashboard base URL."""
-    return os.environ.get("DASHBOARD_BASE_URL", _DEFAULT_DASHBOARD_BASE_URL).strip().rstrip("/")
+    """Public base URL of the dashboard frontend, or ``""`` when there is none.
+
+    An explicit ``DASHBOARD_BASE_URL`` wins. Otherwise the dashboard lives on the
+    backend's own origin when the backend serves it (a bundled build, or the Vite
+    dev server behind ``DASHBOARD_DEV_SERVER_URL``), so ``LANGGRAPH_URL`` is the
+    base; with neither there is no dashboard to link to.
+    """
+    explicit = ENV.DASHBOARD_BASE_URL.optional()
+    if explicit:
+        return explicit.rstrip("/")
+    if is_single_origin():
+        return ENV.LANGGRAPH_URL.get().rstrip("/")
+    return ""
 
 
-def dashboard_thread_url(thread_id: str) -> str | None:
-    """Build the dashboard thread URL for a given thread id."""
-    base_url = dashboard_base_url()
-    if not base_url or not thread_id:
-        return None
-    return f"{base_url}/agents/{quote(thread_id, safe='')}"
+def dashboard_api_base_url() -> str:
+    """Public URL browsers use for ``/dashboard/api/*``; the backend's own unless overridden."""
+    return (ENV.DASHBOARD_API_BASE_URL.optional() or ENV.LANGGRAPH_URL.get()).rstrip("/")
 
 
 def _origin(url: str) -> str | None:
@@ -32,8 +40,22 @@ def _origin(url: str) -> str | None:
     return f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{suffix}"
 
 
+def dashboard_is_same_origin() -> bool:
+    """True when the dashboard is served from the API's own origin."""
+    frontend = _origin(dashboard_base_url())
+    return frontend is not None and frontend == _origin(dashboard_api_base_url())
+
+
+def dashboard_thread_url(thread_id: str) -> str | None:
+    """Build the dashboard thread URL for a given thread id."""
+    base_url = dashboard_base_url()
+    if not base_url or not thread_id:
+        return None
+    return f"{base_url}/agents/{quote(thread_id, safe='')}"
+
+
 def _dashboard_origins() -> set[str]:
-    configured = [dashboard_base_url(), *os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",")]
+    configured = [dashboard_base_url(), *ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(",")]
     return {origin for value in configured if (origin := _origin(value.strip())) is not None}
 
 

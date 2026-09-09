@@ -8,7 +8,7 @@ human messages before the next model call.
 import logging
 from typing import Any, cast
 
-import httpx
+import httpx2
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
@@ -22,6 +22,7 @@ from agent.input_messages import (
     build_input_messages,
     visible_dynamic_context_hashes,
 )
+from agent.middleware.trace import scrub_middleware_inputs
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
@@ -78,7 +79,7 @@ async def _build_blocks_from_payload(
                 "text": text + vision_not_supported_warning(model_id, len(image_urls)),
             }
         return blocks
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:
@@ -176,6 +177,7 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
     return message
 
 
+@scrub_middleware_inputs
 @before_model(state_schema=LinearNotifyState)
 async def check_message_queue_before_model(  # noqa: PLR0911
     state: LinearNotifyState,  # noqa: ARG001

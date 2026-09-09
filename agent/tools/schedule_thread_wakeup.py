@@ -9,11 +9,11 @@ from weakref import WeakValueDictionary
 from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
 from agent.input_messages import build_run_input
+from agent.run_config import RunConfig
 from agent.slack.client import get_active_slack_thread
 from agent.utils.thread_ops import langgraph_url
 
@@ -275,10 +275,9 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
     if delay_seconds > _MAX_DELAY_SECONDS:
         return {"success": False, "error": "delay must be at most 1440 minutes (24 hours)"}
 
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
+    cfg = RunConfig.from_runtime()
+    thread_id = cfg.thread_id
+    if not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}
 
     client = get_client(url=langgraph_url())
@@ -296,16 +295,16 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         "user_email",
         "schedule_id",
     )
+    dumped = cfg.dump()
     wakeup_configurable: dict[str, Any] = {"thread_id": thread_id}
     for key in passthrough_keys:
-        value = configurable.get(key)
+        value = dumped.get(key)
         if value is not None:
             wakeup_configurable[key] = value
-    slack_thread = configurable.get("slack_thread")
     active = await get_active_slack_thread(
         client,
         thread_id,
-        slack_thread if isinstance(slack_thread, dict) else None,
+        cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
     if active:
         wakeup_configurable["slack_thread"] = active

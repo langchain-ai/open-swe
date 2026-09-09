@@ -585,7 +585,7 @@ def _compact_approvals(approvals: Mapping[str, Mapping[str, Any]]) -> list[dict[
 def _looks_uuid(value: str) -> bool:
     try:
         uuid.UUID(value)
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         return False
     return True
 
@@ -827,6 +827,7 @@ async def _send_message(
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
     command = {
+        "id": 1,
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": message}]},

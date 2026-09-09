@@ -8,29 +8,22 @@ run config (seeded by the dashboard chat proxy).
 import base64
 from typing import Any
 
-import httpx
-from langgraph.config import get_config
+import httpx2
 
 from agent.github.checks import github_headers
+from agent.run_config import RunConfig
 
 _GITHUB_API = "https://api.github.com"
 _MAX_FILE_BYTES = 256 * 1024
 
 
 def _chat_repo_context() -> tuple[str, str, str | None, str | None]:
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    if not isinstance(configurable, dict):
-        configurable = {}
-    owner = configurable.get("chat_repo_owner")
-    repo = configurable.get("chat_repo_name")
-    token = configurable.get("chat_github_token")
-    head_sha = configurable.get("chat_head_sha")
+    cfg = RunConfig.from_runtime()
     return (
-        owner if isinstance(owner, str) else "",
-        repo if isinstance(repo, str) else "",
-        token if isinstance(token, str) and token else None,
-        head_sha if isinstance(head_sha, str) and head_sha else None,
+        cfg.chat_repo_owner or "",
+        cfg.chat_repo_name or "",
+        cfg.chat_github_token or None,
+        cfg.chat_head_sha or None,
     )
 
 
@@ -67,9 +60,9 @@ async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
     url = f"{_GITHUB_API}/repos/{owner}/{repo}/contents/{clean_path}"
     headers = github_headers(token)
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx2.AsyncClient(timeout=30) as client:
             response = await client.get(url, headers=headers, params=params)
-    except httpx.HTTPError as exc:
+    except httpx2.HTTPError as exc:
         return {"success": False, "error": f"GitHub request failed: {exc!s}"}
 
     if response.status_code == 404:

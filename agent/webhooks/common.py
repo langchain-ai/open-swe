@@ -4,16 +4,17 @@ import hashlib
 import hmac
 import json
 import logging
-import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
 
-import httpx
+import httpx2
 from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from agent.config import ENV
 from agent.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
@@ -98,11 +99,9 @@ from agent.slack.client import (
     get_slack_channel_context,
     get_slack_channel_context_description,
     get_slack_channel_description,
-    get_slack_channel_info,
     get_slack_permalink,
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
-    is_slack_channel_named,
     lookup_slack_run_mapping,  # noqa: F401
     lookup_slack_thread_id,  # noqa: F401
     normalize_slack_channel_context,  # noqa: F401
@@ -141,6 +140,7 @@ from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.json_types import ThreadLike, as_thread_dict
+from agent.utils.langsmith import create_langsmith_thread_feedback
 from agent.utils.multimodal import (
     dedupe_urls,  # noqa: F401
     extract_image_urls,  # noqa: F401
@@ -154,6 +154,7 @@ from agent.utils.thread_participants import (
     PARTICIPANT_LOGINS_KEY,
     merge_participants,
 )
+from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 
 __all__ = [
     "Any",
@@ -161,7 +162,6 @@ __all__ = [
     "CODE_CHANNEL_SESSION_TS",
     "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_REPO_OWNER",
-    "DOCS_PLZ_SLACK_GATE_REPLY",
     "FEEDBACK_REACTIONS",
     "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
@@ -197,7 +197,6 @@ __all__ = [
     "_get_thread_metadata_safe",
     "_get_thread_environment",
     "_get_thread_plan_mode",
-    "_is_docs_plz_slack_channel",
     "_is_not_found_error",
     "_is_pr_diff_unchanged_since_last_review",
     "_is_repo_allowed",
@@ -307,11 +306,11 @@ logger = logging.getLogger(__name__)
 # allocation site. With tracemalloc running, aiohttp appends an "Object allocated
 # at" traceback to each warning, naming the exact source. Inert unless the env
 # var is set, so this is safe to ship and flip on for one diagnostic run.
-if os.environ.get("DEBUG_TRACEMALLOC"):
+if ENV.DEBUG_TRACEMALLOC.optional():
     import tracemalloc
 
     try:
-        _tracemalloc_frames = int(os.environ.get("DEBUG_TRACEMALLOC_FRAMES") or "25")
+        _tracemalloc_frames = int(ENV.DEBUG_TRACEMALLOC_FRAMES.optional() or "25")
     except ValueError:
         _tracemalloc_frames = 25
     tracemalloc.start(_tracemalloc_frames)
@@ -322,46 +321,36 @@ if os.environ.get("DEBUG_TRACEMALLOC"):
     )
 
 
-LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
-GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
-SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
-SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
-SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
-DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
-DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "")
-SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
-SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "") or DEFAULT_REPO_NAME
-DOCS_PLZ_SLACK_CHANNEL_NAME = "docs-plz"
-DOCS_PLZ_SLACK_GATE_REPLY = (
-    "Please don't use Open SWE here, instead ask the Fleet docs-plz agent to implement the docs"
-)
+LINEAR_WEBHOOK_SECRET = ENV.LINEAR_WEBHOOK_SECRET.get()
+GITHUB_WEBHOOK_SECRET = ENV.GITHUB_WEBHOOK_SECRET.get()
+SLACK_SIGNING_SECRET = ENV.SLACK_SIGNING_SECRET.get()
+SLACK_BOT_USER_ID = ENV.SLACK_BOT_USER_ID.get()
+SLACK_BOT_USERNAME = ENV.SLACK_BOT_USERNAME.get()
+DEFAULT_REPO_OWNER = ENV.DEFAULT_REPO_OWNER.get()
+DEFAULT_REPO_NAME = ENV.DEFAULT_REPO_NAME.get()
+SLACK_REPO_OWNER = ENV.SLACK_REPO_OWNER.get() or DEFAULT_REPO_OWNER
+SLACK_REPO_NAME = ENV.SLACK_REPO_NAME.get() or DEFAULT_REPO_NAME
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 
 _AGENT_VERSION_METADATA: dict[str, str] = (
-    {"LANGSMITH_AGENT_VERSION": os.environ["LANGCHAIN_REVISION_ID"]}
-    if os.environ.get("LANGCHAIN_REVISION_ID")
+    {"LANGSMITH_AGENT_VERSION": ENV.LANGCHAIN_REVISION_ID.require()}
+    if ENV.LANGCHAIN_REVISION_ID.optional()
     else {}
 )
 
 ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
-    org.strip().lower()
-    for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-    if org.strip()
+    org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
 )
 # Org whose members are allowed to tag @open-swe on public repos. When empty,
 # the public-repo gate is disabled (back-compat).
-PUBLIC_REPO_ORG_GATE: str = os.environ.get("PUBLIC_REPO_ORG_GATE", "").strip()
+PUBLIC_REPO_ORG_GATE: str = ENV.PUBLIC_REPO_ORG_GATE.get().strip()
 
 ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
-    repo.strip().lower()
-    for repo in os.environ.get("ALLOWED_GITHUB_REPOS", "").split(",")
-    if repo.strip()
+    repo.strip().lower() for repo in ENV.ALLOWED_GITHUB_REPOS.get().split(",") if repo.strip()
 )
 
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
+LINEAR_API_KEY = ENV.LINEAR_API_KEY.get()
 
 _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🔐 **GitHub Authentication Required**",
@@ -424,7 +413,7 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
     }
     """
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.post(
                 url,
@@ -491,7 +480,7 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
     }
     """
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.post(
                 url,
@@ -508,7 +497,7 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
             result = response.json()
 
             return result.get("data", {}).get("issue")
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             return None
 
 
@@ -555,22 +544,6 @@ async def _get_slack_channel_context(channel_id: str, *, use_cache: bool = True)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to resolve Slack channel context")
         return normalize_slack_channel_context(channel_id, None)
-
-
-async def _is_docs_plz_slack_channel(
-    channel_id: str, channel_context: dict[str, Any] | None = None
-) -> bool:
-    """Check whether a Slack channel is the docs-plz handoff channel."""
-    if channel_context is not None:
-        return is_slack_channel_named(channel_context, DOCS_PLZ_SLACK_CHANNEL_NAME)
-    try:
-        channel = await get_slack_channel_info(channel_id)
-    except Exception:  # noqa: BLE001
-        logger.exception("Failed to resolve Slack channel info for docs-plz gate")
-        return False
-    return is_slack_channel_named(
-        normalize_slack_channel_context(channel_id, channel), DOCS_PLZ_SLACK_CHANNEL_NAME
-    )
 
 
 def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
@@ -794,6 +767,18 @@ async def upsert_agent_thread_metadata(
             await langgraph_client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )
+        elif _pr_linked(existing_meta) or _pr_state_reset_for_user_activity(existing_meta):
+            # A person is continuing the thread, so PR-driven resolution or the
+            # "PRs closed" mark no longer applies. Only the PR webhook sets those,
+            # and only on PR-linked threads, so take its lock for any such thread
+            # and derive the reset from a fresh read rather than the pre-lock one.
+            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+                current = as_thread_dict(await langgraph_client.threads.get(thread_id))
+                current_meta = (
+                    current["metadata"] if isinstance(current.get("metadata"), dict) else {}
+                )
+                metadata.update(_pr_state_reset_for_user_activity(current_meta))
+                await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
         else:
             await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
     except Exception:  # noqa: BLE001
@@ -1066,6 +1051,26 @@ _GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 _GH_PR_AGENT_STATE_ACTIONS = frozenset(
     ["closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"]
 )
+_TERMINAL_PR_STATES = frozenset(["closed", "merged"])
+_PRS_CLOSED_ATTENTION_REASON = "prs_closed"
+
+
+def _pr_linked(metadata: Mapping[str, Any]) -> bool:
+    return any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
+
+
+def _pr_state_reset_for_user_activity(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Metadata that a new user message invalidates: PR-driven resolution and attention."""
+    reset: dict[str, Any] = {}
+    if metadata.get("attention_reason"):
+        reset["attention_reason"] = None
+    if metadata.get("auto_resolved_by_prs") is True:
+        reset["resolved"] = False
+        reset["resolved_at_ms"] = None
+        reset["auto_resolved_by_prs"] = False
+    return reset
+
+
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
     "pull_request_review_comment": frozenset(["created", "edited"]),
@@ -1131,14 +1136,14 @@ async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[s
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{pr_ref.owner}/{pr_ref.repo}/pulls/{pr_ref.number}",
                 headers=headers,
             )
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception(
                 "Failed to fetch PR metadata for %s/%s#%s",
                 pr_ref.owner,
@@ -1269,7 +1274,7 @@ async def _fetch_open_pr_for_branch(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     params = {"state": "open", "head": f"{owner}:{head_ref}", "per_page": 1}
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls",
@@ -1277,7 +1282,7 @@ async def _fetch_open_pr_for_branch(
                 params=params,
             )
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception("Failed to look up open PR for %s/%s head=%s", owner, repo, head_ref)
             return None
     data = response.json()
@@ -1309,14 +1314,14 @@ async def _fetch_compare_diff(
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/compare/{base}...{head}",
                 headers=headers,
             )
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception(
                 "Failed to fetch compare diff for %s/%s %s...%s", owner, repo, base_ref, head_ref
             )
@@ -1365,11 +1370,33 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
     )
 
 
+async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
+    try:
+        await create_langsmith_thread_feedback(
+            thread_id,
+            f"github_pr_merged:{pr_url}",
+            score=1.0,
+            comment=f"Agent-authored pull request merged: {pr_url}",
+            source_info={
+                "source": "github_pr_merged",
+                "thread_id": thread_id,
+                "pr_url": pr_url,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to record merged PR feedback for thread %s", thread_id, exc_info=True)
+
+
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     """Keep an agent thread's tracked PR state in sync with PR lifecycle events.
 
     The agent thread is located by the PR's html_url persisted in metadata when
     the PR was opened (``open_pull_request``). Reviewer threads are skipped.
+
+    A thread auto-resolves only when every tracked PR is merged or closed and the
+    agent opened at least one of them with ``resolves_thread=True``. Without that
+    flag the thread is instead marked ``attention_reason="prs_closed"`` so a
+    person decides whether to resolve it; any PR reopening clears the mark.
     """
     pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
     if not isinstance(pull_request, dict):
@@ -1411,24 +1438,74 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         metadata = thread.get("metadata")
         if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
             continue
-        metadata_update: dict[str, Any] = {}
-        pull_requests = metadata.get("pull_requests")
-        if isinstance(pull_requests, list):
-            updated = [
-                {**record, "state": new_state} if record.get("url") == pr_url else record
-                for record in pull_requests
-                if isinstance(record, dict)
-            ]
-            if updated != pull_requests:
-                metadata_update["pull_requests"] = updated
-        if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
-            metadata_update["pr_state"] = new_state
-        if not metadata_update:
-            continue
         try:
-            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            async with agent_thread_pr_state_lock(langgraph_client, thread_id):
+                current = await langgraph_client.threads.get(thread_id)
+                metadata = current.get("metadata") if isinstance(current, dict) else None
+                if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
+                    continue
+                metadata_update: dict[str, Any] = {}
+                pull_requests = metadata.get("pull_requests")
+                updated_pull_requests: list[dict[str, Any]] = []
+                previous_state: Any = None
+                if isinstance(pull_requests, list):
+                    previous_state = next(
+                        (
+                            record.get("state")
+                            for record in pull_requests
+                            if isinstance(record, dict) and record.get("url") == pr_url
+                        ),
+                        None,
+                    )
+                    updated_pull_requests = [
+                        {**record, "state": new_state} if record.get("url") == pr_url else record
+                        for record in pull_requests
+                        if isinstance(record, dict)
+                    ]
+                    if updated_pull_requests != pull_requests:
+                        metadata_update["pull_requests"] = updated_pull_requests
+                if not updated_pull_requests and metadata.get("pr_url") == pr_url:
+                    previous_state = metadata.get("pr_state")
+                state_changed = previous_state != new_state
+                if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
+                    metadata_update["pr_state"] = new_state
+
+                tracked_states = [record.get("state") for record in updated_pull_requests]
+                if not tracked_states and metadata.get("pr_url") == pr_url:
+                    tracked_states = [new_state]
+                all_terminal = bool(tracked_states) and all(
+                    state in _TERMINAL_PR_STATES for state in tracked_states
+                )
+                resolves_thread = any(
+                    record.get("resolves_thread") is True for record in updated_pull_requests
+                )
+                needs_attention = metadata.get("attention_reason") == _PRS_CLOSED_ATTENTION_REASON
+                if all_terminal:
+                    if state_changed and metadata.get("resolved") is not True:
+                        if resolves_thread:
+                            metadata_update["resolved"] = True
+                            metadata_update["resolved_at_ms"] = int(
+                                datetime.now(UTC).timestamp() * 1000
+                            )
+                            metadata_update["auto_resolved_by_prs"] = True
+                        elif not needs_attention:
+                            metadata_update["attention_reason"] = _PRS_CLOSED_ATTENTION_REASON
+                else:
+                    if metadata.get("auto_resolved_by_prs") is True:
+                        metadata_update["resolved"] = False
+                        metadata_update["resolved_at_ms"] = None
+                        metadata_update["auto_resolved_by_prs"] = False
+                    if needs_attention:
+                        metadata_update["attention_reason"] = None
+                if metadata_update:
+                    await langgraph_client.threads.update(
+                        thread_id=thread_id, metadata=metadata_update
+                    )
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
+            continue
+        if new_state == "merged":
+            await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
 
 
 async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:

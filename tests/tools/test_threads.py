@@ -1,4 +1,5 @@
 import importlib
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -102,6 +103,7 @@ async def test_list_threads_defaults_to_triggering_user(monkeypatch: pytest.Monk
     )
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=actor))
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
 
     result = await threads_tool.list_threads()
 
@@ -110,7 +112,7 @@ async def test_list_threads_defaults_to_triggering_user(monkeypatch: pytest.Monk
         {
             "id": "thread-1",
             "title": "One",
-            "webUrl": "https://openswe.vercel.app/agents/thread-1",
+            "webUrl": "https://dashboard.example/agents/thread-1",
         }
     ]
     page.assert_awaited_once_with(
@@ -281,8 +283,9 @@ class _DetailClient:
 async def test_get_thread_returns_links_cost_last_message_and_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     client = _DetailClient()
-    monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api")
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
         threads_tool,
@@ -976,9 +979,10 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     assert result["mode"] == "started"
     awaited = proxy.await_args
     assert awaited is not None
-    command = awaited.args[2]
-    assert b'"method": "run.start"' in command
-    assert b'"plan_mode": true' in command
+    command = json.loads(awaited.args[2])
+    assert isinstance(command["id"], int)
+    assert command["method"] == "run.start"
+    assert command["params"]["config"]["configurable"]["plan_mode"] is True
 
 
 async def test_manage_thread_update_plan_preserves_format_and_bounds_response(

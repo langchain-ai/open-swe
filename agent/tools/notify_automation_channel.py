@@ -1,12 +1,11 @@
 import asyncio
 import logging
-from collections.abc import Mapping
 from typing import Any
 from weakref import WeakValueDictionary
 
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.run_config import RunConfig
 from agent.slack.client import (
     append_slack_web_link_footer,
     post_slack_top_level_message_with_ts,
@@ -48,28 +47,27 @@ async def _mark_action_posted(thread_id: str, notified_at: str) -> None:
 
 async def notify_automation_channel(message: str) -> dict[str, Any]:
     """Notify the configured automation channel once after a concrete requested action."""
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, Mapping) else {}
-    if not isinstance(configurable, Mapping) or configurable.get("source") != "schedule":
+    cfg = RunConfig.from_runtime()
+    if cfg.source != "schedule":
         return {"success": False, "error": "This tool is only available to scheduled runs"}
 
-    notification = configurable.get("automation_slack_notification")
-    if not isinstance(notification, Mapping) or notification.get("mode") != "on_action":
+    notification = cfg.automation_slack_notification
+    if notification is None or notification.mode != "on_action":
         return {
             "success": False,
             "error": "This schedule is not configured for action-only Slack notifications",
         }
 
-    channel_id = notification.get("channel_id")
-    if not isinstance(channel_id, str) or not channel_id:
+    channel_id = notification.channel_id
+    if not channel_id:
         return {"success": False, "error": "Missing configured automation Slack channel"}
 
-    schedule_id = configurable.get("schedule_id")
-    if not isinstance(schedule_id, str) or notification.get("schedule_id") != schedule_id:
+    schedule_id = cfg.schedule_id
+    if not schedule_id or notification.schedule_id != schedule_id:
         return {"success": False, "error": "Invalid automation notification configuration"}
 
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
+    thread_id = cfg.thread_id
+    if not thread_id:
         return {"success": False, "error": "Missing scheduled thread ID"}
 
     clean_message = message.strip()
@@ -108,8 +106,7 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             logger.exception("Failed to reserve automation notification for %s", thread_id)
             return {"success": False, "error": "Could not reserve the Slack notification"}
 
-        schedule_name = notification.get("schedule_name")
-        title = schedule_name.strip() if isinstance(schedule_name, str) else ""
+        title = (notification.schedule_name or "").strip()
         text = f"*Open SWE automation:* {title or 'Scheduled agent'}\n\n{clean_message}"
         text = append_slack_web_link_footer(text, dashboard_thread_url(thread_id))
         try:

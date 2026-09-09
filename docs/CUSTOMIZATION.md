@@ -58,7 +58,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 | `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
-| `langsmith` (default) | `agent/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
+| `langsmith` (default) | `agent/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY`, `SANDBOX_TYPE="langsmith"` |
 | `daytona` | `agent/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
 | `runloop` | `agent/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `e2b` | `agent/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
@@ -67,7 +67,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY` / `LANGSMITH_API_KEY_PROD`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and environment snapshot captures — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
+For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and environment snapshot captures — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
 
 ### Adding a new sandbox provider
 
@@ -136,14 +136,18 @@ See `deepagents.backends.LangSmithSandbox` and `agent/sandboxes/providers/langsm
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.6-sol` with medium reasoning effort, but you can override the model with the `LLM_MODEL_ID` environment variable:
+Set optional deployment defaults with `LLM_MODEL_ID` and `LLM_REASONING_EFFORT`:
 
 ```bash
-# Set the model via environment variable (uses provider:model format)
 LLM_MODEL_ID="anthropic:claude-sonnet-5"
+LLM_REASONING_EFFORT="high"
 ```
 
-If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.6-sol`) is used.
+When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5`. All other deployments default to `openai:gpt-5.6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
+
+Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `agent/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
+
+These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
 
 `max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
@@ -201,8 +205,8 @@ Routing is opt-in and off by default. Enable it either way:
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `LANGSMITH_GATEWAY_ENABLED` | `false` | Deployment-level default for gateway routing. |
-| `LANGSMITH_GATEWAY_API_KEY` | unset | Optional dedicated LangSmith key for Gateway calls. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY_PROD`, then `LANGSMITH_API_KEY`. |
+| `LANGSMITH_GATEWAY_ENABLED` | on when `LANGSMITH_GATEWAY_API_KEY` is set, else off | Deployment-level default for gateway routing; set explicitly to override. |
+| `LANGSMITH_GATEWAY_API_KEY` | unset | Dedicated LangSmith key for Gateway calls; setting it also turns routing on. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY` when routing is enabled some other way. |
 | `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
 | `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
 
@@ -443,12 +447,14 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 
 | Section | What it controls |
 |---|---|
-| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints |
-| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) |
-| `CODING_STANDARDS_SECTION` | Code style, testing, and quality rules |
-| `COMMIT_PR_SECTION` | PR title/body format and commit conventions |
-| `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
-| `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
+| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints (or `DESKTOP_WORKING_ENV_SECTION` for local desktop runs) |
+| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
+| `DEPENDENCY_SECTION` | Installing, vetting, and managing project dependencies |
+| `COMMIT_PR_SECTION` | PR title/body format, lint/format steps, and commit conventions (or `DESKTOP_PR_SECTION`) |
+| `OPEN_SWE_SHARED_BASE` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
+| `PLAN_MODE_SECTION` | Read-only planning mode instructions |
+
+> **Note:** General code style (`### Working with Code`), communication guidelines (`### Communication`), and core behaviors are composed as subsections of `OPEN_SWE_SHARED_BASE` rather than separate configurable constants.
 
 ### Default prompt file
 

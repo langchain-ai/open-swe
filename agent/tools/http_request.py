@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Any
 
-import httpx
+import httpx2
 
 from agent.tools._sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 from agent.utils.url_safety import (
@@ -55,7 +55,7 @@ async def http_request(
             else:
                 kwargs["content"] = data
 
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx2.AsyncClient(timeout=timeout) as client:
             response, blocked = await _request_with_safe_redirects(
                 client,
                 method,
@@ -87,7 +87,7 @@ async def http_request(
         }
         return await _offload_large_response(result)
 
-    except httpx.TimeoutException:
+    except httpx2.TimeoutException:
         return {
             "success": False,
             "status_code": 0,
@@ -95,7 +95,7 @@ async def http_request(
             "content": f"Request timed out after {timeout} seconds",
             "url": url,
         }
-    except httpx.HTTPError as e:
+    except httpx2.HTTPError as e:
         return {
             "success": False,
             "status_code": 0,

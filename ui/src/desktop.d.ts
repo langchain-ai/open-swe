@@ -13,6 +13,8 @@ export interface DesktopProject {
   cwd: string
   name: string
   addedAt: number
+  /** Terminal/panel scope for the project itself, before a thread exists. */
+  scopeId: string
 }
 
 export interface DesktopLocalThreadSummary {
@@ -112,7 +114,7 @@ export type DesktopTerminalMetadataEvent =
   | (DesktopTerminalTarget & { type: "remove" })
 
 export type DesktopUpdateState = {
-  status: "idle" | "downloading" | "ready"
+  status: "idle" | "downloading" | "ready" | "installing"
   version?: string
 }
 
@@ -161,6 +163,8 @@ declare global {
         current: string | null
         branches: Array<DesktopProjectRef>
       }>
+      watchProjectHead: (cwd: string | null) => Promise<void>
+      onProjectHeadChanged: (callback: (cwd: string) => void) => () => void
       checkoutProjectBranch: (input: {
         cwd: string
         branch: string
@@ -181,6 +185,7 @@ declare global {
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
+      connectService: (provider: "slack" | "notion") => Promise<boolean>
       resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string
@@ -216,6 +221,7 @@ declare global {
       localActivity: () => Promise<DesktopLocalActivity>
       updateLocalThread: (input: {
         threadId: string
+        title?: string
         viewed?: boolean
         archived?: boolean
         modelId?: string
@@ -224,6 +230,7 @@ declare global {
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
+      getProjectDiff: (cwd: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge
     }
   }

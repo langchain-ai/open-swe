@@ -1,12 +1,13 @@
-import os
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import BaseMessage, SystemMessage
 
+from agent.config import ENV
 from agent.input_messages import wrap_system_prompt
+from agent.middleware.trace import OpenSWEMiddleware
 
 _DEFAULT_TIMEOUT_SECONDS = 45 * 60
 _WRAPUP_INSTRUCTION = """
@@ -19,7 +20,7 @@ your turn with the best available result.
 
 
 def _configured_timeout_seconds() -> int:
-    raw = os.environ.get("OPEN_SWE_WRAPUP_TIMEOUT_SECONDS")
+    raw = ENV.OPEN_SWE_WRAPUP_TIMEOUT_SECONDS.optional()
     if not raw:
         return _DEFAULT_TIMEOUT_SECONDS
     try:
@@ -40,7 +41,7 @@ def _content_with_instruction(
     return f"{content}\n\n{instruction}" if content else instruction
 
 
-class TimeoutWrapupMiddleware(AgentMiddleware):
+class TimeoutWrapupMiddleware(OpenSWEMiddleware):
     def __init__(self, timeout_seconds: int | None = None) -> None:
         super().__init__()
         self._timeout_seconds = timeout_seconds or _configured_timeout_seconds()

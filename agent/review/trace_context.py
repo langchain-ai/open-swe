@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import posixpath
 import uuid
 from dataclasses import dataclass
@@ -13,8 +12,9 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 
 from agent.dashboard.team_credentials import get_langsmith_credentials
 from agent.dashboard.team_settings import get_team_review_tracing_project
+from agent.run_config import RunConfig
 from agent.tool_loaders.langsmith import _client
-from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.langsmith import get_langsmith_trace_url, langsmith_host_url, resolve_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class _ResolvedSession:
 
 async def prepare_pr_trace_context(
     *,
-    configurable: dict[str, Any],
+    cfg: RunConfig,
     sandbox_backend: SandboxBackendProtocol,
     work_dir: str,
 ) -> PRTraceContext | None:
@@ -101,7 +101,7 @@ async def prepare_pr_trace_context(
     raw runs to a sandbox file. Returns ``None`` whenever nothing resolves, which
     is the common case.
     """
-    resolved, detail, _ = await _resolve_session(configurable)
+    resolved, detail, _ = await _resolve_session(cfg)
     if resolved is None:
         logger.debug("PR trace context not prepared: %s", detail)
         return None
@@ -150,12 +150,12 @@ async def prepare_pr_trace_context(
     )
 
 
-async def resolve_pr_trace(*, configurable: dict[str, Any]) -> PRTraceResolution:
+async def resolve_pr_trace(*, cfg: RunConfig) -> PRTraceResolution:
     """Resolve a PR to its author thread without writing a sandbox file.
 
     Powers the admin dry-run: paste a PR, see whether (and how) it resolves.
     """
-    resolved, detail, project = await _resolve_session(configurable)
+    resolved, detail, project = await _resolve_session(cfg)
     if resolved is None:
         return PRTraceResolution(
             resolved=False,
@@ -187,7 +187,7 @@ async def resolve_pr_trace(*, configurable: dict[str, Any]) -> PRTraceResolution
 
 
 async def _resolve_session(
-    configurable: dict[str, Any],
+    cfg: RunConfig,
 ) -> tuple[_ResolvedSession | None, str, str | None]:
     """Shared core: resolve the dominant thread and load its runs.
 
@@ -200,7 +200,7 @@ async def _resolve_session(
     creds = await get_langsmith_credentials()
     if creds is None:
         return None, "LangSmith credentials are not connected.", project
-    pr_context = _build_pr_context(configurable)
+    pr_context = _build_pr_context(cfg)
     if pr_context is None:
         return None, "Missing repo owner/name or PR number.", project
 
@@ -264,28 +264,18 @@ def format_pr_trace_context_prompt(context: PRTraceContext | None) -> str:
     )
 
 
-def _build_pr_context(configurable: dict[str, Any]) -> _PRContext | None:
-    repo_config = configurable.get("repo")
-    pr_number = configurable.get("pr_number")
-    if (
-        not isinstance(repo_config, dict)
-        or not isinstance(repo_config.get("owner"), str)
-        or not isinstance(repo_config.get("name"), str)
-        or not isinstance(pr_number, int)
-    ):
+def _build_pr_context(cfg: RunConfig) -> _PRContext | None:
+    if not cfg.repo or not cfg.repo.owner or not cfg.repo.name or cfg.pr_number is None:
         return None
-    owner = str(repo_config["owner"])
-    repo = str(repo_config["name"])
+    owner, repo, pr_number = cfg.repo.owner, cfg.repo.name, cfg.pr_number
     return _PRContext(
         owner=owner,
         repo=repo,
         pr_number=pr_number,
-        pr_url=str(
-            configurable.get("pr_url") or f"https://github.com/{owner}/{repo}/pull/{pr_number}"
-        ),
-        branch_name=str(configurable.get("branch_name") or ""),
-        head_sha=str(configurable.get("head_sha") or ""),
-        base_sha=str(configurable.get("base_sha") or ""),
+        pr_url=cfg.pr_url or f"https://github.com/{owner}/{repo}/pull/{pr_number}",
+        branch_name=cfg.branch_name or "",
+        head_sha=cfg.head_sha or "",
+        base_sha=cfg.base_sha or "",
     )
 
 
@@ -470,16 +460,15 @@ async def _trace_url(thread_id: str, project: str) -> str | None:
     resolved = await get_langsmith_trace_url(thread_id, project_name=project)
     if resolved:
         return resolved
-    tenant_id = os.environ.get("LANGSMITH_TENANT_ID_PROD")
+    tenant_id = await resolve_tenant_id()
     if tenant_id and _looks_uuid(project):
-        host_url = os.environ.get("LANGSMITH_URL_PROD", "https://smith.langchain.com")
-        return f"{host_url}/o/{tenant_id}/projects/p/{project}/t/{thread_id}"
+        return f"{langsmith_host_url()}/o/{tenant_id}/projects/p/{project}/t/{thread_id}"
     return None
 
 
 def _looks_uuid(value: str) -> bool:
     try:
         uuid.UUID(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return True

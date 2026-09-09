@@ -2,8 +2,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
 
-from langgraph.config import get_config
-
+from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
@@ -97,16 +96,14 @@ async def manage_code_channel(
     Files must be inside the active sandbox work directory, valid UTF-8, and at
     most 1 MB. Never publish secrets or credentials in a view.
     """
-    config = get_config()
-    configurable = config.get("configurable", {})
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
+    cfg = RunConfig.from_runtime()
+    thread_id = cfg.thread_id
+    if not thread_id:
         return {"success": False, "error": "Missing thread_id in config"}
 
     client = langgraph_client()
-    configured_slack = configurable.get("slack_thread")
     active = await get_active_slack_thread(
-        client, thread_id, configured_slack if isinstance(configured_slack, dict) else None
+        client, thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
     )
     if not active:
         return {"success": False, "error": "Current Slack location is unavailable"}
@@ -116,13 +113,12 @@ async def manage_code_channel(
     if action == "create":
         if is_code_channel_session(thread_ts):
             return {"success": False, "error": "This session is already a code channel"}
-        repo = configurable.get("repo")
         return await _create(
             client,
             thread_id,
             active,
             await _code_channel_title(client, thread_id, title),
-            repo if isinstance(repo, dict) else None,
+            cfg.repo.model_dump() if cfg.repo else None,
             team_id=team_id,
             is_private=is_private,
         )

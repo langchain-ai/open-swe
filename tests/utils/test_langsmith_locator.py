@@ -27,7 +27,7 @@ from agent.utils.langsmith import LangSmithLocator, parse_langsmith_locator
 def test_parse_langsmith_locator_accepts_trace_urls(
     locator: str, expected: LangSmithLocator, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("LANGSMITH_URL_PROD", "https://smith.example")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api")
     assert parse_langsmith_locator(locator) == expected
 
 
@@ -52,7 +52,7 @@ async def test_get_open_swe_thread_id_from_langsmith_resolves_run_uuid(
     client = SimpleNamespace(
         read_run=AsyncMock(return_value=SimpleNamespace(metadata={"thread_id": "thread-1"}))
     )
-    monkeypatch.setattr(langsmith, "_build_prod_langsmith_client", lambda: client)
+    monkeypatch.setattr(langsmith, "_build_langsmith_client", lambda: client)
 
     result = await langsmith.get_open_swe_thread_id_from_langsmith(
         "11111111-1111-4111-8111-111111111111"
@@ -73,7 +73,7 @@ async def test_get_open_swe_thread_id_from_langsmith_reads_extra_metadata(
             )
         )
     )
-    monkeypatch.setattr(langsmith, "_build_prod_langsmith_client", lambda: client)
+    monkeypatch.setattr(langsmith, "_build_langsmith_client", lambda: client)
 
     result = await langsmith.get_open_swe_thread_id_from_langsmith(
         "https://smith.langchain.com/o/org/projects/p/project/r/run-1"

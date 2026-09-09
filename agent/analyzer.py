@@ -8,16 +8,17 @@ Uses the same sandbox + ``gh`` pattern as the reviewer agent. The dashboard
 user's OAuth token is injected into the LangSmith GitHub proxy so ``gh`` works
 on public repos even when the GitHub App is not installed on them.
 """
-# ruff: noqa: E402
 
+# ruff: noqa: E402
 import logging
-import os
 import warnings
 from typing import Any, cast
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+
+from agent.config import ENV
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -41,10 +42,12 @@ from agent.middleware import (
     ToolErrorMiddleware,
 )
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
+from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL_ID,
     DEFAULT_RECURSION_LIMIT,
+    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
@@ -58,7 +61,6 @@ from agent.utils import ttl_cache
 from agent.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from agent.utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +95,7 @@ async def _configure_sandbox_github_proxy(
     sandbox_backend: SandboxBackendProtocol,
     github_token: str,
 ) -> None:
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         return
     backend = unwrap_sandbox_backend(sandbox_backend)
     await _configure_github_proxy(backend.id, github_token)
@@ -121,28 +123,24 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         self._config = config
 
     def _prepare_config_fingerprint(self) -> object:
-        configurable = self._config.get("configurable", {})
+        cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": configurable.get("prepare_run_id")
-            if isinstance(configurable, dict)
-            else None,
+            "prepare_run_id": cfg.prepare_run_id,
             "thread_id": self._thread_id,
-            "full_name": configurable.get("review_style_full_name")
-            if isinstance(configurable, dict)
-            else None,
-            "mode": configurable.get("analyzer_mode") if isinstance(configurable, dict) else None,
+            "full_name": cfg.review_style_full_name,
+            "mode": cfg.analyzer_mode,
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
         work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-        configurable = self._config.get("configurable") or {}
-        full_name = str(configurable.get("review_style_full_name") or "owner/repo")
+        cfg = RunConfig.from_config(self._config)
+        full_name = cfg.review_style_full_name or "owner/repo"
         owner, _, name = full_name.partition("/")
-        samples_text = str(configurable.get("review_style_samples_text") or "")
-        mode = str(configurable.get("analyzer_mode") or "bootstrap")
-        github_token = configurable.get("review_style_github_token")
-        if not (isinstance(github_token, str) and github_token):
+        samples_text = cfg.review_style_samples_text or ""
+        mode = cfg.analyzer_mode or "bootstrap"
+        github_token = cfg.review_style_github_token
+        if not github_token:
             github_token = await get_github_app_installation_token()
         if isinstance(github_token, str) and github_token:
             await _configure_sandbox_github_proxy(sandbox_backend, github_token)
@@ -162,12 +160,11 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
 
 
 async def get_analyzer(config: RunnableConfig) -> Pregel:
-    configurable = config.get("configurable") or {}
-    thread_id = configurable.get("thread_id")
+    thread_id = RunConfig.from_config(config).thread_id
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
     async def reconnect_backend(_thread_id: str = thread_id):
         return await ensure_sandbox_for_thread(_thread_id)
@@ -204,7 +201,8 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                 SanitizeOpenAIResponsesMiddleware(),
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
-traced_analyzer = traced_graph_factory(get_analyzer, REVIEW_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_analyzer = get_analyzer

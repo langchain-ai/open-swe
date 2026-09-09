@@ -4,12 +4,12 @@ import asyncio
 import hashlib
 import hmac
 import logging
-import os
 import re
 from typing import Any
 
-import httpx
+import httpx2
 
+from agent.config import ENV
 from agent.github.thread_token import GitHubAuthError
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
@@ -38,9 +38,7 @@ _DEFAULT_OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
 
 def _load_open_swe_tags() -> tuple[str, ...]:
     configured = tuple(
-        tag.strip().lower()
-        for tag in os.environ.get("OPEN_SWE_MENTION_TAGS", "").split(",")
-        if tag.strip()
+        tag.strip().lower() for tag in ENV.OPEN_SWE_MENTION_TAGS.get().split(",") if tag.strip()
     )
     return configured or _DEFAULT_OPEN_SWE_TAGS
 
@@ -164,7 +162,7 @@ async def react_to_github_comment(
         owner=owner, repo=repo, comment_id=comment_id, pull_number=pull_number
     )
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 url,
@@ -199,7 +197,7 @@ async def _react_via_graphql(node_id: str | None, *, token: str) -> bool:
     }
     }
     """
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 "https://api.github.com/graphql",
@@ -233,7 +231,7 @@ async def post_github_comment(
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
     url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments"
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.post(
                 url,
@@ -245,7 +243,7 @@ async def post_github_comment(
             )
             response.raise_for_status()
             return True
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception("Failed to post comment to GitHub issue/PR #%s", issue_number)
             return False
 
@@ -262,7 +260,7 @@ async def fetch_github_thread_participants(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     try:
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
             issue_response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}",
                 headers=headers,
@@ -323,7 +321,7 @@ async def fetch_issue_comments(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         comments = await _fetch_paginated(
             http_client,
             f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
@@ -372,7 +370,7 @@ async def fetch_pr_comments_since_last_tag(
 
     all_comments: list[dict[str, Any]] = []
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         pr_comments, review_comments, reviews = await asyncio.gather(
             _fetch_paginated(
                 http_client,
@@ -470,7 +468,7 @@ async def fetch_pr_branch(
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
                 headers=headers,
@@ -548,7 +546,7 @@ def build_pr_prompt(
 
 
 async def _fetch_paginated(
-    client: httpx.AsyncClient, url: str, headers: dict[str, str]
+    client: httpx2.AsyncClient, url: str, headers: dict[str, str]
 ) -> list[dict[str, Any]]:
     """Fetch all pages from a GitHub paginated endpoint.
 
@@ -556,7 +554,7 @@ async def _fetch_paginated(
     pathological PRs with thousands of comments.
 
     Args:
-        client: An active httpx async client.
+        client: An active httpx2 async client.
         url: The GitHub API endpoint URL.
         headers: Auth + accept headers.
 

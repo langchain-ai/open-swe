@@ -53,9 +53,7 @@ async def test_write_sandbox_output_uses_current_thread_backend(monkeypatch) -> 
         return "/workspace"
 
     monkeypatch.setattr(
-        sandbox_output,
-        "get_config",
-        lambda: {"configurable": {"thread_id": "thread-123"}},
+        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-123"}}
     )
     monkeypatch.setattr(sandbox_output, "get_sandbox_backend", fake_get_backend)
     monkeypatch.setattr(sandbox_output, "resolve_sandbox_work_dir", fake_resolve_work_dir)

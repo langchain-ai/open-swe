@@ -9,28 +9,25 @@ from agent.baby_sit import record_retry, start_watch, stop_watch, watch_key
 from agent.github.app import get_github_app_installation_id_for_repo
 from agent.github.ci import fetch_pr
 from agent.github.token import resolve_github_token
+from agent.run_config import RunConfig
 from agent.slack.client import parse_github_pr_url
 from agent.source_context import SourceContext
 
 
-def _configurable() -> tuple[dict[str, Any], Mapping[str, Any]]:
+def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
     config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, Mapping) else {}
-    return dict(configurable) if isinstance(configurable, Mapping) else {}, config
+    return RunConfig.from_config(config), config if isinstance(config, Mapping) else {}
 
 
-def _matches_configured_repo(configurable: dict[str, Any], owner: str, repo: str) -> bool:
-    configured = configurable.get("repo")
-    if not isinstance(configured, Mapping):
+def _matches_configured_repo(cfg: RunConfig, owner: str, repo: str) -> bool:
+    if cfg.repo is None:
         return True
-    configured_owner = configured.get("owner")
-    configured_repo = configured.get("name")
-    if not isinstance(configured_owner, str) or not isinstance(configured_repo, str):
+    if not cfg.repo.owner or not cfg.repo.name:
         return False
-    return configured_owner.lower() == owner.lower() and configured_repo.lower() == repo.lower()
+    return cfg.repo.owner.lower() == owner.lower() and cfg.repo.name.lower() == repo.lower()
 
 
-def _run_config(configurable: dict[str, Any], thread_id: str) -> dict[str, Any]:
+def _run_config(cfg: RunConfig, thread_id: str) -> dict[str, Any]:
     allowed = (
         "source",
         "slack_thread",
@@ -43,18 +40,21 @@ def _run_config(configurable: dict[str, Any], thread_id: str) -> dict[str, Any]:
         "agent_model_id",
         "agent_effort",
     )
-    result = {key: configurable[key] for key in allowed if configurable.get(key) is not None}
+    dumped = cfg.dump()
+    result = {key: dumped[key] for key in allowed if dumped.get(key) is not None}
     result["thread_id"] = thread_id
     return result
 
 
-def _source_context(configurable: dict[str, Any]) -> SourceContext:
-    raw = {
-        key: dict(value)
-        for key in ("slack_thread", "linear_issue", "github_issue")
-        if isinstance(value := configurable.get(key), Mapping)
-    }
-    return SourceContext.parse(raw)
+def _source_context(cfg: RunConfig) -> SourceContext:
+    dumped = cfg.dump()
+    return SourceContext.parse(
+        {
+            key: dumped[key]
+            for key in ("slack_thread", "linear_issue", "github_issue")
+            if isinstance(dumped.get(key), Mapping)
+        }
+    )
 
 
 async def manage_baby_sit(
@@ -70,11 +70,11 @@ async def manage_baby_sit(
     if pr_ref is None:
         return {"success": False, "error": "pr_url must be a canonical GitHub pull request URL"}
 
-    configurable, config = _configurable()
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
+    cfg, config = _configurable()
+    thread_id = cfg.thread_id
+    if not thread_id:
         return {"success": False, "error": "No executable agent thread is available"}
-    if not _matches_configured_repo(configurable, pr_ref.owner, pr_ref.repo):
+    if not _matches_configured_repo(cfg, pr_ref.owner, pr_ref.repo):
         return {"success": False, "error": "Pull request does not match this thread's repository"}
 
     key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
@@ -137,8 +137,8 @@ async def manage_baby_sit(
             head_ref=pr_head_ref,
             installation_id=installation_id,
             thread_id=thread_id,
-            run_config=_run_config(configurable, thread_id),
-            source_context=_source_context(configurable),
+            run_config=_run_config(cfg, thread_id),
+            source_context=_source_context(cfg),
         )
     except Exception as exc:
         return {"success": False, "error": f"Could not start baby-sit watch: {exc}"}

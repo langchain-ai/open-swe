@@ -1,14 +1,14 @@
 """Helpers for LangGraph SDK / store JSON values that type as ``dict | None``."""
 
 from collections.abc import Mapping
-from typing import Any, TypeAlias, cast
+from typing import Any, cast
 
 from langgraph_sdk.schema import Run, Thread, ThreadState
 
-JsonObject: TypeAlias = dict[str, Any]
-ThreadLike: TypeAlias = Thread | Mapping[str, Any]
-RunLike: TypeAlias = Run | Mapping[str, Any]
-ThreadStateLike: TypeAlias = ThreadState | Mapping[str, Any]
+type JsonObject = dict[str, Any]
+type ThreadLike = Thread | Mapping[str, Any]
+type RunLike = Run | Mapping[str, Any]
+type ThreadStateLike = ThreadState | Mapping[str, Any]
 
 
 def as_json_object(value: Any) -> JsonObject:

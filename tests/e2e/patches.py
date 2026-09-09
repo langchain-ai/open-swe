@@ -112,7 +112,7 @@ class _FakeSnapshot:
 class _FakeSandboxClient:
     """Stands in for ``AsyncSandboxClient`` for snapshot calls only."""
 
-    async def __aenter__(self) -> "_FakeSandboxClient":
+    async def __aenter__(self) -> _FakeSandboxClient:
         return self
 
     async def __aexit__(self, *_exc: object) -> bool:

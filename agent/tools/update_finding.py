@@ -2,8 +2,6 @@
 
 from typing import Any
 
-from langgraph.config import get_config
-
 from agent.review.findings import (
     DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
@@ -19,6 +17,7 @@ from agent.review.findings import (
     thread_missing_tool_result,
     update_finding_fields,
 )
+from agent.run_config import RunConfig
 from agent.utils.reviewer_outcomes import emit_finding_status_outcome
 
 
@@ -111,8 +110,7 @@ async def update_finding(
         if status in {"resolved", "dismissed"}:
             updates["resolution_note"] = normalized_note
 
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    cfg = RunConfig.from_runtime()
 
     if not updates:
         if suggestion_dropped:
@@ -138,14 +136,7 @@ async def update_finding(
         return {"success": False, "error": f"No finding found with id {finding_id}"}
 
     delegated_resolution = False
-    repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
-    pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
-    can_resolve_github_thread = (
-        isinstance(repo_config, dict)
-        and bool(repo_config.get("owner"))
-        and bool(repo_config.get("name"))
-        and isinstance(pr_number, int)
-    )
+    can_resolve_github_thread = bool(cfg.repo) and cfg.pr_number is not None
     if (
         status in {"resolved", "dismissed"}
         and can_resolve_github_thread
@@ -183,7 +174,7 @@ async def update_finding(
 
     if status is not None and not delegated_resolution:
         try:
-            head_sha = await resolve_review_head_sha(thread_id, configurable)
+            head_sha = await resolve_review_head_sha(thread_id, cfg)
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
         if head_sha:
@@ -196,9 +187,7 @@ async def update_finding(
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
     if status in {"resolved", "dismissed"} and not delegated_resolution:
-        await emit_finding_status_outcome(
-            updated, status, configurable=configurable, thread_id=thread_id
-        )
+        await emit_finding_status_outcome(updated, status, cfg=cfg, thread_id=thread_id)
     result = {"success": True, "finding": updated}
     if suggestion_dropped:
         result["suggestion_dropped"] = True
