@@ -34,7 +34,6 @@ TEAM_SETTINGS_KEY = "default"
 # Cap the org-wide guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
-REVIEW_TRACING_PROJECT_MAX_CHARS = 256
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
@@ -65,7 +64,6 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     gateway_enabled: bool | None = None
     transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
     fable_enabled: bool = False
-    review_tracing_project: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -96,23 +94,6 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
         if len(text) > ORG_GUIDELINES_MAX_CHARS:
             raise ValueError(
                 f"org_guidelines must be at most {ORG_GUIDELINES_MAX_CHARS} characters"
-            )
-        return text
-
-    @field_validator("review_tracing_project", mode="before")
-    @classmethod
-    def _normalize_review_tracing_project(cls, v: object) -> str | None:
-        if v is None:
-            return None
-        if not isinstance(v, str):
-            raise ValueError("review_tracing_project must be a string")
-        text = v.strip()
-        if not text:
-            return None
-        if len(text) > REVIEW_TRACING_PROJECT_MAX_CHARS:
-            raise ValueError(
-                "review_tracing_project must be at most "
-                f"{REVIEW_TRACING_PROJECT_MAX_CHARS} characters"
             )
         return text
 
@@ -285,7 +266,6 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
         "fable_enabled": False,
-        "review_tracing_project": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -334,6 +314,7 @@ async def get_team_settings() -> dict[str, Any]:
         "autofix_severity_threshold",
         "autofix_enabled",
         "review_author_context_enabled",
+        "review_tracing_project",
     ):
         merged.pop(stale_field, None)
     return normalize_team_settings_for_response(merged)
@@ -347,7 +328,6 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "gateway_enabled": update.gateway_enabled,
         "transcription_model": update.transcription_model,
         "fable_enabled": update.fable_enabled,
-        "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
@@ -546,15 +526,6 @@ async def get_team_fable_enabled() -> bool:
 async def get_effective_gateway_enabled() -> bool:
     """Resolve whether LLM Gateway routing is on: team setting, else env default."""
     return resolve_gateway_enabled(await get_team_gateway_enabled())
-
-
-async def get_team_review_tracing_project() -> str | None:
-    """Return the LangSmith tracing project used for PR trace resolution."""
-    settings = await get_team_settings()
-    value = settings.get("review_tracing_project")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
 
 
 async def get_org_review_guidelines() -> str | None:

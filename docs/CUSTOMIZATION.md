@@ -67,7 +67,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and environment snapshot captures — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and environment snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 
@@ -280,11 +280,11 @@ issue tools have been removed. Reconnect Datadog using the MCP configuration abo
 legacy saved Datadog credentials are not migrated automatically. Use the JSON
 import or connection form to add LangSmith and Linear MCP servers as needed.
 
-LangSmith credentials under **PR Trace Resolution** still support reviewer trace
-lookup. Personal LangSmith credentials let code inside a sandbox call LangSmith
-through the credential proxy. Sandbox provisioning uses the deployment
-`SANDBOX_LANGSMITH_API_KEY`, falling back to `LANGSMITH_API_KEY`. Linear webhook
-intake and the reply tool remain available through the existing Linear app setup.
+Optional reviewer trace resolution and personal LangSmith credential proxying
+have been removed. Configure agent access to LangSmith through Workspace MCPs.
+Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and
+`LANGSMITH_ENDPOINT`. Linear webhook intake and replies continue to use the
+existing Linear app setup.
 
 Use the endpoint for your Datadog site (this example uses US5). Replace the key
 placeholders directly in the dashboard. Import supports multiple named servers,

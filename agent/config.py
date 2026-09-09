@@ -172,8 +172,6 @@ ENV.var(
     "LangGraph Platform control-plane API, used by the legacy LangSmith-brokered GitHub auth.",
     default="https://api.host.langchain.com",
 )
-ENV.var("SANDBOX_LANGSMITH_API_KEY", "LangSmith key for a separate sandbox workspace.", secret=True)
-ENV.var("SANDBOX_LANGSMITH_ENDPOINT", "LangSmith endpoint for a separate sandbox workspace.")
 ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
     "LangSmith key with gateway:invoke for the LLM Gateway.",

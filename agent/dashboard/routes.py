@@ -102,7 +102,6 @@ from agent.dashboard.repo_cache import (
 )
 from agent.dashboard.review_api import (
     create_review_comment,
-    dry_run_trace_resolution,
     get_review,
     get_review_diff,
     list_review_comments,
@@ -147,12 +146,6 @@ from agent.dashboard.skills import (
     list_skills,
     update_organization_skill,
     update_skill,
-)
-from agent.dashboard.team_credentials import (
-    LangSmithCredentialsUpdate,
-    connect_langsmith,
-    disconnect_langsmith,
-    get_team_credentials_status,
 )
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
@@ -204,22 +197,12 @@ from agent.dashboard.threads.runs import (
 )
 from agent.dashboard.user_credentials import (
     CurrentsCredentialsUpdate,
-    UserLangSmithCredentialsUpdate,
     connect_currents,
     connect_notion,
     disconnect_currents,
     disconnect_notion,
     get_currents_status,
     get_notion_status,
-)
-from agent.dashboard.user_credentials import (
-    connect_langsmith as connect_user_langsmith,
-)
-from agent.dashboard.user_credentials import (
-    disconnect_langsmith as disconnect_user_langsmith,
-)
-from agent.dashboard.user_credentials import (
-    get_langsmith_status as get_user_langsmith_status,
 )
 from agent.dashboard.user_instructions import (
     UserInstructionsUpdate,
@@ -701,31 +684,6 @@ async def disconnect_my_currents(
     return status.get("currents", {"connected": False})
 
 
-@router.get("/my-credentials/langsmith")
-async def get_my_langsmith_status(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await get_user_langsmith_status(session["sub"])
-    return status.get("langsmith", {"connected": False})
-
-
-@router.put("/my-credentials/langsmith")
-async def connect_my_langsmith(
-    update: UserLangSmithCredentialsUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await connect_user_langsmith(session["sub"], update)
-    return status.get("langsmith", {"connected": False})
-
-
-@router.delete("/my-credentials/langsmith")
-async def disconnect_my_langsmith(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await disconnect_user_langsmith(session["sub"])
-    return status.get("langsmith", {"connected": False})
-
-
 @router.get("/my-credentials/notion")
 async def get_my_notion_status(
     session: dict[str, Any] = _SESSION_DEP,
@@ -985,13 +943,6 @@ async def api_put_team_settings(
     return await upsert_team_settings(update)
 
 
-@router.get("/team-credentials")
-async def api_get_team_credentials(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await get_team_credentials_status()
-
-
 workspace_mcp_router = APIRouter(route_class=WorkspaceMCPRoute)
 
 
@@ -1045,21 +996,6 @@ async def api_discover_workspace_mcp(
 
 
 router.include_router(workspace_mcp_router)
-
-
-@router.put("/team-credentials/langsmith")
-async def api_connect_langsmith(
-    update: LangSmithCredentialsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await connect_langsmith(update)
-
-
-@router.delete("/team-credentials/langsmith")
-async def api_disconnect_langsmith(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await disconnect_langsmith()
 
 
 class EnabledReviewRepoUpdate(BaseModel):
@@ -1475,17 +1411,6 @@ async def api_re_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await trigger_re_review(owner, repo, pr_number, session["sub"])
-
-
-@router.post("/reviews/{owner}/{repo}/{pr_number}/resolve-trace")
-async def api_resolve_trace(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await dry_run_trace_resolution(owner, repo, pr_number)
 
 
 class ReviewCommentCreate(BaseModel):

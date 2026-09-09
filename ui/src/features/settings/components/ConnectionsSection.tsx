@@ -236,16 +236,6 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
       <SlackRow user={user} />
       <NotionRow setError={setError} />
       <ApiKeyRow
-        queryKey="myLangSmith"
-        label="LangSmith"
-        description="Let code in your sandbox access LangSmith through the credential proxy. Encrypted at rest and scoped to your account."
-        placeholder="LangSmith API key"
-        load={api.getMyLangSmithStatus}
-        connect={(apiKey) => api.connectMyLangSmith({ api_key: apiKey })}
-        disconnect={api.disconnectMyLangSmith}
-        setError={setError}
-      />
-      <ApiKeyRow
         queryKey="myCurrents"
         label="Currents.dev"
         description="Add your API key (Currents → Organization → API & Record Keys) to let runs inspect e2e test results. Encrypted at rest and scoped to your account."
