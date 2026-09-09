@@ -257,6 +257,8 @@ async def _collect_thread_candidates(
     repo: str | None = None,
     ownerless: bool = False,
     admin_threads: bool | None = None,
+    viewer_login: str | None = None,
+    include_private: bool = True,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
@@ -284,6 +286,10 @@ async def _collect_thread_candidates(
                 break
             for thread in batch:
                 metadata = _thread_metadata(thread)
+                if metadata.get("visibility", "public") != "public" and (
+                    not include_private or not thread_is_readable(metadata, viewer_login)
+                ):
+                    continue
                 if surfaced_only and thread_source(metadata) not in _SURFACED_SOURCES:
                     continue
                 if not _metadata_matches_filters(
@@ -337,7 +343,9 @@ async def _pinned_thread_summaries(
         except Exception:  # noqa: BLE001
             logger.debug("Could not fetch pinned sidebar thread %s", thread_id, exc_info=True)
             return None
-        if not isinstance(thread, Mapping) or not thread_is_readable(_thread_metadata(thread)):
+        if not isinstance(thread, Mapping) or not thread_is_readable(
+            _thread_metadata(thread), login
+        ):
             return None
         return await _summarize_thread(client, thread)
 
@@ -366,6 +374,7 @@ async def list_dashboard_thread_projects(
     candidates = await _collect_thread_candidates(
         langgraph_client(),
         _participant_search_filters(login, email=email, include_all=include_all),
+        viewer_login=login,
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
     )
@@ -394,7 +403,7 @@ async def pin_dashboard_thread(thread_id: str, login: str) -> None:
         raise HTTPException(404, "thread not found") from exc
     if not isinstance(thread, Mapping):
         raise HTTPException(404, "thread not found")
-    _assert_thread_readable(_thread_metadata(thread))
+    _assert_thread_readable(_thread_metadata(thread), login)
     await pin_thread(login, thread_id)
 
 
@@ -419,6 +428,7 @@ async def list_dashboard_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     filter_participant_login: str | None = None,
+    include_private: bool = True,
     surfaced_only: bool = False,
     admin_threads: bool | None = None,
     sort_by: _ThreadSortBy = "updated_at",
@@ -447,6 +457,8 @@ async def list_dashboard_threads_page(
         repo=repo,
         ownerless=ownerless,
         admin_threads=admin_threads,
+        viewer_login=login,
+        include_private=include_private,
         target_per_search=target,
         surfaced_only=surfaced_only,
         sort_by=sort_by,

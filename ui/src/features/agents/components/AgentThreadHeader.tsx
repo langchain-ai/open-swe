@@ -12,6 +12,7 @@ import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { ThreadVisibility } from "@/features/agents/components/ThreadVisibility"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import type { AgentThread } from "@/features/agents/lib/types"
@@ -253,6 +254,7 @@ export function AgentThreadHeader({
                 {title}
               </span>
             )}
+            {thread && !localThread && <ThreadVisibility thread={thread} />}
             {(thread || localThread) && (
               <Menu.Root>
                 <Menu.Trigger

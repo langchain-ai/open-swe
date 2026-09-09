@@ -2860,14 +2860,14 @@ async def test_admin_cancel_dashboard_thread_does_not_update_on_cancel_failure(m
     assert updated is False
 
 
-async def test_admin_cancel_thread_route_delegates_without_owner_identity(monkeypatch) -> None:
+async def test_admin_cancel_thread_route_preserves_actor_identity(monkeypatch) -> None:
     cancel = AsyncMock(return_value={"id": "thread-1", "status": "interrupted"})
     monkeypatch.setattr(routes, "admin_cancel_dashboard_thread", cancel)
 
     result = await routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
 
     assert result == {"id": "thread-1", "status": "interrupted"}
-    cancel.assert_awaited_once_with("thread-1")
+    cancel.assert_awaited_once_with("thread-1", "admin")
 
 
 def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:

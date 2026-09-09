@@ -81,26 +81,32 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
     return None
 
 
-def thread_is_readable(metadata: Mapping[str, Any]) -> bool:
-    """Any surfaced-source thread is readable by authenticated users.
+def thread_is_owner(metadata: Mapping[str, Any], login: str | None) -> bool:
+    owner = metadata.get("owner_login")
+    return bool(
+        isinstance(owner, str)
+        and owner.strip()
+        and login
+        and owner.strip().lower() == login.strip().lower()
+    )
 
-    Dashboard login is already gated by ``ALLOWED_GITHUB_ORGS`` (see
-    ``oauth.enforce_org_login_gate``), so any logged-in user is a trusted
-    org member. This lets teammates open "Open in Web" links shared in Slack
-    threads with read-only access.
-    """
-    return thread_source(metadata) in _SURFACED_SOURCES
+
+def thread_is_readable(metadata: Mapping[str, Any], login: str | None = None) -> bool:
+    """Private threads require their immutable owner, without an admin bypass."""
+    return thread_source(metadata) in _SURFACED_SOURCES and (
+        metadata.get("visibility", "public") == "public" or thread_is_owner(metadata, login)
+    )
 
 
-def _assert_thread_readable(metadata: Mapping[str, Any]) -> None:
-    if not thread_is_readable(metadata):
+def _assert_thread_readable(metadata: Mapping[str, Any], login: str | None = None) -> None:
+    if not thread_is_readable(metadata, login):
         raise HTTPException(404, "thread not found")
 
 
 def _assert_thread_postable(
     metadata: Mapping[str, Any], login: str, email: str | None = None
 ) -> None:
-    _assert_thread_readable(metadata)
+    _assert_thread_readable(metadata, login)
     if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
         email, login=login
     ):
@@ -347,6 +353,8 @@ async def _thread_summary(
         "effort": effort,
         "planMode": metadata.get("plan_mode") is True,
         "adminThread": metadata.get("admin_thread") is True,
+        "visibility": metadata.get("visibility", "public"),
+        "ownerLogin": metadata.get("owner_login"),
         "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": thread_source(metadata),

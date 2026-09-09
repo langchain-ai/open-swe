@@ -4,7 +4,7 @@ import logging
 import posixpath
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 
@@ -33,6 +33,7 @@ from agent.dashboard.threads.summary import (
     _thread_is_busy,
     _thread_run_id,
     _thread_summary,
+    thread_is_owner,
 )
 from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
@@ -85,7 +86,7 @@ async def get_dashboard_terminal_sandbox(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
+    _assert_thread_readable(metadata, login)
     sandbox_id = metadata.get("sandbox_id")
     if (
         not isinstance(sandbox_id, str)
@@ -171,7 +172,7 @@ async def get_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
+    _assert_thread_readable(metadata, login)
 
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
     # `GET …/state` → `stream.messages`), so the detail endpoint returns
@@ -370,12 +371,15 @@ async def cancel_dashboard_thread(
     return await _thread_summary(thread)
 
 
-async def admin_cancel_dashboard_thread(thread_id: str) -> dict[str, Any]:
+async def admin_cancel_dashboard_thread(thread_id: str, login: str | None = None) -> dict[str, Any]:
     client = langgraph_client()
     try:
-        await client.threads.get(thread_id)
+        thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
+
+    if thread_metadata(thread).get("visibility", "public") != "public":
+        _assert_thread_readable(thread_metadata(thread), login)
 
     try:
         await _cancel_active_thread_runs(client, thread_id)
@@ -412,11 +416,36 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
 
 
 async def rename_dashboard_thread(
-    thread_id: str, login: str, *, title: str, email: str | None = None
+    thread_id: str,
+    login: str,
+    *,
+    title: str | None = None,
+    visibility: Literal["public", "private"] | None = None,
+    email: str | None = None,
 ) -> dict[str, Any]:
     client = langgraph_client()
     thread = await _authorized_thread(thread_id, login, email=email)
-    metadata_update = {"title": title, "title_seed": None}
+    metadata = thread_metadata(thread)
+    metadata_update: dict[str, Any] = {}
+    if visibility is not None:
+        if not thread_is_owner(metadata, login):
+            raise HTTPException(403, "only the thread owner can change visibility")
+        if metadata.get("visibility", "public") != visibility:
+            if visibility == "public":
+                raise HTTPException(409, "private threads cannot be made public")
+            if _thread_is_busy(thread) or metadata.get("latest_run_status") in {
+                "pending",
+                "running",
+            }:
+                raise HTTPException(409, "stop the thread before making it private")
+            if any(
+                metadata.get(key)
+                for key in ("slack_thread", "linear_issue", "github_issue", "schedule_id")
+            ):
+                raise HTTPException(409, "externally linked threads cannot be made private")
+        metadata_update["visibility"] = visibility
+    if title is not None:
+        metadata_update.update(title=title, title_seed=None)
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:  # noqa: BLE001
@@ -538,7 +567,7 @@ async def get_dashboard_thread_state(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
+    _assert_thread_readable(metadata, login)
     thread, latest_run_status, _ = await _refresh_latest_run_metadata(
         client, thread, timings=record
     )

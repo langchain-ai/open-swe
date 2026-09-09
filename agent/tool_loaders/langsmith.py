@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
+from langgraph.config import get_config
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
 
@@ -20,10 +21,14 @@ from agent.dashboard.team_credentials import (
 from agent.dashboard.team_credentials import (
     get_langsmith_credentials as get_team_langsmith_credentials,
 )
+from agent.dashboard.threads.summary import thread_is_owner, thread_is_readable
 from agent.dashboard.user_credentials import (
     get_langsmith_credentials as get_user_langsmith_credentials,
 )
+from agent.utils.json_types import thread_metadata
+from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import resolve_participant
+from agent.utils.tracing import tracing_project
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +76,52 @@ async def _creds_for(on_behalf_of: str, *, allow_team: bool) -> LangSmithCredent
     return creds
 
 
+async def _authorized_thread_metadata(thread_id: str, login: str) -> dict[str, Any]:
+    metadata = thread_metadata(await langgraph_client().threads.get(thread_id))
+    if not thread_is_readable(metadata, login):
+        raise ValueError("Thread unavailable")
+    return metadata
+
+
+async def _run_is_readable(client: Any, run: Any, login: str) -> bool:
+    try:
+        trace_id = getattr(run, "trace_id", None)
+        root = run
+        if trace_id and str(trace_id) != str(run.id):
+            root = await client.read_run(str(trace_id))
+            if str(root.id) != str(trace_id) or getattr(root, "parent_run_id", None):
+                return False
+        elif getattr(run, "parent_run_id", None):
+            return False
+        for item in (root,) if root is run else (root, run):
+            metadata = (getattr(item, "extra", None) or {}).get("metadata", {})
+            thread_id = metadata.get("thread_id")
+            if thread_id is not None:
+                if not isinstance(thread_id, str) or not thread_id:
+                    return False
+                target = await _authorized_thread_metadata(thread_id, login)
+                if target.get("visibility") == "private":
+                    caller_id = get_config().get("configurable", {}).get("thread_id")
+                    if not isinstance(caller_id, str) or not caller_id:
+                        return False
+                    caller = await _authorized_thread_metadata(caller_id, login)
+                    if caller.get("visibility") != "private" or not thread_is_owner(caller, login):
+                        return False
+            elif item is root:
+                project_id = getattr(item, "session_id", None)
+                if not project_id:
+                    return False
+                project = await client.read_project(project_id=project_id)
+                if not project.name or project.name == tracing_project():
+                    return False
+        for child in getattr(run, "child_runs", None) or []:
+            if not await _run_is_readable(client, child, login):
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def _make_tools(*, allow_team: bool) -> list[BaseTool]:
     async def langsmith_get_trace(
         on_behalf_of: str, run_id: str, load_child_runs: bool = False
@@ -86,16 +137,19 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
             Dictionary with the run details, or an error message.
         """
         try:
-            creds = await _creds_for(on_behalf_of, allow_team=allow_team)
-            if load_child_runs:
-                # AsyncClient.read_run has no load_child_runs; the sync one runs off-loop.
-                run = await asyncio.to_thread(_read_run_with_children, creds, run_id)
-            else:
-                async with langsmith_client(creds) as client:
-                    run = await client.read_run(run_id)
-        except Exception as e:  # noqa: BLE001
+            login = await resolve_participant(on_behalf_of)
+            creds = await _creds_for(login, allow_team=allow_team)
+            async with langsmith_client(creds) as client:
+                run = await client.read_run(run_id)
+                if not await _run_is_readable(client, run, login):
+                    return {"success": False, "error": "Trace unavailable or access denied."}
+                if load_child_runs:
+                    run = await asyncio.to_thread(_read_run_with_children, creds, run_id)
+                    if not await _run_is_readable(client, run, login):
+                        return {"success": False, "error": "Trace unavailable or access denied."}
+        except Exception:  # noqa: BLE001
             logger.warning("langsmith_get_trace failed", exc_info=True)
-            return {"success": False, "error": f"{type(e).__name__}: {e}"}
+            return {"success": False, "error": "LangSmith request unavailable or access denied."}
         return {"success": True, "run": _serialize_run(run)}
 
     async def langsmith_list_runs(
@@ -118,7 +172,8 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
         capped = max(1, min(limit, _MAX_LIST_RUNS))
 
         try:
-            creds = await _creds_for(on_behalf_of, allow_team=allow_team)
+            login = await resolve_participant(on_behalf_of)
+            creds = await _creds_for(login, allow_team=allow_team)
             async with langsmith_client(creds) as client:
                 runs = [
                     run
@@ -127,10 +182,11 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
                         filter=filter,
                         limit=capped,
                     )
+                    if await _run_is_readable(client, run, login)
                 ]
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning("langsmith_list_runs failed", exc_info=True)
-            return {"success": False, "error": f"{type(e).__name__}: {e}"}
+            return {"success": False, "error": "LangSmith request unavailable or access denied."}
         return {"success": True, "runs": [_serialize_run(r) for r in runs]}
 
     return [

@@ -356,6 +356,8 @@ export interface AgentPullRequestContextResponse {
 }
 
 export interface AgentThread {
+  visibility?: "public" | "private"
+  ownerLogin?: string | null
   id: string
   title: string
   repo: string

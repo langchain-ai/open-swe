@@ -92,7 +92,7 @@ async def fetch_thread_metadata(thread_id: str) -> dict[str, Any]:
 @plan_router.get("/{thread_id}")
 async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata):
+    if not thread_is_readable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
     login = session["sub"]
     email = session.get("email")
@@ -129,7 +129,7 @@ async def update_plan(
 ) -> dict[str, Any]:
     """Save an edited HTML artifact while preserving review comments."""
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata):
+    if not thread_is_readable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
     content = await get_plan_content(thread_id) or {}
     _reject_shared_content(content)
@@ -171,7 +171,7 @@ async def get_plan_comments(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata):
+    if not thread_is_readable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
     return {"comments": await list_plan_comments(thread_id)}
 
@@ -181,7 +181,7 @@ async def post_plan_comment(
     thread_id: str, body: CommentBody, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata):
+    if not thread_is_readable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
     _reject_shared_content(await get_plan_content(thread_id) or {})
     text = body.body.strip()
@@ -202,7 +202,7 @@ async def remove_plan_comment(
     thread_id: str, comment_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata):
+    if not thread_is_readable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
     _reject_shared_content(await get_plan_content(thread_id) or {})
     comments = await list_plan_comments(thread_id)
@@ -219,7 +219,7 @@ async def remove_plan_comment(
 @plan_router.post("/{thread_id}/approve")
 async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata):
+    if not thread_is_readable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
     actor_id = str(session.get("sub") or "").strip()
     return await approve_plan_for_thread(
@@ -299,7 +299,7 @@ async def reject_plan(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata):
+    if not thread_is_readable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
     lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
     async with lock:

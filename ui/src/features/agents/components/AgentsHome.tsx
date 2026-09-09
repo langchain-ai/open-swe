@@ -83,6 +83,7 @@ export function AgentsHome({
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }
+  const [visibility, setVisibility] = useState<"public" | "private">("public")
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
   const cloudEnabled = Boolean(session.data)
@@ -424,6 +425,8 @@ export function AgentsHome({
       prompt,
       images,
       repo,
+      visibility,
+      ownerLogin: session.data?.login ?? null,
       repo_explicitly_none: repoOverride === null,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
@@ -436,6 +439,7 @@ export function AgentsHome({
       modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
+    if (visibility === "private") configurable.visibility = "private"
     if (planMode) configurable.plan_mode = true
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
@@ -504,6 +508,27 @@ export function AgentsHome({
           </div>
         )}
         <AgentComposerDock>
+          {runTarget === "cloud" && !submittedDraft && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <label htmlFor="thread-visibility">Visibility</label>
+              <select
+                id="thread-visibility"
+                value={visibility}
+                onChange={(event) =>
+                  setVisibility(event.target.value as "public" | "private")
+                }
+                className="rounded-md border border-border bg-background px-2 py-1 text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="public">Public</option>
+                <option value="private">Private · only you</option>
+              </select>
+              <span>
+                {visibility === "private"
+                  ? "Private threads cannot be made public."
+                  : "Visible to workspace members."}
+              </span>
+            </div>
+          )}
           {localError && (
             <div className="mb-3 w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {localError}

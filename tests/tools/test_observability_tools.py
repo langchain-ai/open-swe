@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Any, Literal, cast
 from unittest.mock import AsyncMock, call, patch
 
@@ -188,7 +189,8 @@ async def test_langsmith_get_trace_serializes() -> None:
         error = None
         start_time = "2024-01-01"
         end_time = "2024-01-02"
-        trace_id = "trace-1"
+        trace_id = "run-1"
+        session_id = "external-project"
         inputs = {"a": 1}
         outputs = {"b": 2}
 
@@ -203,6 +205,9 @@ async def test_langsmith_get_trace_serializes() -> None:
             assert run_id == "run-1"
             return _Run()
 
+        async def read_project(self, **kwargs):
+            return SimpleNamespace(name="external-project")
+
     tools = langsmith_tools._make_tools(allow_team=True)
     get_trace = next(t for t in tools if t.name == "langsmith_get_trace")
     with (
@@ -212,7 +217,108 @@ async def test_langsmith_get_trace_serializes() -> None:
         result = await get_trace.ainvoke({"on_behalf_of": "octo", "run_id": "run-1"})
     assert result["success"] is True
     assert result["run"]["name"] == "my-run"
-    assert result["run"]["trace_id"] == "trace-1"
+    assert result["run"]["trace_id"] == "run-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize(
+    ("target", "caller", "allowed"),
+    [
+        ({"visibility": "private", "owner_login": "alice"}, "public", False),
+        ({"visibility": "private", "owner_login": "alice"}, "private", True),
+        ({"visibility": "private", "owner_login": "bob"}, "private", False),
+        ({"visibility": "public"}, "public", True),
+        (None, "private", False),
+    ],
+)
+async def test_langsmith_trace_privacy(target, caller, allowed, nested) -> None:
+    root = SimpleNamespace(
+        id="root",
+        trace_id="root",
+        extra={"metadata": {"thread_id": "target"}},
+        inputs={"secret": "private content"},
+    )
+    run = SimpleNamespace(id="child", trace_id="root", inputs=root.inputs) if nested else root
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+
+    async def authorize(thread_id, login):
+        if thread_id == "caller":
+            return {"visibility": caller, "owner_login": "alice"}
+        if target is None or target.get("owner_login", login) != login:
+            raise ValueError("not found")
+        return target
+
+    async def list_runs(**kwargs):
+        yield run
+
+    client.list_runs = list_runs
+    client.read_run.side_effect = lambda run_id: root if run_id == "root" else run
+    tools = {t.name: t for t in langsmith_tools._make_tools(allow_team=True)}
+    with (
+        patch.object(langsmith_tools, "_creds_for", AsyncMock()),
+        patch.object(langsmith_tools, "langsmith_client", return_value=client),
+        patch.object(langsmith_tools, "_authorized_thread_metadata", side_effect=authorize),
+        patch.object(
+            langsmith_tools, "get_config", return_value={"configurable": {"thread_id": "caller"}}
+        ),
+        patch.object(langsmith_tools, "_read_run_with_children", return_value=run),
+    ):
+        for children in (False, True):
+            result = await tools["langsmith_get_trace"].ainvoke(
+                {"on_behalf_of": "alice", "run_id": run.id, "load_child_runs": children}
+            )
+            assert result["success"] is allowed
+            if not allowed:
+                assert "private content" not in str(result)
+        result = await tools["langsmith_list_runs"].ainvoke(
+            {"on_behalf_of": "alice", "project_name": "anything", "filter": "anything"}
+        )
+        assert len(result["runs"]) == int(allowed)
+
+
+@pytest.mark.asyncio
+async def test_langsmith_private_children_and_missing_caller_are_denied() -> None:
+    private = SimpleNamespace(
+        id="private", trace_id="private", extra={"metadata": {"thread_id": "private"}}
+    )
+    public = SimpleNamespace(
+        id="public",
+        trace_id="public",
+        extra={"metadata": {"thread_id": "public"}},
+        child_runs=[private],
+    )
+    threads = AsyncMock()
+    threads.threads.get.side_effect = lambda thread_id: {
+        "metadata": {"source": "dashboard", "visibility": thread_id, "owner_login": "alice"}
+    }
+    with (
+        patch.object(langsmith_tools, "langgraph_client", return_value=threads),
+        patch.object(langsmith_tools, "get_config", return_value={}),
+    ):
+        assert not await langsmith_tools._run_is_readable(AsyncMock(), private, "alice")
+        assert not await langsmith_tools._run_is_readable(AsyncMock(), private, "bob")
+        assert not await langsmith_tools._run_is_readable(AsyncMock(), public, "alice")
+        public.child_runs = []
+        assert await langsmith_tools._run_is_readable(AsyncMock(), public, "alice")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project", [None, "application", "external"])
+async def test_langsmith_unidentified_trace_fails_closed(project) -> None:
+    client = AsyncMock()
+    client.read_project.return_value = SimpleNamespace(name=project)
+    run = SimpleNamespace(id="root", trace_id="root", session_id="project")
+    with patch.object(langsmith_tools, "tracing_project", return_value="application"):
+        assert await langsmith_tools._run_is_readable(client, run, "alice") is (
+            project == "external"
+        )
+        client.read_project.side_effect = ValueError("unavailable")
+        assert not await langsmith_tools._run_is_readable(client, run, "alice")
+        client.read_run.side_effect = ValueError("root unavailable")
+        run.trace_id = "missing-root"
+        assert not await langsmith_tools._run_is_readable(client, run, "alice")
 
 
 @pytest.mark.asyncio
