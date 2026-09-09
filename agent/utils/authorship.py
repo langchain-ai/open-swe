@@ -21,10 +21,22 @@ PR_ATTRIBUTION_DEFAULT_URL = "https://openswe.vercel.app"
 PR_ATTRIBUTION_FOOTER = f"{PR_ATTRIBUTION_TEXT}({PR_ATTRIBUTION_DEFAULT_URL})"
 
 
-def build_pr_attribution_footer(thread_url: str | None = None) -> str:
-    """Build the Open SWE PR footer, linking the run's thread when available."""
+def build_pr_attribution_footer(
+    thread_url: str | None = None,
+    *,
+    model_id: str | None = None,
+    reasoning_effort: str | None = None,
+) -> str:
+    """Build the Open SWE PR footer with the run's model details."""
     url = thread_url.strip() if isinstance(thread_url, str) and thread_url.strip() else ""
-    return f"{PR_ATTRIBUTION_TEXT}({url or PR_ATTRIBUTION_DEFAULT_URL})"
+    footer = f"{PR_ATTRIBUTION_TEXT}({url or PR_ATTRIBUTION_DEFAULT_URL})"
+    model = _normalize_text(model_id).replace("`", "")
+    effort = _normalize_text(reasoning_effort).replace("`", "")
+    if model:
+        footer += f" · {model}"
+        if effort:
+            footer += f" ({effort})"
+    return footer
 
 
 @dataclass(frozen=True)

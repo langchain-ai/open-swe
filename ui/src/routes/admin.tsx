@@ -31,6 +31,7 @@ import {
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { slackAppManifestJson } from "@/lib/slack-manifest"
+import { WorkspaceMCPSection } from "@/features/settings/components/WorkspaceMCPSection"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -66,6 +67,7 @@ function AdminPage() {
       />
 
       <SlackIntegrationSection />
+      <WorkspaceMCPSection />
 
       <LLMGatewaySection />
 

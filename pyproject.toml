@@ -80,10 +80,22 @@ select = [
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
     "TID251",
+    "SLF",  # flake8-self: no cross-module access to _private names
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["SLF001"]
+# Pre-existing private-member access; clean up when these modules are next touched.
+"agent/github/routes.py" = ["SLF001"]
+"agent/github/webhook.py" = ["SLF001"]
+"agent/linear/routes.py" = ["SLF001"]
+"agent/linear/webhook.py" = ["SLF001"]
+"agent/reviewer.py" = ["SLF001"]
+"agent/sandboxes/providers/langsmith.py" = ["SLF001"]
+"agent/utils/langsmith.py" = ["SLF001"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Do not use postponed annotation evaluation."
