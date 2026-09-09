@@ -46,7 +46,6 @@ from agent.dashboard.environments import (
     list_environment_options,
     slugify,
 )
-from agent.dashboard.mcp_route import MCPRoute
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -241,12 +240,14 @@ from agent.dashboard.user_mappings import (
 )
 from agent.dashboard.user_mcps import (
     delete_user_mcp,
+    discover_user_mcp,
     get_user_mcp,
     list_user_mcps,
     save_user_mcp,
 )
 from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
+    MCPRoute,
     delete_workspace_mcp,
     get_workspace_mcp,
     list_workspace_mcps,
@@ -284,7 +285,6 @@ from agent.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
-from agent.tool_loaders.user_mcp import discover_user_mcp
 from agent.tool_loaders.workspace_mcp import discover_workspace_mcp
 from agent.utils.dashboard_links import (
     dashboard_api_base_url,

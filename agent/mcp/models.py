@@ -119,8 +119,6 @@ class MCPConnectionUpdate(BaseModel):
 
 
 class MCPToolDescription(BaseModel):
-    """A remote tool listed during discovery, before any allowlist is applied."""
-
     name: str
     description: str = ""
 

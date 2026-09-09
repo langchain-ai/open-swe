@@ -3,15 +3,19 @@
 from functools import partial
 from typing import Any
 
-from agent.mcp import MCPConnection, MCPConnectionUpdate, MCPSource, prepare_connection
+from agent.mcp import (
+    MCPConnection,
+    MCPConnectionUpdate,
+    MCPSource,
+    discover_tools,
+    prepare_connection,
+)
 from agent.store import TypedStore
 
 USER_MCPS_NAMESPACE = ["user_mcps"]
 
 
 def _store(login: str) -> TypedStore[MCPConnection]:
-    if not isinstance(login, str) or not login.strip():
-        raise ValueError("Personal MCP connections require a signed-in user")
     return TypedStore([*USER_MCPS_NAMESPACE, login], MCPConnection)
 
 
@@ -44,8 +48,22 @@ async def delete_user_mcp(login: str, name: str) -> None:
     await _store(login).delete(name)
 
 
+async def discover_user_mcp(
+    login: str, name: str, update: MCPConnectionUpdate | None = None
+) -> list[dict[str, str]]:
+    """List tool descriptions for the owner to choose; never execute any tools."""
+    record = (
+        await prepare_user_mcp(login, name, update)
+        if update is not None
+        else await get_user_mcp(login, name)
+    )
+    if record is None:
+        raise ValueError("Personal MCP connection does not exist")
+    definitions = await discover_tools(record, (*USER_MCPS_NAMESPACE, login))
+    return [{"name": tool.name, "description": tool.description or ""} for tool in definitions]
+
+
 def user_mcp_source(login: str) -> MCPSource:
-    _store(login)
     return MCPSource(
         namespace=(*USER_MCPS_NAMESPACE, login),
         list_connections=partial(list_user_mcp_records, login),

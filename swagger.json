@@ -883,7 +883,6 @@
         "type": "object"
       },
       "MCPToolDescription": {
-        "description": "A remote tool listed during discovery, before any allowlist is applied.",
         "properties": {
           "description": {
             "default": "",

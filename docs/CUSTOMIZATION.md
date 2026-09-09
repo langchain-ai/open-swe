@@ -375,23 +375,19 @@ Investigate graphs.
 ### Personal MCP servers
 
 Any signed-in user can connect remote MCP servers with their own credentials under
-**My settings → Personal MCPs**. The form, JSON import, OAuth client credentials,
-header handling, and tool discovery work exactly like workspace connections, and the
-same URL, header, and redirect restrictions apply. Records live in the LangGraph Store
-under `["user_mcps", <github login>]`, so one user's connections, saved headers, and
-client secrets are never visible to, reused by, or revealed to another user. The
-dashboard API is `/dashboard/api/my-mcps`, which requires only a signed-in session.
+**My settings → Personal MCPs**. The form, JSON import, OAuth, header handling, and
+tool discovery work exactly like workspace connections. Records live in the Store
+under `["user_mcps", <github login>]`, so one user's connections and credentials are
+never visible to, reused by, or revealed to another user. The dashboard API is
+`/dashboard/api/my-mcps` and requires only a signed-in session.
 
 Personal connections load for remote runs whose triggering user resolves to that
-GitHub login (from the dashboard session, a linked Slack account, or the `github_login`
-run setting), the same rule that already applies to personal Notion and Currents
-connections. They do not require `CONFIGURED_ADMINS` or
-`OBSERVABILITY_AUTHORIZED_EMAILS`, which continue to gate workspace connections. Both
-scopes share the **MCPs** tool group; a personal connection with the same name as a
-workspace connection replaces it entirely for that user's runs, including its
-credentials and allowed tools, and a disabled personal connection hides the workspace
-one rather than falling back to it. Desktop (local) runs do not load MCP connections
-yet.
+GitHub login, the same rule that applies to personal Notion and Currents connections;
+they do not require the admin or observability authorization that gates workspace
+connections. Both scopes share the **MCPs** tool group. A personal connection with the
+same name as a workspace connection replaces it entirely for that user's runs, and a
+disabled personal connection hides the workspace one rather than falling back to it.
+Desktop (local) runs do not load MCP connections yet.
 
 ### Adding a Python tool
 

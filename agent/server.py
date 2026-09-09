@@ -620,8 +620,6 @@ async def _mcp_tools_for(config: RunnableConfig, profile_login: str | None) -> l
         sources.append(workspace_mcp_source)
     if profile_login:
         sources.append(user_mcp_source(profile_login))
-    if not sources:
-        return []
     return await load_mcp_tools(*sources)
 
 

@@ -3,15 +3,15 @@ import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
 import { IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import type { MCPOAuthUpdate } from "@/lib/api"
+import type { WorkspaceMCPOAuthUpdate } from "@/lib/api"
 
-export function MCPOAuthFields({
+export function WorkspaceMCPOAuthFields({
   value,
   onChange,
   hasSavedSecret,
 }: {
-  value: MCPOAuthUpdate
-  onChange: (value: MCPOAuthUpdate) => void
+  value: WorkspaceMCPOAuthUpdate
+  onChange: (value: WorkspaceMCPOAuthUpdate) => void
   hasSavedSecret: boolean
 }) {
   const [revealed, setRevealed] = useState(false)
@@ -108,7 +108,7 @@ export function MCPOAuthFields({
             onChange({
               ...value,
               token_endpoint_auth_method: event.target
-                .value as MCPOAuthUpdate["token_endpoint_auth_method"],
+                .value as WorkspaceMCPOAuthUpdate["token_endpoint_auth_method"],
             })
           }
         >

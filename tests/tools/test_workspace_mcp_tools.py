@@ -245,9 +245,8 @@ async def test_workspace_tools_are_gated_while_personal_tools_follow_the_user(mo
     assert namespaces() == [("workspace_mcps",), ("user_mcps", "admin")]
     assert await server._mcp_tools_for(outsider, "outsider") == ["mcp_example_search"]
     assert namespaces() == [("user_mcps", "outsider")]
-    load.reset_mock()
-    assert await server._mcp_tools_for(outsider, None) == []
-    load.assert_not_awaited()
+    await server._mcp_tools_for(outsider, None)
+    assert namespaces() == []
 
 
 def test_connection_tool_pairs_cannot_collide():

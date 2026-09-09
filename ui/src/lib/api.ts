@@ -217,7 +217,7 @@ export interface TeamCredentialsStatus {
   langsmith: ProviderCredentialStatus
 }
 
-export interface MCPOAuth {
+export interface WorkspaceMCPOAuth {
   grant_type?: "client_credentials"
   token_url: string
   client_id: string
@@ -225,30 +225,30 @@ export interface MCPOAuth {
   token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic"
 }
 
-export type MCPOAuthUpdate = MCPOAuth & {
+export type WorkspaceMCPOAuthUpdate = WorkspaceMCPOAuth & {
   client_secret?: string | null
 }
 
-export interface MCPConnection {
+export interface WorkspaceMCP {
   name: string
   url: string
   transport: "streamable_http" | "sse"
   enabled: boolean
   allowed_tools: string[]
   header_names: string[]
-  oauth?: MCPOAuth | null
+  oauth?: WorkspaceMCPOAuth | null
   revision: string
   updated_at: string
 }
 
-export interface MCPConnectionUpdate {
+export interface WorkspaceMCPUpdate {
   name: string
   url: string
-  transport: MCPConnection["transport"]
+  transport: WorkspaceMCP["transport"]
   enabled: boolean
   allowed_tools: string[]
   headers?: Record<string, string> | null
-  oauth?: MCPOAuthUpdate | null
+  oauth?: WorkspaceMCPOAuthUpdate | null
 }
 
 export interface DatadogConnectBody {
@@ -805,14 +805,14 @@ export const api = {
       body: JSON.stringify({ transcription_model }),
     }),
   getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
-  getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
+  getWorkspaceMCPs: () => request<WorkspaceMCP[]>("/workspace-mcps"),
   revealWorkspaceMCPHeaders: (name: string) =>
     request<Record<string, string>>(
       `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
       { method: "POST", cache: "no-store" }
     ),
-  saveWorkspaceMCP: (body: MCPConnectionUpdate) =>
-    request<MCPConnection>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
+  saveWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
+    request<WorkspaceMCP>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -820,19 +820,19 @@ export const api = {
     request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
-  discoverWorkspaceMCP: (body: MCPConnectionUpdate) =>
+  discoverWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
     request<{ name: string; description: string }[]>(
       `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),
+  getMyMCPs: () => request<WorkspaceMCP[]>("/my-mcps"),
   revealMyMCPHeaders: (name: string) =>
     request<Record<string, string>>(
       `/my-mcps/${encodeURIComponent(name)}/headers/reveal`,
       { method: "POST", cache: "no-store" }
     ),
-  saveMyMCP: (body: MCPConnectionUpdate) =>
-    request<MCPConnection>(`/my-mcps/${encodeURIComponent(body.name)}`, {
+  saveMyMCP: (body: WorkspaceMCPUpdate) =>
+    request<WorkspaceMCP>(`/my-mcps/${encodeURIComponent(body.name)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -840,7 +840,7 @@ export const api = {
     request<void>(`/my-mcps/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
-  discoverMyMCP: (body: MCPConnectionUpdate) =>
+  discoverMyMCP: (body: WorkspaceMCPUpdate) =>
     request<{ name: string; description: string }[]>(
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }

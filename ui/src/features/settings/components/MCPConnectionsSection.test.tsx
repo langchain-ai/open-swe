@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
-import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
+import type { WorkspaceMCP, WorkspaceMCPUpdate } from "@/lib/api"
 
 afterEach(() => {
   cleanup()
@@ -21,8 +21,8 @@ afterEach(() => {
 it.each(["form", "import"])(
   "configures OAuth through %s and preserves saved credentials when editing",
   async (source) => {
-    let connection: MCPConnection | null = null
-    const writes: MCPConnectionUpdate[] = []
+    let connection: WorkspaceMCP | null = null
+    const writes: WorkspaceMCPUpdate[] = []
     const oauth = {
       grant_type: "client_credentials" as const,
       token_url: "https://api.linear.app/oauth/token",
@@ -37,7 +37,7 @@ it.each(["form", "import"])(
           JSON.stringify([{ name: "search", description: "Search" }])
         )
       if (init?.method === "PUT") {
-        const update = JSON.parse(String(init.body)) as MCPConnectionUpdate
+        const update = JSON.parse(String(init.body)) as WorkspaceMCPUpdate
         writes.push(update)
         const publicOAuth = update.oauth ? { ...update.oauth } : null
         if (publicOAuth) delete publicOAuth.client_secret
@@ -147,7 +147,7 @@ it.each([
   ["Token URL", "https://other.example/token"],
   ["Client ID", "other-app"],
 ])("requires a replacement secret when %s changes", async (label, value) => {
-  const connection: MCPConnection = {
+  const connection: WorkspaceMCP = {
     name: "linear",
     url: "https://mcp.linear.app/mcp",
     transport: "streamable_http",
@@ -161,7 +161,7 @@ it.each([
     revision: "v1",
     updated_at: "now",
   }
-  const requests: MCPConnectionUpdate[] = []
+  const requests: WorkspaceMCPUpdate[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (init?.body) requests.push(JSON.parse(String(init.body)))
     if (String(input).endsWith("/discover"))
@@ -237,9 +237,9 @@ it("validates the connection name before saving and discovering tools", async ()
 })
 
 it("saves generic authentication, discovers tools, and enables only selected tools", async () => {
-  let connection: MCPConnection | null = null
-  const writes: MCPConnectionUpdate[] = []
-  const discoveries: MCPConnectionUpdate[] = []
+  let connection: WorkspaceMCP | null = null
+  const writes: WorkspaceMCPUpdate[] = []
+  const discoveries: WorkspaceMCPUpdate[] = []
   const operations: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
@@ -253,7 +253,7 @@ it("saves generic authentication, discovers tools, and enables only selected too
       ]
     } else if (init?.method === "PUT") {
       operations.push("save")
-      const update = JSON.parse(String(init.body)) as MCPConnectionUpdate
+      const update = JSON.parse(String(init.body)) as WorkspaceMCPUpdate
       writes.push(update)
       connection = {
         name: update.name,
@@ -376,7 +376,7 @@ it("saves generic authentication, discovers tools, and enables only selected too
 it.each([{ allowedTools: [] }, { allowedTools: ["search"] }])(
   "preserves existing tool selections $allowedTools when rediscovering tools",
   async ({ allowedTools }) => {
-    const connection: MCPConnection = {
+    const connection: WorkspaceMCP = {
       name: "incident",
       url: "https://mcp.incident.io/mcp",
       transport: "streamable_http",
@@ -386,7 +386,7 @@ it.each([{ allowedTools: [] }, { allowedTools: ["search"] }])(
       revision: "v1",
       updated_at: "now",
     }
-    const writes: MCPConnectionUpdate[] = []
+    const writes: WorkspaceMCPUpdate[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       if (String(input).endsWith("/discover")) {
         return new Response(
@@ -438,8 +438,8 @@ it.each([{ allowedTools: [] }, { allowedTools: ["search"] }])(
 )
 
 it("keeps a newly saved connection editable when refreshing the list fails", async () => {
-  let connection: MCPConnection | null = null
-  const writes: MCPConnectionUpdate[] = []
+  let connection: WorkspaceMCP | null = null
+  const writes: WorkspaceMCPUpdate[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (String(input).endsWith("/discover")) {
       return new Response(
@@ -447,7 +447,7 @@ it("keeps a newly saved connection editable when refreshing the list fails", asy
       )
     }
     if (init?.method === "PUT") {
-      const update = JSON.parse(String(init.body)) as MCPConnectionUpdate
+      const update = JSON.parse(String(init.body)) as WorkspaceMCPUpdate
       writes.push(update)
       connection = {
         name: update.name,
@@ -499,7 +499,7 @@ it("keeps a newly saved connection editable when refreshing the list fails", asy
 })
 
 it("reveals saved headers on demand and discards them when hidden or closed", async () => {
-  const connection: MCPConnection = {
+  const connection: WorkspaceMCP = {
     name: "incident",
     url: "https://mcp.incident.io/mcp",
     transport: "streamable_http",
@@ -509,7 +509,7 @@ it("reveals saved headers on demand and discards them when hidden or closed", as
     revision: "v1",
     updated_at: "now",
   }
-  const writes: MCPConnectionUpdate[] = []
+  const writes: WorkspaceMCPUpdate[] = []
   let reveals = 0
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (String(input).endsWith("/headers/reveal")) {
@@ -693,12 +693,12 @@ it("reviews imported connections one at a time without writing on import or skip
 })
 
 it("manages personal connections through the my-mcps endpoints", async () => {
-  let connection: MCPConnection | null = null
+  let connection: WorkspaceMCP | null = null
   const requests: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     requests.push(`${init?.method ?? "GET"} ${String(input)}`)
     if (init?.method === "PUT") {
-      const update = JSON.parse(String(init.body)) as MCPConnectionUpdate
+      const update = JSON.parse(String(init.body)) as WorkspaceMCPUpdate
       connection = {
         ...update,
         oauth: null,
@@ -731,9 +731,12 @@ it("manages personal connections through the my-mcps endpoints", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
   await screen.findByRole("button", { name: "Edit linear" })
   expect(requests.some((request) => request.endsWith("/my-mcps"))).toBe(true)
-  expect(requests).toContain(
-    `PUT ${requests.find((request) => request.endsWith("/my-mcps"))?.slice(4)}/linear`
-  )
+  expect(
+    requests.some(
+      (request) =>
+        request.startsWith("PUT ") && request.endsWith("/my-mcps/linear")
+    )
+  ).toBe(true)
   expect(requests.some((request) => request.includes("workspace-mcps"))).toBe(
     false
   )
