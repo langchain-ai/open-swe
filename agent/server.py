@@ -1020,7 +1020,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
-    adaptive_model_routing = hashlib.sha256(thread_id.encode()).digest()[0] < 128
+    adaptive_model_routing = True
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
