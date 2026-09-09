@@ -4,10 +4,12 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import anthropic
+import httpx
 import httpx2
 import openai
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.exceptions import ModelConnectionError, ModelInvalidRequestError
 from langchain_core.messages import AIMessage
 
 from agent.middleware.model_call_timeout import ModelCallTimeoutError
@@ -73,6 +75,18 @@ class TestShouldFallback:
             "peer closed connection without sending complete message body (incomplete chunked read)"
         )
         assert _should_fallback(exc) is True
+
+    def test_legacy_httpx_remote_protocol_error_falls_back(self) -> None:
+        exc = httpx.RemoteProtocolError(
+            "peer closed connection without sending complete message body (incomplete chunked read)"
+        )
+        assert _should_fallback(exc) is True
+
+    def test_retryable_langchain_model_error_falls_back(self) -> None:
+        assert _should_fallback(ModelConnectionError("Fireworks unavailable")) is True
+
+    def test_non_retryable_langchain_model_error_does_not_fall_back(self) -> None:
+        assert _should_fallback(ModelInvalidRequestError("bad request")) is False
 
     def test_anthropic_400_does_not_fall_back(self) -> None:
         request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
