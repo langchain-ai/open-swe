@@ -324,13 +324,15 @@ async def _handle_successful_run(
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
-    slack_thread = SourceContext.from_metadata(metadata).slack_thread
     payload_metadata = payload.get("metadata")
     automated = (
         isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
     )
     if not automated:
-        await schedule_answer_feedback(thread_id, run_id, metadata)
+        try:
+            await schedule_answer_feedback(thread_id, run_id, metadata)
+        except Exception:
+            logger.warning("Could not schedule completion feedback", extra={"thread_id": thread_id})
     prepare_run_id = _prepare_run_id(payload)
     if prepare_run_id is None:
         return {"status": "ignored", "reason": "missing prepare_run_id"}
