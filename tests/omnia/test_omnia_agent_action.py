@@ -36,6 +36,50 @@ async def test_omnia_agent_action_uses_trusted_run_identity(
 
 
 @pytest.mark.asyncio
+async def test_create_task_returns_the_publishable_branch(monkeypatch):
+    module = __import__("agent.tools.omnia_agent_action", fromlist=["omnia_agent_action"])
+    monkeypatch.setattr(
+        module,
+        "get_config",
+        lambda: {
+            "run_id": "runtime-1",
+            "configurable": {"omnia_thread": {"thread_id": "dm-1", "journal_run_id": 2744}},
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "post_omnia_agent_action",
+        AsyncMock(
+            return_value={
+                "success": True,
+                "task": {"taskNumber": 10},
+            }
+        ),
+    )
+    result = await omnia_agent_action("create_task", title="Chat search")
+    assert result["branch_name"] == "agent/luna/task-10-run-2744"
+
+
+@pytest.mark.asyncio
+async def test_new_browser_request_does_not_replay_a_consumed_session(monkeypatch):
+    module = __import__("agent.tools.omnia_agent_action", fromlist=["omnia_agent_action"])
+    monkeypatch.setattr(
+        module,
+        "get_config",
+        lambda: {
+            "run_id": "runtime-1",
+            "configurable": {"omnia_thread": {"thread_id": "dm-1"}},
+        },
+    )
+    post = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(module, "post_omnia_agent_action", post)
+    for _ in range(2):
+        await omnia_agent_action("browser_session", preview_url="https://preview.vercel.app")
+    keys = [call.args[0]["idempotency_key"] for call in post.await_args_list]
+    assert keys[0] != keys[1]
+
+
+@pytest.mark.asyncio
 async def test_omnia_agent_action_validates_mutating_inputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -71,7 +115,9 @@ async def test_omnia_agent_action_requests_a_preview_browser_session(
             },
         },
     )
-    post = AsyncMock(return_value={"success": True, "browser_session_url": "https://preview/session"})
+    post = AsyncMock(
+        return_value={"success": True, "browser_session_url": "https://preview/session"}
+    )
     monkeypatch.setattr(module, "post_omnia_agent_action", post)
 
     result = await omnia_agent_action(

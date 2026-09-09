@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import uuid
 from typing import Any, Literal
 
 from langgraph.config import get_config
@@ -50,7 +51,9 @@ async def omnia_agent_action(
             sort_keys=True,
         ).encode()
     ).hexdigest()[:24]
-    return await post_omnia_agent_action(
+    if action == "browser_session":
+        fingerprint = uuid.uuid4().hex
+    result = await post_omnia_agent_action(
         {
             "action": action,
             "title": title.strip() if isinstance(title, str) else None,
@@ -63,3 +66,10 @@ async def omnia_agent_action(
             "idempotency_key": f"open-swe:{run_id}:{fingerprint}",
         }
     )
+    if action == "create_task" and result.get("success"):
+        task = result.get("task")
+        number = task.get("taskNumber") if isinstance(task, dict) else None
+        journal = omnia_thread.get("journal_run_id")
+        if isinstance(number, int) and isinstance(journal, int):
+            result["branch_name"] = f"agent/luna/task-{number}-run-{journal}"
+    return result

@@ -1,6 +1,7 @@
 """Open a GitHub pull request attributed to the triggering user."""
 
 import logging
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -896,6 +897,20 @@ async def open_pull_request(
         On failure: {"success": False, "error": str, "code": str,
         "recoverable_by_agent": False, "pr_created": False, ...}.
     """
+    if _configurable().get("source") == "omnia" and not re.fullmatch(
+        r"agent/luna/task-[1-9]\d*-(?:run|attempt)-\d+", head
+    ):
+        return {
+            "success": False,
+            "recoverable_by_agent": True,
+            "pr_created": False,
+            "error": (
+                "Omnia reviews require agent/luna/task-<taskNumber>-run-<journal_run_id>. "
+                "Use the branch_name returned by omnia_agent_action(create_task). "
+                "Preserve your changes, rename and push that task branch, then retry. "
+                "Do not ask the user to repair repository details."
+            ),
+        }
     return await _open_pull_request(
         owner=owner,
         repo=repo,
