@@ -247,6 +247,88 @@ async def test_langsmith_list_runs_caps_limit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_langsmith_list_runs_routes_uuid_project_name_to_project_id() -> None:
+    creds = LangSmithCredentials(api_key="k", endpoint="https://api.smith.langchain.com")
+    captured: dict[str, object] = {}
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def list_runs(self, **kwargs):
+            captured.update(kwargs)
+            return
+            yield
+
+    tools = langsmith_tools._make_tools(allow_team=True)
+    list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
+    with (
+        patch.object(langsmith_tools, "_creds_for", AsyncMock(return_value=creds)),
+        patch.object(langsmith_tools, "langsmith_client", lambda _c: _FakeClient()),
+    ):
+        result = await list_runs.ainvoke(
+            {"on_behalf_of": "octo", "project_name": "123e4567-e89b-12d3-a456-426614174000"}
+        )
+    assert result["success"] is True
+    assert captured["project_id"] == "123e4567-e89b-12d3-a456-426614174000"
+    assert "project_name" not in captured
+
+
+@pytest.mark.asyncio
+async def test_langsmith_list_runs_passes_explicit_project_id() -> None:
+    creds = LangSmithCredentials(api_key="k", endpoint="https://api.smith.langchain.com")
+    captured: dict[str, object] = {}
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def list_runs(self, **kwargs):
+            captured.update(kwargs)
+            return
+            yield
+
+    tools = langsmith_tools._make_tools(allow_team=True)
+    list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
+    with (
+        patch.object(langsmith_tools, "_creds_for", AsyncMock(return_value=creds)),
+        patch.object(langsmith_tools, "langsmith_client", lambda _c: _FakeClient()),
+    ):
+        result = await list_runs.ainvoke(
+            {"on_behalf_of": "octo", "project_id": "123e4567-e89b-12d3-a456-426614174000"}
+        )
+    assert result["success"] is True
+    assert captured["project_id"] == "123e4567-e89b-12d3-a456-426614174000"
+    assert "project_name" not in captured
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"project_name": "project", "project_id": "project-id"},
+        {},
+    ],
+)
+async def test_langsmith_list_runs_requires_one_project_identifier(
+    arguments: dict[str, str],
+) -> None:
+    tools = langsmith_tools._make_tools(allow_team=True)
+    list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
+    result = await list_runs.ainvoke({"on_behalf_of": "octo", **arguments})
+    assert result == {
+        "success": False,
+        "error": "Exactly one of project_name or project_id must be provided.",
+    }
+
+
+@pytest.mark.asyncio
 async def test_load_observability_tools_skipped_when_unauthorized() -> None:
     with (
         patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),

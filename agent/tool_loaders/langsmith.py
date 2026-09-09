@@ -8,6 +8,7 @@ runs in a project.
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -28,6 +29,9 @@ from agent.utils.thread_participants import resolve_participant
 logger = logging.getLogger(__name__)
 
 _MAX_LIST_RUNS = 50
+_UUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 
 def langsmith_client(creds: LangSmithCredentials):
@@ -75,16 +79,7 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
     async def langsmith_get_trace(
         on_behalf_of: str, run_id: str, load_child_runs: bool = False
     ) -> dict[str, Any]:
-        """Fetch a single LangSmith run (trace) by its run ID.
-
-        Args:
-            on_behalf_of: GitHub login of the thread participant to act for.
-            run_id: The LangSmith run UUID.
-            load_child_runs: Include nested child runs when True.
-
-        Returns:
-            Dictionary with the run details, or an error message.
-        """
+        """Fetch a single LangSmith run (trace) by its run ID; run_id must be a run or trace UUID, not a thread ID, which returns a 404, so investigate threads with langsmith_list_runs and an eq(thread_id, '<id>') filter."""
         try:
             creds = await _creds_for(on_behalf_of, allow_team=allow_team)
             if load_child_runs:
@@ -100,30 +95,35 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
 
     async def langsmith_list_runs(
         on_behalf_of: str,
-        project_name: str,
+        project_name: str | None = None,
+        project_id: str | None = None,
         limit: int = 20,
         filter: str | None = None,
     ) -> dict[str, Any]:
-        """List recent LangSmith runs in a project.
-
-        Args:
-            on_behalf_of: GitHub login of the thread participant to act for.
-            project_name: The LangSmith project (tracing project) name.
-            limit: Maximum runs to return (capped at 50).
-            filter: Optional LangSmith filter string (e.g. "eq(status, 'error')").
-
-        Returns:
-            Dictionary with a list of runs, or an error message.
-        """
+        """List recent LangSmith runs in a project; a /projects/p/<uuid>/r/<run_id> URL yields a project_id UUID, not a project name, and project_name is only the human-readable tracing project name."""
         capped = max(1, min(limit, _MAX_LIST_RUNS))
+
+        if (project_name is None) == (project_id is None):
+            return {
+                "success": False,
+                "error": "Exactly one of project_name or project_id must be provided.",
+            }
+        if project_name is not None and _UUID_PATTERN.fullmatch(project_name):
+            project_id = project_name
+            project_name = None
 
         try:
             creds = await _creds_for(on_behalf_of, allow_team=allow_team)
             async with langsmith_client(creds) as client:
+                project_filter = (
+                    {"project_id": project_id}
+                    if project_id is not None
+                    else {"project_name": project_name}
+                )
                 runs = [
                     run
                     async for run in client.list_runs(
-                        project_name=project_name,
+                        **project_filter,
                         filter=filter,
                         limit=capped,
                     )
