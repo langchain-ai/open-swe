@@ -63,6 +63,7 @@ from agent.utils.json_types import (
     thread_metadata,
 )
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from agent.utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -2605,6 +2606,13 @@ async def _observe_dashboard_run_ttft(
             async for event in thread_stream.subscribe(
                 ["lifecycle", "messages"], namespaces=[[]], depth=10
             ):
+                lifecycle = root_lifecycle(event)
+                if (
+                    lifecycle is not None
+                    and lifecycle[0] == run_id
+                    and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS
+                ):
+                    return
                 observation = detector.observe(event)
                 if observation is None:
                     continue

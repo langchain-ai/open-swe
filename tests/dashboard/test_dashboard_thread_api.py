@@ -1205,6 +1205,63 @@ async def test_run_ttft_observer_records_first_assistant_text(
     )
 
 
+@pytest.mark.parametrize("phase", ["completed", "failed", "interrupted"])
+async def test_run_ttft_observer_closes_when_target_run_ends_without_text(
+    monkeypatch, phase: str
+) -> None:
+    def lifecycle(run_id: str, phase: str, namespace: list[str]) -> dict[str, object]:
+        return {
+            "method": "lifecycle",
+            "event_id": f"synth:{run_id}:lc||{phase}",
+            "params": {"namespace": namespace, "data": {"event": phase}},
+        }
+
+    target_ended = False
+    closed = False
+    read_after_end = False
+
+    class ThreadStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            nonlocal closed
+            closed = True
+
+        async def subscribe(self, *args, **kwargs):
+            nonlocal target_ended, read_after_end
+            yield lifecycle("historical-run", phase, [])
+            yield lifecycle("run-1", "running", [])
+            yield lifecycle("run-1", phase, ["subagent"])
+            target_ended = True
+            yield lifecycle("run-1", phase, [])
+            read_after_end = True
+            yield lifecycle("run-2", "running", [])
+            for data in [
+                {"event": "message-start", "role": "ai"},
+                {
+                    "event": "content-block-delta",
+                    "delta": {"type": "text-delta", "text": "Later run's text"},
+                },
+            ]:
+                yield {
+                    "method": "messages",
+                    "params": {"namespace": ["agent"], "timestamp": 3_000, "data": data},
+                }
+
+    client = SimpleNamespace(threads=SimpleNamespace(stream=lambda *a, **kw: ThreadStream()))
+    record = AsyncMock()
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_api, "record_dashboard_thread_ttft", record)
+
+    await thread_api._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
+
+    assert target_ended
+    assert closed
+    assert not read_after_end
+    record.assert_not_awaited()
+
+
 async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
