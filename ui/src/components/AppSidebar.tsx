@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link } from "@tanstack/react-router"
 import {
   IoArrowBackOutline,
   IoCloudOutline,
@@ -60,7 +60,6 @@ const LINK_CLASS =
 
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
-  const navigate = useNavigate()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
@@ -76,13 +75,9 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         )}
       >
         <Link
-          to="/agents"
+          to={getLastAppLocation()}
           className={cn(LINK_CLASS, "-mx-2.5 font-medium")}
-          onClick={(event) => {
-            event.preventDefault()
-            layout.closeOnMobile()
-            void navigate({ href: getLastAppLocation() })
-          }}
+          onClick={layout.closeOnMobile}
         >
           <IoArrowBackOutline className="size-4" />
           <span>Back to app</span>
