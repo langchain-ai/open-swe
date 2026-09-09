@@ -14,7 +14,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agent.encryption import decrypt_token, encrypt_token
-from agent.store import delete_value, get_value, now_iso, put_value, search_all_values
+from agent.store import TypedStore, now_iso
 
 WORKSPACE_MCPS_NAMESPACE = ["workspace_mcps"]
 _BLOCKED_HEADERS = {
@@ -138,6 +138,8 @@ class WorkspaceMCPUpdate(BaseModel):
 
 
 class WorkspaceMCP(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     name: str
     url: str
     transport: Literal["streamable_http", "sse"] = "streamable_http"
@@ -160,14 +162,15 @@ class WorkspaceMCP(BaseModel):
         return json.loads(decrypted)
 
 
+_store = TypedStore(WORKSPACE_MCPS_NAMESPACE, WorkspaceMCP)
+
+
 async def get_workspace_mcp(name: str) -> WorkspaceMCP | None:
-    record = await get_value(WORKSPACE_MCPS_NAMESPACE, name)
-    return WorkspaceMCP.model_validate(record) if record else None
+    return await _store.get(name)
 
 
 async def list_workspace_mcp_records() -> list[WorkspaceMCP]:
-    records = await search_all_values(WORKSPACE_MCPS_NAMESPACE)
-    return sorted((WorkspaceMCP.model_validate(record) for record in records), key=lambda r: r.name)
+    return sorted(await _store.search_all(), key=lambda record: record.name)
 
 
 async def list_workspace_mcps() -> list[dict[str, Any]]:
@@ -197,9 +200,9 @@ async def prepare_workspace_mcp(name: str, update: WorkspaceMCPUpdate) -> Worksp
 
 async def save_workspace_mcp(name: str, update: WorkspaceMCPUpdate) -> dict[str, Any]:
     record = await prepare_workspace_mcp(name, update)
-    await put_value(WORKSPACE_MCPS_NAMESPACE, name, record.model_dump())
+    await _store.put(name, record)
     return record.public()
 
 
 async def delete_workspace_mcp(name: str) -> None:
-    await delete_value(WORKSPACE_MCPS_NAMESPACE, name)
+    await _store.delete(name)

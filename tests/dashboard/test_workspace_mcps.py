@@ -43,6 +43,23 @@ async def test_generic_connection_roundtrip_redacts_and_preserves_headers(fake_s
     assert await mcps.list_workspace_mcps() == []
 
 
+async def test_corrupt_record_does_not_hide_other_connections_or_log_values(fake_store, caplog):
+    saved = await mcps.save_workspace_mcp(
+        "example", mcps.WorkspaceMCPUpdate(name="example", url="https://example.com/mcp")
+    )
+    fake_store.values(["workspace_mcps"])["broken"] = {
+        **saved,
+        "name": "broken",
+        "encrypted_headers": {"Authorization": "test-secret"},
+    }
+
+    assert await mcps.list_workspace_mcps() == [saved]
+    with pytest.raises(ValidationError):
+        await mcps.get_workspace_mcp("broken")
+    assert "Skipping unreadable" in caplog.text
+    assert "test-secret" not in caplog.text
+
+
 async def test_url_change_requires_explicit_header_replacement(fake_store):
     await mcps.save_workspace_mcp(
         "example",

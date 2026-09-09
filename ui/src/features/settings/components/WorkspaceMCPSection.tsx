@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
 import { SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
+import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 import type { WorkspaceMCP, WorkspaceMCPUpdate } from "@/lib/api"
@@ -11,7 +11,7 @@ import { WorkspaceMCPImport } from "./WorkspaceMCPImport"
 import type { ImportedMCP } from "./WorkspaceMCPImport"
 
 type Header = { name: string; value: string; revealed?: boolean }
-type Draft = WorkspaceMCPUpdate & { existing: boolean }
+type Draft = Omit<WorkspaceMCPUpdate, "headers"> & { existing: boolean }
 const queryKey = ["workspaceMCPs"]
 
 export function WorkspaceMCPSection() {
@@ -34,20 +34,42 @@ export function WorkspaceMCPSection() {
   const [pendingImports, setPendingImports] = useState<ImportedMCP[]>([])
   const toolsId = useId()
   const editorId = useId()
+  const toolDescriptions = new Map(
+    catalog.map((tool) => [tool.name, tool.description])
+  )
+  const selectedTools = new Set(draft?.allowed_tools)
   const toolNames = [
     ...new Set([
-      ...catalog.map((tool) => tool.name),
+      ...toolDescriptions.keys(),
       ...(connections.data?.find(
         (connection) => connection.name === draft?.name
       )?.allowed_tools ?? []),
-      ...(draft?.allowed_tools ?? []),
+      ...selectedTools,
     ]),
   ].sort()
+
+  const openEditor = (
+    connection: Draft,
+    authentication?: Record<string, string> | null
+  ) => {
+    setDraft(connection)
+    setHeaders(
+      Object.entries(authentication ?? {}).map(([name, value]) => ({
+        name,
+        value,
+      }))
+    )
+    setSavedHeaders(null)
+    setReplaceHeaders(authentication != null || !connection.existing)
+    setCatalog([])
+    setToolsExpanded(true)
+    setError(null)
+  }
 
   const edit = (connection?: WorkspaceMCP) => {
     setImporting(false)
     setPendingImports([])
-    setDraft(
+    openEditor(
       connection
         ? { ...connection, existing: true }
         : {
@@ -59,35 +81,24 @@ export function WorkspaceMCPSection() {
             existing: false,
           }
     )
-    setHeaders([])
-    setSavedHeaders(null)
-    setReplaceHeaders(!connection)
-    setCatalog([])
-    setToolsExpanded(true)
-    setError(null)
   }
 
-  const openImported = (connection: ImportedMCP) => {
-    setSavedHeaders(null)
+  const openImported = ({
+    headers: authentication,
+    ...connection
+  }: ImportedMCP) => {
     const previous = connections.data?.find(
       (saved) => saved.name === connection.name
     )
-    setDraft({
-      ...connection,
-      enabled: previous?.enabled ?? true,
-      allowed_tools: previous?.allowed_tools ?? [],
-      existing: Boolean(previous),
-    })
-    setHeaders(
-      Object.entries(connection.headers ?? {}).map(([name, value]) => ({
-        name,
-        value,
-      }))
+    openEditor(
+      {
+        ...connection,
+        enabled: previous?.enabled ?? true,
+        allowed_tools: previous?.allowed_tools ?? [],
+        existing: Boolean(previous),
+      },
+      authentication
     )
-    setReplaceHeaders(connection.headers !== undefined || !previous)
-    setCatalog([])
-    setToolsExpanded(true)
-    setError(null)
   }
 
   const closeEditor = () => {
@@ -283,7 +294,7 @@ export function WorkspaceMCPSection() {
                 </div>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button
+                <IconButton
                   type="button"
                   size="icon-sm"
                   variant="outline"
@@ -309,7 +320,7 @@ export function WorkspaceMCPSection() {
                   ) : (
                     <EyeIcon aria-hidden="true" />
                   )}
-                </Button>
+                </IconButton>
                 <Button
                   type="button"
                   size="sm"
@@ -347,7 +358,7 @@ export function WorkspaceMCPSection() {
                       updateHeader(index, "value", e.target.value)
                     }
                   />
-                  <Button
+                  <IconButton
                     type="button"
                     size="icon-sm"
                     variant="outline"
@@ -369,7 +380,7 @@ export function WorkspaceMCPSection() {
                     ) : (
                       <EyeIcon aria-hidden="true" />
                     )}
-                  </Button>
+                  </IconButton>
                   <Button
                     type="button"
                     size="sm"
@@ -458,7 +469,7 @@ export function WorkspaceMCPSection() {
                       type="checkbox"
                       className="mt-1 shrink-0"
                       aria-label={`Allow ${name}`}
-                      checked={draft.allowed_tools.includes(name)}
+                      checked={selectedTools.has(name)}
                       onChange={(e) =>
                         setDraft({
                           ...draft,
@@ -473,10 +484,7 @@ export function WorkspaceMCPSection() {
                     <span className="min-w-0 break-words">
                       {name}
                       <span className="block text-xs text-muted-foreground">
-                        {
-                          catalog.find((tool) => tool.name === name)
-                            ?.description
-                        }
+                        {toolDescriptions.get(name)}
                       </span>
                     </span>
                   </label>
@@ -532,90 +540,84 @@ export function WorkspaceMCPSection() {
             {connections.error?.message || error}
           </p>
         )}
-        {connections.data?.map((connection) => (
-          <section
-            key={connection.name}
-            aria-label={`${connection.name} MCP connection`}
-            className="rounded-md border"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3 p-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">
-                  {connection.name}{" "}
-                  <span className="text-muted-foreground">
-                    · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
-                    {connection.allowed_tools.length} tools
-                  </span>
-                </p>
-                <p className="text-xs break-all text-muted-foreground">
-                  {connection.url}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => {
-                    if (draft?.existing && draft.name === connection.name) {
-                      closeEditor()
-                    } else edit(connection)
-                  }}
-                  aria-expanded={Boolean(
-                    draft?.existing && draft.name === connection.name
-                  )}
-                  aria-controls={
-                    draft?.existing && draft.name === connection.name
-                      ? editorId
-                      : undefined
-                  }
-                  aria-label={`${draft?.existing && draft.name === connection.name ? "Close" : "Edit"} ${connection.name}`}
-                >
-                  {draft?.existing && draft.name === connection.name
-                    ? "Close"
-                    : "Edit"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    run(async () => {
-                      await api.saveWorkspaceMCP({
-                        name: connection.name,
-                        url: connection.url,
-                        transport: connection.transport,
-                        enabled: !connection.enabled,
-                        allowed_tools: connection.allowed_tools,
+        {connections.data?.map((connection) => {
+          const isEditing = draft?.existing && draft.name === connection.name
+          return (
+            <section
+              key={connection.name}
+              aria-label={`${connection.name} MCP connection`}
+              className="rounded-md border"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    {connection.name}{" "}
+                    <span className="text-muted-foreground">
+                      · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
+                      {connection.allowed_tools.length} tools
+                    </span>
+                  </p>
+                  <p className="text-xs break-all text-muted-foreground">
+                    {connection.url}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      if (isEditing) closeEditor()
+                      else edit(connection)
+                    }}
+                    aria-expanded={Boolean(isEditing)}
+                    aria-controls={isEditing ? editorId : undefined}
+                    aria-label={`${isEditing ? "Close" : "Edit"} ${connection.name}`}
+                  >
+                    {isEditing ? "Close" : "Edit"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        await api.saveWorkspaceMCP({
+                          name: connection.name,
+                          url: connection.url,
+                          transport: connection.transport,
+                          enabled: !connection.enabled,
+                          allowed_tools: connection.allowed_tools,
+                        })
+                        await qc.invalidateQueries({ queryKey })
+                        if (draft?.name === connection.name) closeEditor()
                       })
-                      await qc.invalidateQueries({ queryKey })
-                      if (draft?.name === connection.name) closeEditor()
-                    })
-                  }
-                  aria-label={`${connection.enabled ? "Disable" : "Enable"} ${connection.name}`}
-                >
-                  {connection.enabled ? "Disable" : "Enable"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    run(async () => {
-                      await api.deleteWorkspaceMCP(connection.name)
-                      await qc.invalidateQueries({ queryKey })
-                      if (draft?.name === connection.name) closeEditor()
-                    })
-                  }
-                  aria-label={`Delete ${connection.name}`}
-                >
-                  Delete
-                </Button>
+                    }
+                    aria-label={`${connection.enabled ? "Disable" : "Enable"} ${connection.name}`}
+                  >
+                    {connection.enabled ? "Disable" : "Enable"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        await api.deleteWorkspaceMCP(connection.name)
+                        await qc.invalidateQueries({ queryKey })
+                        if (draft?.name === connection.name) closeEditor()
+                      })
+                    }
+                    aria-label={`Delete ${connection.name}`}
+                  >
+                    Delete
+                  </Button>
+                </div>
               </div>
-            </div>
-            {draft?.existing && draft.name === connection.name && editor}
-          </section>
-        ))}
+              {isEditing && editor}
+            </section>
+          )
+        })}
         {importing ? (
           <WorkspaceMCPImport
             onImport={([first, ...rest]) => {
