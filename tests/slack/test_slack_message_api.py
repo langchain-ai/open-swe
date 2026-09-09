@@ -8,6 +8,19 @@ import pytest
 from agent.slack import client as slack_utils
 
 
+def test_parse_slack_thread_url_uses_root_thread_timestamp() -> None:
+    assert slack_utils.parse_slack_thread_url(
+        "<https://workspace.slack.com/archives/C123/p1788431248678809"
+        "?thread_ts=1788425314.774339&cid=C123|message>"
+    ) == ("C123", "1788425314.774339")
+
+
+def test_parse_slack_thread_url_defaults_to_message_timestamp() -> None:
+    assert slack_utils.parse_slack_thread_url(
+        "https://workspace.slack.com/archives/C123/p1788431248678809"
+    ) == ("C123", "1788431248.678809")
+
+
 def _ok_response() -> MagicMock:
     response = MagicMock()
     response.json.return_value = {"ok": True, "ts": "1.0"}
