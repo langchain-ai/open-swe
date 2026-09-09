@@ -7,11 +7,7 @@ import type {
   DesktopLocalPromptInput,
   DesktopLocalThreadSummary,
 } from "@/desktop"
-import type {
-  ImageChunk,
-  Message,
-  QueuedThreadMessage,
-} from "@/features/agents/lib/types"
+import type { ImageChunk, Message } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -49,13 +45,10 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import {
-  enqueueLocalPrompt,
-  takeLocalPromptQueue,
-} from "@/features/agents/lib/stream/localMessageQueue"
-import {
   modelConfigurable,
   promptMessage,
 } from "@/features/agents/lib/stream/promptMessage"
+import { useLocalPromptQueue } from "@/features/agents/lib/stream/useLocalPromptQueue"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -119,13 +112,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   }, [stream])
   const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [queuedState, setQueuedState] = useState<{
-    sessionId: string
-    items: Array<QueuedThreadMessage>
-  }>({ sessionId, items: [] })
-  const queued = queuedState.sessionId === sessionId ? queuedState.items : []
-  const stoppedRef = useRef(false)
-  const handoffRef = useRef(false)
   const isMobile = useIsMobile()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
@@ -288,7 +274,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     ) => {
       if (!thread) return false
       setError(null)
-      stoppedRef.current = false
       const credentialError = await ensureDesktopModelCredential(
         activeSelection?.modelId
       )
@@ -322,51 +307,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [activeSelection, rememberSelection, stream, thread]
   )
 
-  // Mid-run follow-ups go to the thread's store queue, which
-  // `check_message_queue_before_model` drains into the running agent, rather
-  // than starting a second run on a busy thread.
-  const enqueue = useCallback(
-    async (prompt: string, images: Array<ImageChunk>) => {
-      const text = prompt.trim()
-      await enqueueLocalPrompt(
-        stream.client,
-        sessionId,
-        { text, images },
-        login
-      )
-      const createdAt = Date.now()
-      setQueuedState((current) => ({
-        sessionId,
-        items: [
-          ...(current.sessionId === sessionId ? current.items : []),
-          { id: `queued-${createdAt}`, content: text, images, createdAt },
-        ],
-      }))
-    },
-    [login, sessionId, stream.client]
-  )
-
-  // A live run does not guarantee another queue check: a follow-up written
-  // after its last model call is never read. Once the run ends, take back
-  // whatever the agent left behind and send it as a fresh run — unless the
-  // user stopped the run, in which case the pending work is discarded.
-  const flushUndrainedQueue = useCallback(async () => {
-    const pending = await takeLocalPromptQueue(stream.client, sessionId)
-    if (!pending || stoppedRef.current) return
-    await submit(pending.text, pending.images)
-  }, [sessionId, stream.client, submit])
-
-  useEffect(() => {
-    if (isRunning || queued.length === 0 || handoffRef.current) return
-    handoffRef.current = true
-    // oxlint-disable-next-line react/set-state-in-effect
-    setQueuedState({ sessionId, items: [] })
-    void flushUndrainedQueue()
-      .catch((cause) => setError(errorMessage(cause)))
-      .finally(() => {
-        handoffRef.current = false
-      })
-  }, [flushUndrainedQueue, isRunning, queued.length, sessionId])
+  const queue = useLocalPromptQueue({
+    client: stream.client,
+    sessionId,
+    login,
+    isRunning,
+    submit,
+  })
+  const shownError = error ?? (queue.error ? errorMessage(queue.error) : null)
 
   useEffect(() => {
     if (modelsLoading || !thread || initialPromptRef.current === sessionId)
@@ -458,12 +406,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           target="This Mac"
           panelCollapsed={panelCollapsed}
         />
-        {(error || activity === "error") && (
+        {(shownError || activity === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
               <CircleAlert />
               <AlertDescription>
-                {error || "The local Open SWE agent stopped unexpectedly."}
+                {shownError || "The local Open SWE agent stopped unexpectedly."}
               </AlertDescription>
             </Alert>
           </div>
@@ -477,7 +425,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             scrollKey={sessionId}
             onOpenFile={handleOpenFile}
             queuedMessages={
-              isRunning ? visibleQueuedMessages(queued, messages) : []
+              isRunning ? visibleQueuedMessages(queue.queued, messages) : []
             }
             streamIsLoading={stream.isLoading}
             scrollControlRef={scrollControlRef}
@@ -518,7 +466,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               onSelectionChange={setSelection}
               onStop={async () => {
                 try {
-                  stoppedRef.current = true
                   await stream.stop()
                 } catch (cause) {
                   setError(errorMessage(cause))
@@ -536,7 +483,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   return
                 }
                 try {
-                  await enqueue(text, images)
+                  await queue.enqueue(text, images)
                 } catch (cause) {
                   setError(errorMessage(cause))
                 }

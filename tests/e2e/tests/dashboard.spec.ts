@@ -3,6 +3,7 @@ import {
   OTHER_USER,
   SAME_USER,
   composerFor,
+  dismissOnboardingIfShown,
   expectTranscriptVisible,
   loginAs,
   openRunningThreadViaSlackLink,
@@ -281,33 +282,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
-    const [sessionResponse, profileResponse, mappingResponse] =
-      await Promise.all([
-        page.request.get("/dashboard/api/me"),
-        page.request.get("/dashboard/api/profile"),
-        page.request.get("/dashboard/api/my-mapping"),
-      ]);
-    const session = (await sessionResponse.json()) as {
-      slack_oauth_enabled?: boolean;
-    };
-    const profile = (await profileResponse.json()) as {
-      default_model?: string;
-    };
-    const mapping = (await mappingResponse.json()) as {
-      slack_user_id?: string;
-    };
-    const needsOnboarding =
-      !profile.default_model ||
-      (session.slack_oauth_enabled && !mapping.slack_user_id);
     await page.goto("/agents");
-    const dismissOnboarding = page.getByRole("button", {
-      name: "Maybe later",
-    });
-    if (needsOnboarding) {
-      await expect(dismissOnboarding).toBeVisible();
-      await dismissOnboarding.click();
-      await expect(dismissOnboarding).toBeHidden();
-    }
+    await dismissOnboardingIfShown(page);
 
     const prompt = "Reproduce the new chat send experience";
     const editor = page.getByTestId("composer-editor");
@@ -400,6 +376,90 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     );
     expect.soft(observations.messageDisappeared).toBe(false);
     expect.soft(observations.newChatReturned).toBe(false);
+  });
+
+  // Stopping a run must not strand what the user queued behind it: the server
+  // starts a follow-up run for the queue, and the page has to show that run
+  // answering without the user sending anything else.
+  test("answers a queued follow-up after the user stops the active run", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openRunningThreadViaSlackLink(page);
+
+    const queuedText = "Please pick this up once the current run stops.";
+    const busyComposer = composerFor(page, /Send a message to queue next/);
+    await expect(async () => {
+      await page.reload();
+      await expect(busyComposer.prompt).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60000 });
+    await typeIntoComposer(page, queuedText);
+    await expect(
+      page.getByTestId("queued-message").filter({ hasText: queuedText }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Stop run" }).click();
+
+    // The queue drains into the follow-up run, whose reply is the fake
+    // model's follow-up script (the stopped run never got to its own reply).
+    await expect(page.getByTestId("queued-message")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    const sentFollowUp = page
+      .getByTestId("user-message")
+      .filter({ hasText: queuedText });
+    await expect(sentFollowUp).toBeVisible({ timeout: 30_000 });
+    const reply = page.getByText(/anything else you'd like changed/);
+    await expect(reply).toBeVisible({ timeout: 30_000 });
+    expect(
+      await sentFollowUp.evaluate(
+        (message, answer) =>
+          Boolean(
+            message.compareDocumentPosition(answer) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        await reply.elementHandle(),
+      ),
+    ).toBe(true);
+  });
+
+  test("answers a queued follow-up after stopping a run this browser started", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.request.post("/control/reset");
+    await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
+
+    // Long enough a hold that queueing and stopping both land mid-run.
+    await typeIntoComposer(
+      page,
+      "E2E_BUSY_HOLD:15 please add a greet() helper and open a PR",
+    );
+    await expect(page).toHaveURL(/\/agents\/[0-9a-f-]{36}$/, {
+      timeout: 30_000,
+    });
+
+    const queuedText = "Please pick this up once the current run stops.";
+    // The run is past its Slack acknowledgement and inside the hold.
+    await expect(page.getByText("On it!", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+    await typeIntoComposer(page, queuedText);
+    await expect(
+      page.getByTestId("queued-message").filter({ hasText: queuedText }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Stop run" }).click();
+
+    await expect(page.getByTestId("queued-message")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByText(/anything else you'd like changed/),
+    ).toBeVisible({ timeout: 30_000 });
   });
 
   test("stops a Slack-started run from the web app", async ({ page }) => {
