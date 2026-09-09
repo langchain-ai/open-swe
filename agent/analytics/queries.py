@@ -132,12 +132,15 @@ async def usage_leaderboard(
             text("SELECT max(recorded_at) FROM events WHERE workspace_id = :workspace_id"),
             {"workspace_id": workspace_id()},
         )
-    current = next((row for row in rows if row.pop("is_current")), None)
+    current_user_rank = None
+    for row in rows:
+        if row.pop("is_current"):
+            current_user_rank = row["rank"]
     return {
         "period": period if period in {"7d", "30d", "all"} else "30d",
         "rows": rows,
         "total_members": int(total_members or 0),
-        "current_user_rank": current["rank"] if current else None,
+        "current_user_rank": current_user_rank,
         "generated_at_ms": int(datetime.now(UTC).timestamp() * 1000),
         "reviewer_stats": await reviewer_stats(start),
         **summary_metadata(watermark=watermark, completeness="epoch_forward_only"),

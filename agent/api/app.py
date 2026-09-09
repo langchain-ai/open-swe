@@ -1,5 +1,6 @@
 """FastAPI application composition."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -17,6 +18,8 @@ from agent.slack.routes import router as slack_webhook_router
 from agent.utils.dashboard_ui import mount_dashboard_ui
 from agent.utils.event_loop import pin_single_event_loop
 
+logger = logging.getLogger(__name__)
+
 # Before the queue starts: it reads this when it builds its workers, and Open SWE
 # cannot survive them landing on different loops.
 pin_single_event_loop()
@@ -24,6 +27,9 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from agent.analytics.database import close as close_analytics
+    from agent.analytics.database import migrate as migrate_analytics
+    from agent.analytics.outbox import start_worker, stop_worker
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
@@ -33,8 +39,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
     try:
+        await migrate_analytics()
+        start_worker()
+    except Exception:  # noqa: BLE001
+        logger.warning("Analytics startup failed", exc_info=True)
+    try:
         yield
     finally:
+        await stop_worker()
+        await close_analytics()
         await close_cached_models()
 
 
