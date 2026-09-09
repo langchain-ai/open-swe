@@ -298,9 +298,9 @@ async def test_prompt_uses_exact_run_mapping_and_deduplicates(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("question_answered", [False, True])
+@pytest.mark.parametrize("should_ask_for_feedback", [False, True])
 async def test_success_completion_only_prompts_for_answered_question(
-    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch, question_answered: bool
+    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch, should_ask_for_feedback: bool
 ) -> None:
     fake_store.values(("slack_thread_feedback", "C1")).clear()
     client = AsyncMock()
@@ -320,14 +320,14 @@ async def test_success_completion_only_prompts_for_answered_question(
                 "triggering_user_id": "U1",
                 "message_ts": "2.0",
                 "thread_ts": "1.0",
-                "question_answered": question_answered,
+                "should_ask_for_feedback": should_ask_for_feedback,
             }
         ),
     )
     await completion.handle_run_completion(
         {"thread_id": "thread-1", "run_id": "run-1", "status": "success"}
     )
-    assert feedback.post_slack_ephemeral_message.await_count == int(question_answered)
+    assert feedback.post_slack_ephemeral_message.await_count == int(should_ask_for_feedback)
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,7 @@ def _config() -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    "question_answered,options,expected",
+    "should_ask_for_feedback,options,expected",
     [
         (True, None, True),
         (False, None, False),
@@ -43,7 +43,7 @@ def _config() -> dict[str, Any]:
 )
 async def test_reply_records_answer_completion_only_without_pending_choices(
     monkeypatch: pytest.MonkeyPatch,
-    question_answered: bool,
+    should_ask_for_feedback: bool,
     options: list[str] | None,
     expected: bool,
 ) -> None:
@@ -64,9 +64,9 @@ async def test_reply_records_answer_completion_only_without_pending_choices(
     mapping = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", mapping)
     assert await slack_reply_tool.slack_thread_reply(
-        "The answer", question_answered=question_answered, options=options
+        "The answer", should_ask_for_feedback=should_ask_for_feedback, options=options
     ) == {"success": True}
-    assert mapping.await_args.kwargs["question_answered"] is expected
+    assert mapping.await_args.kwargs["should_ask_for_feedback"] is expected
 
 
 async def test_slack_thread_reply_holds_mutation_lock_while_posting(

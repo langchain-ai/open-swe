@@ -22,7 +22,7 @@ async def slack_thread_reply(
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
-    question_answered: bool = False,
+    should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
     """Post a message to the current Slack thread and the Web UI.
 
@@ -35,7 +35,7 @@ async def slack_thread_reply(
     details, and redundant context; use bullets only when multiple items are
     essential. End the run by posting a concise final outcome here.
 
-    Set `question_answered=True` only when this message completely answers an
+    Set `should_ask_for_feedback=True` only when this message completely answers an
     information-only request, with no clarification or further work needed.
     This offers the requester a private rating after the run succeeds. Leave it
     False for progress, plans, approval requests, blockers, partial answers, and
@@ -115,7 +115,7 @@ async def slack_thread_reply(
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
-            question_answered=question_answered and not options,
+            should_ask_for_feedback=should_ask_for_feedback and not options,
         )
     if message_ts is None:
         return {
@@ -237,7 +237,7 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
-    question_answered: bool = False,
+    should_ask_for_feedback: bool = False,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -256,6 +256,6 @@ async def _post_and_store_mapping(
             message_ts,
             run_id=run_id,
             triggering_user_id=triggering_user_id,
-            question_answered=question_answered,
+            should_ask_for_feedback=should_ask_for_feedback,
         )
     return message_ts, slack_error

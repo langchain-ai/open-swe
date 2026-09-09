@@ -105,7 +105,7 @@ async def post_slack_feedback_prompt(
             mapping = await lookup_slack_run_message_mapping(langgraph_client(), channel_id, run_id)
             if not mapping or mapping.get("run_id") != run_id:
                 return
-            if require_answer and mapping.get("question_answered") is not True:
+            if require_answer and mapping.get("should_ask_for_feedback") is not True:
                 return
         if record is None:
             user_id = mapping.get("triggering_user_id")
