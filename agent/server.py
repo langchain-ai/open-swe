@@ -1020,12 +1020,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
-    stored_adaptive_routing = thread_settings.get("adaptive_model_routing")
-    adaptive_model_routing = (
-        stored_adaptive_routing
-        if isinstance(stored_adaptive_routing, bool)
-        else profile is not None and profile.get("adaptive_model_routing") is True
-    )
+    adaptive_model_routing = hashlib.sha256(thread_id.encode()).digest()[0] < 128
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
@@ -1076,7 +1071,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "effort": profile_effort,
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
-        "adaptive_model_routing": adaptive_model_routing,
         "repo_instructions": repo_instructions,
     }
     if not local_run and (
@@ -1085,6 +1079,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
+    config["metadata"] = {
+        **(config.get("metadata") or {}),
+        "model_routing_applied": adaptive_model_routing,
+    }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
     )
@@ -1388,8 +1386,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 TimeoutWrapupMiddleware(),
                 notify_step_limit_reached,
                 record_run_usage,
-                *fallback_middleware,
                 *model_selection_middleware,
+                *fallback_middleware,
                 PlanModeMiddleware(
                     excluded=PLAN_MODE_EXCLUDED_TOOLS
                     | frozenset(tool.name for tool in workspace_mcp_tools),

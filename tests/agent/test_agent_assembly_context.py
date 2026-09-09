@@ -46,7 +46,7 @@ async def _capture_create_deep_agent_kwargs(
     captured: dict[str, object] = {}
     make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
-    thread_id = "thread-ctx"
+    thread_id = str((config.get("configurable") or {}).get("thread_id"))
 
     def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
         captured.update(kwargs)
@@ -159,6 +159,24 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         await agent_task
 
     SANDBOX_BACKENDS.pop("thread-ctx", None)
+
+
+@pytest.mark.asyncio
+async def test_model_routing_is_deterministically_applied_to_half_of_threads() -> None:
+    routed = _base_config()
+    routed["configurable"]["thread_id"] = "thread-1"
+    routed_agent = await _capture_create_deep_agent_kwargs(routed)
+
+    unrouted = _base_config()
+    unrouted["configurable"]["thread_id"] = "thread-0"
+    unrouted_agent = await _capture_create_deep_agent_kwargs(unrouted)
+
+    routed_names = [type(middleware).__name__ for middleware in routed_agent["middleware"]]
+    unrouted_names = [type(middleware).__name__ for middleware in unrouted_agent["middleware"]]
+    assert "ModelSelectionMiddleware" in routed_names
+    assert "ModelSelectionMiddleware" not in unrouted_names
+    assert routed["metadata"]["model_routing_applied"] is True
+    assert unrouted["metadata"]["model_routing_applied"] is False
 
 
 @pytest.mark.asyncio

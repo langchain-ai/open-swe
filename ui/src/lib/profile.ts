@@ -121,7 +121,6 @@ export function buildProfileUpdate(
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
-    adaptive_model_routing: current?.adaptive_model_routing ?? false,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     ...patch,
