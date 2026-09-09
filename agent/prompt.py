@@ -129,11 +129,26 @@ for secrets or credentials. Take a screenshot for applicable UI-facing changes a
 the user in the final delivery without committing it."""
 
 
-def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
+SHOW_FILE_GUIDANCE = """### Showing Files
+
+The user is in the Web UI, where `show_file` renders a file as an inline card: highlighted source
+with line numbers, a per-file highlighted diff, or an image. Use it instead of pasting code,
+diffs, logs, or generated output into a message. Write the content to a file first, for example
+`git diff > .open-swe/artifacts/changes.patch`, then call `show_file` with that path. To point
+at existing source, pass `start_line`/`end_line`. The user can select lines in the card and
+comment on them, so reference the card rather than restating its contents."""
+
+UI_SOURCES = frozenset({"dashboard", "desktop"})
+
+
+def render_open_swe_shared_base(*, sandbox_file_downloads: bool, show_file: bool = False) -> str:
     """Render shared guidance for the tools available to this agent."""
-    if not sandbox_file_downloads:
-        return OPEN_SWE_SHARED_BASE
-    return f"{OPEN_SWE_SHARED_BASE}\n\n{SANDBOX_FILE_DOWNLOAD_GUIDANCE}"
+    sections = [OPEN_SWE_SHARED_BASE]
+    if sandbox_file_downloads:
+        sections.append(SANDBOX_FILE_DOWNLOAD_GUIDANCE)
+    if show_file:
+        sections.append(SHOW_FILE_GUIDANCE)
+    return "\n\n".join(sections)
 
 
 WORKING_ENV_SECTION = """### Working Environment
@@ -628,6 +643,9 @@ def construct_system_prompt(
             if not admin_environments
             else ""
         )
-        + render_open_swe_shared_base(sandbox_file_downloads=sandbox_file_downloads),
+        + render_open_swe_shared_base(
+            sandbox_file_downloads=sandbox_file_downloads,
+            show_file=source in UI_SOURCES,
+        ),
     )
     return prompt

@@ -114,6 +114,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
+    UI_SOURCES,
     construct_sender_context,
     construct_system_prompt,
     render_open_swe_shared_base,
@@ -194,6 +195,7 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
+    show_file,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -411,6 +413,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "manage_thread",
         "notify_automation_channel",
         "read_user_settings",
+        "show_file",
     }
 
 
@@ -667,6 +670,11 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
         and cfg.stop_summary is not True
         and not is_desktop_run(cfg)
     )
+
+
+def _ui_tools_enabled(cfg: RunConfig) -> bool:
+    """Return whether the run renders in the Web UI, where card-producing tools have a surface."""
+    return (cfg.source or "dashboard") in UI_SOURCES and cfg.stop_summary is not True
 
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
@@ -1208,6 +1216,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
+        *((show_file,) if _ui_tools_enabled(cfg) else ()),
         manage_code_channel,
         slack_add_reaction,
         slack_attach_html,
@@ -1218,7 +1227,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         *(ADMIN_TOOLS if admin_thread else ()),
     ]
     if local_run:
-        static_tools = [http_request, fetch_url, web_search]
+        static_tools = [http_request, fetch_url, web_search, show_file]
     elif stop_summary_mode:
         static_tools = [slack_read_thread_messages, slack_thread_reply]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}

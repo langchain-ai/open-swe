@@ -23,12 +23,14 @@ export type RenderItem =
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "file-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "iframe-item",
+  "file-item",
 ])
 
 export function splitWorkAndReply(items: Array<RenderItem>): {
@@ -48,6 +50,7 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
     if (
       item.type === "reply-item" ||
       item.type === "iframe-item" ||
+      item.type === "file-item" ||
       index >= trailingReplyIndex
     ) {
       replyItems.push(item)
@@ -231,6 +234,16 @@ export function buildRenderItems(
         flushGroups()
         items.push({
           type: "iframe-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+        continue
+      }
+
+      if (chunk.display?.type === "show_file") {
+        flushGroups()
+        items.push({
+          type: "file-item",
           key: `tool-${chunk.toolCallId}`,
           chunk,
         })

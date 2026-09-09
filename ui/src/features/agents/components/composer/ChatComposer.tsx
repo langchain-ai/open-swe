@@ -46,6 +46,7 @@ import type {
 import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import { subscribeComposerInsert } from "@/features/agents/lib/composerInsert"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
@@ -592,6 +593,19 @@ export const ChatComposer = memo(function ChatComposer({
       editorRef.current?.focusAtEnd()
     },
     [applyPrompt, value]
+  )
+
+  useEffect(
+    () =>
+      subscribeComposerInsert((text) => {
+        const current = editorRef.current?.readSnapshot().value ?? ""
+        const separator =
+          current.length === 0 || current.endsWith("\n") ? "" : "\n\n"
+        const nextValue = `${current}${separator}${text}`
+        applyPrompt(nextValue, nextValue.length)
+        editorRef.current?.focusAtEnd()
+      }),
+    [applyPrompt]
   )
 
   // Two accepted payloads: OS image files, and a repo path dragged out of the

@@ -95,6 +95,30 @@ export type OutputIframeDisplay =
       filename: string
     }
 
+interface ShowFileDisplayBase {
+  type: "show_file"
+  path: string
+  filename: string
+  title: string
+}
+
+export type ShowFileDisplay =
+  | (ShowFileDisplayBase & {
+      kind: "text"
+      content: string
+      totalLines: number
+      startLine: number
+      endLine: number
+    })
+  | (ShowFileDisplayBase & { kind: "diff"; content: string })
+  | (ShowFileDisplayBase & {
+      kind: "image"
+      mimeType: string
+      contentBase64: string
+    })
+
+export type ToolDisplay = OutputIframeDisplay | ShowFileDisplay
+
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
@@ -105,7 +129,7 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
-  display?: OutputIframeDisplay
+  display?: ToolDisplay
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData
