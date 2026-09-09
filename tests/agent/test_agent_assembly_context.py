@@ -245,6 +245,24 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
 
 
 @pytest.mark.asyncio
+async def test_engine_validation_keeps_disposable_sandbox_writable() -> None:
+    config = _base_config()
+    config["configurable"].update(
+        {
+            "langsmith_engine_issue_validation": True,
+            "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        }
+    )
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+
+    backend = captured["backend"]
+    assert isinstance(backend, CompositeBackend)
+    assert isinstance(backend.default, SandboxBackendProxy)
+    assert isinstance(backend.routes["/bundled-skills/"], ReadOnlyBackend)
+
+
+@pytest.mark.asyncio
 async def test_agent_wires_user_organization_and_bundled_skills_into_agents() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     sources = ["/skills/", "/organization-skills/", "/bundled-skills/"]

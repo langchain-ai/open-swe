@@ -262,3 +262,50 @@ def test_resolve_github_token_bot_only_mode_non_slack_uses_bot(
     config = {"configurable": {"source": source, "github_login": "octo", "thread_id": "t1"}}
     token, _ = asyncio.run(auth.resolve_github_token(config, "t1"))
     assert token == "bot-tok"
+
+
+def test_engine_validation_uses_repository_scoped_read_only_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    async def fake_installation_token(**kwargs):
+        captured.update(kwargs)
+        return "validation-token", "2099-01-01T00:00:00Z"
+
+    monkeypatch.setattr(
+        auth,
+        "get_github_app_installation_token_with_expiry",
+        fake_installation_token,
+    )
+    monkeypatch.setattr(
+        auth,
+        "_cache_resolved_github_token",
+        lambda _thread_id, token, expires_at=None, **_: (token, expires_at),
+    )
+    config = {
+        "configurable": {
+            "langsmith_engine_issue_validation": True,
+            "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        }
+    }
+
+    token = asyncio.run(auth.resolve_github_token(config, "t1"))
+
+    assert token == ("validation-token", "2099-01-01T00:00:00Z")
+    assert captured == {
+        "repositories": ["open-swe"],
+        "permissions": {"contents": "read"},
+    }
+
+
+def test_engine_validation_rejects_other_repositories() -> None:
+    config = {
+        "configurable": {
+            "langsmith_engine_issue_validation": True,
+            "repo": {"owner": "private", "name": "repo"},
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="public Open SWE repository"):
+        asyncio.run(auth.resolve_github_token(config, "t1"))

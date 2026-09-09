@@ -72,6 +72,12 @@ def test_is_eval_covers_both_flags():
     assert not RunConfig.parse({}).is_eval
 
 
+def test_engine_validation_requires_explicit_flag():
+    assert RunConfig.parse({"langsmith_engine_issue_validation": True}).is_engine_validation
+    assert not RunConfig.parse({"source": "engine_validation"}).is_engine_validation
+    assert not RunConfig.parse({}).is_engine_validation
+
+
 def test_bools_are_not_accepted_as_integers():
     """Pydantic treats bool as int, which would make ``pr_number=True`` mean PR 1."""
     cfg = RunConfig.parse(

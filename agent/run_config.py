@@ -152,6 +152,7 @@ class RunConfig(BaseModel):
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     stop_summary: bool | None = None
+    langsmith_engine_issue_validation: bool | None = None
 
     # Dashboard review chat
     chat_repo_owner: str | None = None
@@ -237,3 +238,7 @@ class RunConfig(BaseModel):
     @property
     def is_eval(self) -> bool:
         return self.eval is True or self.reviewer_eval is True
+
+    @property
+    def is_engine_validation(self) -> bool:
+        return self.langsmith_engine_issue_validation is True
