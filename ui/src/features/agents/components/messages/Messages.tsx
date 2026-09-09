@@ -19,6 +19,10 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
+import {
+  readScrollPosition,
+  rememberScrollPosition,
+} from "@/features/agents/lib/scrollMemory"
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24
 
@@ -67,6 +71,7 @@ function QueuedMessages({
 export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
+  scrollKey,
   showPlanArtifact = false,
   emptyState,
   pollWorkflowApprovalsWhileActive = false,
@@ -93,7 +98,14 @@ export const Messages = memo(function MessagesComponent({
   const lastManualScrollTopRef = useRef(0)
   const previousScrollTopRef = useRef(0)
   const pendingScrollFrameRef = useRef<number | null>(null)
+  const scrollKeyRef = useRef(scrollKey)
+  /** A remembered offset still waiting for enough content to scroll to. */
+  const restoreTopRef = useRef<number | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+
+  useLayoutEffect(() => {
+    scrollKeyRef.current = scrollKey
+  }, [scrollKey])
 
   const clearScheduledScroll = useCallback(() => {
     if (pendingScrollFrameRef.current === null) return
@@ -123,6 +135,20 @@ export const Messages = memo(function MessagesComponent({
     previousScrollTopRef.current = currentTop
     syncScrollButtonVisibility(el)
   }, [syncScrollButtonVisibility])
+
+  const applyPendingRestore = useCallback(
+    (el: HTMLDivElement) => {
+      const top = restoreTopRef.current
+      if (top === null) return false
+      const maxTop = Math.max(0, el.scrollHeight - el.clientHeight)
+      el.scrollTop = Math.min(top, maxTop)
+      lastManualScrollTopRef.current = el.scrollTop
+      previousScrollTopRef.current = el.scrollTop
+      syncScrollButtonVisibility(el)
+      return true
+    },
+    [syncScrollButtonVisibility]
+  )
 
   const scheduleScrollToBottom = useCallback(() => {
     if (!autoScrollEnabledRef.current) return
@@ -154,10 +180,16 @@ export const Messages = memo(function MessagesComponent({
       syncScrollButtonVisibility(el)
       lastManualScrollTopRef.current = currentTop
       previousScrollTopRef.current = currentTop
+      const key = scrollKeyRef.current
+      if (key) {
+        rememberScrollPosition(key, { top: currentTop, atBottom: nearBottom })
+      }
     }
 
-    scrollToBottomNow()
-    autoScrollEnabledRef.current = true
+    if (restoreTopRef.current === null) {
+      scrollToBottomNow()
+      autoScrollEnabledRef.current = true
+    }
 
     el.addEventListener("scroll", handleScroll, { passive: true })
     return () => {
@@ -171,9 +203,34 @@ export const Messages = memo(function MessagesComponent({
     syncScrollButtonVisibility,
   ])
 
+  // Switching transcripts: resume where the user left this one, or follow the
+  // tail when they were pinned to it (or have never seen it).
   useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
+    const remembered = scrollKey ? readScrollPosition(scrollKey) : undefined
+    if (remembered && !remembered.atBottom) {
+      autoScrollEnabledRef.current = false
+      clearScheduledScroll()
+      restoreTopRef.current = remembered.top
+      applyPendingRestore(el)
+      return
+    }
+    restoreTopRef.current = null
+    autoScrollEnabledRef.current = true
+    scrollToBottomNow()
+  }, [applyPendingRestore, clearScheduledScroll, scrollKey, scrollToBottomNow])
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    if (applyPendingRestore(el)) {
+      // Content is in place once messages exist; later growth must not yank
+      // the user back to the remembered offset.
+      if (messages.length > 0) restoreTopRef.current = null
+      return
+    }
 
     if (autoScrollEnabledRef.current) {
       scheduleScrollToBottom()
@@ -191,6 +248,7 @@ export const Messages = memo(function MessagesComponent({
     previousScrollTopRef.current = el.scrollTop
     syncScrollButtonVisibility(el)
   }, [
+    applyPendingRestore,
     messages,
     isStreaming,
     scheduleScrollToBottom,
@@ -203,6 +261,7 @@ export const Messages = memo(function MessagesComponent({
     if (!scroller || !content || typeof ResizeObserver === "undefined") return
 
     const resizeObserver = new ResizeObserver(() => {
+      if (applyPendingRestore(scroller)) return
       if (autoScrollEnabledRef.current) {
         scheduleScrollToBottom()
         return
@@ -222,7 +281,7 @@ export const Messages = memo(function MessagesComponent({
     resizeObserver.observe(content)
 
     return () => resizeObserver.disconnect()
-  }, [scheduleScrollToBottom, syncScrollButtonVisibility])
+  }, [applyPendingRestore, scheduleScrollToBottom, syncScrollButtonVisibility])
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),

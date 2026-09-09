@@ -88,11 +88,11 @@ importers:
         specifier: ^1.2.9
         version: 1.2.9(ws@8.21.3)
       '@langchain/langgraph-sdk':
-        specifier: ^1.9.31
-        version: 1.10.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: ^1.10.2
+        version: 1.10.2(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@langchain/react':
-        specifier: ^1.0.32
-        version: 1.0.33(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: ^1.0.35
+        version: 1.0.35(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@lexical/react':
         specifier: ^0.49.0
         version: 0.49.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.3)(yjs@13.6.32)
@@ -809,8 +809,8 @@ packages:
     resolution: {integrity: sha512-conzSEj9Zu1AyXJLXsSbgrtxtxinmI1yGqQ5CIJZSoV5rvv+yvQE/vgBnoySpBQ/bl3YPgj2FL/gbDjWykLSfg==}
     engines: {node: '>=20'}
 
-  '@langchain/langgraph-sdk@1.10.0':
-    resolution: {integrity: sha512-cPPkh+hMNgeOaGtJRrqs1AjZde45cG2+Ma9Sc10wz2RyvT8SKToCKS+VvkS18SsLajnmq6/FKVmthq6rnUVYOw==}
+  '@langchain/langgraph-sdk@1.10.2':
+    resolution: {integrity: sha512-86qsfdBZWu1ZgywLN8AThU/jXi9rjPDZPWcTJp4SA1A/L62ypTNoSXbvtiwZt1odokXccYTxK1XWS8tmVdvEmw==}
     peerDependencies:
       '@langchain/core': ^1.1.48
       react: ^18 || ^19
@@ -824,8 +824,8 @@ packages:
   '@langchain/protocol@0.0.19':
     resolution: {integrity: sha512-9hKcRrH7cBX6gfutdfXPoft1OCchHe4FEpALoDJMl5Qu+n/YG5ynZmyu8+8cxORlPwHBoKTxggvXz+76M1yX1Q==}
 
-  '@langchain/react@1.0.33':
-    resolution: {integrity: sha512-gd/wUgXxlAaS6XH7BStsfo/XhqqmRPdZ3XrF7YzrekglH9utCtJz+iTPfnB/KY+YSTCgglpU+9LWR7nlLv2q+w==}
+  '@langchain/react@1.0.35':
+    resolution: {integrity: sha512-U207/V5yjUc7zTFk0nYK42o6ba4DVr1qeAfDs4Ye601fs5wU0x6cef9XTVzCN5AtRFr70TnZ8FY+3WXZzSCabw==}
     peerDependencies:
       '@langchain/core': ^1.1.48
       react: ^18 || ^19
@@ -6569,7 +6569,7 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/langgraph-sdk@1.10.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/langgraph-sdk@1.10.2(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@langchain/core': 1.2.9(ws@8.21.3)
       '@langchain/protocol': 0.0.19
@@ -6582,10 +6582,10 @@ snapshots:
 
   '@langchain/protocol@0.0.19': {}
 
-  '@langchain/react@1.0.33(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/react@1.0.35(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@langchain/core': 1.2.9(ws@8.21.3)
-      '@langchain/langgraph-sdk': 1.10.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@langchain/langgraph-sdk': 1.10.2(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
     transitivePeerDependencies:
       - react-dom
@@ -7971,7 +7971,7 @@ snapshots:
     dependencies:
       '@types/http-cache-semantics': 4.2.0
       '@types/keyv': 3.1.4
-      '@types/node': 24.13.3
+      '@types/node': 26.3.0
       '@types/responselike': 1.0.3
 
   '@types/chai@5.2.3':
@@ -7995,7 +7995,7 @@ snapshots:
 
   '@types/fs-extra@9.0.13':
     dependencies:
-      '@types/node': 24.13.3
+      '@types/node': 26.3.0
 
   '@types/hast@3.0.5':
     dependencies:
@@ -8014,7 +8014,7 @@ snapshots:
 
   '@types/keyv@3.1.4':
     dependencies:
-      '@types/node': 24.13.3
+      '@types/node': 26.3.0
 
   '@types/mdast@4.0.4':
     dependencies:
@@ -8040,7 +8040,7 @@ snapshots:
 
   '@types/responselike@1.0.3':
     dependencies:
-      '@types/node': 24.13.3
+      '@types/node': 26.3.0
 
   '@types/tough-cookie@4.0.5': {}
 
