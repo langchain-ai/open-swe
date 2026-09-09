@@ -12,7 +12,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 
 from agent.github import comments as github_comments
@@ -182,7 +182,7 @@ class _MockHttpxClient:
 
 def test_react_to_github_comment_raises_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_client = _MockHttpxClient(status_code=401)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: mock_client)
+    monkeypatch.setattr(httpx2, "AsyncClient", lambda *a, **kw: mock_client)
 
     async def _run() -> None:
         await github_comments.react_to_github_comment(
@@ -200,7 +200,7 @@ def test_fetch_pr_comments_since_last_tag_raises_on_401(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mock_client = _MockHttpxClient(status_code=401)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: mock_client)
+    monkeypatch.setattr(httpx2, "AsyncClient", lambda *a, **kw: mock_client)
 
     async def _run() -> None:
         await github_comments.fetch_pr_comments_since_last_tag(
@@ -215,7 +215,7 @@ def test_fetch_pr_comments_since_last_tag_raises_on_401(
 
 def test_fetch_issue_comments_raises_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_client = _MockHttpxClient(status_code=401)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: mock_client)
+    monkeypatch.setattr(httpx2, "AsyncClient", lambda *a, **kw: mock_client)
 
     async def _run() -> None:
         await github_comments.fetch_issue_comments(

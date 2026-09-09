@@ -23,7 +23,7 @@ import logging
 import re
 from typing import Any, TypedDict
 
-import httpx
+import httpx2
 
 from agent.github.checks import CheckConclusion, complete_review_check_run
 from agent.github.http import (
@@ -361,7 +361,7 @@ async def post_status_comment(
         try:
             response = await github_request(client, "POST", url, json={"body": body})
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception("Failed to post status comment for %s/%s#%s", owner, repo, pr_number)
             return None
     data = response.json()
@@ -384,7 +384,7 @@ async def delete_status_comment(
             if response.status_code == 404:  # noqa: PLR2004
                 return True
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception("Failed to delete status comment %s on %s/%s", comment_id, owner, repo)
             return False
     return True
@@ -519,7 +519,7 @@ async def open_swe_review_exists(
             try:
                 response = await github_request(client, "GET", url, params=params)
                 response.raise_for_status()
-            except httpx.HTTPError:
+            except httpx2.HTTPError:
                 logger.exception(
                     "Failed to list PR reviews for %s/%s#%s",
                     owner,
@@ -568,7 +568,7 @@ async def post_pull_request_review(
             response.raise_for_status()
         except GitHubAuthError:
             raise
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             body = (e.response.text or "")[:500]
             logger.exception(
                 "Failed to POST PR review for %s/%s#%s: %s %s",
@@ -606,7 +606,7 @@ async def post_pull_request_review(
                 "_raw_errors": raw_errors,
                 "_status": e.response.status_code,
             }
-        except httpx.HTTPError as e:
+        except httpx2.HTTPError as e:
             logger.exception("Failed to POST PR review for %s/%s#%s", owner, repo, pr_number)
             return {"_error": f"{type(e).__name__}: {e}"}
     data = response.json()
@@ -644,7 +644,7 @@ async def fetch_review_comments(
             try:
                 response = await github_request(client, "GET", url, params=params)
                 response.raise_for_status()
-            except httpx.HTTPError:
+            except httpx2.HTTPError:
                 logger.exception(
                     "Failed to list review comments for review %s on %s/%s",
                     review_id,
@@ -737,7 +737,7 @@ async def fetch_pr_review_threads(
                     },
                 )
                 response.raise_for_status()
-            except httpx.HTTPError:
+            except httpx2.HTTPError:
                 logger.exception(
                     "Failed to fetch PR review threads for %s/%s#%s",
                     owner,
@@ -859,7 +859,7 @@ async def fetch_review_thread_id_for_comment(
                     },
                 )
                 response.raise_for_status()
-            except httpx.HTTPError:
+            except httpx2.HTTPError:
                 logger.exception(
                     "Failed to fetch review threads for %s/%s#%s",
                     owner,
@@ -913,7 +913,7 @@ async def resolve_review_thread(*, thread_node_id: str, token: str) -> bool:
                 json={"query": mutation, "variables": {"threadId": thread_node_id}},
             )
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception("Failed to resolve review thread %s", thread_node_id)
             return False
     data = response.json()
@@ -950,7 +950,7 @@ async def reply_to_review_comment(
             response.raise_for_status()
         except GitHubAuthError:
             raise
-        except httpx.HTTPError:
+        except httpx2.HTTPError:
             logger.exception(
                 "Failed to reply to review comment %s on %s/%s#%s",
                 review_comment_id,

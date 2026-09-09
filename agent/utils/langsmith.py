@@ -40,7 +40,7 @@ class LangSmithCostUnavailable(RuntimeError):
 def async_langsmith_client(api_key: str, api_url: str) -> AsyncLangSmithClient:
     """Return a pooled ``AsyncClient`` for these credentials.
 
-    Each client owns an ``httpx`` connection pool bound to the event loop that
+    Each client owns an ``httpx2`` connection pool bound to the event loop that
     built it, so this assumes one loop per process. Keyed on the credentials so
     a test that repoints the env gets a fresh client instead of a stale pool.
     """

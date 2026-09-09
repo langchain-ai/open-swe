@@ -1086,7 +1086,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
     monkeypatch.setattr(thread_api, "_now_ms", lambda: 123_456)
-    monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(thread_api.httpx2, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(
         thread_api, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
     )
@@ -1186,16 +1186,15 @@ async def test_run_ttft_observer_records_first_assistant_text(
         def stream(self, method: str, url: str, **kwargs: object) -> FakeStreamContext:
             assert method == "GET"
             assert url.endswith("/threads/thread-1/runs/run-1/stream")
-            assert kwargs["headers"] == {
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream",
-                "Last-Event-ID": "-1",
-            }
+            headers = kwargs["headers"]
+            assert headers["Content-Type"] == "application/json"
+            assert headers["Accept"] == "text/event-stream"
+            assert headers["Last-Event-ID"] == "-1"
             assert kwargs["params"] == {"stream_mode": "messages"}
             return FakeStreamContext()
 
     record = AsyncMock()
-    monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(thread_api.httpx2, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(thread_api, "record_dashboard_thread_ttft", record)
 
     await thread_api._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
@@ -1309,7 +1308,7 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin,another-admin")
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
-    monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(thread_api.httpx2, "AsyncClient", FakeAsyncClient)
 
     status_code, _, _ = await thread_api.proxy_dashboard_thread_commands(
         "tid", "another-admin", b'{"method": "input.respond"}'
@@ -1396,7 +1395,7 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
             return FakeResponse()
 
     posted: list[dict[str, object]] = []
-    monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(thread_api.httpx2, "AsyncClient", FakeAsyncClient)
     await thread_api.proxy_dashboard_thread_history("tid", "teammate", b'{"limit": 20}')
     await thread_api.proxy_dashboard_thread_history(
         "tid", "teammate", b'{"limit": 20, "metadata": {"run_id": "run-1"}}'

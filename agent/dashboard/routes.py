@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Any, Literal, Protocol, TypeVar
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
-import httpx
+import httpx2
 from fastapi import (
     APIRouter,
     Depends,
@@ -271,7 +271,7 @@ router = APIRouter(
     tags=["dashboard"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
-_GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+_GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
 # Module-level so a local harness can point the browser leg at a fake consent
@@ -1176,7 +1176,7 @@ def _github_api_http_exception(status_code: int) -> HTTPException:
 
 
 async def _paginate(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     url: str,
     *,
     headers: dict[str, str],
@@ -1197,15 +1197,15 @@ async def _paginate(
         params = {"per_page": "100"} if first else None
         try:
             r = await client.get(next_url, headers=headers, params=params)
-        except httpx.TimeoutException as exc:
+        except httpx2.TimeoutException as exc:
             logger.warning("GitHub API timed out while paginating %s", next_url)
             raise HTTPException(503, "github API request timed out") from exc
-        except httpx.RequestError as exc:
+        except httpx2.RequestError as exc:
             logger.warning("GitHub API request failed while paginating %s: %s", next_url, exc)
             raise HTTPException(502, "github API request failed") from exc
         try:
             r.raise_for_status()
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             logger.warning(
                 "GitHub API returned %s while paginating %s",
                 r.status_code,
@@ -1239,7 +1239,7 @@ async def _fetch_user_installations_and_repos(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
         try:
             installations = await _paginate(
                 client,

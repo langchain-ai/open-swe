@@ -12,7 +12,7 @@ screenshots and DOM snapshots.
 import logging
 from typing import Any
 
-import httpx
+import httpx2
 from langchain_core.tools import BaseTool, StructuredTool
 
 from agent.dashboard.user_credentials import CURRENTS_API_BASE, get_currents_api_key
@@ -20,7 +20,7 @@ from agent.utils.thread_participants import resolve_participant
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+_TIMEOUT = httpx2.Timeout(30.0, connect=10.0)
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -33,7 +33,7 @@ def _headers(api_key: str) -> dict[str, str]:
 
 async def _get(path: str, api_key: str, **params: Any) -> dict[str, Any]:
     url = f"{CURRENTS_API_BASE}{path}"
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_TIMEOUT) as client:
         resp = await client.get(url, headers=_headers(api_key), params=params)
         resp.raise_for_status()
         return resp.json()

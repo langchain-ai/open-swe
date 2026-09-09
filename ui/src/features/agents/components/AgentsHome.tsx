@@ -16,8 +16,6 @@ import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeade
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Messages } from "@/features/agents/components/messages"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
-import { LocalProjectSelector } from "@/features/agents/components/composer/RunTargetSelector"
-import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { LocalProjectRightPanel } from "@/features/agents/components/LocalProjectRightPanel"
 import {
@@ -62,7 +60,13 @@ const NEW_AGENT_PANEL_REF = {
   threadId: NEW_AGENT_PANEL_ID,
 }
 
-export function AgentsHome() {
+export function AgentsHome({
+  initialRepo,
+  initialLocalProject,
+}: {
+  initialRepo?: string
+  initialLocalProject?: string
+}) {
   const stream = useAgentStream()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -104,12 +108,17 @@ export function AgentsHome() {
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
+  const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
+    initialLocalProject ? "local" : initialRepo ? "cloud" : null
+  )
   const runTarget: RunTarget = isDesktop
     ? cloudEnabled
-      ? desktopThreadSource
+      ? (runTargetOverride ?? desktopThreadSource)
       : "local"
     : "cloud"
-  const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
+  const [localProjectPath, setLocalProjectPath] = useState<string | null>(
+    initialLocalProject ?? null
+  )
   const localProjectPathRef = useRef(localProjectPath)
   useEffect(() => {
     localProjectPathRef.current = localProjectPath
@@ -130,6 +139,7 @@ export function AgentsHome() {
   const [localError, setLocalError] = useState<string | null>(null)
   const {
     projects: localProjects,
+    loaded: localProjectsLoaded,
     addProject,
     removeProject,
   } = useDesktopProjects()
@@ -139,7 +149,7 @@ export function AgentsHome() {
   const skills = useAgentSkills({ enabled: cloudEnabled })
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
-    undefined
+    initialRepo
   )
   const repo =
     repoOverride === undefined
@@ -166,14 +176,14 @@ export function AgentsHome() {
   }, [panelCollapsed, stream.threadId])
 
   useEffect(() => {
-    if (!isDesktop) return
+    if (!isDesktop || !localProjectsLoaded) return
     const stored = window.localStorage.getItem(LAST_LOCAL_PROJECT_KEY)
     const selected = localProjects.find(
       (project) => project.cwd === localProjectPath || project.cwd === stored
     )
     // oxlint-disable-next-line react/set-state-in-effect
     setLocalProjectPath(selected?.cwd ?? localProjects[0]?.cwd ?? null)
-  }, [isDesktop, localProjectPath, localProjects])
+  }, [isDesktop, localProjectPath, localProjects, localProjectsLoaded])
 
   const refreshLocalProjectBranch = useCallback(async () => {
     const cwd = localProjectPathRef.current
@@ -276,12 +286,14 @@ export function AgentsHome() {
   }, [refreshLocalProjectBranch])
 
   const handleRunTargetChange = (next: RunTarget) => {
+    setRunTargetOverride(next)
     setDesktopThreadSource(next)
     setLocalError(null)
   }
 
   const handleSelectLocalProject = (cwd: string) => {
     setLocalProjectPath(cwd)
+    setRunTargetOverride("local")
     window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
     setDesktopThreadSource("local")
     setLocalError(null)
@@ -450,10 +462,6 @@ export function AgentsHome() {
     runTarget === "local"
       ? localProjects.find((project) => project.cwd === localProjectPath)
       : undefined
-  const hasProjects =
-    runTarget === "local"
-      ? localProjects.length > 0
-      : Boolean(repo || reposQuery.data?.repositories.length)
   const optimisticDraftThread = submittedDraft
     ? optimisticThread("pending", submittedDraft)
     : null
@@ -483,41 +491,8 @@ export function AgentsHome() {
                 alt=""
                 className="size-14 opacity-30 grayscale dark:opacity-20"
               />
-              <h1 className="flex flex-wrap items-baseline justify-center gap-x-1 text-center text-2xl tracking-tight sm:text-3xl">
-                {hasProjects ? (
-                  <>
-                    <span>What should we build in</span>
-                    {runTarget === "local" ? (
-                      <LocalProjectSelector
-                        onAddProject={() => void handleAddLocalProject()}
-                        onRemoveProject={(cwd) =>
-                          void handleRemoveLocalProject(cwd)
-                        }
-                        onSelectProject={handleSelectLocalProject}
-                        placeholder="a project"
-                        projects={localProjects}
-                        selectedProjectPath={localProjectPath}
-                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
-                      />
-                    ) : (
-                      <RepoSelector
-                        className="inline-flex"
-                        emptySelectionLabel="Don't work in a project"
-                        noMatchesLabel="No matching projects"
-                        onRepoChange={setRepoOverride}
-                        placeholder="a project"
-                        repos={reposQuery.data?.repositories}
-                        searchPlaceholder="Search projects…"
-                        selectedLabel={repo?.split("/").at(-1)}
-                        selectedRepo={repo}
-                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
-                      />
-                    )}
-                    <span>?</span>
-                  </>
-                ) : (
-                  <span>What should we build?</span>
-                )}
+              <h1 className="text-center text-2xl tracking-tight sm:text-3xl">
+                What should we build?
               </h1>
             </div>
           </div>

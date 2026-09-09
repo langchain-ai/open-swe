@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 from fastapi import HTTPException
 
@@ -9,9 +9,9 @@ from agent.dashboard import thread_api
 from agent.github import pull_request_status
 
 
-def _response(status: int, payload: object) -> httpx.Response:
-    return httpx.Response(
-        status, json=payload, request=httpx.Request("GET", "https://api.github.com")
+def _response(status: int, payload: object) -> httpx2.Response:
+    return httpx2.Response(
+        status, json=payload, request=httpx2.Request("GET", "https://api.github.com")
     )
 
 
