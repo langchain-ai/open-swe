@@ -1180,12 +1180,22 @@ async def get_dashboard_terminal_sandbox(
 
 
 async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[str, Any]]:
-    runs = await client.runs.list(thread_id, status="pending", limit=100)
-    queued = [
-        dict(message)
-        for run in runs
-        if isinstance((message := run.get("metadata", {}).get("dashboard_queued_message")), Mapping)
-    ]
+    queued: list[dict[str, Any]] = []
+    try:
+        runs = await client.runs.list(thread_id, status="pending", limit=100)
+        queued = [
+            dict(message)
+            for run in runs
+            if isinstance(
+                (message := run.get("metadata", {}).get("dashboard_queued_message")), Mapping
+            )
+        ]
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "Could not fetch queued runs",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
     try:
         item = await client.store.get_item(("queue", thread_id), "pending_messages")
     except Exception:  # noqa: BLE001

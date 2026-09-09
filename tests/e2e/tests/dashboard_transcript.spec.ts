@@ -163,11 +163,23 @@ test.describe("transcript rendering", () => {
     await waitForThreadNotBusy(page, threadId);
     await typeIntoComposer(page, "E2E_BUSY_HOLD:8 first queued-run test");
     await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+    const queuedResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          `/dashboard/api/threads/${threadId}/messages` &&
+        response.request().postDataJSON()?.content ===
+          "Durable followup after reload",
+    );
     await typeIntoComposer(page, "Durable followup after reload");
+    expect((await queuedResponse).status()).toBe(200);
     await expect(page.getByTestId("queued-message")).toContainText(
       "Durable followup after reload",
     );
     await page.reload();
+    await expect(page.getByTestId("queued-message")).toContainText(
+      "Durable followup after reload",
+    );
     await waitForStateToContain(
       page,
       threadId,

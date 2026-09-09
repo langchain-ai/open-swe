@@ -1,4 +1,7 @@
 from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
 
 from agent.dashboard import thread_api
 
@@ -214,3 +217,56 @@ async def test_get_dashboard_thread_hydrates_queued_dashboard_messages(monkeypat
             ],
         }
     ]
+
+
+@pytest.mark.parametrize("unavailable", ["runs", "store", "both"])
+async def test_queue_lookup_failure_keeps_thread_readable(monkeypatch, unavailable) -> None:
+    queued = {"id": "queued-run", "content": "native follow-up", "createdAt": 123, "images": []}
+    client = FakeClient(
+        {"source": "dashboard", "github_login": "octocat", "latest_run_status": "running"},
+        "running",
+        thread_status="busy",
+        queued={
+            "value": {
+                "messages": [
+                    {
+                        "content": {
+                            "source": "dashboard",
+                            "queue_id": "legacy",
+                            "text": "legacy follow-up",
+                            "created_at_ms": 456,
+                        }
+                    }
+                ]
+            }
+        },
+    )
+
+    async def list_runs(thread_id, limit=1, status=None):
+        if status == "pending":
+            if unavailable in {"runs", "both"}:
+                raise RuntimeError("Run queue unavailable")
+            return [{"metadata": {"dashboard_queued_message": queued}}]
+        return [{"run_id": "run-1", "status": "running"}]
+
+    monkeypatch.setattr(client.runs, "list", list_runs)
+    if unavailable in {"store", "both"}:
+        monkeypatch.setattr(
+            client.store, "get_item", AsyncMock(side_effect=RuntimeError("Store unavailable"))
+        )
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+
+    result = await thread_api.get_dashboard_thread("tid", "octocat")
+
+    assert result["id"] == "tid"
+    assert result["status"] == "running"
+    assert (
+        result["queuedMessages"]
+        == {
+            "runs": [
+                {"id": "legacy", "content": "legacy follow-up", "createdAt": 456, "images": []}
+            ],
+            "store": [queued],
+            "both": [],
+        }[unavailable]
+    )

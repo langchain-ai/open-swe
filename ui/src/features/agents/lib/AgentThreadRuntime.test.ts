@@ -211,7 +211,7 @@ it("accepts a send before the run ends and rejects a failed dispatch", async () 
     failed.runtime.submit({
       messages: [{ type: "human", content: "keep this draft" }],
     })
-  ).rejects.toThrow()
+  ).rejects.toThrow("The message was not accepted. Please retry.")
   expect(
     failed.runtime.store.getSnapshot().messages.map((m) => m.text)
   ).not.toContain("keep this draft")

@@ -30,6 +30,7 @@ describe("Messages", () => {
             author: "agent",
             timestamp: "2026-09-03T10:30:00.000Z",
             chunks: [
+              { kind: "text", text: "I'll acknowledge this in Slack." },
               {
                 kind: "tool-execution",
                 toolCallId: "reply",

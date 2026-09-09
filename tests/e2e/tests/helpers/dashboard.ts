@@ -32,6 +32,9 @@ export async function typeIntoComposer(page: Page, text: string) {
   const editor = page.getByTestId("composer-editor");
   await editor.click();
   await editor.pressSequentially(text);
+  await expect(
+    page.getByRole("button", { name: /^(Send message|Steer agent)$/ }),
+  ).toBeEnabled();
   await editor.press("Enter");
 }
 

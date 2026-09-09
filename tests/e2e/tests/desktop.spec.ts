@@ -37,6 +37,9 @@ async function typeIntoComposer(
   const editor = page.getByTestId("composer-editor");
   await editor.click();
   await editor.pressSequentially(text);
+  await expect(
+    page.getByRole("button", { name: /^(Send message|Steer agent)$/ }),
+  ).toBeEnabled();
   await editor.press("Enter");
 }
 
@@ -252,6 +255,10 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       contentType: "image/png",
     });
   } finally {
+    // Unload persistent streams before Playwright flushes and closes the context.
+    await page
+      ?.goto("about:blank", { waitUntil: "commit", timeout: 10_000 })
+      .catch(() => {});
     await context.tracing.stop({ path: trace }).catch(() => {});
     if (existsSync(trace)) {
       await testInfo.attach("electron-trace", {

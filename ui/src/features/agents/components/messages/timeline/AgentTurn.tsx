@@ -284,9 +284,13 @@ export function AgentTurn({
         ? collapsedItems
         : renderItems
   const workItemKeys = new Set(workItems.map((item) => item.key))
-  const firstWorkIndex = renderItems.findIndex((item) =>
-    workItemKeys.has(item.key)
+  const firstActionIndex = renderItems.findIndex(
+    (item) => workItemKeys.has(item.key) && countWorkActions([item]) > 0
   )
+  const firstWorkIndex =
+    firstActionIndex >= 0
+      ? firstActionIndex
+      : renderItems.findIndex((item) => workItemKeys.has(item.key))
   const renderItemIndex = new Map(
     renderItems.map((item, index) => [item.key, index])
   )
