@@ -32,6 +32,7 @@ export interface ThreadMessageRequest {
   model_id?: string | null
   effort?: string | null
   plan_mode?: boolean
+  client_message_id?: string
 }
 
 export interface ScheduleCreateRequest {
@@ -402,8 +403,6 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
     ),
-  streamUrl: (threadId: string) =>
-    `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
 }
 
 export type ThreadGroup = "today" | "last7" | "last30" | "older"

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 _MAX_LIST_RUNS = 50
 
 
-def _client(creds: LangSmithCredentials):
+def langsmith_client(creds: LangSmithCredentials):
     return AsyncLangSmithClient(api_key=creds.api_key, api_url=creds.endpoint)
 
 
@@ -91,7 +91,7 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
                 # AsyncClient.read_run has no load_child_runs; the sync one runs off-loop.
                 run = await asyncio.to_thread(_read_run_with_children, creds, run_id)
             else:
-                async with _client(creds) as client:
+                async with langsmith_client(creds) as client:
                     run = await client.read_run(run_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("langsmith_get_trace failed", exc_info=True)
@@ -119,7 +119,7 @@ def _make_tools(*, allow_team: bool) -> list[BaseTool]:
 
         try:
             creds = await _creds_for(on_behalf_of, allow_team=allow_team)
-            async with _client(creds) as client:
+            async with langsmith_client(creds) as client:
                 runs = [
                     run
                     async for run in client.list_runs(

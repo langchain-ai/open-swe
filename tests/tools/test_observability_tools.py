@@ -207,7 +207,7 @@ async def test_langsmith_get_trace_serializes() -> None:
     get_trace = next(t for t in tools if t.name == "langsmith_get_trace")
     with (
         patch.object(langsmith_tools, "_creds_for", AsyncMock(return_value=creds)),
-        patch.object(langsmith_tools, "_client", lambda _c: _FakeClient()),
+        patch.object(langsmith_tools, "langsmith_client", lambda _c: _FakeClient()),
     ):
         result = await get_trace.ainvoke({"on_behalf_of": "octo", "run_id": "run-1"})
     assert result["success"] is True
@@ -237,7 +237,7 @@ async def test_langsmith_list_runs_caps_limit() -> None:
     list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
     with (
         patch.object(langsmith_tools, "_creds_for", AsyncMock(return_value=creds)),
-        patch.object(langsmith_tools, "_client", lambda _c: _FakeClient()),
+        patch.object(langsmith_tools, "langsmith_client", lambda _c: _FakeClient()),
     ):
         result = await list_runs.ainvoke(
             {"on_behalf_of": "octo", "project_name": "p", "limit": 9999}

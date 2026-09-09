@@ -2,8 +2,9 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
-Slack runs enqueue deferred session-cost enrichment; failures (``error`` /
-``timeout``) post a short reply so a run that died never leaves the user silent.
+Slack runs enqueue deferred session-cost enrichment and offer private feedback
+when a question was answered. Failures (``error`` / ``timeout``) post a short reply
+so a run that died never leaves the user silent.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -28,6 +29,7 @@ from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
+from agent.slack.thread_feedback import post_slack_feedback_prompt
 from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
@@ -305,7 +307,7 @@ async def _settle_code_channel_session(
     await set_session_status(slack_thread.channel_id, "active")
 
 
-async def _schedule_success_cost_refresh(
+async def _handle_successful_run(
     thread_id: str, run_id: str | None, payload: dict[str, Any]
 ) -> dict[str, str]:
     if run_id is None:
@@ -322,6 +324,15 @@ async def _schedule_success_cost_refresh(
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    payload_metadata = payload.get("metadata")
+    automated = (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
+    )
+    if slack_thread is not None and slack_thread.channel_id and not automated:
+        await post_slack_feedback_prompt(
+            thread_id, run_id, slack_thread.channel_id, require_answer=True
+        )
     prepare_run_id = _prepare_run_id(payload)
     if prepare_run_id is None:
         return {"status": "ignored", "reason": "missing prepare_run_id"}
@@ -361,7 +372,7 @@ async def _schedule_success_cost_refresh(
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
-    Enqueues successful Slack cost refreshes and posts failure replies idempotently.
+    Prompts for Slack feedback, enqueues cost refreshes, and posts failure replies.
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")
@@ -371,7 +382,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     if status == "success":
-        return await _schedule_success_cost_refresh(thread_id, run_id, payload)
+        return await _handle_successful_run(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
     if (
         status in _TERMINAL_FAILURE_STATUSES

@@ -7,9 +7,10 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
+from agent.input_messages import InputMessageContext, SystemIdentity
 from agent.sandboxes.providers.registry import create_sandbox
 from agent.source_context import SourceContext
-from agent.tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
+from agent.tools.background_execute import TASK_ROOT, control_script, encoded, execute
 from agent.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,16 @@ CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
 MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
+_BACKGROUND_TASK_SENDER: SystemIdentity = {
+    "id": "system:background-task",
+    "display_name": "Background task",
+    "platform": "open-swe",
+}
+_BACKGROUND_TASK_CONTEXT: InputMessageContext = {
+    "sender_id": _BACKGROUND_TASK_SENDER["id"],
+    "surface": "automation",
+    "kind": "system",
+}
 
 
 def _client():
@@ -113,9 +124,9 @@ async def _mark_delivered(backend: Any, task_id: str) -> None:
 
 
 async def _list_tasks(backend: Any) -> list[dict[str, Any]]:
-    script = _control_script("list", None)
-    result = await _execute(
-        backend, f"printf %s {shlex.quote(_encoded(script))} | base64 -d | python3"
+    script = control_script("list", None)
+    result = await execute(
+        backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
     )
     tasks = result.get("tasks") if isinstance(result, dict) else []
     return tasks if isinstance(tasks, list) else []
@@ -144,11 +155,14 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
         message = _notification(task)
         try:
             configurable = _dispatch_config(metadata, thread_id)
+            configurable["background_task_completion"] = True
             await dispatch_agent_run(
                 thread_id,
                 message,
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
+                context=_BACKGROUND_TASK_CONTEXT,
+                systems=[_BACKGROUND_TASK_SENDER],
                 metadata={},
                 multitask_strategy="enqueue",
             )

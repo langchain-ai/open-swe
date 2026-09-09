@@ -36,7 +36,10 @@ import {
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
-import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
+import {
+  visiblePendingMessages,
+  visibleQueuedMessages,
+} from "@/features/agents/lib/queuedMessages"
 import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
@@ -193,11 +196,19 @@ export function AgentThreadView({
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
   )
-  const queuedMessages = useMemo(
-    () => visibleQueuedMessages(thread.queuedMessages, baseMessages),
-    [baseMessages, thread.queuedMessages]
+  const pendingMessages = useMemo(
+    () => visiblePendingMessages(thread.pendingMessages, baseMessages),
+    [baseMessages, thread.pendingMessages]
   )
-  const hasMessages = baseMessages.length > 0
+  const visibleMessages = useMemo(
+    () => [...baseMessages, ...pendingMessages],
+    [baseMessages, pendingMessages]
+  )
+  const queuedMessages = useMemo(
+    () => visibleQueuedMessages(thread.queuedMessages, visibleMessages),
+    [thread.queuedMessages, visibleMessages]
+  )
+  const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedMessages.length > 0
   // The only file list the UI has: whatever the agent has already touched in
   // this thread. Those are also the paths a follow-up is most likely about.
@@ -293,7 +304,7 @@ export function AgentThreadView({
             </div>
           ) : (
             <Messages
-              messages={baseMessages}
+              messages={visibleMessages}
               threadId={thread.id}
               scrollKey={thread.id}
               showPlanArtifact={

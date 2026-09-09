@@ -5,9 +5,9 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.language_models import BaseChatModel
 from langchain_openai.chat_models.codex import _ChatOpenAICodex  # noqa: PLC2701
-from langchain_openai.chatgpt_oauth import (  # noqa: PLC2701
-    _ChatGPTOAuthTokenProvider,
-    _ChatGPTToken,
+from langchain_openai.chatgpt_oauth import (
+    _ChatGPTOAuthTokenProvider,  # noqa: PLC2701
+    _ChatGPTToken,  # noqa: PLC2701
 )
 
 from agent.config import ENV
