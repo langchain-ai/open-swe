@@ -142,12 +142,14 @@ async def run_agent_cost_refresh(
 
 
 async def finalize_agent_run_usage(
-    *, run_id: str, thread_id: str, state: dict[str, Any] | None
+    *, run_id: str, thread_id: str, state: dict[str, Any] | None, status: str = "success"
 ) -> None:
     """Persist terminal run usage and schedule deferred cost enrichment."""
     try:
         recorded = await record_agent_run_completion(
             run_id=run_id,
+            thread_id=thread_id,
+            status=status,
             usage=summarize_run_usage(state, run_id=run_id),
         )
         if not recorded and not await agent_run_needs_cost_refresh(run_id=run_id):

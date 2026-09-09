@@ -1940,7 +1940,32 @@ async def api_agent_usage_leaderboard(
         limit=limit,
         current_login=session["sub"],
         current_email=session.get("email"),
+        admin=_session_is_admin(session),
     )
+
+
+@router.get("/analytics/pr-merge-rate-by-model")
+async def api_pr_merge_rate_by_model(
+    period: str | None = "30d",
+    maturity_days: int | None = Query(default=None, ge=1, le=365),
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    from agent.analytics.queries import pr_merge_rate_by_model
+
+    return await pr_merge_rate_by_model(
+        period=period,
+        maturity_days=maturity_days,
+        admin=_session_is_admin(session),
+    )
+
+
+@router.get("/analytics/outbox-status")
+async def api_analytics_outbox_status(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    from agent.analytics.outbox import outbox_status
+
+    return await outbox_status()
 
 
 @router.get("/schedules")

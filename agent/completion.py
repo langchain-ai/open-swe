@@ -284,6 +284,7 @@ async def _finalize_agent_usage_telemetry(
         run_id=prepare_run_id,
         thread_id=thread_id,
         state=state,
+        status=str(status),
     )
 
 

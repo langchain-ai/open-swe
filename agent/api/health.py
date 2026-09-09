@@ -14,6 +14,13 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
+@router.get("/health/analytics")
+async def analytics_health_check() -> dict[str, Any]:
+    from agent.analytics.database import readiness
+
+    return await readiness()
+
+
 @router.post("/webhooks/run-complete")
 async def run_complete_webhook(request: Request) -> dict[str, Any]:
     if not verify_run_complete_token(request.query_params.get("token")):

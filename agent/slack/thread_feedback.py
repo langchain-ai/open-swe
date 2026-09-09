@@ -323,6 +323,14 @@ async def _process_rating(payload: dict[str, Any]) -> None:
             record.rating = int(suffix)
             record.last_rating_ts = action_ts
             await _store(channel_id).put(run_id, record)
+            from agent.analytics.emitter import feedback_submitted
+
+            await feedback_submitted(
+                run_key=run_id,
+                person_key=user_id,
+                rating=record.rating,
+                producer_version=str(action_ts),
+            )
     except Exception:
         logger.warning(
             "Could not save Slack rating", extra={"feedback_run_id": run_id}, exc_info=True
