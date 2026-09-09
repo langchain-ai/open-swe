@@ -55,12 +55,14 @@ def workspace_id() -> UUID:
 
 def opaque_id(kind: str, value: str | int | None) -> UUID | None:
     normalized = str(value or "").strip()
-    return subject_uuid(workspace_id(), kind, normalized) if normalized else None
+    return subject_uuid(workspace_id(), kind, normalized) if configured() and normalized else None
 
 
 def opaque_person(provider: str, immutable_id: str | int | None) -> UUID | None:
     normalized = str(immutable_id or "").strip().lower()
-    return person_uuid(workspace_id(), provider, normalized) if normalized else None
+    return (
+        person_uuid(workspace_id(), provider, normalized) if configured() and normalized else None
+    )
 
 
 def entry_point(source: str | None) -> EntryPoint:

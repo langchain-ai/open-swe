@@ -591,7 +591,9 @@ export function AgentsSidebar({
           to: "/agents",
           search: group.repoFullName
             ? { repo: group.repoFullName }
-            : { localProject: group.localProjectPath },
+            : group.localProjectPath
+              ? { localProject: group.localProjectPath }
+              : { noProject: true },
         })
       }}
       onTogglePin={() => toggleProjectPin(group.key)}
