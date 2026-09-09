@@ -10,8 +10,8 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
-import { WorkspaceMCPSection } from "./WorkspaceMCPSection"
-import type { WorkspaceMCP, WorkspaceMCPUpdate } from "@/lib/api"
+import { MCPConnectionsSection } from "./MCPConnectionsSection"
+import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
 
 afterEach(() => {
   cleanup()
@@ -21,8 +21,8 @@ afterEach(() => {
 it.each(["form", "import"])(
   "configures OAuth through %s and preserves saved credentials when editing",
   async (source) => {
-    let connection: WorkspaceMCP | null = null
-    const writes: WorkspaceMCPUpdate[] = []
+    let connection: MCPConnection | null = null
+    const writes: MCPConnectionUpdate[] = []
     const oauth = {
       grant_type: "client_credentials" as const,
       token_url: "https://api.linear.app/oauth/token",
@@ -37,7 +37,7 @@ it.each(["form", "import"])(
           JSON.stringify([{ name: "search", description: "Search" }])
         )
       if (init?.method === "PUT") {
-        const update = JSON.parse(String(init.body)) as WorkspaceMCPUpdate
+        const update = JSON.parse(String(init.body)) as MCPConnectionUpdate
         writes.push(update)
         const publicOAuth = update.oauth ? { ...update.oauth } : null
         if (publicOAuth) delete publicOAuth.client_secret
@@ -57,7 +57,7 @@ it.each(["form", "import"])(
     })
     render(
       <QueryClientProvider client={client}>
-        <WorkspaceMCPSection />
+        <MCPConnectionsSection scope="workspace" />
       </QueryClientProvider>
     )
     const add = screen.getByRole("button", { name: "Add MCP server" })
@@ -147,7 +147,7 @@ it.each([
   ["Token URL", "https://other.example/token"],
   ["Client ID", "other-app"],
 ])("requires a replacement secret when %s changes", async (label, value) => {
-  const connection: WorkspaceMCP = {
+  const connection: MCPConnection = {
     name: "linear",
     url: "https://mcp.linear.app/mcp",
     transport: "streamable_http",
@@ -161,7 +161,7 @@ it.each([
     revision: "v1",
     updated_at: "now",
   }
-  const requests: WorkspaceMCPUpdate[] = []
+  const requests: MCPConnectionUpdate[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (init?.body) requests.push(JSON.parse(String(init.body)))
     if (String(input).endsWith("/discover"))
@@ -175,7 +175,7 @@ it.each([
   })
   render(
     <QueryClientProvider client={client}>
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
     </QueryClientProvider>
   )
   fireEvent.click(await screen.findByRole("button", { name: "Edit linear" }))
@@ -215,7 +215,7 @@ it("validates the connection name before saving and discovering tools", async ()
   })
   render(
     <QueryClientProvider client={client}>
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
     </QueryClientProvider>
   )
   const add = screen.getByRole("button", { name: "Add MCP server" })
@@ -237,9 +237,9 @@ it("validates the connection name before saving and discovering tools", async ()
 })
 
 it("saves generic authentication, discovers tools, and enables only selected tools", async () => {
-  let connection: WorkspaceMCP | null = null
-  const writes: WorkspaceMCPUpdate[] = []
-  const discoveries: WorkspaceMCPUpdate[] = []
+  let connection: MCPConnection | null = null
+  const writes: MCPConnectionUpdate[] = []
+  const discoveries: MCPConnectionUpdate[] = []
   const operations: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
@@ -253,7 +253,7 @@ it("saves generic authentication, discovers tools, and enables only selected too
       ]
     } else if (init?.method === "PUT") {
       operations.push("save")
-      const update = JSON.parse(String(init.body)) as WorkspaceMCPUpdate
+      const update = JSON.parse(String(init.body)) as MCPConnectionUpdate
       writes.push(update)
       connection = {
         name: update.name,
@@ -283,7 +283,7 @@ it("saves generic authentication, discovers tools, and enables only selected too
   })
   render(
     <QueryClientProvider client={client}>
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
     </QueryClientProvider>
   )
   const add = screen.getByRole("button", { name: "Add MCP server" })
@@ -376,7 +376,7 @@ it("saves generic authentication, discovers tools, and enables only selected too
 it.each([{ allowedTools: [] }, { allowedTools: ["search"] }])(
   "preserves existing tool selections $allowedTools when rediscovering tools",
   async ({ allowedTools }) => {
-    const connection: WorkspaceMCP = {
+    const connection: MCPConnection = {
       name: "incident",
       url: "https://mcp.incident.io/mcp",
       transport: "streamable_http",
@@ -386,7 +386,7 @@ it.each([{ allowedTools: [] }, { allowedTools: ["search"] }])(
       revision: "v1",
       updated_at: "now",
     }
-    const writes: WorkspaceMCPUpdate[] = []
+    const writes: MCPConnectionUpdate[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       if (String(input).endsWith("/discover")) {
         return new Response(
@@ -407,7 +407,7 @@ it.each([{ allowedTools: [] }, { allowedTools: ["search"] }])(
     })
     render(
       <QueryClientProvider client={client}>
-        <WorkspaceMCPSection />
+        <MCPConnectionsSection scope="workspace" />
       </QueryClientProvider>
     )
     fireEvent.click(
@@ -438,8 +438,8 @@ it.each([{ allowedTools: [] }, { allowedTools: ["search"] }])(
 )
 
 it("keeps a newly saved connection editable when refreshing the list fails", async () => {
-  let connection: WorkspaceMCP | null = null
-  const writes: WorkspaceMCPUpdate[] = []
+  let connection: MCPConnection | null = null
+  const writes: MCPConnectionUpdate[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (String(input).endsWith("/discover")) {
       return new Response(
@@ -447,7 +447,7 @@ it("keeps a newly saved connection editable when refreshing the list fails", asy
       )
     }
     if (init?.method === "PUT") {
-      const update = JSON.parse(String(init.body)) as WorkspaceMCPUpdate
+      const update = JSON.parse(String(init.body)) as MCPConnectionUpdate
       writes.push(update)
       connection = {
         name: update.name,
@@ -472,7 +472,7 @@ it("keeps a newly saved connection editable when refreshing the list fails", asy
   })
   render(
     <QueryClientProvider client={client}>
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
     </QueryClientProvider>
   )
   const add = screen.getByRole("button", { name: "Add MCP server" })
@@ -499,7 +499,7 @@ it("keeps a newly saved connection editable when refreshing the list fails", asy
 })
 
 it("reveals saved headers on demand and discards them when hidden or closed", async () => {
-  const connection: WorkspaceMCP = {
+  const connection: MCPConnection = {
     name: "incident",
     url: "https://mcp.incident.io/mcp",
     transport: "streamable_http",
@@ -509,7 +509,7 @@ it("reveals saved headers on demand and discards them when hidden or closed", as
     revision: "v1",
     updated_at: "now",
   }
-  const writes: WorkspaceMCPUpdate[] = []
+  const writes: MCPConnectionUpdate[] = []
   let reveals = 0
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (String(input).endsWith("/headers/reveal")) {
@@ -527,7 +527,7 @@ it("reveals saved headers on demand and discards them when hidden or closed", as
   })
   render(
     <QueryClientProvider client={client}>
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
     </QueryClientProvider>
   )
   fireEvent.click(await screen.findByRole("button", { name: "Edit incident" }))
@@ -570,7 +570,7 @@ it("keeps an unsaved draft and its headers when discovery fails", async () => {
   })
   render(
     <QueryClientProvider client={client}>
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
     </QueryClientProvider>
   )
   const add = screen.getByRole("button", { name: "Add MCP server" })
@@ -616,7 +616,7 @@ it("surfaces a settings error and prevents writing over an unknown list", async 
   })
   render(
     <QueryClientProvider client={client}>
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
     </QueryClientProvider>
   )
   await screen.findByRole("alert")
@@ -639,7 +639,7 @@ it("reviews imported connections one at a time without writing on import or skip
   })
   render(
     <QueryClientProvider client={client}>
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
     </QueryClientProvider>
   )
   const importButton = screen.getByRole("button", { name: "Import JSON" })
@@ -690,4 +690,51 @@ it("reviews imported connections one at a time without writing on import or skip
     )
   ).toBe(false)
   client.clear()
+})
+
+it("manages personal connections through the my-mcps endpoints", async () => {
+  let connection: MCPConnection | null = null
+  const requests: string[] = []
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    requests.push(`${init?.method ?? "GET"} ${String(input)}`)
+    if (init?.method === "PUT") {
+      const update = JSON.parse(String(init.body)) as MCPConnectionUpdate
+      connection = {
+        ...update,
+        oauth: null,
+        header_names: [],
+        revision: "v1",
+        updated_at: "now",
+      }
+      return new Response(JSON.stringify(connection))
+    }
+    return new Response(JSON.stringify(connection ? [connection] : []))
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>
+  )
+  screen.getByRole("heading", { name: "Personal MCPs" })
+  const add = screen.getByRole("button", { name: "Add MCP server" })
+  await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(add)
+  fireEvent.change(screen.getByLabelText("Connection name"), {
+    target: { value: "linear" },
+  })
+  fireEvent.change(screen.getByLabelText("Server URL"), {
+    target: { value: "https://mcp.linear.app/mcp" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
+  await screen.findByRole("button", { name: "Edit linear" })
+  expect(requests.some((request) => request.endsWith("/my-mcps"))).toBe(true)
+  expect(requests).toContain(
+    `PUT ${requests.find((request) => request.endsWith("/my-mcps"))?.slice(4)}/linear`
+  )
+  expect(requests.some((request) => request.includes("workspace-mcps"))).toBe(
+    false
+  )
 })

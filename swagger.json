@@ -650,6 +650,128 @@
         "title": "LangSmithCredentialsUpdate",
         "type": "object"
       },
+      "MCPConnectionUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Tools",
+            "type": "array"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "headers": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "oauth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPOAuthUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transport": {
+            "default": "streamable_http",
+            "enum": [
+              "streamable_http",
+              "sse"
+            ],
+            "title": "Transport",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "MCPConnectionUpdate",
+        "type": "object"
+      },
+      "MCPOAuthUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret"
+          },
+          "grant_type": {
+            "const": "client_credentials",
+            "default": "client_credentials",
+            "title": "Grant Type",
+            "type": "string"
+          },
+          "scope": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Scope",
+            "type": "string"
+          },
+          "token_endpoint_auth_method": {
+            "default": "client_secret_post",
+            "enum": [
+              "client_secret_post",
+              "client_secret_basic"
+            ],
+            "title": "Token Endpoint Auth Method",
+            "type": "string"
+          },
+          "token_url": {
+            "maxLength": 2048,
+            "title": "Token Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_url",
+          "client_id"
+        ],
+        "title": "MCPOAuthUpdate",
+        "type": "object"
+      },
       "PlanRejection": {
         "properties": {
           "dispatch": {
@@ -754,6 +876,17 @@
               }
             ],
             "title": "Draft Prs"
+          },
+          "model_routing_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Routing Enabled"
           },
           "reasoning_effort": {
             "title": "Reasoning Effort",
@@ -1420,6 +1553,72 @@
             ],
             "title": "Default Agent Reasoning Effort"
           },
+          "default_agent_routing_balanced_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Balanced Model"
+          },
+          "default_agent_routing_balanced_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Balanced Reasoning Effort"
+          },
+          "default_agent_routing_fast_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Model"
+          },
+          "default_agent_routing_fast_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Reasoning Effort"
+          },
+          "default_agent_routing_performance_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Performance Model"
+          },
+          "default_agent_routing_performance_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Performance Reasoning Effort"
+          },
           "default_agent_subagent_model": {
             "anyOf": [
               {
@@ -1868,62 +2067,6 @@
           "status"
         ],
         "title": "WebhookResponse",
-        "type": "object"
-      },
-      "WorkspaceMCPUpdate": {
-        "additionalProperties": false,
-        "properties": {
-          "allowed_tools": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Allowed Tools",
-            "type": "array"
-          },
-          "enabled": {
-            "default": true,
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "headers": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Headers"
-          },
-          "name": {
-            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
-            "title": "Name",
-            "type": "string"
-          },
-          "transport": {
-            "default": "streamable_http",
-            "enum": [
-              "streamable_http",
-              "sse"
-            ],
-            "title": "Transport",
-            "type": "string"
-          },
-          "url": {
-            "maxLength": 2048,
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "url"
-        ],
-        "title": "WorkspaceMCPUpdate",
         "type": "object"
       }
     },
@@ -3355,6 +3498,250 @@
           }
         ],
         "summary": "Get My Mapping",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps": {
+      "get": {
+        "operationId": "api_list_my_mcps_dashboard_api_my_mcps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Api List My Mcps Dashboard Api My Mcps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List My Mcps",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps/{name}": {
+      "delete": {
+        "operationId": "api_delete_my_mcp_dashboard_api_my_mcps__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete My Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "api_save_my_mcp_dashboard_api_my_mcps__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Save My Mcp Dashboard Api My Mcps  Name  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Save My Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps/{name}/discover": {
+      "post": {
+        "operationId": "api_discover_my_mcp_dashboard_api_my_mcps__name__discover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MCPConnectionUpdate"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "title": "Response Api Discover My Mcp Dashboard Api My Mcps  Name  Discover Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Discover My Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps/{name}/headers/reveal": {
+      "post": {
+        "operationId": "api_reveal_my_mcp_headers_dashboard_api_my_mcps__name__headers_reveal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reveal My Mcp Headers",
         "tags": [
           "dashboard"
         ]
@@ -8467,7 +8854,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WorkspaceMCPUpdate"
+                "$ref": "#/components/schemas/MCPConnectionUpdate"
               }
             }
           },
@@ -8528,7 +8915,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/WorkspaceMCPUpdate"
+                    "$ref": "#/components/schemas/MCPConnectionUpdate"
                   },
                   {
                     "type": "null"

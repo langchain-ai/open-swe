@@ -6,18 +6,57 @@ import { SettingsSection } from "@/components/AppShell"
 import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
-import type { WorkspaceMCP, WorkspaceMCPUpdate } from "@/lib/api"
-import { WorkspaceMCPImport } from "./WorkspaceMCPImport"
-import type { ImportedMCP } from "./WorkspaceMCPImport"
-import { WorkspaceMCPOAuthFields } from "./WorkspaceMCPOAuthFields"
+import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
+import { MCPImport } from "./MCPImport"
+import type { ImportedMCP } from "./MCPImport"
+import { MCPOAuthFields } from "./MCPOAuthFields"
 
 type Header = { name: string; value: string; revealed?: boolean }
-type Draft = Omit<WorkspaceMCPUpdate, "headers"> & { existing: boolean }
-const queryKey = ["workspaceMCPs"]
+type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
+type Catalog = { name: string; description: string }[]
 
-export function WorkspaceMCPSection() {
+export type MCPScope = "workspace" | "user"
+
+type MCPScopeConfig = {
+  title: string
+  description: string
+  queryKey: string[]
+  list: () => Promise<MCPConnection[]>
+  save: (body: MCPConnectionUpdate) => Promise<MCPConnection>
+  remove: (name: string) => Promise<void>
+  revealHeaders: (name: string) => Promise<Record<string, string>>
+  discover: (body: MCPConnectionUpdate) => Promise<Catalog>
+}
+
+const scopes: Record<MCPScope, MCPScopeConfig> = {
+  workspace: {
+    title: "Workspace MCPs",
+    description:
+      "Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+    queryKey: ["workspaceMCPs"],
+    list: api.getWorkspaceMCPs,
+    save: api.saveWorkspaceMCP,
+    remove: api.deleteWorkspaceMCP,
+    revealHeaders: api.revealWorkspaceMCPHeaders,
+    discover: api.discoverWorkspaceMCP,
+  },
+  user: {
+    title: "Personal MCPs",
+    description:
+      "Connect remote MCP servers with your own credentials for the cloud runs you trigger. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+    queryKey: ["myMCPs"],
+    list: api.getMyMCPs,
+    save: api.saveMyMCP,
+    remove: api.deleteMyMCP,
+    revealHeaders: api.revealMyMCPHeaders,
+    discover: api.discoverMyMCP,
+  },
+}
+
+export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
+  const { title, description, queryKey, ...client } = scopes[scope]
   const qc = useQueryClient()
-  const connections = useQuery({ queryKey, queryFn: api.getWorkspaceMCPs })
+  const connections = useQuery({ queryKey, queryFn: client.list })
   const [draft, setDraft] = useState<Draft | null>(null)
   const [headers, setHeaders] = useState<Header[]>([])
   const [replaceHeaders, setReplaceHeaders] = useState(false)
@@ -25,9 +64,7 @@ export function WorkspaceMCPSection() {
     string,
     string
   > | null>(null)
-  const [catalog, setCatalog] = useState<
-    { name: string; description: string }[]
-  >([])
+  const [catalog, setCatalog] = useState<Catalog>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toolsExpanded, setToolsExpanded] = useState(true)
@@ -68,7 +105,7 @@ export function WorkspaceMCPSection() {
     setError(null)
   }
 
-  const edit = (connection?: WorkspaceMCP) => {
+  const edit = (connection?: MCPConnection) => {
     setImporting(false)
     setPendingImports([])
     openEditor(
@@ -157,7 +194,7 @@ export function WorkspaceMCPSection() {
         connections.data?.some((c) => c.name === draft.name)
       )
         throw new Error("A connection with this name already exists")
-      const update: WorkspaceMCPUpdate = {
+      const update: MCPConnectionUpdate = {
         name: draft.name,
         url: draft.url,
         transport: draft.transport,
@@ -166,9 +203,9 @@ export function WorkspaceMCPSection() {
         headers: replaceHeaders ? authentication : null,
         oauth: draft.oauth ?? null,
       }
-      const discovered = discover ? await api.discoverWorkspaceMCP(update) : []
-      const saved = await api.saveWorkspaceMCP(update)
-      qc.setQueryData<WorkspaceMCP[]>(queryKey, (current) => [
+      const discovered = discover ? await client.discover(update) : []
+      const saved = await client.save(update)
+      qc.setQueryData<MCPConnection[]>(queryKey, (current) => [
         ...(current ?? []).filter(
           (connection) => connection.name !== saved.name
         ),
@@ -268,7 +305,7 @@ export function WorkspaceMCPSection() {
             onChange={(e) =>
               setDraft({
                 ...draft,
-                transport: e.target.value as WorkspaceMCP["transport"],
+                transport: e.target.value as MCPConnection["transport"],
               })
             }
           >
@@ -303,7 +340,7 @@ export function WorkspaceMCPSection() {
           </select>
         </label>
         {draft.oauth && (
-          <WorkspaceMCPOAuthFields
+          <MCPOAuthFields
             key={draft.name}
             value={draft.oauth}
             hasSavedSecret={Boolean(
@@ -365,9 +402,7 @@ export function WorkspaceMCPSection() {
                     if (savedHeaders) setSavedHeaders(null)
                     else
                       void run(async () => {
-                        setSavedHeaders(
-                          await api.revealWorkspaceMCPHeaders(draft.name)
-                        )
+                        setSavedHeaders(await client.revealHeaders(draft.name))
                       })
                   }}
                 >
@@ -583,10 +618,7 @@ export function WorkspaceMCPSection() {
   ) : null
 
   return (
-    <SettingsSection
-      title="Workspace MCPs"
-      description="Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them."
-    >
+    <SettingsSection title={title} description={description}>
       <div className="space-y-4 p-4">
         {connections.isLoading && (
           <p className="text-sm text-muted-foreground">Loading connections…</p>
@@ -638,7 +670,7 @@ export function WorkspaceMCPSection() {
                     disabled={busy}
                     onClick={() =>
                       run(async () => {
-                        await api.saveWorkspaceMCP({
+                        await client.save({
                           name: connection.name,
                           url: connection.url,
                           transport: connection.transport,
@@ -659,7 +691,7 @@ export function WorkspaceMCPSection() {
                     disabled={busy}
                     onClick={() =>
                       run(async () => {
-                        await api.deleteWorkspaceMCP(connection.name)
+                        await client.remove(connection.name)
                         await qc.invalidateQueries({ queryKey })
                         if (draft?.name === connection.name) closeEditor()
                       })
@@ -675,7 +707,7 @@ export function WorkspaceMCPSection() {
           )
         })}
         {importing ? (
-          <WorkspaceMCPImport
+          <MCPImport
             onImport={([first, ...rest]) => {
               if (!first) return
               setImporting(false)

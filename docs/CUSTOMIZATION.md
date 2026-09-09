@@ -334,7 +334,7 @@ Datadog documents its headers and site-specific endpoints in the
 Enter Datadog key values directly, without a `Bearer` prefix. The `core` toolset
 includes logs, metrics, traces, dashboards, monitors, and incidents.
 
-Allowed tools appear in the agent's **Workspace MCPs** tool group with connection
+Allowed tools appear in the agent's **MCPs** tool group with connection
 prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming
 collisions. Catalogs are cached for ten minutes
 per settings revision. Changing a connection causes the next run to discover its
@@ -365,12 +365,33 @@ Saved secrets must only be preserved from the previous record in the same scope.
 Catalog and token caches include the source namespace. Each tool call resolves the
 current winning connection again, checks its allowlist, and refuses to switch scopes
 mid-run. Source lookup errors must raise instead of returning an empty result, so a
-failed lookup cannot expose a lower-precedence connection. Only workspace sources
-are wired into the product today; user-scoped storage, authorization, and UI can use
-this package when added.
+failed lookup cannot expose a lower-precedence connection. The product wires the
+workspace source and the triggering user's personal source (below) into every remote
+coding-agent run.
 An unavailable server omits its tools without preventing other connections from
 loading. This catalog is not attached to the separate read-only reviewer or
 Investigate graphs.
+
+### Personal MCP servers
+
+Any signed-in user can connect remote MCP servers with their own credentials under
+**My settings → Personal MCPs**. The form, JSON import, OAuth client credentials,
+header handling, and tool discovery work exactly like workspace connections, and the
+same URL, header, and redirect restrictions apply. Records live in the LangGraph Store
+under `["user_mcps", <github login>]`, so one user's connections, saved headers, and
+client secrets are never visible to, reused by, or revealed to another user. The
+dashboard API is `/dashboard/api/my-mcps`, which requires only a signed-in session.
+
+Personal connections load for remote runs whose triggering user resolves to that
+GitHub login (from the dashboard session, a linked Slack account, or the `github_login`
+run setting), the same rule that already applies to personal Notion and Currents
+connections. They do not require `CONFIGURED_ADMINS` or
+`OBSERVABILITY_AUTHORIZED_EMAILS`, which continue to gate workspace connections. Both
+scopes share the **MCPs** tool group; a personal connection with the same name as a
+workspace connection replaces it entirely for that user's runs, including its
+credentials and allowed tools, and a disabled personal connection hides the workspace
+one rather than falling back to it. Desktop (local) runs do not load MCP connections
+yet.
 
 ### Adding a Python tool
 

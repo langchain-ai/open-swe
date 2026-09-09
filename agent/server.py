@@ -75,6 +75,8 @@ from agent.dashboard.team_settings import (
 )
 from agent.dashboard.user_credentials import get_sandbox_langsmith_credentials
 from agent.dashboard.user_mappings import email_for_login
+from agent.dashboard.user_mcps import user_mcp_source
+from agent.dashboard.workspace_mcps import workspace_mcp_source
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.org_membership import is_user_active_org_member
@@ -87,6 +89,7 @@ from agent.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
+from agent.mcp import load_mcp_tools
 from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -152,7 +155,6 @@ from agent.tool_loaders.datadog_mcp import load_datadog_tools
 from agent.tool_loaders.langsmith import load_langsmith_tools
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
-from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
 from agent.tools import (
     approve_plan,
     background_execute,
@@ -607,10 +609,20 @@ async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any],
     return currents_tools, notion_tools
 
 
-async def _workspace_mcp_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
-    if not await _observability_authorized(config, profile_login):
+async def _mcp_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
+    """Workspace MCPs for authorized users plus the triggering user's personal MCPs.
+
+    A personal connection with the same name as a workspace one replaces it entirely
+    for that user's runs.
+    """
+    sources = []
+    if await _observability_authorized(config, profile_login):
+        sources.append(workspace_mcp_source)
+    if profile_login:
+        sources.append(user_mcp_source(profile_login))
+    if not sources:
         return []
-    return await load_workspace_mcp_tools()
+    return await load_mcp_tools(*sources)
 
 
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
@@ -1162,13 +1174,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     observability_tools: list[Any] = []
-    workspace_mcp_tools: list[Any] = []
+    mcp_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
         (
             observability_tools,
-            workspace_mcp_tools,
+            mcp_tools,
             (currents_tools, notion_tools),
         ) = await asyncio.gather(
             _phase_result(
@@ -1178,8 +1190,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
             _phase_result(
                 thread_id,
-                "factory.workspace_mcp_tools",
-                lambda: _workspace_mcp_tools_for(config, profile_login),
+                "factory.mcp_tools",
+                lambda: _mcp_tools_for(config, profile_login),
             ),
             _phase_result(
                 thread_id,
@@ -1252,7 +1264,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "Observability": observability_tools,
-        "Workspace MCPs": workspace_mcp_tools,
+        "MCPs": mcp_tools,
         "Currents": currents_tools,
         "Notion": notion_tools,
     }
@@ -1404,8 +1416,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *model_selection_middleware,
                 *fallback_middleware,
                 PlanModeMiddleware(
-                    excluded=PLAN_MODE_EXCLUDED_TOOLS
-                    | frozenset(tool.name for tool in workspace_mcp_tools),
+                    excluded=PLAN_MODE_EXCLUDED_TOOLS | frozenset(tool.name for tool in mcp_tools),
                     initial=plan_mode,
                 ),
                 SanitizeFireworksMessagesMiddleware(),
