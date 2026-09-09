@@ -1445,7 +1445,6 @@ if (!hasSingleInstanceLock) {
       configPath: path.join(os.homedir(), ".open-swe", "mcp.json"),
       togglesPath: path.join(app.getPath("userData"), "mcp-enabled.json"),
       credentialsDir: path.join(app.getPath("userData"), "mcp-credentials"),
-      loginEnv,
       encryptString: (value) => {
         if (
           !safeStorage.isEncryptionAvailable() ||

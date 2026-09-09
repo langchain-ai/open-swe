@@ -30,7 +30,7 @@ import {
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { slackAppManifestJson } from "@/lib/slack-manifest"
-import { WorkspaceMCPSection } from "@/features/settings/components/WorkspaceMCPSection"
+import { McpConnectionsSection } from "@/features/settings/components/McpConnectionsSection"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -66,7 +66,14 @@ function AdminPage() {
       />
 
       <SlackIntegrationSection />
-      <WorkspaceMCPSection />
+      <SettingsSection
+        title="Workspace MCPs"
+        description="Remote MCP servers shared by every authorized coding-agent run."
+      >
+        <div className="p-4">
+          <McpConnectionsSection scope="workspace" login={session.data.login} />
+        </div>
+      </SettingsSection>
 
       <LLMGatewaySection />
 

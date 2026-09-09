@@ -20,8 +20,9 @@ from agent import desktop_mcp as mcp
 
 class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
     async def test_stdio_sessions_are_held_and_closed(self):
+        os.environ["VALUE"] = "literal-value"
+        self.addCleanup(os.environ.pop, "VALUE", None)
         runtime = {
-            "env": {"PATH": os.environ["PATH"], "VALUE": "literal-value", "SECRET": "shell"},
             "servers": [
                 {
                     "name": "counter",
@@ -35,7 +36,6 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
                     "env_passthrough": ["VALUE"],
                 }
             ],
-            "cloud": None,
         }
         connections = await mcp._connections(runtime)
         self.assertEqual(connections[0]["env"]["LITERAL"], "literal-value:literal-value")
@@ -54,11 +54,17 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
+        def respond(request):
+            if request.url.path == "/cloud/connections":
+                return httpx.Response(503, json=None)
+            return httpx.Response(200, json=runtime)
+
         @asynccontextmanager
         async def broker():
             async with httpx.AsyncClient(
                 base_url="http://127.0.0.1",
-                transport=httpx.MockTransport(lambda request: httpx.Response(200, json=runtime)),
+                headers={"Authorization": "Bearer broker-secret"},
+                transport=httpx.MockTransport(respond),
             ) as client:
                 yield client
 
@@ -74,11 +80,12 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
                 await tools[0].ainvoke({})
 
     async def test_env_allowlist_rejects_missing_or_reserved_variables(self):
+        os.environ["OPEN_SWE_MCP_BROKER_TOKEN"] = "secret"
+        self.addCleanup(os.environ.pop, "OPEN_SWE_MCP_BROKER_TOKEN", None)
         for key in ("MISSING", "OPEN_SWE_MCP_BROKER_TOKEN"):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 await mcp._connections(
                     {
-                        "env": {"OPEN_SWE_MCP_BROKER_TOKEN": "secret"},
                         "servers": [
                             {
                                 "name": "s",
@@ -87,16 +94,15 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
                                 "env_vars": [key],
                             }
                         ],
-                        "cloud": None,
                     }
                 )
 
-    async def test_cloud_uses_only_backend_proxy_and_enabled_local_name_wins(self):
+    async def test_cloud_connections_are_relayed_by_the_broker_and_enabled_local_name_wins(self):
         requests = []
-        real_client = httpx.AsyncClient
 
         def respond(request):
             requests.append(request)
+            self.assertEqual(request.url.path, "/cloud/connections")
             return httpx.Response(
                 200,
                 json={
@@ -114,35 +120,39 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-        with patch.object(
-            mcp.httpx,
-            "AsyncClient",
-            lambda **kwargs: real_client(**kwargs, transport=httpx.MockTransport(respond)),
-        ):
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:4242",
+            headers={"Authorization": "Bearer broker-secret"},
+            transport=httpx.MockTransport(respond),
+        ) as broker:
             connections = await mcp._connections(
                 {
-                    "env": {},
                     "servers": [
                         {"name": "cloud", "enabled": True, "command": "wins"},
                         {"name": "override", "enabled": False, "command": "ignored"},
                     ],
-                    "cloud": {
-                        "backend_url": "https://backend.example",
-                        "cookie_name": "osw_session",
-                        "session_token": "session",
-                    },
-                }
+                },
+                broker,
             )
         cloud = [connection for connection in connections if connection.get("cloud")]
         self.assertEqual([connection["label"] for connection in cloud], ["override"])
         self.assertEqual(
-            cloud[0]["url"],
-            f"https://backend.example/dashboard/api/mcp-connections/{'b' * 32}/proxy",
+            cloud[0]["url"], f"http://127.0.0.1:4242/cloud/connections/{'b' * 32}/proxy"
         )
-        self.assertEqual(cloud[0]["headers"], {"Cookie": "osw_session=session"})
-        self.assertEqual(requests[0].headers["cookie"], "osw_session=session")
+        # Only the loopback broker capability travels with cloud traffic; no cookie.
+        self.assertEqual(cloud[0]["headers"], {"Authorization": "Bearer broker-secret"})
+        self.assertEqual(requests[0].headers["authorization"], "Bearer broker-secret")
         self.assertNotIn("upstream.invalid", json.dumps(connections))
         self.assertNotIn("must-not-copy", json.dumps(connections))
+
+    async def test_broker_without_a_cloud_session_yields_local_servers_only(self):
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:4242",
+            headers={"Authorization": "Bearer broker-secret"},
+            transport=httpx.MockTransport(lambda request: httpx.Response(503, json=None)),
+        ) as broker:
+            connections = await mcp._connections({"servers": []}, broker)
+        self.assertEqual(connections, [])
 
     async def test_sdk_oauth_loopback_pkce_keychain_and_refresh(self, method=None):
         record = {"client_secret": "manual-secret"} if method and method != "none" else {}

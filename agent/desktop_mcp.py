@@ -79,9 +79,17 @@ async def _post(broker: httpx.AsyncClient, path: str, data: dict[str, Any]) -> A
     return response.json()
 
 
-async def _connections(runtime: dict[str, Any]) -> list[dict[str, Any]]:
+async def _connections(
+    runtime: dict[str, Any], broker: httpx.AsyncClient | None = None
+) -> list[dict[str, Any]]:
+    """Local servers from the broker's config, plus cloud connections relayed by Electron.
+
+    The login environment is this process's own environment; Electron starts the
+    backend with it. Cloud traffic goes to the broker, which adds the dashboard
+    session itself, so the cookie never reaches this process.
+    """
     connections = []
-    env = runtime["env"]
+    env = dict(os.environ)
     for server in runtime["servers"]:
         if not server["enabled"]:
             continue
@@ -114,26 +122,24 @@ async def _connections(runtime: dict[str, Any]) -> list[dict[str, Any]]:
             )
         connection["local_name"] = server["name"]
         connections.append(connection)
-    cloud = runtime.get("cloud")
-    if cloud:
-        base = cloud["backend_url"].rstrip("/")
-        headers = {"Cookie": f"{cloud['cookie_name']}={cloud['session_token']}"}
-        async with httpx.AsyncClient(
-            headers=headers, follow_redirects=False, trust_env=False, timeout=20
-        ) as client:
-            response = await client.get(f"{base}/dashboard/api/mcp-connections")
+    if broker is not None:
+        response = await broker.get("/cloud/connections")
+        if response.status_code != 503:
             response.raise_for_status()
+            local_names = {server["name"] for server in runtime["servers"] if server["enabled"]}
             for record in response.json()["connections"]:
-                if record["enabled"] and record["name"] not in {
-                    server["name"] for server in runtime["servers"] if server["enabled"]
-                }:
+                if record["enabled"] and record["name"] not in local_names:
                     connections.append(
                         {
                             "name": f"cloud_{record['id']}",
                             "label": record["name"],
                             "transport": "streamable_http",
-                            "url": f"{base}/dashboard/api/mcp-connections/{quote(record['id'], safe='')}/proxy",
-                            "headers": headers.copy(),
+                            "url": str(
+                                broker.base_url.join(
+                                    f"/cloud/connections/{quote(record['id'], safe='')}/proxy"
+                                )
+                            ),
+                            "headers": {"Authorization": broker.headers["Authorization"]},
                             "cloud": True,
                         }
                     )
@@ -345,7 +351,7 @@ async def local_mcp_tools() -> AsyncIterator[list[BaseTool]]:
         broker = await stack.enter_async_context(_broker())
         response = await broker.get("/runtime")
         response.raise_for_status()
-        connections = await _connections(response.json())
+        connections = await _connections(response.json(), broker)
         tools = []
         for connection in sorted(connections, key=lambda item: item["name"]):
             try:
@@ -382,10 +388,7 @@ async def _connection_tools(
                 auth = await stack.enter_async_context(_oauth(broker, connection))
             client = await stack.enter_async_context(
                 httpx.AsyncClient(
-                    headers={
-                        **connection["headers"],
-                        **({"Origin": "open-swe://app"} if connection.get("cloud") else {}),
-                    },
+                    headers=connection["headers"],
                     auth=auth,
                     follow_redirects=False,
                     trust_env=False,

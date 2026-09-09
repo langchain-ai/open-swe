@@ -84,16 +84,30 @@ async with local_mcp_tools() as mcp_tools:
 The context must enclose the **entire run**, including streaming and subagent calls. It retains
 stdio processes, MCP client sessions and HTTP transports in an `AsyncExitStack`; cancellation or
 failure closes them. `await local_connections()` alternatively returns enabled transport records
-for a trusted loader; those records can contain local headers/environment and a dashboard session
-cookie and must never be exposed to the model, renderer, traces, or durable run metadata.
+for a trusted loader; those records can contain local headers and environment and must never be
+exposed to the model, renderer, traces, or durable run metadata.
 
-At each run the authenticated, loopback-only Electron broker supplies fresh local records and
-trusted cloud runtime metadata (`backend_url`, `cookie_name`, `session_token`) from the selected
-backend and Electron's existing session cookie jar. The loader lists `/dashboard/api/mcp-connections`
-and connects only to `/dashboard/api/mcp-connections/{id}/proxy`, never the upstream URL or its
-secrets. Local names override matching cloud names, including disabled local entries. Cloud list
-or connection failures surface rather than silently omitting tools. With no cloud session, local
-servers and local OAuth do not require a cloud backend.
+The authenticated, loopback-only Electron broker exposes:
+
+- `GET /runtime` returns `{ "servers": [...] }`, each local server carrying a `credential_key`.
+  It carries no environment and no cloud metadata; the local backend reads its own environment,
+  which Electron populates from the login shell through `BackendSupervisor`.
+- `POST /credentials` and `POST /open` store or read encrypted local OAuth records and open the
+  system browser, unchanged.
+- `GET /cloud/connections` proxies the selected backend's `/dashboard/api/mcp-connections` list
+  (user scope) and returns its status and body verbatim; `503` with body `null` when no backend
+  or dashboard session is available.
+- `GET|POST|DELETE /cloud/connections/{id}/proxy` (32 hex characters, no query string) streams
+  MCP traffic to `/dashboard/api/mcp-connections/{id}/proxy`. Only `Accept`, `Content-Type`,
+  `Mcp-Session-Id`, `Mcp-Protocol-Version` and `Last-Event-Id` are forwarded upstream (bodies are
+  capped at 4 MiB); only `Content-Type` and `Mcp-Session-Id` come back, and SSE bodies are
+  streamed without buffering.
+
+Electron attaches its own dashboard session cookie and `Origin: open-swe://app` to every cloud
+call; the session cookie never leaves Electron and the broker bearer token is never forwarded. The
+loader never sees the upstream MCP URL or its secrets. Local names override matching cloud names,
+including disabled local entries. Cloud list or connection failures surface rather than silently
+omitting tools. With no cloud session, local servers and local OAuth do not require a cloud backend.
 
 The graph owner must wire the context above in `server.py`; this desktop module does not register
 routes. The backend owner must expose the authenticated list and proxy routes. No new Python

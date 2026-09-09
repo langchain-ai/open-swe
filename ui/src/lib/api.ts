@@ -9,6 +9,8 @@ import type {
   McpConnection,
   McpConnectionInput,
   McpConnectionsPayload,
+  McpScope,
+  McpToolInfo,
 } from "./mcp"
 import { dashboardApiBase } from "./api-base"
 import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
@@ -211,26 +213,6 @@ export interface ProviderCredentialStatus {
 
 export interface TeamCredentialsStatus {
   langsmith: ProviderCredentialStatus
-}
-
-export interface WorkspaceMCP {
-  name: string
-  url: string
-  transport: "streamable_http" | "sse"
-  enabled: boolean
-  allowed_tools: string[]
-  header_names: string[]
-  revision: string
-  updated_at: string
-}
-
-export interface WorkspaceMCPUpdate {
-  name: string
-  url: string
-  transport: WorkspaceMCP["transport"]
-  enabled: boolean
-  allowed_tools: string[]
-  headers?: Record<string, string> | null
 }
 
 export interface LangSmithConnectBody {
@@ -652,20 +634,34 @@ export interface ReviewerEvalStatus {
 }
 
 export const api = {
-  mcpConnections: () => request<McpConnectionsPayload>("/mcp-connections"),
-  saveMcpConnection: (body: McpConnectionInput) =>
-    request<McpConnection>("/mcp-connections", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  deleteMcpConnection: (id: string) =>
-    request<void>(`/mcp-connections/${encodeURIComponent(id)}`, {
+  mcpConnections: (scope: McpScope = "user") =>
+    request<McpConnectionsPayload>(`/mcp-connections?scope=${scope}`),
+  saveMcpConnection: (body: McpConnectionInput, scope: McpScope = "user") =>
+    request<McpConnection>(
+      body.id
+        ? `/mcp-connections/${encodeURIComponent(body.id)}?scope=${scope}`
+        : `/mcp-connections?scope=${scope}`,
+      { method: body.id ? "PUT" : "POST", body: JSON.stringify(body) }
+    ),
+  deleteMcpConnection: (id: string, scope: McpScope = "user") =>
+    request<void>(`/mcp-connections/${encodeURIComponent(id)}?scope=${scope}`, {
       method: "DELETE",
     }),
-  testMcpConnection: (id: string) =>
-    request<McpConnection>(`/mcp-connections/${encodeURIComponent(id)}/test`, {
-      method: "POST",
-    }),
+  testMcpConnection: (id: string, scope: McpScope = "user") =>
+    request<McpConnection>(
+      `/mcp-connections/${encodeURIComponent(id)}/test?scope=${scope}`,
+      { method: "POST" }
+    ),
+  discoverMcpConnection: (body: McpConnectionInput, scope: McpScope = "user") =>
+    request<{ tools: Array<McpToolInfo> }>(
+      `/mcp-connections/discover?scope=${scope}`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  revealMcpConnectionHeaders: (id: string) =>
+    request<Record<string, string>>(
+      `/mcp-connections/${encodeURIComponent(id)}/headers/reveal?scope=workspace`,
+      { method: "POST", cache: "no-store" }
+    ),
   me: () => request<SessionUser>("/me"),
   options: () => request<OptionsPayload>("/options"),
   profile: () => request<Profile>("/profile"),
@@ -789,26 +785,6 @@ export const api = {
       body: JSON.stringify({ transcription_model }),
     }),
   getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
-  getWorkspaceMCPs: () => request<WorkspaceMCP[]>("/workspace-mcps"),
-  revealWorkspaceMCPHeaders: (name: string) =>
-    request<Record<string, string>>(
-      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
-      { method: "POST", cache: "no-store" }
-    ),
-  saveWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
-    request<WorkspaceMCP>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  deleteWorkspaceMCP: (name: string) =>
-    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    }),
-  discoverWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
-    request<{ name: string; description: string }[]>(
-      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
-      { method: "POST", body: JSON.stringify(body) }
-    ),
   connectLangSmith: (body: LangSmithConnectBody) =>
     request<TeamCredentialsStatus>("/team-credentials/langsmith", {
       method: "PUT",

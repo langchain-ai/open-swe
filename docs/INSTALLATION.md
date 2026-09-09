@@ -362,22 +362,11 @@ A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_O
 
 - The image has no dashboard build. On LangGraph Platform, check the build log for `dashboard build failed`; with Docker, run `make build-dashboard` before `docker build`, or set `DASHBOARD_STATIC_DIR` to a directory holding a build.
 
-### MCP connection ownership and OAuth recovery
+### MCP connection conflicts and OAuth recovery
 
-- Cloud MCP operations use a persistent LangGraph thread as an ownership lock. Normal validation, missing-record, and OAuth errors release it; cancellation, unexpected exceptions (including Store read/write failures), or an uncertain release can leave it held. Contenders wait up to 60 seconds before returning `503 MCP connection is unavailable; retry or recreate it`. The lock's `keep_latest` TTL is **60 minutes**, not a lease: it retains the thread rather than making ownership available again.
-- If the current operation is still running, allow it to finish. A retained lock blocks reads that acquire ownership, edits, deletion, and OAuth reconnect for that connection ID. Adding a **new connection** in Plugins creates a new ID and avoids that lock; it does not delete the old record, revoke its credentials, or stop its worker.
-- **Administrator recovery:** block new MCP requests and confirm the old owning worker is terminated, with no in-flight Store mutations remaining. If its identity is unknown, stop all backend replicas/workers that could own it. Only then delete the specific ownership thread through the deployment's authenticated LangGraph Threads API (`client.threads.delete(lock_id)`), not the connection's Store record. Never clear a lock merely because its TTL elapsed or a request timed out: a surviving owner can overwrite newer credentials or delete a replacement owner's lock. There is no dashboard unlock action. Derive the thread ID exactly as follows:
-
-  ```python
-  import json
-  import uuid
-
-  key = ["mcp_connections", "<owner-login>", "<connection-id>"]
-  lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:ownership:" + json.dumps(key)))
-  ```
-
-  OAuth callback ownership uses the same formula with the SHA-256 hex digest of the encrypted callback `state` instead of the connection ID. Prefer starting a fresh OAuth flow rather than recovering an old callback. Treat callback URLs/state as credentials; do not paste them into logs or tickets.
-- `MCP OAuth refresh interrupted; reconnect` means `refresh_pending` was persisted before a refresh whose outcome may be ambiguous. Start a fresh OAuth authorization; do not manually clear that flag or retry the old refresh token. Ordinary OAuth rejection releases ownership, so reconnect or deletion remains available unless a separate unexpected failure retained the lock. For provider-side `invalid_client`/`invalid_grant`, correct the registered client ID/secret, token-endpoint authentication method, and callback URI as applicable, then authorize again; clearing a lock does not repair invalid credentials. If encrypted records cannot be read, restore the required `TOKEN_ENCRYPTION_KEY` before recovery.
+- MCP connection records are written with optimistic concurrency. Two edits that race on the same connection both succeed at the store, but the loser sees `409 MCP connection changed; retry`: reload the connection and repeat the edit. There is no lock to clear and no administrator recovery step.
+- Token refresh is claimed the same way so only one worker spends a rotating refresh token; other callers wait for it. `MCP OAuth refresh is taking too long; retry` means a refresh has been in flight for over thirty seconds; a claim older than a minute is taken over automatically, so simply retry. A refresh the provider rejects is released immediately, and the next call tries again; if the provider keeps rejecting it (`invalid_client`, `invalid_grant`), correct the registered client ID/secret, token-endpoint authentication method, and callback URI as applicable, then authorize again. If encrypted records cannot be read, restore the required `TOKEN_ENCRYPTION_KEY` before recovery.
+- Treat OAuth callback URLs and `state` values as credentials; do not paste them into logs or tickets. Each state is consumed once; start a fresh authorization rather than replaying an old callback.
 - For cloud OAuth without protected-resource discovery, enter the provider's HTTPS **Authorization server URL (cloud only)** under Advanced OAuth settings alongside your registered client details; authorization-server metadata, matching issuer, S256 PKCE, public HTTPS endpoints, and any returned protected-resource metadata are still validated (the fallback resource is the canonical MCP URL).
 
 ### Sandbox creation failures

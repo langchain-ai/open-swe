@@ -3,21 +3,23 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const http = require("node:http");
 const { DesktopMcp, resolveLoginEnvironment } = require("../build/mcp.cjs");
 
-function fixture(t) {
+function fixture(t, cloudRuntime) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "desktop-mcp-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const manager = new DesktopMcp({
     configPath: path.join(root, "mcp.json"),
     togglesPath: path.join(root, "enabled.json"),
     credentialsDir: path.join(root, "credentials"),
-    loginEnv: { PATH: "/login/bin", LOCAL_SECRET: "local-value" },
-    cloudRuntime: async () => ({
-      backend_url: "https://backend.example",
-      session_token: "session-only",
-      cookie_name: "osw_session",
-    }),
+    cloudRuntime:
+      cloudRuntime ??
+      (async () => ({
+        backend_url: "https://backend.example",
+        session_token: "session-only",
+        cookie_name: "osw_session",
+      })),
     encryptString: (value) => Buffer.from(value).map((byte) => byte ^ 73),
     decryptString: (value) =>
       Buffer.from(value)
@@ -91,8 +93,9 @@ test("MCP broker requires capability, rejects browser origins, and scopes encryp
   const runtime = await (
     await fetch(`${manager.url}/runtime`, { headers: auth })
   ).json();
-  assert.equal(runtime.cloud.session_token, "session-only");
-  assert.equal(runtime.env.PATH, "/login/bin");
+  assert.equal(runtime.cloud, undefined);
+  assert.equal(runtime.env, undefined);
+  assert.equal(JSON.stringify(runtime).includes("session-only"), false);
   const key = runtime.servers[0].credential_key;
   const request = (data) =>
     fetch(`${manager.url}/credentials`, {
@@ -125,6 +128,155 @@ test("MCP broker requires capability, rejects browser origins, and scopes encryp
   });
   assert.equal((await request({ value: { tokens: {} } })).status, 400);
   assert.equal(fs.existsSync(file), false);
+});
+
+async function fakeBackend(t, handler) {
+  const seen = [];
+  const server = http.createServer((request, response) => {
+    seen.push(request.headers);
+    handler(request, response);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  return { url: `http://127.0.0.1:${server.address().port}`, seen };
+}
+
+async function brokerFixture(t, backend) {
+  const manager = fixture(
+    t,
+    async () =>
+      backend && {
+        backend_url: backend.url,
+        session_token: "session-only",
+        cookie_name: "osw_session",
+      },
+  );
+  await manager.start();
+  t.after(() => manager.close());
+  return manager;
+}
+
+test("cloud connections are listed through Electron with the session cookie", async (t) => {
+  const backend = await fakeBackend(t, (request, response) => {
+    assert.equal(request.url, "/dashboard/api/mcp-connections");
+    response
+      .writeHead(201, { "Content-Type": "application/json" })
+      .end(JSON.stringify({ connections: [{ id: "a".repeat(32) }] }));
+  });
+  const manager = await brokerFixture(t, backend);
+  const auth = { Authorization: `Bearer ${manager.secret}` };
+  const response = await fetch(`${manager.url}/cloud/connections`, {
+    headers: auth,
+  });
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), {
+    connections: [{ id: "a".repeat(32) }],
+  });
+  assert.equal(backend.seen.length, 1);
+  assert.equal(backend.seen[0].cookie, "osw_session=session-only");
+  assert.equal(backend.seen[0].origin, "open-swe://app");
+  assert.equal(backend.seen[0].authorization, undefined);
+  assert.equal((await fetch(`${manager.url}/cloud/connections`)).status, 403);
+});
+
+test("cloud proxy streams SSE, forwards MCP headers both ways and validates paths", async (t) => {
+  const id = "0123456789abcdef0123456789abcdef";
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const backend = await fakeBackend(t, async (request, response) => {
+    assert.equal(request.url, `/dashboard/api/mcp-connections/${id}/proxy`);
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    assert.equal(body, request.method === "POST" ? '{"jsonrpc":"2.0"}' : "");
+    response.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Mcp-Session-Id": "upstream-session",
+      "Set-Cookie": "leak=1",
+    });
+    response.write("data: first\n\n");
+    await gate;
+    response.end("data: second\n\n");
+  });
+  const manager = await brokerFixture(t, backend);
+  const auth = { Authorization: `Bearer ${manager.secret}` };
+  const response = await fetch(`${manager.url}/cloud/connections/${id}/proxy`, {
+    method: "POST",
+    headers: {
+      ...auth,
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      "Mcp-Session-Id": "client-session",
+      "X-Forwarded-Secret": "nope",
+    },
+    body: '{"jsonrpc":"2.0"}',
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/event-stream");
+  assert.equal(response.headers.get("mcp-session-id"), "upstream-session");
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("set-cookie"), null);
+  const reader = response.body.getReader();
+  const first = await reader.read();
+  assert.equal(Buffer.from(first.value).toString(), "data: first\n\n");
+  release();
+  let rest = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    rest += Buffer.from(value).toString();
+  }
+  assert.equal(rest, "data: second\n\n");
+  const [headers] = backend.seen;
+  assert.equal(headers.cookie, "osw_session=session-only");
+  assert.equal(headers.origin, "open-swe://app");
+  assert.equal(headers["mcp-session-id"], "client-session");
+  assert.equal(headers.accept, "text/event-stream");
+  assert.equal(headers.authorization, undefined);
+  assert.equal(headers["x-forwarded-secret"], undefined);
+  assert.equal(
+    (
+      await fetch(`${manager.url}/cloud/connections/not-an-id/proxy`, {
+        headers: auth,
+      })
+    ).status,
+    404,
+  );
+  assert.equal(
+    (
+      await fetch(`${manager.url}/cloud/connections/${id}/proxy?x=1`, {
+        headers: auth,
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await fetch(`${manager.url}/cloud/connections/${id}/proxy`, {
+        method: "PUT",
+        headers: auth,
+      })
+    ).status,
+    404,
+  );
+  assert.equal(backend.seen.length, 1);
+});
+
+test("cloud endpoints answer 503 without a backend session", async (t) => {
+  const manager = await brokerFixture(t, null);
+  const auth = { Authorization: `Bearer ${manager.secret}` };
+  const list = await fetch(`${manager.url}/cloud/connections`, {
+    headers: auth,
+  });
+  assert.equal(list.status, 503);
+  assert.equal(await list.json(), null);
+  const proxy = await fetch(
+    `${manager.url}/cloud/connections/${"b".repeat(32)}/proxy`,
+    { headers: auth },
+  );
+  assert.equal(proxy.status, 503);
 });
 
 test("credential storage IDs persist and invalidate for each public OAuth setting", (t) => {

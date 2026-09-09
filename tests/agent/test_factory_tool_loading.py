@@ -14,7 +14,7 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware
+from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
 from agent.middleware.plan_mode import PlanModeMiddleware
 from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.server import get_agent
@@ -41,10 +41,10 @@ def _config() -> RunnableConfig:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("fake_store")
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
-async def test_tool_loaders_run_concurrently_and_gate_workspace_mcps(
+async def test_tool_loaders_run_concurrently_and_gate_mcp_tools_in_plan_mode(
     initial_plan_mode: bool,
 ) -> None:
-    barrier = asyncio.Barrier(3)
+    barrier = asyncio.Barrier(2)
 
     async def delete_incident() -> str:
         return "deleted"
@@ -95,8 +95,19 @@ async def test_tool_loaders_run_concurrently_and_gate_workspace_mcps(
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
         patch("agent.server._observability_tools_for", side_effect=rendezvous([])),
-        patch("agent.server._workspace_mcp_tools_for", side_effect=rendezvous([mcp_tool])),
-        patch("agent.server._load_integration_tools", side_effect=rendezvous(([], {}))),
+        patch(
+            "agent.server._load_integration_tools",
+            side_effect=rendezvous(
+                (
+                    [],
+                    {
+                        "incident": IntegrationGroup(
+                            tool_names=[mcp_tool.name], load=AsyncMock(return_value=[mcp_tool])
+                        )
+                    },
+                )
+            ),
+        ),
     ):
         config = _config()
         config["configurable"]["plan_mode"] = initial_plan_mode

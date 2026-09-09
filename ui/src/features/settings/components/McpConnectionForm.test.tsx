@@ -47,7 +47,7 @@ it("reports malformed JSON readably and does not save", async () => {
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "files" },
   })
-  fireEvent.change(screen.getByLabelText("Type"), {
+  fireEvent.change(screen.getByLabelText("Transport"), {
     target: { value: "stdio" },
   })
   fireEvent.change(screen.getByLabelText("Command"), {
@@ -68,7 +68,7 @@ it("sends only the listed passthrough variables for stdio servers", async () => 
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "files" },
   })
-  fireEvent.change(screen.getByLabelText("Type"), {
+  fireEvent.change(screen.getByLabelText("Transport"), {
     target: { value: "stdio" },
   })
   fireEvent.change(screen.getByLabelText("Command"), {

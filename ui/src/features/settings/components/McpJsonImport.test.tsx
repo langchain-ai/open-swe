@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 
-import { parseMCPConfig, WorkspaceMCPImport } from "./WorkspaceMCPImport"
+import { McpJsonImport, parseMCPConfig } from "./McpJsonImport"
 
 afterEach(cleanup)
 
@@ -86,7 +86,7 @@ it.each([
   "rejects unsupported or malformed configuration without echoing secrets",
   (input, message) => {
     const onImport = vi.fn()
-    render(<WorkspaceMCPImport onImport={onImport} onCancel={vi.fn()} />)
+    render(<McpJsonImport onImport={onImport} onCancel={vi.fn()} />)
     fireEvent.change(screen.getByLabelText("MCP configuration JSON"), {
       target: { value: input },
     })

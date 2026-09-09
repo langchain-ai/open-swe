@@ -233,25 +233,28 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 ### Workspace MCP servers
 
 Admins can connect generic remote MCP servers under **Admin → Workspace MCPs**.
-Connections belong to this Open SWE deployment and are shared across repositories
-and remote coding-agent threads. The existing `CONFIGURED_ADMINS` and
-`OBSERVABILITY_AUTHORIZED_EMAILS` access rules control which users can load them.
+It uses the same connection editor users have under **Plugins → MCPs**; the
+difference is scope. Workspace connections belong to this Open SWE deployment and
+are shared by every authorized coding-agent run across repositories. Per-user
+connections live under **Plugins → MCPs** and only apply to that user's runs. The
+existing `CONFIGURED_ADMINS` and `OBSERVABILITY_AUTHORIZED_EMAILS` access rules
+control which users can load workspace connections.
 
-1. Choose **Add MCP server** and enter a unique lowercase connection name, an
-   HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
-2. Add authentication headers. Values are encrypted using `TOKEN_ENCRYPTION_KEY`
-   in the LangGraph Store; normal dashboard responses only return header names.
-   Admins can use the eye icon (**Show saved headers**) to reveal values on demand,
-   then the crossed-out eye to clear them from the editor. Entered or imported
-   values also have an eye icon to show or hide them. Use headers
-   for credentials, rather than URL query parameters.
-3. Choose **Save and discover tools**. For new connections, all discovered tools
-   are selected by default. Review the selection, then choose **Save connection**
-   to enable those tools. Rediscovering an existing connection preserves its
+1. Choose **Add server** and enter a unique lowercase connection name, an HTTPS
+   server URL, and its transport (**Streamable HTTP** or **SSE**).
+2. Choose **Custom headers** authentication and add header rows. Values are
+   encrypted using `TOKEN_ENCRYPTION_KEY` in the LangGraph Store; normal dashboard
+   responses only return header names. Admins can use the eye icon (**Show saved
+   headers**) to reveal values on demand, then the crossed-out eye to clear them
+   from the editor. Each row also has an eye icon to show or hide the value being
+   entered. Use headers for credentials, rather than URL query parameters.
+   Workspace connections do not support OAuth.
+3. Choose **Discover tools**. For new connections, all discovered tools are
+   selected by default. Review the selection, then choose **Save server** to
+   enable those tools. Rediscovering an existing connection preserves its
    selected tools, including an intentionally empty selection. Newly added tools
-   on the remote server require explicit selection.
-   Discovery checks the draft before saving; if it fails, no connection is
-   created and existing settings stay unchanged. Discovery only lists tools.
+   on the remote server require explicit selection. Discovery checks the draft
+   without saving; if it fails, nothing is written.
 
 Alternatively, choose **Import JSON** and paste a Claude-style configuration:
 
@@ -301,9 +304,9 @@ catalog again. Every tool call reloads the current headers and checks whether th
 connection and tool are still enabled. Disabling or deleting a connection blocks
 subsequent calls from already-loaded tools; it does not cancel an in-flight call.
 
-Editing keeps saved headers unless **Replace headers** is selected. Replacing
-with an empty header list clears authentication. Changing the URL requires
-explicitly replacing or clearing saved headers. Requests must remain on the
+Editing keeps saved headers unless a header row is changed. Removing every row
+from a configured connection clears authentication. Changing the URL requires
+entering the headers again. Requests must remain on the
 configured public HTTPS origin; redirects, private addresses, local processes,
 and interactive OAuth login are not supported by this connection manager.
 An unavailable server omits its tools without preventing other connections from

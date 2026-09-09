@@ -16,9 +16,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { api, connectService } from "@/lib/api"
 import { mcpDesktopBridge } from "@/lib/mcp"
-import type { LocalMcpServer, McpConnection } from "@/lib/mcp"
+import type { LocalMcpServer, McpConnection, McpScope } from "@/lib/mcp"
 import { McpConnectionForm } from "./McpConnectionForm"
 import type { McpEditor, McpSave } from "./McpConnectionForm"
+import { McpJsonImport } from "./McpJsonImport"
+import type { ImportedMCP } from "./McpJsonImport"
 
 const subscribe = () => () => {}
 const serverSnapshot = () => false
@@ -32,24 +34,35 @@ export interface McpNotice {
   error?: string
 }
 
+function toolCount(record: McpConnection): number {
+  return record.allowed_tools?.length ?? record.tool_names.length
+}
+
 export function McpConnectionsSection({
   login,
+  scope = "user",
   notice,
   onDismissNotice,
 }: {
   login: string
+  scope?: McpScope
   notice?: McpNotice
   onDismissNotice?: () => void
 }) {
   const qc = useQueryClient()
-  const localAvailable = useSyncExternalStore(
+  const workspace = scope === "workspace"
+  const desktop = useSyncExternalStore(
     subscribe,
     desktopSnapshot,
     serverSnapshot
   )
-  const cloudKey = ["mcpConnections", login]
+  const localAvailable = desktop && !workspace
+  const cloudKey = ["mcpConnections", scope, login]
   const localKey = ["localMcpServers", login]
-  const cloud = useQuery({ queryKey: cloudKey, queryFn: api.mcpConnections })
+  const cloud = useQuery({
+    queryKey: cloudKey,
+    queryFn: () => api.mcpConnections(scope),
+  })
   const local = useQuery({
     queryKey: localKey,
     queryFn: () => {
@@ -64,6 +77,8 @@ export function McpConnectionsSection({
   })
   const [search, setSearch] = useState("")
   const [editor, setEditor] = useState<McpEditor | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [pendingImports, setPendingImports] = useState<Array<ImportedMCP>>([])
   const [error, setError] = useState<string | null>(null)
   const refresh = async () => {
     await Promise.all([
@@ -73,7 +88,8 @@ export function McpConnectionsSection({
   }
   const save = useMutation({
     mutationFn: async (value: McpSave) => {
-      if (value.source === "cloud") return api.saveMcpConnection(value.record)
+      if (value.source === "cloud")
+        return api.saveMcpConnection(value.record, scope)
       const bridge = mcpDesktopBridge()
       if (!bridge)
         throw new Error(
@@ -100,20 +116,21 @@ export function McpConnectionsSection({
     }) => {
       setError(null)
       if (row.source === "cloud") {
-        if (kind === "delete") return api.deleteMcpConnection(row.record.id)
-        if (kind === "test") return api.testMcpConnection(row.record.id)
+        if (kind === "delete")
+          return api.deleteMcpConnection(row.record.id, scope)
+        if (kind === "test") return api.testMcpConnection(row.record.id, scope)
         if (kind === "authorize") {
           // The desktop app runs consent itself; the web redirect never resolves here.
           const pending = connectService(`mcp-connections/${row.record.id}`)
           if (!pending) return new Promise<never>(() => {})
           if (!(await pending))
             throw new Error("Authorization was cancelled or failed.")
-          return api.testMcpConnection(row.record.id)
+          return api.testMcpConnection(row.record.id, scope)
         }
-        return api.saveMcpConnection({
-          id: row.record.id,
-          enabled: !row.record.enabled,
-        })
+        return api.saveMcpConnection(
+          { id: row.record.id, enabled: !row.record.enabled },
+          scope
+        )
       }
       const bridge = mcpDesktopBridge()
       if (!bridge)
@@ -130,7 +147,7 @@ export function McpConnectionsSection({
     onError: (cause: Error) => setError(cause.message),
   })
   const rows: Array<ServerRow> = [
-    ...(local.data ?? []).map((record): ServerRow => ({
+    ...(localAvailable ? (local.data ?? []) : []).map((record): ServerRow => ({
       source: "local",
       record,
     })),
@@ -147,24 +164,63 @@ export function McpConnectionsSection({
   )
   const busy = save.isPending || action.isPending
   const localNames = new Set((local.data ?? []).map((record) => record.name))
+  const cloudLabel = workspace ? "Workspace" : "Cloud"
+
+  const openImported = (imported: ImportedMCP) =>
+    setEditor({
+      source: "cloud",
+      record: cloud.data?.connections.find(
+        (connection) => connection.name === imported.name
+      ),
+      imported,
+    })
+  const nextImport = () => {
+    const [next, ...rest] = pendingImports
+    setPendingImports(rest)
+    if (next) openImported(next)
+    else setEditor(null)
+  }
+  const closeEditor = () => {
+    setPendingImports([])
+    setEditor(null)
+  }
 
   return (
     <section className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-sm font-medium">MCP servers</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Give Open SWE access to your tools, services, and data.
-          </p>
+        {workspace ? (
+          <div />
+        ) : (
+          <div>
+            <h2 className="text-sm font-medium">MCP servers</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Give Open SWE access to your tools, services, and data.
+            </p>
+          </div>
+        )}
+        <div className="flex gap-2">
+          {workspace && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setImporting(true)
+                setError(null)
+              }}
+              disabled={busy || cloud.isPending || cloud.isError}
+            >
+              Import JSON
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={() => setEditor({ source: "cloud" })}
+            disabled={busy || (workspace && (cloud.isPending || cloud.isError))}
+          >
+            <Plus className="size-3.5" />
+            Add server
+          </Button>
         </div>
-        <Button
-          size="sm"
-          onClick={() => setEditor({ source: "cloud" })}
-          disabled={busy}
-        >
-          <Plus className="size-3.5" />
-          Add server
-        </Button>
       </div>
       <div className="relative">
         <Search className="absolute top-2 left-3 size-3.5 text-muted-foreground" />
@@ -181,7 +237,7 @@ export function McpConnectionsSection({
           {error}
         </p>
       )}
-      {(notice?.connected || notice?.error) && (
+      {!workspace && (notice?.connected || notice?.error) && (
         <div
           role="status"
           className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${notice.error ? "border-destructive/40 text-destructive" : "border-border text-muted-foreground"}`}
@@ -203,7 +259,8 @@ export function McpConnectionsSection({
           role="alert"
           className="flex flex-wrap items-center gap-3 text-xs text-destructive"
         >
-          Could not load cloud servers: {cloud.error.message}
+          Could not load {workspace ? "workspace" : "cloud"} servers:{" "}
+          {cloud.error.message}
           <Button
             size="sm"
             variant="outline"
@@ -255,7 +312,7 @@ export function McpConnectionsSection({
                       ) : (
                         <Monitor className="size-3" />
                       )}
-                      {source === "cloud" ? "Cloud" : "This device"}
+                      {source === "cloud" ? cloudLabel : "This device"}
                     </span>
                     {shadowed && (
                       <span className="text-[10px] text-muted-foreground">
@@ -274,7 +331,7 @@ export function McpConnectionsSection({
                     {!record.enabled
                       ? "Disabled"
                       : status === "connected" && source === "cloud"
-                        ? `Connected · ${row.record.tool_names.length} tools`
+                        ? `Connected · ${toolCount(row.record)} tools`
                         : status === "auth_required"
                           ? "Authorization required"
                           : status === "error"
@@ -290,7 +347,7 @@ export function McpConnectionsSection({
                 <div className="flex items-center gap-1.5">
                   {source === "cloud" && (
                     <>
-                      {row.record.auth_type === "oauth" && (
+                      {!workspace && row.record.auth_type === "oauth" && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -325,10 +382,12 @@ export function McpConnectionsSection({
                     </>
                   )}
                   <Switch
-                    aria-label={`${record.enabled ? "Disable" : "Enable"} ${record.name} ${source === "cloud" ? "globally" : "on this device"}`}
+                    aria-label={`${record.enabled ? "Disable" : "Enable"} ${record.name} ${source === "cloud" ? (workspace ? "for the workspace" : "globally") : "on this device"}`}
                     title={
                       source === "cloud"
-                        ? "Applies everywhere for your account"
+                        ? workspace
+                          ? "Applies to every authorized run"
+                          : "Applies everywhere for your account"
                         : "Applies to this device"
                     }
                     checked={record.enabled}
@@ -354,7 +413,7 @@ export function McpConnectionsSection({
                     onClick={() => {
                       if (
                         window.confirm(
-                          `Delete ${record.name} from ${source === "cloud" ? "Cloud" : "this device"}? This cannot be undone.${source === "local" && cloud.data?.connections.some((connection) => connection.name === record.name) ? " The cloud server with this name will apply on this device again." : ""}`
+                          `Delete ${record.name} from ${source === "cloud" ? cloudLabel : "this device"}? This cannot be undone.${source === "local" && cloud.data?.connections.some((connection) => connection.name === record.name) ? " The cloud server with this name will apply on this device again." : ""}`
                         )
                       )
                         action.mutate({ row, kind: "delete" })
@@ -377,23 +436,38 @@ export function McpConnectionsSection({
               <p className="mt-1 text-xs text-muted-foreground">
                 {needle
                   ? "Try a different name or source."
-                  : "Add a custom server or start with a preset below."}
+                  : workspace
+                    ? "Add a remote server or import a Claude-style JSON configuration."
+                    : "Add a custom server or start with a preset below."}
               </p>
             </div>
           )}
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
-        Cloud toggles apply to all your runs. This device settings only affect
-        local runs; matching local names override cloud servers.
-      </p>
-      {!localAvailable && (
+      {importing && (
+        <McpJsonImport
+          onImport={([first, ...rest]) => {
+            if (!first) return
+            setImporting(false)
+            setPendingImports(rest)
+            openImported(first)
+          }}
+          onCancel={() => setImporting(false)}
+        />
+      )}
+      {!workspace && (
+        <p className="text-xs text-muted-foreground">
+          Cloud toggles apply to all your runs. This device settings only affect
+          local runs; matching local names override cloud servers.
+        </p>
+      )}
+      {!workspace && !localAvailable && (
         <p className="text-xs text-muted-foreground">
           Device servers and stdio require a desktop version with local MCP
           support.
         </p>
       )}
-      {!!cloud.data?.presets.length && (
+      {!workspace && !!cloud.data?.presets.length && (
         <div className="space-y-3 pt-3">
           <h3 className="text-xs font-medium text-muted-foreground">
             Quick start
@@ -424,13 +498,27 @@ export function McpConnectionsSection({
       )}
       {editor && (
         <McpConnectionForm
+          key={`${editor.source}:${editor.record ? ("id" in editor.record ? editor.record.id : editor.record.name) : ""}:${editor.source === "cloud" ? (editor.imported?.name ?? "") : ""}`}
           editor={editor}
+          scope={scope}
           localAvailable={localAvailable}
           pending={save.isPending}
-          onClose={() => setEditor(null)}
+          queued={pendingImports.length}
+          onClose={closeEditor}
+          onSkip={
+            editor.source === "cloud" && editor.imported
+              ? nextImport
+              : undefined
+          }
+          onDiscover={async (record) =>
+            (await api.discoverMcpConnection(record, scope)).tools
+          }
+          onRevealHeaders={
+            workspace ? api.revealMcpConnectionHeaders : undefined
+          }
           onSave={async (value) => {
             await save.mutateAsync(value)
-            setEditor(null)
+            nextImport()
           }}
         />
       )}

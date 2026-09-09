@@ -1,3 +1,5 @@
+"""Owner-scoped MCP connections: storage, validation, discovery, OAuth and the desktop proxy."""
+
 import asyncio
 import base64
 import hashlib
@@ -11,9 +13,6 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import pytest
 from cryptography.fernet import Fernet
-from langgraph_sdk.errors import ConflictError
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
 from starlette.requests import Request
 
 from agent import store
@@ -21,7 +20,6 @@ from agent.dashboard import mcp_connections as mc
 from agent.dashboard import mcp_http as mh
 from agent.dashboard import mcp_oauth as mo
 from agent.utils import url_safety
-from agent.utils.distributed_lock import distributed_lock
 
 
 @pytest.fixture
@@ -44,30 +42,7 @@ async def environment(monkeypatch):
             ]
             return {"items": values[kwargs["offset"] : kwargs["offset"] + kwargs["limit"]]}
 
-    claims = set()
-
-    class Threads:
-        async def create(self, *, thread_id, if_exists, ttl):
-            await asyncio.sleep(0)
-            assert if_exists == "raise"
-            assert ttl == {"strategy": "keep_latest", "ttl": 60}
-            if thread_id in claims:
-                raise ConflictError(
-                    "Already owned",
-                    response=httpx.Response(
-                        409, request=httpx.Request("POST", "http://store/threads")
-                    ),
-                    body=None,
-                )
-            claims.add(thread_id)
-
-        async def delete(self, thread_id):
-            await asyncio.sleep(0)
-            claims.remove(thread_id)
-
-    monkeypatch.setattr(
-        store, "store_client", lambda: SimpleNamespace(store=Store(), threads=Threads())
-    )
+    monkeypatch.setattr(store, "store_client", lambda: SimpleNamespace(store=Store()))
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
     def dns(host, port, *args, **kwargs):
@@ -75,19 +50,9 @@ async def environment(monkeypatch):
 
     monkeypatch.setattr(url_safety.socket, "getaddrinfo", dns)
 
-    @asynccontextmanager
-    async def stream(*args, **kwargs):
-        yield (None, None, None)
-
     class Session:
-        def __init__(self, *args):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
+        def __init__(self, connection):
+            self.connection = connection
 
         async def initialize(self):
             pass
@@ -95,20 +60,27 @@ async def environment(monkeypatch):
         async def list_tools(self, params=None):
             cursor = params.cursor if params else None
             return SimpleNamespace(
-                tools=[SimpleNamespace(name="search" if cursor is None else "fetch")],
+                tools=[
+                    SimpleNamespace(
+                        name="search" if cursor is None else "fetch", description="Find things"
+                    )
+                ],
                 nextCursor="next" if cursor is None else None,
             )
 
-    monkeypatch.setattr(mc, "streamable_http_client", stream)
-    monkeypatch.setattr(mc, "ClientSession", Session)
+    @asynccontextmanager
+    async def create_session(connection, **kwargs):
+        yield Session(connection)
+
+    monkeypatch.setattr(mc, "create_session", create_session)
     return items
 
 
-async def create(auth_type="bearer", **kwargs):
+async def create(auth_type="bearer", owner="alice", **kwargs):
     return await mc.save_connection(
-        "alice",
+        owner,
         {
-            "name": "Example",
+            "name": "Example" if owner != mc.WORKSPACE_OWNER else "example",
             "url": "https://example.com/mcp",
             "auth_type": auth_type,
             "bearer_token": "secret-token",
@@ -117,69 +89,12 @@ async def create(auth_type="bearer", **kwargs):
     )
 
 
-async def test_cancelled_owner_is_not_replaced(environment):
-    entered = asyncio.Event()
-
-    async def owner():
-        async with distributed_lock(["cancelled-oauth"]):
-            entered.set()
-            await asyncio.Event().wait()
-
-    task = asyncio.create_task(owner())
-    await entered.wait()
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    with pytest.raises(TimeoutError):
-        async with distributed_lock(["cancelled-oauth"], timeout=0):
-            pytest.fail("An abandoned owner must not be replaced without fencing")
-
-
-async def test_real_sdk_initialization_and_paginated_discovery(environment, monkeypatch):
-    requests = []
-
-    async def upstream(request):
-        if request.method != "POST":
-            return httpx.Response(405)
-        message = json.loads(await request.aread())
-        requests.append(message)
-        if "id" not in message:
-            return httpx.Response(202)
-        if message["method"] == "initialize":
-            result = {
-                "protocolVersion": "2025-11-25",
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "test", "version": "1"},
-            }
-        else:
-            cursor = message.get("params", {}).get("cursor")
-            result = {
-                "tools": [
-                    {"name": "fetch" if cursor else "search", "inputSchema": {"type": "object"}}
-                ]
-            }
-            if not cursor:
-                result["nextCursor"] = "page2"
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": message["id"], "result": result})
-
-    monkeypatch.setattr(mc, "ClientSession", ClientSession)
-    monkeypatch.setattr(mc, "streamable_http_client", streamable_http_client)
-    monkeypatch.setattr(
-        mc,
-        "mcp_http_client",
-        lambda *args, **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
-    )
-    result = await create()
-    assert result["status"] == "connected"
-    assert result["tool_names"] == ["fetch", "search"]
-    assert requests[0]["method"] == "initialize"
-    assert sum(message["method"] == "tools/list" for message in requests) == 2
-
-
 async def test_encryption_crud_catalog_owner_and_url_change(environment):
     record = await create()
     assert record["status"] == "connected"
     assert record["tool_names"] == ["fetch", "search"]
+    assert record["tools"][0] == {"name": "search", "description": "Find things"}
+    assert record["scope"] == "user"
     assert record["bearer_token_configured"]
     assert "secret-token" not in json.dumps(record)
     assert "secret-token" not in json.dumps(list(environment.values()))
@@ -188,7 +103,6 @@ async def test_encryption_crud_catalog_owner_and_url_change(environment):
         with pytest.raises(mh.MCPConnectionError, match="not found"):
             await operation("bob", record["id"])
     await mc.delete_connection("bob", record["id"])
-    await mc.delete_connection("bob", "0" * 32)
     assert await mc.list_connections("alice") == [record]
     with pytest.raises(mh.MCPConnectionError, match="not found") as error:
         await mc.delete_connection("alice", "malformed")
@@ -197,6 +111,7 @@ async def test_encryption_crud_catalog_owner_and_url_change(environment):
         await mc.save_connection("bob", {"id": record["id"], "name": "stolen"})
     preserved = await mc.save_connection("alice", {"id": record["id"], "name": "Renamed"})
     assert preserved["bearer_token_configured"]
+    assert preserved["revision"] != record["revision"]
     disabled = await mc.save_connection("alice", {"id": record["id"], "enabled": False})
     assert not disabled["enabled"]
     with pytest.raises(mh.MCPConnectionError, match="disabled"):
@@ -211,8 +126,112 @@ async def test_encryption_crud_catalog_owner_and_url_change(environment):
     assert not changed["oauth_client_configured"]
     assert not changed["oauth_client_secret_configured"]
     await mc.delete_connection("alice", record["id"])
-    await mc.delete_connection("alice", record["id"])
     assert await mc.list_connections("alice") == []
+
+
+async def test_concurrent_writers_are_detected_instead_of_overwriting(environment):
+    record = await create()
+    stored = await mc.get_record("alice", record["id"])
+    stale = dict(stored)
+    stored["name"] = "first"
+    await mc.put_record("alice", stored, expected_version=stored["version"])
+    stale["name"] = "second"
+    with pytest.raises(mh.MCPConnectionError, match="changed") as error:
+        await mc.put_record("alice", stale, expected_version=stale["version"])
+    assert error.value.status_code == 409
+    assert (await mc.get_record("alice", record["id"]))["name"] == "first"
+
+    async def rename(current):
+        current["name"] = "third"
+
+    updated, _ = await mc.update_record("alice", record["id"], rename)
+    assert updated["name"] == "third"
+    with pytest.raises(mh.MCPConnectionError, match="changed"):
+        await mc.put_record("alice", {**updated, "id": "f" * 32}, expected_version="missing")
+
+
+async def test_workspace_scope_rules_and_allowlist(environment):
+    with pytest.raises(mh.MCPConnectionError, match="lowercase"):
+        await create("headers", owner=mc.WORKSPACE_OWNER, name="Incident", headers={"X-Key": "k"})
+    with pytest.raises(mh.MCPConnectionError, match="OAuth"):
+        await create("oauth", owner=mc.WORKSPACE_OWNER)
+    shared = await create("headers", owner=mc.WORKSPACE_OWNER, headers={"X-Key": "k"})
+    assert shared["scope"] == "workspace"
+    assert shared["header_names"] == ["x-key"]
+    assert shared["allowed_tools"] is None
+    record = await mc.get_record(mc.WORKSPACE_OWNER, shared["id"])
+    assert mc.runnable_tools(record) == [], "workspace tools run only when explicitly allowed"
+    allowed = await mc.save_connection(
+        mc.WORKSPACE_OWNER, {"id": shared["id"], "allowed_tools": ["search", "search", "gone"]}
+    )
+    assert allowed["allowed_tools"] == ["search", "gone"]
+    assert mc.runnable_tools(await mc.get_record(mc.WORKSPACE_OWNER, shared["id"])) == ["search"]
+    assert await mc.reveal_headers(mc.WORKSPACE_OWNER, shared["id"]) == {"x-key": "k"}
+    with pytest.raises(mh.MCPConnectionError, match="not found"):
+        await mc.reveal_headers("alice", shared["id"])
+    assert await mc.list_connections("alice") == []
+    personal = await create(allowed_tools=None)
+    assert mc.runnable_tools(await mc.get_record("alice", personal["id"])) == ["fetch", "search"]
+    with pytest.raises(mh.MCPConnectionError):
+        await create(url="https://example.com/mcp?api_key=secret")
+    sse = await create(
+        "headers",
+        owner=mc.WORKSPACE_OWNER,
+        name="dd",
+        transport="sse",
+        url="https://mcp.example/v1/mcp?toolsets=core",
+        headers={"DD_API_KEY": "k"},
+    )
+    assert sse["transport"] == "sse"
+    assert sse["url"].endswith("?toolsets=core")
+
+
+async def test_draft_discovery_persists_nothing(environment, monkeypatch):
+    tools = await mc.discover_draft(
+        "alice",
+        {
+            "name": "Draft",
+            "url": "https://example.com/mcp",
+            "auth_type": "bearer",
+            "bearer_token": "t",
+        },
+    )
+    assert [tool["name"] for tool in tools] == ["search", "fetch"]
+    assert await mc.list_connections("alice") == []
+
+    @asynccontextmanager
+    async def failing(connection, **kwargs):
+        raise httpx.HTTPStatusError(
+            "denied",
+            request=httpx.Request("POST", "https://example.com/mcp"),
+            response=httpx.Response(401),
+        )
+        yield
+
+    monkeypatch.setattr(mc, "create_session", failing)
+    with pytest.raises(mh.MCPConnectionError, match="HTTP 401") as error:
+        await mc.discover_draft("alice", {"name": "Draft", "url": "https://example.com/mcp"})
+    assert error.value.status_code == 400
+
+
+async def test_legacy_workspace_records_migrate_once(environment):
+    environment[(("workspace_mcps",), "incident")] = {
+        "name": "incident",
+        "url": "https://mcp.incident.io/mcp",
+        "transport": "streamable_http",
+        "enabled": True,
+        "allowed_tools": ["incident_list"],
+        "encrypted_headers": mc.encrypt_token(json.dumps({"Authorization": "Bearer legacy"})),
+        "header_names": ["Authorization"],
+        "revision": "r1",
+        "updated_at": "2026-01-01T00:00:00Z",
+    }
+    listed = await mc.list_connections(mc.WORKSPACE_OWNER)
+    assert [record["name"] for record in listed] == ["incident"]
+    assert listed[0]["allowed_tools"] == ["incident_list"]
+    assert listed[0]["headers_configured"]
+    assert (("workspace_mcps",), "incident") not in environment
+    assert await mc.list_connections(mc.WORKSPACE_OWNER) == listed
 
 
 @pytest.mark.parametrize(
@@ -263,6 +282,7 @@ async def test_unsafe_url_forms(url):
         {"Authorization": "secret"},
         {"Cookie": "session"},
         {"Mcp-Session-Id": "other-user"},
+        {"X-Key": "one", "x-key": "two"},
     ],
 )
 async def test_header_injection_rejected(environment, headers):
@@ -346,16 +366,20 @@ async def test_proxy_streaming_session_binding_and_dashboard_credentials(environ
     assert len(seen) == 1
 
 
-async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, monkeypatch):
-    public = await create("oauth")
-    calls = []
-    metadata = {
+def _metadata():
+    return {
         "issuer": "https://auth.example/",
         "authorization_endpoint": "https://auth.example/authorize",
         "token_endpoint": "https://auth.example/token",
         "registration_endpoint": "https://auth.example/register",
         "token_endpoint_auth_methods_supported": ["none"],
     }
+
+
+async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, monkeypatch):
+    public = await create("oauth")
+    calls = []
+    metadata = _metadata()
 
     async def discover(url, authorization_server=""):
         assert not authorization_server
@@ -396,7 +420,7 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     result = next(result for result in results if isinstance(result, dict))
     replay = next(result for result in results if isinstance(result, mh.MCPConnectionError))
     assert replay.status_code == 400
-    assert sum(url.endswith("token") for url, _ in calls) == 1
+    assert sum(url.endswith("token") for url, _ in calls) == 1, "a code is exchanged once"
     assert result["oauth_configured"]
     assert "oauth-access-secret" not in json.dumps(result)
     assert "oauth-refresh-secret" not in json.dumps(list(environment.values()))
@@ -404,27 +428,26 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     assert calls[-1][1]["data"]["resource"] == "https://example.com/mcp"
     with pytest.raises(mh.MCPConnectionError, match="state"):
         await mo.finish_oauth(state, "authorization-code")
-    record = await mc.get_record("alice", public["id"])
-    record["oauth"]["expires_at"] = time.time() - 1
-    await mc.put_record("alice", record)
-    stale = await mc.get_record("alice", public["id"])
+
+    async def expire(current):
+        current["oauth"]["expires_at"] = time.time() - 1
+
+    record, _ = await mc.update_record("alice", public["id"], expire)
+    stale = dict(record)
     refreshed = await asyncio.gather(
         mo.access_token("alice", record), mo.access_token("alice", stale)
     )
     assert refreshed == ["oauth-access-secret", "oauth-access-secret"]
     assert (
         sum(kwargs.get("data", {}).get("grant_type") == "refresh_token" for _, kwargs in calls) == 1
-    )
+    ), "concurrent callers share one refresh"
     config = await mc.connection_config("alice", public["id"])
     assert config["headers"] == {}
     flow = config["auth"].async_auth_flow(httpx.Request("POST", config["url"]))
     request = await anext(flow)
     assert request.headers["authorization"] == "Bearer oauth-access-secret"
     await flow.aclose()
-    assert calls[-1][1]["data"]["grant_type"] == "refresh_token"
-    record = await mc.get_record("alice", public["id"])
-    record["oauth"]["expires_at"] = time.time() - 1
-    await mc.put_record("alice", record)
+    record, _ = await mc.update_record("alice", public["id"], expire)
     attempts = 0
 
     async def interrupted(*args, **kwargs):
@@ -435,15 +458,50 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
 
     monkeypatch.setattr(mo, "request_json", interrupted)
     failures = await asyncio.gather(
-        mo.access_token("alice", record), mo.access_token("alice", record), return_exceptions=True
+        mo.access_token("alice", record),
+        mo.access_token("alice", dict(record)),
+        return_exceptions=True,
     )
-    # Each caller retries in turn; a handled failure must not strand the connection.
-    assert attempts == 2
+    assert attempts == 2, "each caller retries in turn after a handled failure"
     assert sorted(error.status_code for error in failures) == [502, 502]
-    assert "refresh_pending" not in (await mc.get_record("alice", public["id"]))["oauth"]
+    assert "refresh" not in (await mc.get_record("alice", public["id"]))["oauth"]
     await mc.delete_connection("alice", public["id"])
     with pytest.raises(mh.MCPConnectionError, match="not found"):
         await anext(config["auth"].async_auth_flow(httpx.Request("POST", config["url"])))
+
+
+async def test_stale_refresh_claim_is_taken_over(environment, monkeypatch):
+    public = await create("oauth")
+
+    async def seed(current):
+        current["oauth"] = {
+            "metadata": _metadata(),
+            "resource": current["url"],
+            "client": {"client_id": "client", "token_endpoint_auth_method": "none"},
+            "tokens": {"access_token": "old", "refresh_token": "refresh", "token_type": "Bearer"},
+            "expires_at": time.time() - 1,
+            "refresh": {"id": "dead-worker", "started_at": time.time() - 3600},
+        }
+
+    record, _ = await mc.update_record("alice", public["id"], seed)
+
+    async def request_json(method, url, **kwargs):
+        return {"access_token": "fresh", "token_type": "Bearer", "expires_in": 3600}
+
+    monkeypatch.setattr(mo, "request_json", request_json)
+    assert await mo.access_token("alice", record) == "fresh"
+    stored = await mc.get_record("alice", public["id"])
+    assert stored["oauth"]["tokens"]["refresh_token"] == "refresh"
+    assert "refresh" not in stored["oauth"]
+
+    async def live_claim(current):
+        current["oauth"]["expires_at"] = time.time() - 1
+        current["oauth"]["refresh"] = {"id": "other-worker", "started_at": time.time()}
+
+    record, _ = await mc.update_record("alice", public["id"], live_claim)
+    monkeypatch.setattr(mo, "_REFRESH_WAIT", 0.3)
+    with pytest.raises(mh.MCPConnectionError, match="taking too long"):
+        await mo.access_token("alice", record)
 
 
 async def test_oauth_discovery_rejects_ssrf_from_challenge(environment, monkeypatch):
@@ -703,13 +761,7 @@ async def test_metadata_error_redaction(environment, monkeypatch):
 
 async def test_desktop_handoff_flow_is_pinned_to_its_owner(environment, monkeypatch):
     public = await create("oauth")
-    metadata = {
-        "issuer": "https://auth.example/",
-        "authorization_endpoint": "https://auth.example/authorize",
-        "token_endpoint": "https://auth.example/token",
-        "registration_endpoint": "https://auth.example/register",
-        "token_endpoint_auth_methods_supported": ["none"],
-    }
+    metadata = _metadata()
 
     async def discover(url, authorization_server=""):
         return metadata, url, "read"

@@ -1,4 +1,16 @@
 export type McpAuthType = "none" | "bearer" | "headers" | "oauth"
+export type McpScope = "user" | "workspace"
+export type McpTransport = "streamable_http" | "sse"
+export type McpConnectionStatus =
+  | "untested"
+  | "connected"
+  | "error"
+  | "auth_required"
+
+export interface McpToolInfo {
+  name: string
+  description: string
+}
 
 export interface McpPreset {
   name: string
@@ -8,10 +20,17 @@ export interface McpPreset {
 
 export interface McpConnection extends McpPreset {
   id: string
+  scope: McpScope
+  transport: McpTransport
   enabled: boolean
   tool_names: Array<string>
-  status: string
+  tools: Array<McpToolInfo>
+  /** `null` allows every discovered tool. Workspace connections only run listed tools. */
+  allowed_tools: Array<string> | null
+  status: McpConnectionStatus
+  revision: string
   headers_configured: boolean
+  header_names: Array<string>
   bearer_token_configured: boolean
   oauth_configured: boolean
   oauth_client_configured: boolean
@@ -29,10 +48,13 @@ export interface McpConnectionInput {
   id?: string
   name?: string
   url?: string
+  transport?: McpTransport
   enabled?: boolean
   auth_type?: McpAuthType
+  /** Omit to keep the saved headers; send `{}` to clear them. */
   headers?: Record<string, string>
   bearer_token?: string
+  allowed_tools?: Array<string> | null
   oauth_client_id?: string
   oauth_client_secret?: string
   oauth_authorization_server?: string

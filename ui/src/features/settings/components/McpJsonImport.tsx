@@ -2,12 +2,14 @@ import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import type { WorkspaceMCPUpdate } from "@/lib/api"
+import type { McpTransport } from "@/lib/mcp"
 
-export type ImportedMCP = Pick<
-  WorkspaceMCPUpdate,
-  "name" | "url" | "transport" | "headers"
->
+export interface ImportedMCP {
+  name: string
+  url: string
+  transport: McpTransport
+  headers?: Record<string, string>
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -80,7 +82,7 @@ export function parseMCPConfig(text: string): ImportedMCP[] {
   })
 }
 
-export function WorkspaceMCPImport({
+export function McpJsonImport({
   onImport,
   onCancel,
 }: {

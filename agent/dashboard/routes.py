@@ -233,14 +233,6 @@ from agent.dashboard.user_mappings import (
     upsert_mapping,
 )
 from agent.dashboard.voice import transcribe_audio
-from agent.dashboard.workspace_mcps import (
-    WorkspaceMCPRoute,
-    WorkspaceMCPUpdate,
-    delete_workspace_mcp,
-    get_workspace_mcp,
-    list_workspace_mcps,
-    save_workspace_mcp,
-)
 from agent.encryption import decrypt_token, encrypt_token
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
@@ -268,7 +260,6 @@ from agent.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
-from agent.tool_loaders.workspace_mcp import discover_workspace_mcp
 from agent.utils.dashboard_links import (
     dashboard_api_base_url,
     dashboard_base_url,
@@ -716,40 +707,87 @@ async def _mcp_result[T](operation: Awaitable[T]) -> T:
         raise HTTPException(502, "MCP connection operation failed; retry or reconnect") from None
 
 
+_McpScope = Literal["user", "workspace"]
+
+
+def _mcp_owner(scope: _McpScope, session: dict[str, Any]) -> str:
+    """The store owner for ``scope``; the shared workspace scope is admin-only."""
+    if scope == "workspace":
+        _require_admin(session)
+    return mcp_connections.scope_owner(scope, session["sub"])
+
+
 @router.get("/mcp-connections")
-async def get_mcp_connections(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+async def get_mcp_connections(
+    scope: _McpScope = "user", session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    owner = _mcp_owner(scope, session)
     return {
-        "connections": await _mcp_result(mcp_connections.list_connections(session["sub"])),
-        "presets": mcp_connections.MCP_PRESETS,
+        "connections": await _mcp_result(mcp_connections.list_connections(owner)),
+        "presets": mcp_connections.MCP_PRESETS if scope == "user" else [],
     }
 
 
 @router.post("/mcp-connections")
 async def save_mcp_connection(
-    body: dict[str, Any], session: dict[str, Any] = _SESSION_DEP
+    body: dict[str, Any],
+    scope: _McpScope = "user",
+    session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await _mcp_result(mcp_connections.save_connection(session["sub"], body))
+    owner = _mcp_owner(scope, session)
+    return await _mcp_result(mcp_connections.save_connection(owner, body))
+
+
+@router.post("/mcp-connections/discover")
+async def discover_mcp_connection(
+    body: dict[str, Any],
+    scope: _McpScope = "user",
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """List a draft's tools so its allowlist can be chosen before anything is saved."""
+    owner = _mcp_owner(scope, session)
+    return {"tools": await _mcp_result(mcp_connections.discover_draft(owner, body))}
 
 
 @router.patch("/mcp-connections/{id}")
 @router.put("/mcp-connections/{id}")
 async def update_mcp_connection(
-    id: str, body: dict[str, Any], session: dict[str, Any] = _SESSION_DEP
+    id: str,
+    body: dict[str, Any],
+    scope: _McpScope = "user",
+    session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if "id" in body and body["id"] != id:
         raise HTTPException(400, "MCP connection ID mismatch")
-    return await _mcp_result(mcp_connections.save_connection(session["sub"], {**body, "id": id}))
+    owner = _mcp_owner(scope, session)
+    return await _mcp_result(mcp_connections.save_connection(owner, {**body, "id": id}))
 
 
 @router.delete("/mcp-connections/{id}", status_code=204)
-async def delete_mcp_connection(id: str, session: dict[str, Any] = _SESSION_DEP) -> Response:
-    await _mcp_result(mcp_connections.delete_connection(session["sub"], id))
+async def delete_mcp_connection(
+    id: str, scope: _McpScope = "user", session: dict[str, Any] = _SESSION_DEP
+) -> Response:
+    owner = _mcp_owner(scope, session)
+    await _mcp_result(mcp_connections.delete_connection(owner, id))
     return Response(status_code=204)
 
 
 @router.post("/mcp-connections/{id}/test")
-async def test_mcp_connection(id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
-    return await _mcp_result(mcp_connections.discover_connection(session["sub"], id))
+async def test_mcp_connection(
+    id: str, scope: _McpScope = "user", session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    owner = _mcp_owner(scope, session)
+    return await _mcp_result(mcp_connections.discover_connection(owner, id))
+
+
+@router.post("/mcp-connections/{id}/headers/reveal")
+async def reveal_mcp_connection_headers(
+    id: str, scope: _McpScope = "user", session: dict[str, Any] = _SESSION_DEP
+) -> JSONResponse:
+    """Saved header values for an admin editing a shared connection; never cached."""
+    owner = _mcp_owner(scope, session)
+    headers = await _mcp_result(mcp_connections.reveal_headers(owner, id))
+    return JSONResponse(content=headers, headers={"Cache-Control": "no-store"})
 
 
 _MCP_STATE_COOKIE = "osw_mcp_oauth_state"
@@ -1037,61 +1075,6 @@ async def api_get_team_credentials(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     return await get_team_credentials_status()
-
-
-workspace_mcp_router = APIRouter(route_class=WorkspaceMCPRoute)
-
-
-@workspace_mcp_router.get("/workspace-mcps")
-async def api_list_workspace_mcps(_admin: dict[str, Any] = _ADMIN_DEP) -> list[dict[str, Any]]:
-    return await list_workspace_mcps()
-
-
-@workspace_mcp_router.put("/workspace-mcps/{name}")
-async def api_save_workspace_mcp(
-    name: str,
-    update: WorkspaceMCPUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    try:
-        return await save_workspace_mcp(name, update)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
-
-
-@workspace_mcp_router.delete("/workspace-mcps/{name}", status_code=204)
-async def api_delete_workspace_mcp(name: str, _admin: dict[str, Any] = _ADMIN_DEP) -> None:
-    await delete_workspace_mcp(name)
-
-
-@workspace_mcp_router.post("/workspace-mcps/{name}/headers/reveal")
-async def api_reveal_workspace_mcp_headers(
-    name: str,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> JSONResponse:
-    record = await get_workspace_mcp(name)
-    if record is None:
-        raise HTTPException(404, "MCP connection not found")
-    try:
-        headers = record.connection_headers()
-    except ValueError:
-        raise HTTPException(400, "MCP authentication headers could not be decrypted") from None
-    return JSONResponse(content=headers, headers={"Cache-Control": "no-store"})
-
-
-@workspace_mcp_router.post("/workspace-mcps/{name}/discover")
-async def api_discover_workspace_mcp(
-    name: str,
-    update: WorkspaceMCPUpdate | None = None,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> list[dict[str, str]]:
-    try:
-        return await discover_workspace_mcp(name, update)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
-
-
-router.include_router(workspace_mcp_router)
 
 
 @router.put("/team-credentials/langsmith")

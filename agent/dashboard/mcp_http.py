@@ -19,7 +19,7 @@ class MCPConnectionError(Exception):
         self.detail = detail
 
 
-def validate_url(value: str) -> httpx.URL:
+def validate_url(value: str, *, allow_query: bool = False) -> httpx.URL:
     try:
         url = httpx.URL(value)
         if (
@@ -27,7 +27,7 @@ def validate_url(value: str) -> httpx.URL:
             or not url.host
             or url.userinfo
             or url.fragment
-            or url.query
+            or (url.query and not allow_query)
             or any(ord(c) < 33 for c in value)
         ):
             raise ValueError
@@ -38,8 +38,8 @@ def validate_url(value: str) -> httpx.URL:
         ) from None
 
 
-async def resolve_url(value: str) -> httpx.URL:
-    url = validate_url(value)
+async def resolve_url(value: str, *, allow_query: bool = False) -> httpx.URL:
+    url = validate_url(value, allow_query=allow_query)
     safe, _, _, _ = await asyncio.to_thread(resolve_and_validate, str(url))
     if not safe:
         raise MCPConnectionError(400, "Endpoint must resolve only to public addresses")

@@ -26,12 +26,12 @@ from mcp.shared.auth_utils import check_resource_allowed, resource_url_from_serv
 from pydantic import AnyHttpUrl, ValidationError
 
 from agent.dashboard.mcp_connections import (
-    connection_lock,
     discover_connection,
     get_record,
     put_record,
     seal,
     unseal,
+    update_record,
 )
 from agent.dashboard.mcp_http import MCPConnectionError, request_json, resolve_url, validate_url
 from agent.store import delete_value, get_value, put_value
@@ -39,6 +39,8 @@ from agent.tool_loaders.mcp_transport import mcp_http_client
 
 _FLOW_NAMESPACE = "mcp_oauth_flows"
 _FLOW_TTL = 600
+_REFRESH_STALE_AFTER = 60
+_REFRESH_WAIT = 30
 
 
 async def _metadata(urls: list[str]) -> dict[str, Any]:
@@ -180,45 +182,44 @@ async def start_oauth(
 ) -> str:
     """Begin the authorization-code flow; ``handoff`` marks a desktop PKCE loopback flow."""
     validate_url(redirect_uri)
-    async with connection_lock(login, id):
-        record = await get_record(login, id)
-        if record["auth_type"] != "oauth":
-            raise MCPConnectionError(409, "Select OAuth authentication first")
-        metadata, resource, suggested_scope = await _discover(
-            record["url"], record.get("oauth_authorization_server", "")
+    record = await get_record(login, id)
+    if record["auth_type"] != "oauth":
+        raise MCPConnectionError(409, "Select OAuth authentication first")
+    metadata, resource, suggested_scope = await _discover(
+        record["url"], record.get("oauth_authorization_server", "")
+    )
+    scope = record.get("oauth_scope") or suggested_scope
+    client = await _client(record, metadata, redirect_uri, scope)
+    pkce = PKCEParameters.generate()
+    state = secrets.token_urlsafe(32)
+    flow = {
+        "state": state,
+        "owner": login,
+        "id": id,
+        "revision": record["revision"],
+        "expires_at": time.time() + _FLOW_TTL,
+        "redirect_uri": redirect_uri,
+        "handoff": list(handoff) if handoff else None,
+        "verifier": pkce.code_verifier,
+        "metadata": metadata,
+        "resource": resource,
+        "client": client,
+    }
+    await put_value([_FLOW_NAMESPACE], state, seal(flow))
+    return f"{metadata['authorization_endpoint']}?{
+        urlencode(
+            {
+                'response_type': 'code',
+                'client_id': client['client_id'],
+                'redirect_uri': redirect_uri,
+                'state': state,
+                'code_challenge': pkce.code_challenge,
+                'code_challenge_method': 'S256',
+                'resource': resource,
+                'scope': scope,
+            }
         )
-        scope = record.get("oauth_scope") or suggested_scope
-        client = await _client(record, metadata, redirect_uri, scope)
-        pkce = PKCEParameters.generate()
-        state = secrets.token_urlsafe(32)
-        flow = {
-            "state": state,
-            "owner": login,
-            "id": id,
-            "revision": record["revision"],
-            "expires_at": time.time() + _FLOW_TTL,
-            "redirect_uri": redirect_uri,
-            "handoff": list(handoff) if handoff else None,
-            "verifier": pkce.code_verifier,
-            "metadata": metadata,
-            "resource": resource,
-            "client": client,
-        }
-        await put_value([_FLOW_NAMESPACE], state, seal(flow))
-        return f"{metadata['authorization_endpoint']}?{
-            urlencode(
-                {
-                    'response_type': 'code',
-                    'client_id': client['client_id'],
-                    'redirect_uri': redirect_uri,
-                    'state': state,
-                    'code_challenge': pkce.code_challenge,
-                    'code_challenge_method': 'S256',
-                    'resource': resource,
-                    'scope': scope,
-                }
-            )
-        }"
+    }"
 
 
 async def _token(oauth: dict[str, Any], fields: dict[str, str]) -> dict[str, Any]:
@@ -283,73 +284,145 @@ async def finish_oauth(state: str, code: str, *, owner: str | None = None) -> di
         or len(code) > 8192
     ):
         raise MCPConnectionError(400, "OAuth state is invalid or expired")
-    namespace = [_FLOW_NAMESPACE]
-    async with connection_lock(_FLOW_NAMESPACE, state):
-        stored = await get_value(namespace, state)
-        if stored is None:
-            raise MCPConnectionError(400, "OAuth state is invalid or expired")
-        flow = unseal(stored)
-        await delete_value(namespace, state)
-        if (
-            flow["state"] != state
-            or flow["expires_at"] < time.time()
-            or (owner is not None and flow["owner"] != owner)
-        ):
-            raise MCPConnectionError(400, "OAuth state is invalid or expired")
-        login = flow["owner"]
-        async with connection_lock(login, flow["id"]):
-            record = await get_record(login, flow["id"])
-            if record["revision"] != flow["revision"] or record["auth_type"] != "oauth":
-                raise MCPConnectionError(409, "MCP connection changed; restart OAuth")
-            oauth = {key: flow[key] for key in ("metadata", "resource", "client")}
-            tokens = await _token(
-                oauth,
-                {
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": flow["redirect_uri"],
-                    "code_verifier": flow["verifier"],
-                },
-            )
-            _store_tokens(oauth, tokens)
-            record["oauth"] = oauth
-            await put_record(login, record)
+    flow = await _claim_flow(state)
+    if (
+        flow["state"] != state
+        or flow["expires_at"] < time.time()
+        or (owner is not None and flow["owner"] != owner)
+    ):
+        raise MCPConnectionError(400, "OAuth state is invalid or expired")
+    login = flow["owner"]
+    record = await get_record(login, flow["id"])
+    if record["revision"] != flow["revision"] or record["auth_type"] != "oauth":
+        raise MCPConnectionError(409, "MCP connection changed; restart OAuth")
+    oauth = {key: flow[key] for key in ("metadata", "resource", "client")}
+    tokens = await _token(
+        oauth,
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": flow["redirect_uri"],
+            "code_verifier": flow["verifier"],
+        },
+    )
+    _store_tokens(oauth, tokens)
+
+    async def attach(current: dict[str, Any]) -> None:
+        if current["revision"] != flow["revision"] or current["auth_type"] != "oauth":
+            raise MCPConnectionError(409, "MCP connection changed; restart OAuth")
+        current["oauth"] = oauth
+
+    await update_record(login, flow["id"], attach)
     return await discover_connection(login, flow["id"])
 
 
+async def _claim_flow(state: str) -> dict[str, Any]:
+    """Consume the flow exactly once: mark it claimed, verify the mark stuck, delete it.
+
+    Two callbacks racing on the same state both read it, but only the writer
+    whose claim survives the read-back proceeds; the other sees a foreign claim.
+    """
+    namespace = [_FLOW_NAMESPACE]
+    stored = await get_value(namespace, state)
+    if stored is None:
+        raise MCPConnectionError(400, "OAuth state is invalid or expired")
+    flow = unseal(stored)
+    if flow.get("claim"):
+        raise MCPConnectionError(400, "OAuth state is invalid or expired")
+    flow["claim"] = secrets.token_hex(16)
+    await put_value(namespace, state, seal(flow))
+    verify = await get_value(namespace, state)
+    if verify is None or unseal(verify).get("claim") != flow["claim"]:
+        raise MCPConnectionError(400, "OAuth state is invalid or expired")
+    await delete_value(namespace, state)
+    return flow
+
+
 async def access_token(login: str, record: dict[str, Any]) -> str:
-    async with connection_lock(login, record["id"]):
-        current = await get_record(login, record["id"])
-        if not current["enabled"] or current["revision"] != record["revision"]:
-            raise MCPConnectionError(409, "MCP connection changed; reconnect")
-        return await access_token_locked(login, current)
+    current = await get_record(login, record["id"])
+    if not current["enabled"] or current["revision"] != record["revision"]:
+        raise MCPConnectionError(409, "MCP connection changed; reconnect")
+    return await access_token_for(login, current)
 
 
-async def access_token_locked(login: str, record: dict[str, Any]) -> str:
-    oauth = record.get("oauth", {})
-    if oauth.get("refresh_pending"):
-        raise MCPConnectionError(409, "MCP OAuth refresh interrupted; reconnect")
-    tokens = oauth.get("tokens", {})
-    if not tokens.get("access_token"):
-        raise MCPConnectionError(409, "MCP OAuth authorization required")
+def _needs_refresh(oauth: dict[str, Any]) -> bool:
     expires_at = oauth.get("expires_at")
-    if expires_at is not None and expires_at <= time.time() + 60:
-        if not tokens.get("refresh_token"):
-            raise MCPConnectionError(409, "MCP OAuth authorization expired; reconnect")
-        # The pending flag makes a crash between the request and the store
-        # visible; a failure that reaches us here is handled, so clear it and
-        # let the next call retry rather than forcing a reconnect.
-        oauth["refresh_pending"] = True
-        await put_record(login, record)
-        try:
-            refreshed = await _token(
-                oauth, {"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}
-            )
-        except MCPConnectionError:
-            oauth.pop("refresh_pending", None)
-            await put_record(login, record)
-            raise
-        oauth.pop("refresh_pending")
-        _store_tokens(oauth, refreshed)
-        await put_record(login, record)
-    return oauth["tokens"]["access_token"]
+    return expires_at is not None and expires_at <= time.time() + 60
+
+
+def _refresh_in_progress(oauth: dict[str, Any]) -> bool:
+    claim = oauth.get("refresh")
+    return bool(claim) and time.time() - claim.get("started_at", 0) < _REFRESH_STALE_AFTER
+
+
+async def access_token_for(login: str, record: dict[str, Any]) -> str:
+    """A live access token, refreshing once across workers when it is about to expire.
+
+    Refresh tokens may rotate, so only one worker may spend one. The claim is
+    written with optimistic concurrency; anyone who loses waits for the winner's
+    tokens instead of refreshing again. A claim older than a minute belonged to
+    a worker that died mid-refresh and may be taken over.
+    """
+    oauth = record.get("oauth", {})
+    if not oauth.get("tokens", {}).get("access_token"):
+        raise MCPConnectionError(409, "MCP OAuth authorization required")
+    if not _needs_refresh(oauth):
+        return oauth["tokens"]["access_token"]
+    revision = record["revision"]
+    deadline = time.time() + _REFRESH_WAIT
+    while True:
+        oauth = record.get("oauth", {})
+        if not oauth.get("tokens", {}).get("access_token"):
+            raise MCPConnectionError(409, "MCP OAuth authorization required")
+        if not _needs_refresh(oauth):
+            return oauth["tokens"]["access_token"]
+        if not _refresh_in_progress(oauth):
+            refreshed = await _try_refresh(login, record)
+            if refreshed is not None:
+                return refreshed
+        if time.time() >= deadline:
+            raise MCPConnectionError(409, "MCP OAuth refresh is taking too long; retry")
+        await asyncio.sleep(0.2)
+        record = await get_record(login, record["id"])
+        if record["revision"] != revision or not record["enabled"]:
+            raise MCPConnectionError(409, "MCP connection changed; reconnect")
+
+
+async def _try_refresh(login: str, record: dict[str, Any]) -> str | None:
+    """Claim and perform one refresh; ``None`` when another worker claimed first."""
+    oauth = record["oauth"]
+    tokens = oauth.get("tokens", {})
+    if not tokens.get("refresh_token"):
+        raise MCPConnectionError(409, "MCP OAuth authorization expired; reconnect")
+    claim = {"id": secrets.token_hex(8), "started_at": time.time()}
+    oauth["refresh"] = claim
+    try:
+        await put_record(login, record, expected_version=record["version"])
+    except MCPConnectionError as exc:
+        if exc.status_code == 409:
+            return None
+        raise
+
+    async def release(current: dict[str, Any]) -> None:
+        if current.get("oauth", {}).get("refresh", {}).get("id") == claim["id"]:
+            current["oauth"].pop("refresh", None)
+
+    try:
+        refreshed = await _token(
+            oauth, {"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}
+        )
+    except MCPConnectionError:
+        await update_record(login, record["id"], release)
+        raise
+
+    async def store(current: dict[str, Any]) -> None:
+        if current.get("revision") != record["revision"] or current.get("auth_type") != "oauth":
+            raise MCPConnectionError(409, "MCP connection changed; reconnect")
+        current_oauth = current.setdefault("oauth", {})
+        current_oauth.pop("refresh", None)
+        _store_tokens(current_oauth, refreshed)
+
+    stored, _ = await update_record(login, record["id"], store)
+    record.clear()
+    record.update(stored)
+    return stored["oauth"]["tokens"]["access_token"]

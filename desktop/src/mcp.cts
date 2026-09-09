@@ -4,6 +4,19 @@ const http = require("node:http");
 const { execFile } = require("node:child_process");
 const { promisify, isDeepStrictEqual } = require("node:util");
 const { randomBytes, timingSafeEqual } = require("node:crypto");
+const { Readable } = require("node:stream");
+const { pipeline } = require("node:stream/promises");
+
+const PROXY_REQUEST_HEADERS = [
+  "accept",
+  "content-type",
+  "mcp-session-id",
+  "mcp-protocol-version",
+  "last-event-id",
+];
+const PROXY_RESPONSE_HEADERS = ["content-type", "mcp-session-id"];
+const PROXY_BODY_LIMIT = 4 * 1024 * 1024;
+const CLOUD_TIMEOUT = 20000;
 
 function readJson(file, fallback) {
   try {
@@ -345,6 +358,88 @@ class DesktopMcp {
       OPEN_SWE_MCP_BROKER_TOKEN: this.secret,
     };
   }
+  cloudHeaders(cloud) {
+    return {
+      Cookie: `${cloud.cookie_name}=${cloud.session_token}`,
+      Origin: "open-swe://app",
+    };
+  }
+  async cloudConnections(response) {
+    const cloud = await this.options.cloudRuntime();
+    if (!cloud) {
+      response
+        .writeHead(503, { "Content-Type": "application/json" })
+        .end("null");
+      return;
+    }
+    const upstream = await fetch(
+      new URL("/dashboard/api/mcp-connections", cloud.backend_url),
+      {
+        headers: this.cloudHeaders(cloud),
+        redirect: "manual",
+        signal: AbortSignal.timeout(CLOUD_TIMEOUT),
+      },
+    );
+    const body = await upstream.text();
+    response
+      .writeHead(upstream.status, { "Content-Type": "application/json" })
+      .end(body);
+  }
+  async cloudProxy(request, response, id) {
+    const cloud = await this.options.cloudRuntime();
+    if (!cloud) {
+      response
+        .writeHead(503, { "Content-Type": "application/json" })
+        .end("null");
+      return;
+    }
+    const headers = { ...this.cloudHeaders(cloud) };
+    for (const name of PROXY_REQUEST_HEADERS) {
+      const value = request.headers[name];
+      if (typeof value === "string") headers[name] = value;
+    }
+    let received = 0;
+    const limited = async function* () {
+      for await (const chunk of request) {
+        received += chunk.length;
+        if (received > PROXY_BODY_LIMIT) throw new Error("Request too large");
+        yield chunk;
+      }
+    };
+    const hasBody =
+      request.method !== "GET" &&
+      (Number(request.headers["content-length"]) > 0 ||
+        request.headers["transfer-encoding"] !== undefined);
+    const upstream = await fetch(
+      new URL(`/dashboard/api/mcp-connections/${id}/proxy`, cloud.backend_url),
+      {
+        method: request.method,
+        headers,
+        body: hasBody ? Readable.toWeb(Readable.from(limited())) : undefined,
+        duplex: hasBody ? "half" : undefined,
+        redirect: "manual",
+        signal: AbortSignal.timeout(CLOUD_TIMEOUT),
+      } as any,
+    );
+    const outgoing: Record<string, string> = { "Cache-Control": "no-store" };
+    for (const name of PROXY_RESPONSE_HEADERS) {
+      const value = upstream.headers.get(name);
+      if (value !== null) outgoing[name] = value;
+    }
+    response.writeHead(upstream.status, outgoing);
+    response.flushHeaders();
+    if (!upstream.body) {
+      response.end();
+      return;
+    }
+    const abort = () => upstream.body?.cancel().catch(() => {});
+    response.once("close", abort);
+    try {
+      await pipeline(Readable.fromWeb(upstream.body as any), response);
+    } catch {
+      response.destroy();
+    }
+  }
   async start() {
     this.broker = http.createServer(async (request, response) => {
       response.setHeader("Cache-Control", "no-store");
@@ -358,6 +453,22 @@ class DesktopMcp {
         response.writeHead(403).end();
         return;
       }
+      const proxy = /^\/cloud\/connections\/([a-f0-9]{32})\/proxy$/.exec(
+        request.url.split("?")[0],
+      );
+      if (
+        proxy &&
+        ["GET", "POST", "DELETE"].includes(request.method) &&
+        !request.url.includes("?")
+      ) {
+        try {
+          await this.cloudProxy(request, response, proxy[1]);
+        } catch {
+          if (response.headersSent) response.destroy();
+          else response.writeHead(502).end("Cloud MCP proxy failed");
+        }
+        return;
+      }
       try {
         let result;
         if (request.method === "GET" && request.url === "/runtime") {
@@ -368,9 +479,16 @@ class DesktopMcp {
                 this.credentialPath(server.name, server),
               ),
             })),
-            env: this.options.loginEnv,
-            cloud: await this.options.cloudRuntime(),
           };
+        } else if (
+          request.method === "GET" &&
+          request.url === "/cloud/connections"
+        ) {
+          await this.cloudConnections(response);
+          return;
+        } else if (proxy && request.url.includes("?")) {
+          response.writeHead(400).end("Query strings are not allowed");
+          return;
         } else if (
           request.method === "POST" &&
           ["/credentials", "/open"].includes(request.url)
@@ -403,7 +521,8 @@ class DesktopMcp {
           .writeHead(200, { "Content-Type": "application/json" })
           .end(JSON.stringify(result));
       } catch {
-        response.writeHead(400).end("Local MCP operation failed");
+        if (response.headersSent) response.destroy();
+        else response.writeHead(400).end("Local MCP operation failed");
       }
     });
     this.broker.requestTimeout = 15000;
