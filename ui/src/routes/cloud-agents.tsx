@@ -150,8 +150,18 @@ function CloudAgentsPage() {
       <SettingsSection title="Defaults">
         <div className="divide-y divide-border">
           <SettingsRow
+            label="Adaptive model routing"
+            description="Automatically choose a model for each turn; turn this off to always use your default model"
+            control={
+              <Switch
+                checked={profile.data?.model_routing_enabled ?? true}
+                onCheckedChange={(v) => persist({ model_routing_enabled: v })}
+              />
+            }
+          />
+          <SettingsRow
             label="Default Model"
-            description="Used when no model is specified"
+            description="Used when adaptive routing is off or no model is specified"
             control={
               <Select value={modelId} onValueChange={(v) => v && setModelId(v)}>
                 <SelectTrigger className="w-40">

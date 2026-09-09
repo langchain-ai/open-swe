@@ -51,6 +51,7 @@ from agent.dashboard.agent_overrides import (
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_draft_prs,
+    profile_model_routing_enabled,
     resolve_github_login,
 )
 from agent.dashboard.agent_usage import record_agent_run_usage
@@ -1036,13 +1037,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
-    adaptive_model_routing = True
+    adaptive_model_routing = profile_model_routing_enabled(profile)
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
         subagent_effort = thread_settings.get("subagent_effort")
+        adaptive_model_routing = thread_settings.get("model_routing_enabled", True)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
     # An explicit per-run model choice is the one thing allowed to move a thread
@@ -1087,6 +1089,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "effort": profile_effort,
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
+        "model_routing_enabled": adaptive_model_routing,
         "repo_instructions": repo_instructions,
     }
     if not local_run and (

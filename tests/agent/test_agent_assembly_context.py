@@ -181,7 +181,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_model_routing_is_applied_to_all_threads() -> None:
+async def test_model_routing_is_applied_when_enabled() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config)
 
@@ -196,6 +196,48 @@ async def test_model_routing_is_applied_to_all_threads() -> None:
         "openai:gpt-5.6-sol",
         "anthropic:claude-opus-5",
     ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_can_be_disabled_in_profile() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(
+        config, profile={"model_routing_enabled": False}
+    )
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["metadata"]["model_routing_applied"] is False
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert [model for model, _ in calls] == [
+        "openai:gpt-5.6-sol",
+        "openai:gpt-5.6-sol",
+        "openai:gpt-5.6-luna",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_preference_is_snapshotted_for_existing_thread() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(
+        config,
+        profile={"model_routing_enabled": True},
+        thread_settings={
+            "model_id": "openai:gpt-5.6-sol",
+            "effort": "medium",
+            "subagent_model_id": "openai:gpt-5.6-sol",
+            "subagent_effort": "low",
+            "model_routing_enabled": False,
+        },
+    )
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["metadata"]["model_routing_applied"] is False
 
 
 @pytest.mark.asyncio
