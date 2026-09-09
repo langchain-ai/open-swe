@@ -70,7 +70,10 @@ async def test_show_file_returns_full_text_with_requested_range(
 
     content, artifact = await show_file_tool._show_file("src/app.py", start_line=2, end_line=3)
 
-    assert content == "Displayed src/app.py lines 2-3 of 4 in the dashboard."
+    assert content == (
+        "Displayed src/app.py lines 2-3 of 4 in the dashboard. "
+        "Refer to the card rather than repeating it.\n\nb\nc"
+    )
     assert artifact == {
         "type": "show_file",
         "kind": "text",
@@ -85,6 +88,18 @@ async def test_show_file_returns_full_text_with_requested_range(
 
 
 @pytest.mark.asyncio
+async def test_show_file_result_elides_the_middle_of_long_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = "\n".join(f"line {index}" for index in range(1, 21)) + "\n"
+    _configure(monkeypatch, {f"{WORK_DIR}/big.txt": body.encode()})
+
+    content, _ = await show_file_tool._show_file("big.txt")
+
+    assert content.endswith("line 1\nline 2\nline 3\n… 14 more lines …\nline 18\nline 19\nline 20")
+
+
+@pytest.mark.asyncio
 async def test_show_file_detects_patches_by_content(monkeypatch: pytest.MonkeyPatch) -> None:
     patch = b"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n"
     _configure(monkeypatch, {f"{WORK_DIR}/.open-swe/artifacts/changes.txt": patch})
@@ -93,7 +108,8 @@ async def test_show_file_detects_patches_by_content(monkeypatch: pytest.MonkeyPa
         ".open-swe/artifacts/changes.txt", title="Changes"
     )
 
-    assert content == "Displayed diff .open-swe/artifacts/changes.txt in the dashboard."
+    assert content.startswith("Displayed diff .open-swe/artifacts/changes.txt in the dashboard.")
+    assert content.endswith("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new")
     assert artifact["kind"] == "diff"
     assert artifact["title"] == "Changes"
     assert artifact["content"] == patch.decode()
@@ -107,7 +123,7 @@ async def test_show_file_renders_mermaid_files_as_diagrams(
 
     content, artifact = await show_file_tool._show_file("flow.mmd")
 
-    assert content == "Displayed diagram flow.mmd in the dashboard."
+    assert content.startswith("Displayed diagram flow.mmd in the dashboard.")
     assert artifact["kind"] == "diagram"
     assert artifact["content"] == "graph TD\n  A --> B\n"
 
@@ -118,7 +134,7 @@ async def test_show_file_renders_markdown_files(monkeypatch: pytest.MonkeyPatch)
 
     content, artifact = await show_file_tool._show_file("notes.md")
 
-    assert content == "Displayed rendered markdown notes.md in the dashboard."
+    assert content.startswith("Displayed rendered markdown notes.md in the dashboard.")
     assert artifact["kind"] == "markdown"
     assert artifact["content"] == "# Title\n\ntext\n"
 

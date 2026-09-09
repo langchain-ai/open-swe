@@ -102,23 +102,24 @@ async def _show_file(
     except UnicodeDecodeError as exc:
         raise ValueError(f"{relative_path} is not UTF-8 text or a supported image") from exc
 
+    lines = text.splitlines()
     if kind == "diagram":
         return (
-            f"Displayed diagram {relative_path} in the dashboard.",
+            _result(f"Displayed diagram {relative_path}", lines),
             {**base, "kind": "diagram", "content": text},
         )
     if kind == "markdown":
         return (
-            f"Displayed rendered markdown {relative_path} in the dashboard.",
+            _result(f"Displayed rendered markdown {relative_path}", lines),
             {**base, "kind": "markdown", "content": text},
         )
     if kind == "diff" or _looks_like_patch(text):
         return (
-            f"Displayed diff {relative_path} in the dashboard.",
+            _result(f"Displayed diff {relative_path}", lines),
             {**base, "kind": "diff", "content": text},
         )
 
-    total_lines = text.count("\n") + (0 if text.endswith("\n") or not text else 1)
+    total_lines = len(lines)
     if start_line is not None and start_line > max(total_lines, 1):
         raise ValueError(
             f"start_line {start_line} is past the end of {relative_path} ({total_lines} lines)"
@@ -127,7 +128,7 @@ async def _show_file(
     last = min(end_line or total_lines, total_lines) if total_lines else 1
     shown = f" lines {first}-{last} of {total_lines}" if start_line or end_line else ""
     return (
-        f"Displayed {relative_path}{shown} in the dashboard.",
+        _result(f"Displayed {relative_path}{shown}", lines[first - 1 : last]),
         {
             **base,
             "kind": "text",
@@ -183,6 +184,26 @@ async def _html_preview_urls(
         content_disposition="attachment",
     )
     return {"preview_url": preview["url"], "download_url": download["url"]}
+
+
+_EXCERPT_EDGE_LINES = 3
+_EXCERPT_LINE_CHARS = 120
+
+
+def _result(summary: str, lines: list[str]) -> str:
+    """Tool result for the model: what was shown plus its first and last lines."""
+    if not lines:
+        return f"{summary} in the dashboard (empty)."
+    clipped = [line[:_EXCERPT_LINE_CHARS] for line in lines]
+    if len(clipped) > 2 * _EXCERPT_EDGE_LINES:
+        omitted = len(clipped) - 2 * _EXCERPT_EDGE_LINES
+        clipped = [
+            *clipped[:_EXCERPT_EDGE_LINES],
+            f"… {omitted} more lines …",
+            *clipped[-_EXCERPT_EDGE_LINES:],
+        ]
+    excerpt = "\n".join(clipped)
+    return f"{summary} in the dashboard. Refer to the card rather than repeating it.\n\n{excerpt}"
 
 
 async def _file_size(backend: Any, path: str) -> int:
