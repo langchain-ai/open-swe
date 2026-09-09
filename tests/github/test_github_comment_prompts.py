@@ -170,11 +170,19 @@ def test_construct_system_prompt_shell_escapes_user_name() -> None:
     )
 
     system_prompt = construct_system_prompt(working_dir="/workspace")
-    sender_context = construct_sender_context(identity)
+    sender_context = construct_sender_context(
+        identity,
+        model_id="openai:gpt-5.6-luna",
+        reasoning_effort="xhigh",
+    )
 
     assert hostile not in system_prompt
     assert f"git config user.name {shlex.quote(hostile)}" in sender_context
     assert f"git config user.name {hostile}" not in sender_context
+    assert (
+        "Made by [Open SWE](https://openswe.vercel.app)"
+        " · Model: `openai:gpt-5.6-luna` · Reasoning: `xhigh`"
+    ) in sender_context
 
 
 def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:

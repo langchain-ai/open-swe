@@ -399,12 +399,18 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 def _render_collaboration_section(
     identity: CollaboratorIdentity | None,
     thread_url: str | None = None,
+    model_id: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     if identity is None:
         return ""
     return COLLABORATION_TEMPLATE.format(
         display_name=identity.display_name,
-        pr_attribution_footer=build_pr_attribution_footer(thread_url),
+        pr_attribution_footer=build_pr_attribution_footer(
+            thread_url,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+        ),
         bot_coauthor_trailer=f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>",
     )
 
@@ -503,6 +509,8 @@ def construct_sender_context(
     user_custom_instructions: str | None = None,
     draft_prs: bool = True,
     thread_url: str | None = None,
+    model_id: str | None = None,
+    reasoning_effort: str | None = None,
     workspace_admin: bool = False,
     participant_identities: Sequence[CollaboratorIdentity] = (),
 ) -> str:
@@ -522,7 +530,12 @@ def construct_sender_context(
         f"Workspace admin: {'yes' if workspace_admin else 'no'}.",
         f"Sender's git identity command: `{_git_identity_command(resolved_identity)}`",
         _render_participant_identities(identities),
-        _render_collaboration_section(resolved_identity, thread_url),
+        _render_collaboration_section(
+            resolved_identity,
+            thread_url,
+            model_id,
+            reasoning_effort,
+        ),
         f"New PRs are created {'as drafts' if draft_prs else 'ready for review'} for this sender.",
         _render_user_instructions_section(user_custom_instructions),
     ]
