@@ -167,6 +167,8 @@ declare global {
         current: string | null
         branches: Array<DesktopProjectRef>
       }>
+      watchProjectHead: (cwd: string | null) => Promise<void>
+      onProjectHeadChanged: (callback: (cwd: string) => void) => () => void
       checkoutProjectBranch: (input: {
         cwd: string
         branch: string
@@ -223,6 +225,7 @@ declare global {
       localActivity: () => Promise<DesktopLocalActivity>
       updateLocalThread: (input: {
         threadId: string
+        title?: string
         viewed?: boolean
         archived?: boolean
         modelId?: string

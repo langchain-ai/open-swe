@@ -213,6 +213,26 @@ export interface TeamCredentialsStatus {
   langsmith: ProviderCredentialStatus
 }
 
+export interface WorkspaceMCP {
+  name: string
+  url: string
+  transport: "streamable_http" | "sse"
+  enabled: boolean
+  allowed_tools: string[]
+  header_names: string[]
+  revision: string
+  updated_at: string
+}
+
+export interface WorkspaceMCPUpdate {
+  name: string
+  url: string
+  transport: WorkspaceMCP["transport"]
+  enabled: boolean
+  allowed_tools: string[]
+  headers?: Record<string, string> | null
+}
+
 export interface LangSmithConnectBody {
   api_key: string
   endpoint?: string | null
@@ -769,6 +789,26 @@ export const api = {
       body: JSON.stringify({ transcription_model }),
     }),
   getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
+  getWorkspaceMCPs: () => request<WorkspaceMCP[]>("/workspace-mcps"),
+  revealWorkspaceMCPHeaders: (name: string) =>
+    request<Record<string, string>>(
+      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
+    request<WorkspaceMCP>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteWorkspaceMCP: (name: string) =>
+    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+  discoverWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   connectLangSmith: (body: LangSmithConnectBody) =>
     request<TeamCredentialsStatus>("/team-credentials/langsmith", {
       method: "PUT",

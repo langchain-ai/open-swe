@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "analyzer"
 
 
-def _client():
+def langgraph_client():
     """LangGraph SDK client for the current deployment (same resolution as webapp)."""
     url = ENV.LANGGRAPH_URL.optional()
     if url:
@@ -95,7 +95,7 @@ async def start_bootstrap_analysis(
     samples_text = format_samples_for_analyzer(samples)
     thread_id = review_style_thread_id(owner, repo)
 
-    client = _client()
+    client = langgraph_client()
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "review_style_full_name": full_name,
@@ -171,7 +171,7 @@ async def start_continual_run(
     configurable = build_continual_run_configurable(full_name)
     thread_id = configurable["thread_id"]
     try:
-        client = _client()
+        client = langgraph_client()
         run = await create_durable_run(
             thread_id,
             _ASSISTANT_ID,
@@ -200,7 +200,7 @@ async def sync_review_style_run_status(full_name: str) -> ReviewStyle:
     if not thread_id:
         return record
 
-    client = _client()
+    client = langgraph_client()
     run_status: str | None = None
     run_missing = False
     try:
@@ -232,7 +232,7 @@ async def cancel_review_style_analysis(full_name: str) -> ReviewStyle:
 
     if record.analysis_thread_id and record.analysis_run_id:
         try:
-            await _client().runs.cancel(
+            await langgraph_client().runs.cancel(
                 record.analysis_thread_id, record.analysis_run_id, wait=False
             )
         except Exception:

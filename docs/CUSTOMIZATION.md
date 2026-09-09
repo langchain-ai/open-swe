@@ -230,7 +230,87 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 | `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
 | `slack_thread_reply` | `agent/slack/tools/thread_reply.py` | Reply in Slack threads |
 
-### Adding a tool
+### Workspace MCP servers
+
+Admins can connect generic remote MCP servers under **Admin → Workspace MCPs**.
+Connections belong to this Open SWE deployment and are shared across repositories
+and remote coding-agent threads. The existing `CONFIGURED_ADMINS` and
+`OBSERVABILITY_AUTHORIZED_EMAILS` access rules control which users can load them.
+
+1. Choose **Add MCP server** and enter a unique lowercase connection name, an
+   HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
+2. Add authentication headers. Values are encrypted using `TOKEN_ENCRYPTION_KEY`
+   in the LangGraph Store; normal dashboard responses only return header names.
+   Admins can use the eye icon (**Show saved headers**) to reveal values on demand,
+   then the crossed-out eye to clear them from the editor. Entered or imported
+   values also have an eye icon to show or hide them. Use headers
+   for credentials, rather than URL query parameters.
+3. Choose **Save and discover tools**. For new connections, all discovered tools
+   are selected by default. Review the selection, then choose **Save connection**
+   to enable those tools. Rediscovering an existing connection preserves its
+   selected tools, including an intentionally empty selection. Newly added tools
+   on the remote server require explicit selection.
+   Discovery checks the draft before saving; if it fails, no connection is
+   created and existing settings stay unchanged. Discovery only lists tools.
+
+Alternatively, choose **Import JSON** and paste a Claude-style configuration:
+
+```json
+{
+  "mcpServers": {
+    "datadog": {
+      "type": "http",
+      "url": "https://mcp.us5.datadoghq.com/v1/mcp?toolsets=core",
+      "headers": {
+        "DD_API_KEY": "YOUR_API_KEY",
+        "DD_APPLICATION_KEY": "YOUR_APPLICATION_KEY"
+      }
+    }
+  }
+}
+```
+
+Use the endpoint for your Datadog site (this example uses US5). Replace the key
+placeholders directly in the dashboard. Import supports multiple named servers,
+optional `type` (`http` by default, or `sse`), and string authentication headers.
+It opens each connection for review without saving automatically. Existing
+connections keep their enabled state and selected tools. Local `command` servers
+and environment-variable expansion are not supported.
+
+Examples for the generic connection form:
+
+| Connection | URL | Authentication headers |
+|---|---|---|
+| `incident` | `https://mcp.incident.io/mcp` | `Authorization`: `Bearer <your incident.io API key>` |
+| `datadog` | `https://mcp.datadoghq.com/v1/mcp?toolsets=core` | `DD_API_KEY`: your API key; `DD_APPLICATION_KEY`: your application key |
+
+Both examples use Streamable HTTP. Choose the Datadog MCP hostname for your site
+(for example, `mcp.datadoghq.eu`). Use appropriately scoped provider keys and
+select the read tools you need for investigation. The incident.io authentication
+and catalog are documented in [its remote MCP guide](https://docs.incident.io/ai/remote-mcp).
+Datadog documents its headers and site-specific endpoints in the
+[MCP setup guide](https://docs.datadoghq.com/mcp_server/setup/#api-and-application-keys).
+Enter Datadog key values directly, without a `Bearer` prefix. The `core` toolset
+includes logs, metrics, traces, dashboards, monitors, and incidents.
+
+Allowed tools appear in the agent's **Workspace MCPs** tool group with connection
+prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming
+collisions. Catalogs are cached for ten minutes
+per settings revision. Changing a connection causes the next run to discover its
+catalog again. Every tool call reloads the current headers and checks whether the
+connection and tool are still enabled. Disabling or deleting a connection blocks
+subsequent calls from already-loaded tools; it does not cancel an in-flight call.
+
+Editing keeps saved headers unless **Replace headers** is selected. Replacing
+with an empty header list clears authentication. Changing the URL requires
+explicitly replacing or clearing saved headers. Requests must remain on the
+configured public HTTPS origin; redirects, private addresses, local processes,
+and interactive OAuth login are not supported by this connection manager.
+An unavailable server omits its tools without preventing other connections from
+loading. This catalog is not attached to the separate read-only reviewer or
+Investigate graphs.
+
+### Adding a Python tool
 
 Create a new file in `agent/tools/`, define a function, and add it to the tools list.
 

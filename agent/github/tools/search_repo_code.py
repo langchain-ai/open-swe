@@ -2,7 +2,7 @@
 
 from typing import Any
 
-import httpx
+import httpx2
 
 from agent.github.checks import github_headers
 from agent.run_config import RunConfig
@@ -45,11 +45,11 @@ async def search_repo_code(query: str, max_results: int = 20) -> dict[str, Any]:
     headers["Accept"] = "application/vnd.github.text-match+json"
     params = {"q": f"{query} repo:{owner}/{repo}", "per_page": capped}
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx2.AsyncClient(timeout=30) as client:
             response = await client.get(
                 f"{_GITHUB_API}/search/code", headers=headers, params=params
             )
-    except httpx.HTTPError as exc:
+    except httpx2.HTTPError as exc:
         return {"success": False, "error": f"GitHub request failed: {exc!s}"}
 
     if response.status_code == 422:

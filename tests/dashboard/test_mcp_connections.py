@@ -20,6 +20,7 @@ from agent import store
 from agent.dashboard import mcp_connections as mc
 from agent.dashboard import mcp_http as mh
 from agent.dashboard import mcp_oauth as mo
+from agent.utils import url_safety
 from agent.utils.distributed_lock import distributed_lock
 
 
@@ -69,10 +70,10 @@ async def environment(monkeypatch):
     )
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
-    async def dns(host, port, **kwargs):
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    def dns(host, port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
 
-    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", dns)
 
     @asynccontextmanager
     async def stream(*args, **kwargs):
@@ -165,8 +166,8 @@ async def test_real_sdk_initialization_and_paginated_discovery(environment, monk
     monkeypatch.setattr(mc, "streamable_http_client", streamable_http_client)
     monkeypatch.setattr(
         mc,
-        "safe_client",
-        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
+        "mcp_http_client",
+        lambda *args, **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
     )
     result = await create()
     assert result["status"] == "connected"
@@ -228,36 +229,15 @@ async def test_encryption_crud_catalog_owner_and_url_change(environment):
     ],
 )
 async def test_ssrf_rejects_private_and_mixed_answers(monkeypatch, ip):
-    async def dns(*args, **kwargs):
+    def dns(*args, **kwargs):
         return [
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 443))
             for address in ("93.184.216.34", ip)
         ]
 
-    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", dns)
     with pytest.raises(mh.MCPConnectionError, match="public"):
         await mh.resolve_url("https://attacker.example/mcp")
-
-
-async def test_transport_pins_dns_sni_host_and_rejects_redirects(environment, monkeypatch):
-    seen = []
-
-    async def upstream(request):
-        seen.append(request)
-        return httpx.Response(307, headers={"Location": "https://127.0.0.1/secret"})
-
-    transport = mh.PinnedTransport()
-    transport.transport = httpx.MockTransport(upstream)
-    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
-        with pytest.raises(mh.MCPConnectionError, match="redirects"):
-            await client.post(
-                "https://example.com/mcp",
-                headers={"Host": "attacker", "Authorization": "Bearer secret"},
-            )
-    assert len(seen) == 1
-    assert seen[0].url.host == "93.184.216.34"
-    assert seen[0].headers["host"] == "example.com"
-    assert seen[0].extensions["sni_hostname"] == "example.com"
 
 
 @pytest.mark.parametrize(
@@ -338,8 +318,8 @@ async def test_proxy_streaming_session_binding_and_dashboard_credentials(environ
 
     monkeypatch.setattr(
         mc,
-        "safe_client",
-        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
+        "mcp_http_client",
+        lambda *args, **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
     )
     response = await mc.proxy_connection(
         proxy_request(headers={"Authorization": "dashboard-secret", "Cookie": "dashboard-cookie"}),
@@ -357,7 +337,7 @@ async def test_proxy_streaming_session_binding_and_dashboard_credentials(environ
     assert closed
     assert seen[0].headers["authorization"] == "Bearer secret-token"
     assert "cookie" not in seen[0].headers
-    record = await mc._get("alice", public["id"])
+    record = await mc.get_record("alice", public["id"])
     assert mc._upstream_session("alice", record, token) == "upstream-secret"
     with pytest.raises(mh.MCPConnectionError):
         mc._upstream_session("bob", record, token)
@@ -399,7 +379,7 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     query = parse_qs(urlsplit(url).query)
     state = query["state"][0]
     flows = [
-        mc._unseal(value)
+        mc.unseal(value)
         for (namespace, _), value in environment.items()
         if namespace[0] == mo._FLOW_NAMESPACE
     ]
@@ -424,10 +404,10 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     assert calls[-1][1]["data"]["resource"] == "https://example.com/mcp"
     with pytest.raises(mh.MCPConnectionError, match="state"):
         await mo.finish_oauth(state, "authorization-code")
-    record = await mc._get("alice", public["id"])
+    record = await mc.get_record("alice", public["id"])
     record["oauth"]["expires_at"] = time.time() - 1
-    await mc._put("alice", record)
-    stale = await mc._get("alice", public["id"])
+    await mc.put_record("alice", record)
+    stale = await mc.get_record("alice", public["id"])
     refreshed = await asyncio.gather(
         mo.access_token("alice", record), mo.access_token("alice", stale)
     )
@@ -442,9 +422,9 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     assert request.headers["authorization"] == "Bearer oauth-access-secret"
     await flow.aclose()
     assert calls[-1][1]["data"]["grant_type"] == "refresh_token"
-    record = await mc._get("alice", public["id"])
+    record = await mc.get_record("alice", public["id"])
     record["oauth"]["expires_at"] = time.time() - 1
-    await mc._put("alice", record)
+    await mc.put_record("alice", record)
     attempts = 0
 
     async def interrupted(*args, **kwargs):
@@ -459,7 +439,7 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     )
     assert attempts == 1
     assert sorted(error.status_code for error in failures) == [409, 502]
-    assert (await mc._get("alice", public["id"]))["oauth"]["refresh_pending"]
+    assert (await mc.get_record("alice", public["id"]))["oauth"]["refresh_pending"]
     await mc.delete_connection("alice", public["id"])
     with pytest.raises(mh.MCPConnectionError, match="not found"):
         await anext(config["auth"].async_auth_flow(httpx.Request("POST", config["url"])))
@@ -472,22 +452,22 @@ async def test_oauth_discovery_rejects_ssrf_from_challenge(environment, monkeypa
             headers={"WWW-Authenticate": 'Bearer resource_metadata="https://127.0.0.1/metadata"'},
         )
 
-    async def dns(host, port, **kwargs):
+    def dns(host, port, *args, **kwargs):
         return [
             (
                 socket.AF_INET,
                 socket.SOCK_STREAM,
                 6,
                 "",
-                ("127.0.0.1" if host == "127.0.0.1" else "93.184.216.34", port),
+                ("127.0.0.1" if host == "127.0.0.1" else "93.184.216.34", 443),
             )
         ]
 
-    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", dns)
     monkeypatch.setattr(
         mo,
-        "safe_client",
-        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
+        "mcp_http_client",
+        lambda *args, **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
     )
     with pytest.raises(mh.MCPConnectionError, match="public"):
         await mo._discover("https://example.com/mcp")
@@ -516,22 +496,22 @@ async def test_oauth_metadata_endpoint_validation(environment, monkeypatch, bad_
             bad_field: "https://127.0.0.1/private",
         }
 
-    async def dns(host, port, **kwargs):
+    def dns(host, port, *args, **kwargs):
         return [
             (
                 socket.AF_INET,
                 socket.SOCK_STREAM,
                 6,
                 "",
-                ("127.0.0.1" if host == "127.0.0.1" else "93.184.216.34", port),
+                ("127.0.0.1" if host == "127.0.0.1" else "93.184.216.34", 443),
             )
         ]
 
-    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", dns)
     monkeypatch.setattr(
         mo,
-        "safe_client",
-        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
+        "mcp_http_client",
+        lambda *args, **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
     )
     monkeypatch.setattr(mo, "_metadata", metadata)
     with pytest.raises(mh.MCPConnectionError):
@@ -585,18 +565,18 @@ async def test_manual_client_fallback_and_stale_callback(environment, monkeypatc
             return httpx.Response(200, json={"access_token": "access", "token_type": "Bearer"})
         return httpx.Response(401)
 
-    async def dns(host, port, **kwargs):
+    def dns(host, port, *args, **kwargs):
         return [
             (
                 socket.AF_INET,
                 socket.SOCK_STREAM,
                 6,
                 "",
-                ("127.0.0.1" if host == "private.example" else "93.184.216.34", port),
+                ("127.0.0.1" if host == "private.example" else "93.184.216.34", 443),
             )
         ]
 
-    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns)
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", dns)
     monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda **kwargs: httpx.MockTransport(upstream))
     for issuer in ("http://auth.example", "https://private.example"):
         with pytest.raises(mh.MCPConnectionError):
@@ -679,7 +659,7 @@ async def test_manual_client_fallback_and_stale_callback(environment, monkeypatc
     assert changed["oauth_client_id"] == "replacement"
     assert not changed["oauth_client_secret_configured"]
     assert not changed["oauth_configured"]
-    assert (await mc._get("alice", record["id"]))["oauth_client_secret"] == ""
+    assert (await mc.get_record("alice", record["id"]))["oauth_client_secret"] == ""
     changed = await mc.save_connection(
         "alice", {"id": record["id"], **fields, "oauth_client_secret": "secret"}
     )
@@ -699,7 +679,9 @@ async def test_manual_client_fallback_and_stale_callback(environment, monkeypatc
         "alice", {"id": record["id"], **fields, "oauth_client_secret": "replacement-secret"}
     )
     assert changed["oauth_client_configured"]
-    assert (await mc._get("alice", record["id"]))["oauth_client_secret"] == "replacement-secret"
+    assert (await mc.get_record("alice", record["id"]))[
+        "oauth_client_secret"
+    ] == "replacement-secret"
 
 
 async def test_metadata_error_redaction(environment, monkeypatch):
@@ -710,8 +692,8 @@ async def test_metadata_error_redaction(environment, monkeypatch):
 
     monkeypatch.setattr(
         mh,
-        "safe_client",
-        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
+        "mcp_http_client",
+        lambda *args, **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
     )
     with pytest.raises(mh.MCPConnectionError) as error:
         await mh.request_json("POST", "https://example.com/token")

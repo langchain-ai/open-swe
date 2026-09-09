@@ -27,6 +27,21 @@ const HOP_BY_HOP = new Set([
 // never receives.
 const REFRAMED = new Set(["content-encoding", "content-length"])
 
+// undici rejects a request that carries `transfer-encoding` outright; it frames
+// the streamed body itself. `content-length` stays: with it undici sends a
+// fixed-length body, without it a chunked one, and the backend must see the
+// same framing the client used.
+function requestHeaders(incoming: Headers): Headers {
+  const headers = new Headers()
+  for (const [name, value] of incoming) {
+    if (HOP_BY_HOP.has(name)) {
+      continue
+    }
+    headers.set(name, value)
+  }
+  return headers
+}
+
 export default async function backendProxy(event: { req: Request }) {
   const url = new URL(event.req.url)
   const method = event.req.method
@@ -35,7 +50,7 @@ export default async function backendProxy(event: { req: Request }) {
     `${backendOrigin()}${url.pathname}${url.search}`,
     {
       method,
-      headers: event.req.headers,
+      headers: requestHeaders(event.req.headers),
       body: method === "GET" || method === "HEAD" ? undefined : event.req.body,
       // `manual` keeps the OAuth 3xx hops intact — following them here would
       // leave the browser's address bar where it started.

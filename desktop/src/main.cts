@@ -34,6 +34,7 @@ const {
   repositoryMetadata,
   restoreWorktree,
   validBranchName,
+  watchProjectHead,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
@@ -433,6 +434,36 @@ function configureDesktopIpc() {
     return listProjects();
   });
 
+  const projectHeadWatches = new Map<number, () => void>();
+  ipcMain.handle("desktop:watch-project-head", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const sender = event.sender;
+    projectHeadWatches.get(sender.id)?.();
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    if (!project) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    const close = () => {
+      disposed = true;
+      stop?.();
+      projectHeadWatches.delete(sender.id);
+      sender.removeListener("destroyed", close);
+      sender.removeListener("did-start-navigation", close);
+    };
+    projectHeadWatches.set(sender.id, close);
+    sender.once("destroyed", close);
+    sender.once("did-start-navigation", close);
+    try {
+      stop = await watchProjectHead(project, () => {
+        if (!disposed && !sender.isDestroyed())
+          sender.send("desktop:project-head-changed", cwd);
+      });
+      if (disposed) stop();
+    } catch {
+      if (!disposed) close();
+    }
+  });
+
   ipcMain.handle("desktop:project-branches", async (event, cwd) => {
     requireTrustedDesktopIpc(event);
     const project = typeof cwd === "string" ? registeredProject(cwd) : null;
@@ -594,6 +625,7 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     return localThreadStore.update(input?.threadId, {
+      ...(typeof input?.title === "string" ? { title: input.title } : {}),
       ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
       ...(typeof input?.archived === "boolean"
         ? { archived: input.archived }

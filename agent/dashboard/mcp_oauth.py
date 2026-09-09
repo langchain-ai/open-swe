@@ -25,22 +25,24 @@ from mcp.shared.auth import (
 from mcp.shared.auth_utils import check_resource_allowed, resource_url_from_server_url
 from pydantic import AnyHttpUrl, ValidationError
 
-from agent.dashboard.mcp_connections import _get, _lock, _put, _seal, _unseal, discover_connection
-from agent.dashboard.mcp_http import (
-    MCPConnectionError,
-    request_json,
-    resolve_url,
-    safe_client,
-    validate_url,
+from agent.dashboard.mcp_connections import (
+    connection_lock,
+    discover_connection,
+    get_record,
+    put_record,
+    seal,
+    unseal,
 )
+from agent.dashboard.mcp_http import MCPConnectionError, request_json, resolve_url, validate_url
 from agent.store import delete_value, get_value, put_value
+from agent.tool_loaders.mcp_transport import mcp_http_client
 
 _FLOW_NAMESPACE = "mcp_oauth_flows"
 _FLOW_TTL = 600
 
 
 async def _metadata(urls: list[str]) -> dict[str, Any]:
-    async with asyncio.timeout(30), safe_client(timeout=httpx.Timeout(20)) as client:
+    async with asyncio.timeout(30), mcp_http_client(timeout=httpx.Timeout(20)) as client:
         for url in urls:
             async with client.stream(
                 "GET", url, headers={"Accept": "application/json"}
@@ -66,7 +68,7 @@ async def _discover(url: str, authorization_server: str = "") -> tuple[dict[str,
         if authorization_server:
             await resolve_url(authorization_server)
             authorization_server = str(AnyHttpUrl(authorization_server))
-        async with safe_client(timeout=httpx.Timeout(20)) as client:
+        async with mcp_http_client(timeout=httpx.Timeout(20)) as client:
             async with client.stream(
                 "GET", url, headers={"Accept": "application/json, text/event-stream"}
             ) as response:
@@ -172,8 +174,8 @@ async def _client(
 
 async def start_oauth(login: str, id: str, redirect_uri: str) -> str:
     validate_url(redirect_uri)
-    async with _lock(login, id):
-        record = await _get(login, id)
+    async with connection_lock(login, id):
+        record = await get_record(login, id)
         if record["auth_type"] != "oauth":
             raise MCPConnectionError(409, "Select OAuth authentication first")
         metadata, resource, suggested_scope = await _discover(
@@ -195,7 +197,7 @@ async def start_oauth(login: str, id: str, redirect_uri: str) -> str:
             "resource": resource,
             "client": client,
         }
-        await put_value([_FLOW_NAMESPACE], state, _seal(flow))
+        await put_value([_FLOW_NAMESPACE], state, seal(flow))
         return f"{metadata['authorization_endpoint']}?{
             urlencode(
                 {
@@ -260,17 +262,17 @@ async def finish_oauth(state: str, code: str) -> dict[str, Any]:
     ):
         raise MCPConnectionError(400, "OAuth state is invalid or expired")
     namespace = [_FLOW_NAMESPACE]
-    async with _lock(_FLOW_NAMESPACE, state):
+    async with connection_lock(_FLOW_NAMESPACE, state):
         stored = await get_value(namespace, state)
         if stored is None:
             raise MCPConnectionError(400, "OAuth state is invalid or expired")
-        flow = _unseal(stored)
+        flow = unseal(stored)
         await delete_value(namespace, state)
         if flow["state"] != state or flow["expires_at"] < time.time():
             raise MCPConnectionError(400, "OAuth state is invalid or expired")
         login = flow["owner"]
-        async with _lock(login, flow["id"]):
-            record = await _get(login, flow["id"])
+        async with connection_lock(login, flow["id"]):
+            record = await get_record(login, flow["id"])
             if record["revision"] != flow["revision"] or record["auth_type"] != "oauth":
                 raise MCPConnectionError(409, "MCP connection changed; restart OAuth")
             oauth = {key: flow[key] for key in ("metadata", "resource", "client")}
@@ -285,19 +287,19 @@ async def finish_oauth(state: str, code: str) -> dict[str, Any]:
             )
             _store_tokens(oauth, tokens)
             record["oauth"] = oauth
-            await _put(login, record)
+            await put_record(login, record)
     return await discover_connection(login, flow["id"])
 
 
 async def access_token(login: str, record: dict[str, Any]) -> str:
-    async with _lock(login, record["id"]):
-        current = await _get(login, record["id"])
+    async with connection_lock(login, record["id"]):
+        current = await get_record(login, record["id"])
         if not current["enabled"] or current["revision"] != record["revision"]:
             raise MCPConnectionError(409, "MCP connection changed; reconnect")
-        return await _access_token_locked(login, current)
+        return await access_token_locked(login, current)
 
 
-async def _access_token_locked(login: str, record: dict[str, Any]) -> str:
+async def access_token_locked(login: str, record: dict[str, Any]) -> str:
     oauth = record.get("oauth", {})
     if oauth.get("refresh_pending"):
         raise MCPConnectionError(409, "MCP OAuth refresh interrupted; reconnect")
@@ -309,11 +311,11 @@ async def _access_token_locked(login: str, record: dict[str, Any]) -> str:
         if not tokens.get("refresh_token"):
             raise MCPConnectionError(409, "MCP OAuth authorization expired; reconnect")
         oauth["refresh_pending"] = True
-        await _put(login, record)
+        await put_record(login, record)
         refreshed = await _token(
             oauth, {"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}
         )
         oauth.pop("refresh_pending")
         _store_tokens(oauth, refreshed)
-        await _put(login, record)
+        await put_record(login, record)
     return oauth["tokens"]["access_token"]

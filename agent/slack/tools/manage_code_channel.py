@@ -36,7 +36,7 @@ from agent.slack.code_channels import (
     store_block_suggestions,
 )
 from agent.source_context import SourceContext
-from agent.tools.create_sandbox_file_download_url import _resolve_sandbox_file
+from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client
 
@@ -259,7 +259,7 @@ async def _resolve_content(content: str, file_path: str) -> tuple[str, str | Non
     if not file_path:
         return content, None
     try:
-        backend, path, _ = await _resolve_sandbox_file(file_path)
+        backend, path, _ = await resolve_sandbox_file(file_path)
         downloads = await backend.adownload_files([path])
     except Exception as exc:  # noqa: BLE001
         return "", f"Could not read file_path: {exc}"

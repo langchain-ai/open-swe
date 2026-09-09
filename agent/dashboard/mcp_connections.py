@@ -17,9 +17,10 @@ from mcp.types import PaginatedRequestParams
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 
-from agent.dashboard.mcp_http import MCPConnectionError, resolve_url, safe_client
+from agent.dashboard.mcp_http import MCPConnectionError, resolve_url
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value, search_all_values
+from agent.tool_loaders.mcp_transport import mcp_http_client
 from agent.utils.distributed_lock import distributed_lock
 
 MCP_PRESETS = [
@@ -64,7 +65,7 @@ def _connection_id(value: str) -> str:
 
 
 @asynccontextmanager
-async def _lock(login: str, connection_id: str) -> AsyncIterator[None]:
+async def connection_lock(login: str, connection_id: str) -> AsyncIterator[None]:
     _namespace(login)
     error = None
     try:
@@ -81,11 +82,11 @@ async def _lock(login: str, connection_id: str) -> AsyncIterator[None]:
         raise error
 
 
-def _seal(value: dict[str, Any]) -> dict[str, str]:
+def seal(value: dict[str, Any]) -> dict[str, str]:
     return {"encrypted_record": encrypt_token(json.dumps(value))}
 
 
-def _unseal(value: dict[str, Any]) -> dict[str, Any]:
+def unseal(value: dict[str, Any]) -> dict[str, Any]:
     try:
         result = json.loads(decrypt_token(value.get("encrypted_record", "")))
         if not isinstance(result, dict):
@@ -97,18 +98,18 @@ def _unseal(value: dict[str, Any]) -> dict[str, Any]:
         ) from None
 
 
-async def _get(login: str, connection_id: str) -> dict[str, Any]:
+async def get_record(login: str, connection_id: str) -> dict[str, Any]:
     value = await get_value(_namespace(login), _connection_id(connection_id))
     if value is None:
         raise MCPConnectionError(404, "MCP connection not found")
-    record = _unseal(value)
+    record = unseal(value)
     if record.get("owner") != login or record.get("id") != connection_id:
         raise MCPConnectionError(404, "MCP connection not found")
     return record
 
 
-async def _put(login: str, record: dict[str, Any]) -> None:
-    await put_value(_namespace(login), record["id"], _seal(record))
+async def put_record(login: str, record: dict[str, Any]) -> None:
+    await put_value(_namespace(login), record["id"], seal(record))
 
 
 def _public(record: dict[str, Any]) -> dict[str, Any]:
@@ -142,7 +143,7 @@ def _public(record: dict[str, Any]) -> dict[str, Any]:
 
 
 async def list_connections(login: str) -> list[dict[str, Any]]:
-    records = [_unseal(value) for value in await search_all_values(_namespace(login))]
+    records = [unseal(value) for value in await search_all_values(_namespace(login))]
     return [_public(record) for record in records if record.get("owner") == login]
 
 
@@ -195,8 +196,8 @@ async def save_connection(login: str, data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict) or data.keys() - allowed:
         raise MCPConnectionError(400, "Invalid MCP connection fields")
     connection_id = _connection_id(data["id"]) if "id" in data else uuid.uuid4().hex
-    async with _lock(login, connection_id):
-        existing = await _get(login, connection_id) if "id" in data else {}
+    async with connection_lock(login, connection_id):
+        existing = await get_record(login, connection_id) if "id" in data else {}
         record = {
             "id": connection_id,
             "owner": login,
@@ -214,9 +215,9 @@ async def save_connection(login: str, data: dict[str, Any]) -> dict[str, Any]:
         }
         record["name"] = _text(record["name"], 100)
         url = _text(record["url"], 2048)
-        record["url"] = str((await resolve_url(url))[0])
+        record["url"] = str(await resolve_url(url))
         issuer = _text(record.get("oauth_authorization_server", ""), 2048, empty=True)
-        record["oauth_authorization_server"] = str((await resolve_url(issuer))[0]) if issuer else ""
+        record["oauth_authorization_server"] = str(await resolve_url(issuer)) if issuer else ""
         record["auth_type"] = _text(record["auth_type"], 20)
         if type(record["enabled"]) is not bool or record["auth_type"] not in {
             "none",
@@ -268,13 +269,13 @@ async def save_connection(login: str, data: dict[str, Any]) -> dict[str, Any]:
             record["oauth_client_secret"] = ""
         record["revision"] = uuid.uuid4().hex
         record["updated_at"] = now_iso()
-        await _put(login, record)
+        await put_record(login, record)
         return await _discover(login, record)
 
 
 async def delete_connection(login: str, id: str) -> None:
     id = _connection_id(id)
-    async with _lock(login, id):
+    async with connection_lock(login, id):
         await delete_value(_namespace(login), id)
 
 
@@ -287,9 +288,9 @@ async def _headers(login: str, record: dict[str, Any]) -> dict[str, str]:
             raise MCPConnectionError(409, "MCP authentication must be configured")
         return {"Authorization": f"Bearer {token}"}
     if record["auth_type"] == "oauth":
-        from agent.dashboard.mcp_oauth import _access_token_locked
+        from agent.dashboard.mcp_oauth import access_token_locked
 
-        return {"Authorization": f"Bearer {await _access_token_locked(login, record)}"}
+        return {"Authorization": f"Bearer {await access_token_locked(login, record)}"}
     return {}
 
 
@@ -303,8 +304,8 @@ class _ConnectionAuth(httpx.Auth):
     async def async_auth_flow(self, request: httpx.Request):
         if str(request.url) != self.url:
             raise MCPConnectionError(400, "MCP endpoint changes require reconnecting")
-        async with _lock(self.login, self.id):
-            record = await _get(self.login, self.id)
+        async with connection_lock(self.login, self.id):
+            record = await get_record(self.login, self.id)
             if not record["enabled"] or record["revision"] != self.revision:
                 raise MCPConnectionError(409, "MCP connection changed; reconnect")
             request.headers.update(await _headers(self.login, record))
@@ -317,13 +318,13 @@ async def _config(login: str, record: dict[str, Any]) -> dict[str, Any]:
         "url": record["url"],
         "headers": {},
         "auth": _ConnectionAuth(login, record),
-        "httpx_client_factory": partial(safe_client, endpoint=record["url"]),
+        "httpx_client_factory": partial(mcp_http_client, record["url"]),
     }
 
 
 async def connection_config(login: str, id: str) -> dict[str, Any]:
-    async with _lock(login, id):
-        record = await _get(login, id)
+    async with connection_lock(login, id):
+        record = await get_record(login, id)
         if not record["enabled"]:
             raise MCPConnectionError(409, "MCP connection is disabled")
         return await _config(login, record)
@@ -375,13 +376,13 @@ async def _discover(login: str, record: dict[str, Any]) -> dict[str, Any]:
             else "error"
         )
     record["tested_at"] = now_iso()
-    await _put(login, record)
+    await put_record(login, record)
     return _public(record)
 
 
 async def discover_connection(login: str, id: str) -> dict[str, Any]:
-    async with _lock(login, id):
-        return await _discover(login, await _get(login, id))
+    async with connection_lock(login, id):
+        return await _discover(login, await get_record(login, id))
 
 
 async def start_oauth(login: str, id: str, redirect_uri: str) -> str:
@@ -437,8 +438,8 @@ async def proxy_connection(request: Request, login: str, id: str) -> Response:
         raise MCPConnectionError(405, "Unsupported MCP method")
     if request.url.query:
         raise MCPConnectionError(400, "MCP proxy query parameters are not supported")
-    async with _lock(login, id):
-        record = await _get(login, id)
+    async with connection_lock(login, id):
+        record = await get_record(login, id)
         if not record["enabled"]:
             raise MCPConnectionError(409, "MCP connection is disabled")
         headers = await _headers(login, record)
@@ -454,7 +455,7 @@ async def proxy_connection(request: Request, login: str, id: str) -> Response:
         body.extend(chunk)
         if len(body) > 4 * 1024 * 1024:
             raise MCPConnectionError(413, "MCP request exceeds the size limit")
-    client = safe_client(endpoint=record["url"])
+    client = mcp_http_client(record["url"], timeout=httpx.Timeout(30, read=300))
     try:
         upstream = await client.send(
             client.build_request(
