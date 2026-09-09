@@ -6,6 +6,8 @@ import json
 import logging
 import posixpath
 import shlex
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Literal, Protocol, TypeVar
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
@@ -21,7 +23,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from agent.config import ENV
 from agent.dashboard.admin import is_admin
@@ -261,7 +263,7 @@ from agent.utils.dashboard_links import (
     dashboard_base_url,
     dashboard_is_same_origin,
 )
-from agent.utils.thread_ops import langgraph_url
+from agent.utils.thread_ops import langgraph_client, langgraph_url
 from agent.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -277,6 +279,9 @@ _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
 # Long enough that a browsing session mints once, short enough that a revoked
 # dashboard session loses access soon after.
 _SERVICE_TOKEN_TTL_SECONDS = 3600
+# A stored token is reused while at least this much of its life is left, so a
+# proxied request never starts with one about to expire mid-connection.
+_SERVICE_TOKEN_MIN_REMAINING_SECONDS = 120
 # Module-level so a local harness can point the browser leg at a fake consent
 # page and still run the real login/callback code.
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
@@ -2127,6 +2132,54 @@ async def api_thread_terminal_connection(
     }
 
 
+class SandboxServiceToken(BaseModel):
+    """A LangSmith service credential for one port of one sandbox."""
+
+    service_url: str
+    token: str
+    expires_at: str
+
+    def usable_for(self, seconds: float) -> bool:
+        try:
+            expires = datetime.fromisoformat(self.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        return (expires - datetime.now(UTC)).total_seconds() > seconds
+
+
+def _service_token_namespace(sandbox_id: str) -> tuple[str, str]:
+    return ("sandbox_service", sandbox_id)
+
+
+async def _stored_service_token(sandbox_id: str, port: int) -> SandboxServiceToken | None:
+    """The token this deployment already minted for the port, while it stays usable."""
+    try:
+        item = await langgraph_client().store.get_item(
+            _service_token_namespace(sandbox_id), str(port)
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    value = item.get("value") if isinstance(item, Mapping) else None
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        stored = SandboxServiceToken.model_validate(value)
+    except ValidationError:
+        return None
+    return stored if stored.usable_for(_SERVICE_TOKEN_MIN_REMAINING_SECONDS) else None
+
+
+async def _store_service_token(sandbox_id: str, port: int, token: SandboxServiceToken) -> None:
+    try:
+        await langgraph_client().store.put_item(
+            _service_token_namespace(sandbox_id), str(port), token.model_dump()
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not store the sandbox service token", exc_info=True)
+
+
 @router.get("/threads/{thread_id}/service-url")
 async def api_thread_service_url(
     thread_id: str,
@@ -2146,6 +2199,11 @@ async def api_thread_service_url(
     sandbox_id, _ = await get_dashboard_terminal_sandbox(
         thread_id, session["sub"], email=session.get("email")
     )
+    response.headers["Cache-Control"] = "no-store"
+    stored = await _stored_service_token(sandbox_id, port)
+    if stored is not None:
+        return stored.model_dump()
+
     from agent.sandboxes.providers.langsmith import get_async_sandbox_client
 
     try:
@@ -2160,12 +2218,13 @@ async def api_thread_service_url(
             exc_info=True,
         )
         raise HTTPException(502, "could not reach the thread sandbox") from exc
-    response.headers["Cache-Control"] = "no-store"
-    return {
-        "service_url": service.service_url,
-        "token": service.token,
-        "expires_at": service.expires_at,
-    }
+    minted = SandboxServiceToken(
+        service_url=service.service_url,
+        token=service.token,
+        expires_at=service.expires_at,
+    )
+    await _store_service_token(sandbox_id, port, minted)
+    return minted.model_dump()
 
 
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
