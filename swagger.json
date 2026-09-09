@@ -1926,6 +1926,18 @@
         "title": "WorkspaceMCPUpdate",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "AdminBearer": {
+        "description": "An admin's GitHub user token or an allowlisted GitHub Actions OIDC token.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "DashboardSession": {
+        "in": "cookie",
+        "name": "osw_session",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
@@ -1952,6 +1964,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Admin Get Reviewer Eval",
         "tags": [
           "dashboard"
@@ -1996,6 +2013,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Admin Cancel Thread",
         "tags": [
           "dashboard"
@@ -2051,6 +2073,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Admin List User Mappings",
         "tags": [
           "dashboard"
@@ -2097,6 +2124,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Admin Delete User Mapping",
         "tags": [
           "dashboard"
@@ -2122,6 +2154,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Agent Instructions",
         "tags": [
           "dashboard"
@@ -2161,6 +2198,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Create Agent Instructions",
         "tags": [
           "dashboard"
@@ -2201,6 +2243,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete Agent Instructions",
         "tags": [
           "dashboard"
@@ -2241,6 +2288,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Agent Instructions",
         "tags": [
           "dashboard"
@@ -2291,6 +2343,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Update Agent Instructions",
         "tags": [
           "dashboard"
@@ -2353,6 +2410,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Agent Usage Leaderboard",
         "tags": [
           "dashboard"
@@ -2583,6 +2645,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Enabled Review Repos",
         "tags": [
           "dashboard"
@@ -2629,6 +2696,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Set Enabled Review Repo",
         "tags": [
           "dashboard"
@@ -2652,6 +2724,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Environments",
         "tags": [
           "dashboard"
@@ -2691,6 +2768,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Create Environment",
         "tags": [
           "dashboard"
@@ -2715,6 +2797,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Environment Options",
         "tags": [
           "dashboard"
@@ -2755,6 +2842,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete Environment",
         "tags": [
           "dashboard"
@@ -2795,6 +2887,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Environment",
         "tags": [
           "dashboard"
@@ -2845,6 +2942,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Update Environment",
         "tags": [
           "dashboard"
@@ -2868,6 +2970,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Me",
         "tags": [
           "dashboard"
@@ -2887,6 +2994,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete My Instructions",
         "tags": [
           "dashboard"
@@ -2908,6 +3020,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get My Instructions",
         "tags": [
           "dashboard"
@@ -2949,6 +3066,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Put My Instructions",
         "tags": [
           "dashboard"
@@ -2972,6 +3094,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Disconnect My Currents",
         "tags": [
           "dashboard"
@@ -2993,6 +3120,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Get My Currents Status",
         "tags": [
           "dashboard"
@@ -3034,6 +3166,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Connect My Currents",
         "tags": [
           "dashboard"
@@ -3057,6 +3194,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Disconnect My Langsmith",
         "tags": [
           "dashboard"
@@ -3078,6 +3220,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Get My Langsmith Status",
         "tags": [
           "dashboard"
@@ -3119,6 +3266,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Connect My Langsmith",
         "tags": [
           "dashboard"
@@ -3142,6 +3294,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Disconnect My Notion",
         "tags": [
           "dashboard"
@@ -3163,6 +3320,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Get My Notion Status",
         "tags": [
           "dashboard"
@@ -3187,6 +3349,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Get My Mapping",
         "tags": [
           "dashboard"
@@ -3319,6 +3486,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Notion Desktop Exchange",
         "tags": [
           "dashboard"
@@ -3384,6 +3556,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Notion Login",
         "tags": [
           "dashboard"
@@ -3471,6 +3648,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Organization Skills",
         "tags": [
           "dashboard"
@@ -3512,6 +3694,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Create Organization Skill",
         "tags": [
           "dashboard"
@@ -3552,6 +3739,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete Organization Skill",
         "tags": [
           "dashboard"
@@ -3604,6 +3796,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Update Organization Skill",
         "tags": [
           "dashboard"
@@ -3648,6 +3845,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Get Plan",
         "tags": [
           "plan"
@@ -3701,6 +3903,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Update Plan",
         "tags": [
           "plan"
@@ -3745,6 +3952,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Approve Plan",
         "tags": [
           "plan"
@@ -3789,6 +4001,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Get Plan Comments",
         "tags": [
           "plan"
@@ -3841,6 +4058,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Post Plan Comment",
         "tags": [
           "plan"
@@ -3894,6 +4116,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Remove Plan Comment",
         "tags": [
           "plan"
@@ -3955,6 +4182,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Reject Plan",
         "tags": [
           "plan"
@@ -3978,6 +4210,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Get My Profile",
         "tags": [
           "dashboard"
@@ -4019,6 +4256,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Put My Profile",
         "tags": [
           "dashboard"
@@ -4065,6 +4307,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "List Repos",
         "tags": [
           "dashboard"
@@ -4090,6 +4337,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Review Styles",
         "tags": [
           "dashboard"
@@ -4129,6 +4381,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Create Review Style",
         "tags": [
           "dashboard"
@@ -4169,6 +4426,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete Review Style",
         "tags": [
           "dashboard"
@@ -4209,6 +4471,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Review Style",
         "tags": [
           "dashboard"
@@ -4259,6 +4526,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Update Review Style Prompt",
         "tags": [
           "dashboard"
@@ -4301,6 +4573,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Analyze Review Style",
         "tags": [
           "dashboard"
@@ -4343,6 +4620,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Cancel Review Style",
         "tags": [
           "dashboard"
@@ -4398,6 +4680,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Reviews",
         "tags": [
           "dashboard"
@@ -4460,6 +4747,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Review",
         "tags": [
           "dashboard"
@@ -4522,6 +4814,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Review Chat",
         "tags": [
           "dashboard"
@@ -4584,6 +4881,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Review Chat Threads",
         "tags": [
           "dashboard"
@@ -4651,6 +4953,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete Review Chat Thread",
         "tags": [
           "dashboard"
@@ -4718,6 +5025,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Review Chat Commands",
         "tags": [
           "dashboard"
@@ -4785,6 +5097,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Review Chat History",
         "tags": [
           "dashboard"
@@ -4852,6 +5169,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Review Chat State",
         "tags": [
           "dashboard"
@@ -4919,6 +5241,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Review Chat Stream Events",
         "tags": [
           "dashboard"
@@ -4981,6 +5308,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Review Comments",
         "tags": [
           "dashboard"
@@ -5051,6 +5383,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Create Review Comment",
         "tags": [
           "dashboard"
@@ -5132,6 +5469,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Update Review Comment",
         "tags": [
           "dashboard"
@@ -5194,6 +5536,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Review Diff",
         "tags": [
           "dashboard"
@@ -5261,6 +5608,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Review Image",
         "tags": [
           "dashboard"
@@ -5323,6 +5675,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Re Review",
         "tags": [
           "dashboard"
@@ -5385,6 +5742,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Resolve Trace",
         "tags": [
           "dashboard"
@@ -5408,6 +5770,14 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          },
+          {
+            "AdminBearer": []
+          }
+        ],
         "summary": "Api Get Sandbox Settings",
         "tags": [
           "dashboard"
@@ -5449,6 +5819,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          },
+          {
+            "AdminBearer": []
+          }
+        ],
         "summary": "Api Set Sandbox Settings",
         "tags": [
           "dashboard"
@@ -5475,6 +5853,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Schedules",
         "tags": [
           "dashboard"
@@ -5516,6 +5899,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Create Schedule",
         "tags": [
           "dashboard"
@@ -5556,6 +5944,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete Schedule",
         "tags": [
           "dashboard"
@@ -5608,6 +6001,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Update Schedule",
         "tags": [
           "dashboard"
@@ -5652,6 +6050,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Trigger Schedule",
         "tags": [
           "dashboard"
@@ -5710,6 +6113,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Skills",
         "tags": [
           "dashboard"
@@ -5751,6 +6159,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Create Skill",
         "tags": [
           "dashboard"
@@ -5791,6 +6204,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete Skill",
         "tags": [
           "dashboard"
@@ -5843,6 +6261,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Update Skill",
         "tags": [
           "dashboard"
@@ -5937,6 +6360,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Slack Desktop Exchange",
         "tags": [
           "dashboard"
@@ -6003,6 +6431,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Slack Login",
         "tags": [
           "dashboard"
@@ -6026,6 +6459,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Team Credentials",
         "tags": [
           "dashboard"
@@ -6049,6 +6487,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Disconnect Datadog",
         "tags": [
           "dashboard"
@@ -6090,6 +6533,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Connect Datadog",
         "tags": [
           "dashboard"
@@ -6113,6 +6561,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Disconnect Langsmith",
         "tags": [
           "dashboard"
@@ -6154,6 +6607,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Connect Langsmith",
         "tags": [
           "dashboard"
@@ -6177,6 +6635,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Team Settings",
         "tags": [
           "dashboard"
@@ -6218,6 +6681,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Put Team Settings",
         "tags": [
           "dashboard"
@@ -6261,6 +6729,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Put Transcription Settings",
         "tags": [
           "dashboard"
@@ -6309,6 +6782,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Threads",
         "tags": [
           "dashboard"
@@ -6525,6 +7003,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Threads Page",
         "tags": [
           "dashboard"
@@ -6551,6 +7034,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Pinned Threads",
         "tags": [
           "dashboard"
@@ -6619,6 +7107,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Thread Projects",
         "tags": [
           "dashboard"
@@ -6664,6 +7157,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Pull Request Checks",
         "tags": [
           "dashboard"
@@ -6704,6 +7202,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete Thread",
         "tags": [
           "dashboard"
@@ -6756,6 +7259,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Thread",
         "tags": [
           "dashboard"
@@ -6808,6 +7316,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Rename Thread",
         "tags": [
           "dashboard"
@@ -6852,6 +7365,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Thread Branch Diff",
         "tags": [
           "dashboard"
@@ -6896,6 +7414,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Cancel Thread",
         "tags": [
           "dashboard"
@@ -6936,6 +7459,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Thread Commands",
         "tags": [
           "dashboard"
@@ -6976,6 +7504,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Thread History",
         "tags": [
           "dashboard"
@@ -7030,6 +7563,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Send Thread Message",
         "tags": [
           "dashboard"
@@ -7065,6 +7603,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Unpin Thread",
         "tags": [
           "dashboard"
@@ -7098,6 +7641,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Pin Thread",
         "tags": [
           "dashboard"
@@ -7142,6 +7690,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Thread Pr Diff",
         "tags": [
           "dashboard"
@@ -7204,6 +7757,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Thread Pull Request Context",
         "tags": [
           "dashboard"
@@ -7248,6 +7806,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Thread Pull Request Status",
         "tags": [
           "dashboard"
@@ -7288,6 +7851,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Thread Recovery Patch",
         "tags": [
           "dashboard"
@@ -7342,6 +7910,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Resolve Thread",
         "tags": [
           "dashboard"
@@ -7411,6 +7984,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Cancel Thread Run",
         "tags": [
           "dashboard"
@@ -7451,6 +8029,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Thread State",
         "tags": [
           "dashboard"
@@ -7491,6 +8074,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Thread Stream Events",
         "tags": [
           "dashboard"
@@ -7537,6 +8125,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Thread Terminal Connection",
         "tags": [
           "dashboard"
@@ -7581,6 +8174,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Get Thread Working Tree Diff",
         "tags": [
           "dashboard"
@@ -7606,6 +8204,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Create Voice Transcription",
         "tags": [
           "dashboard"
@@ -7650,6 +8253,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "List Workflow Push Approvals",
         "tags": [
           "workflow-approval"
@@ -7703,6 +8311,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Approve Workflow Push",
         "tags": [
           "workflow-approval"
@@ -7756,6 +8369,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Reject Workflow Push",
         "tags": [
           "workflow-approval"
@@ -7782,6 +8400,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api List Workspace Mcps",
         "tags": [
           "dashboard"
@@ -7817,6 +8440,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Delete Workspace Mcp",
         "tags": [
           "dashboard"
@@ -7869,6 +8497,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Save Workspace Mcp",
         "tags": [
           "dashboard"
@@ -7935,6 +8568,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Discover Workspace Mcp",
         "tags": [
           "dashboard"
@@ -7975,6 +8613,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
         "summary": "Api Reveal Workspace Mcp Headers",
         "tags": [
           "dashboard"
