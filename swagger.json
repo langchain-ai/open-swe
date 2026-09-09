@@ -650,6 +650,73 @@
         "title": "LangSmithCredentialsUpdate",
         "type": "object"
       },
+      "MCPConnectionPublic": {
+        "description": "Connection settings safe to return to the dashboard; credentials stay server-side.",
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Tools",
+            "type": "array"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "header_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Header Names",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "oauth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPOAuth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          },
+          "transport": {
+            "default": "streamable_http",
+            "enum": [
+              "streamable_http",
+              "sse"
+            ],
+            "title": "Transport",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url",
+          "revision",
+          "updated_at"
+        ],
+        "title": "MCPConnectionPublic",
+        "type": "object"
+      },
       "MCPConnectionUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -716,6 +783,49 @@
         "title": "MCPConnectionUpdate",
         "type": "object"
       },
+      "MCPOAuth": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "grant_type": {
+            "const": "client_credentials",
+            "default": "client_credentials",
+            "title": "Grant Type",
+            "type": "string"
+          },
+          "scope": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Scope",
+            "type": "string"
+          },
+          "token_endpoint_auth_method": {
+            "default": "client_secret_post",
+            "enum": [
+              "client_secret_post",
+              "client_secret_basic"
+            ],
+            "title": "Token Endpoint Auth Method",
+            "type": "string"
+          },
+          "token_url": {
+            "maxLength": 2048,
+            "title": "Token Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_url",
+          "client_id"
+        ],
+        "title": "MCPOAuth",
+        "type": "object"
+      },
       "MCPOAuthUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -770,6 +880,25 @@
           "client_id"
         ],
         "title": "MCPOAuthUpdate",
+        "type": "object"
+      },
+      "MCPToolDescription": {
+        "description": "A remote tool listed during discovery, before any allowlist is applied.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MCPToolDescription",
         "type": "object"
       },
       "PlanRejection": {
@@ -3512,8 +3641,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/components/schemas/MCPConnectionPublic"
                   },
                   "title": "Response Api List My Mcps Dashboard Api My Mcps Get",
                   "type": "array"
@@ -3601,9 +3729,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Save My Mcp Dashboard Api My Mcps  Name  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/MCPConnectionPublic"
                 }
               }
             },
@@ -3668,10 +3794,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": {
-                      "type": "string"
-                    },
-                    "type": "object"
+                    "$ref": "#/components/schemas/MCPToolDescription"
                   },
                   "title": "Response Api Discover My Mcp Dashboard Api My Mcps  Name  Discover Post",
                   "type": "array"
@@ -8776,8 +8899,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/components/schemas/MCPConnectionPublic"
                   },
                   "title": "Response Api List Workspace Mcps Dashboard Api Workspace Mcps Get",
                   "type": "array"
@@ -8865,9 +8987,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Save Workspace Mcp Dashboard Api Workspace Mcps  Name  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/MCPConnectionPublic"
                 }
               }
             },
@@ -8932,10 +9052,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": {
-                      "type": "string"
-                    },
-                    "type": "object"
+                    "$ref": "#/components/schemas/MCPToolDescription"
                   },
                   "title": "Response Api Discover Workspace Mcp Dashboard Api Workspace Mcps  Name  Discover Post",
                   "type": "array"

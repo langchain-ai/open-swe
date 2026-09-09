@@ -254,7 +254,12 @@ from agent.dashboard.workspace_mcps import (
 )
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
-from agent.mcp import MCPConnection, MCPConnectionUpdate
+from agent.mcp import (
+    MCPConnection,
+    MCPConnectionPublic,
+    MCPConnectionUpdate,
+    MCPToolDescription,
+)
 from agent.review.analyzer_cron import remove_continual_cron
 from agent.review.eval_jobs import (
     get_reviewer_eval_status,
@@ -1028,12 +1033,12 @@ def _reveal_mcp_headers(record: MCPConnection | None) -> JSONResponse:
 workspace_mcp_router = APIRouter(route_class=MCPRoute)
 
 
-@workspace_mcp_router.get("/workspace-mcps")
+@workspace_mcp_router.get("/workspace-mcps", response_model=list[MCPConnectionPublic])
 async def api_list_workspace_mcps(_admin: dict[str, Any] = _ADMIN_DEP) -> list[dict[str, Any]]:
     return await list_workspace_mcps()
 
 
-@workspace_mcp_router.put("/workspace-mcps/{name}")
+@workspace_mcp_router.put("/workspace-mcps/{name}", response_model=MCPConnectionPublic)
 async def api_save_workspace_mcp(
     name: str,
     update: MCPConnectionUpdate,
@@ -1058,7 +1063,9 @@ async def api_reveal_workspace_mcp_headers(
     return _reveal_mcp_headers(await get_workspace_mcp(name))
 
 
-@workspace_mcp_router.post("/workspace-mcps/{name}/discover")
+@workspace_mcp_router.post(
+    "/workspace-mcps/{name}/discover", response_model=list[MCPToolDescription]
+)
 async def api_discover_workspace_mcp(
     name: str,
     update: MCPConnectionUpdate | None = None,
@@ -1076,12 +1083,12 @@ router.include_router(workspace_mcp_router)
 user_mcp_router = APIRouter(route_class=MCPRoute)
 
 
-@user_mcp_router.get("/my-mcps")
+@user_mcp_router.get("/my-mcps", response_model=list[MCPConnectionPublic])
 async def api_list_my_mcps(session: dict[str, Any] = _SESSION_DEP) -> list[dict[str, Any]]:
     return await list_user_mcps(session["sub"])
 
 
-@user_mcp_router.put("/my-mcps/{name}")
+@user_mcp_router.put("/my-mcps/{name}", response_model=MCPConnectionPublic)
 async def api_save_my_mcp(
     name: str,
     update: MCPConnectionUpdate,
@@ -1106,7 +1113,7 @@ async def api_reveal_my_mcp_headers(
     return _reveal_mcp_headers(await get_user_mcp(session["sub"], name))
 
 
-@user_mcp_router.post("/my-mcps/{name}/discover")
+@user_mcp_router.post("/my-mcps/{name}/discover", response_model=list[MCPToolDescription])
 async def api_discover_my_mcp(
     name: str,
     update: MCPConnectionUpdate | None = None,
