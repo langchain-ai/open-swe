@@ -585,7 +585,7 @@ export function WorkspaceMCPSection() {
   return (
     <SettingsSection
       title="Workspace MCPs"
-      description="Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them."
+      description="Connect remote MCP servers for all coding-agent users. New connections preselect all discovered tools; review the selection and save to enable them for everyone."
     >
       <div className="space-y-4 p-4">
         {connections.isLoading && (

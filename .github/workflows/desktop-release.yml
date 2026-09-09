@@ -123,6 +123,12 @@ jobs:
           APPLE_API_KEY: ${{ env.APPLE_API_KEY_PATH }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          VITE_DATADOG_APPLICATION_ID: ${{ secrets.VITE_DATADOG_APPLICATION_ID }}
+          VITE_DATADOG_CLIENT_TOKEN: ${{ secrets.VITE_DATADOG_CLIENT_TOKEN }}
+          VITE_DATADOG_SERVICE: open-swe-desktop
+          VITE_DATADOG_VERSION: ${{ steps.release.outputs.version }}
+          VITE_DATADOG_SESSION_SAMPLE_RATE: "100"
+          VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE: "20"
         run: |
           pnpm run build
           pnpm --filter open-swe-desktop run build:local-backend

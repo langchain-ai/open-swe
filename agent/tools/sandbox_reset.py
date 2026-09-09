@@ -6,10 +6,8 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.dashboard.agent_overrides import resolve_github_login
-from agent.dashboard.user_credentials import get_sandbox_langsmith_credentials
+from agent.prompts import load_prompt
 from agent.tools.admin_gate import configurable, require_admin
-from agent.utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +39,13 @@ class SandboxResetParams(BaseModel):
     internal_runtime: Any = Field(default=None, alias="_internal_runtime")
 
 
-@tool("sandbox_reset", args_schema=SandboxResetParams)
+@tool(
+    "sandbox_reset",
+    args_schema=SandboxResetParams,
+    description=load_prompt("tools/sandbox_reset.md"),
+)
 async def sandbox_reset(**create_options: Any) -> dict[str, Any]:
-    """Replace this admin thread's sandbox using a complete create request.
-
-    Every supplied argument is forwarded to the LangSmith sandbox-create body.
-    The schema includes all public create fields and accepts additional hidden
-    fields such as ``_internal_runtime``. Omitted fields use platform defaults.
-    The new sandbox starts empty except for any requested snapshot, and the old
-    sandbox is preserved but detached from this thread. Never pass secrets,
-    credentials, or authentication tokens.
-    """
+    """Implement the `sandbox_reset` tool."""
     if error := require_admin("reset sandboxes"):
         return {"success": False, "error": error}
 
@@ -68,13 +62,9 @@ async def sandbox_reset(**create_options: Any) -> dict[str, Any]:
     try:
         from agent.sandboxes.lifecycle import reset_sandbox_for_thread
 
-        login = resolve_github_login({"configurable": as_json_object(cfg.dump())})
-        credentials = await get_sandbox_langsmith_credentials(login) if login else None
-        kwargs = {"langsmith_credentials": credentials} if credentials is not None else {}
         old_sandbox_id, new_sandbox_id = await reset_sandbox_for_thread(
             thread_id,
             create_params,
-            **kwargs,
         )
     except Exception as exc:
         logger.exception("Failed to reset sandbox for thread %s", thread_id)

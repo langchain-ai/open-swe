@@ -225,7 +225,7 @@ async def list_threads(
     admin_threads: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """List surfaced threads by locator, participant, admin mode, status, source, or text."""
+    """Implement the `list_threads` tool."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -711,7 +711,7 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Inspect a thread from its ID, dashboard/Slack/LangSmith URL, or LangSmith run ID."""
+    """Implement the `get_thread` tool."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -947,7 +947,7 @@ async def manage_thread(
     plan_mode: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Perform a dashboard-equivalent action on an Open SWE thread."""
+    """Implement the `manage_thread` tool."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")

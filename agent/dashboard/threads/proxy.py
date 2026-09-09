@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from typing import Any
 
@@ -92,7 +92,7 @@ async def stream_thread_events(
     thread_id: str,
     body: bytes,
     content_type: str,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
     headers = langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
