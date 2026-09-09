@@ -1,7 +1,6 @@
 """Resumable, encrypted MCP OAuth authorization-code flows with PKCE and refresh."""
 
 import asyncio
-import json
 import re
 import secrets
 import time
@@ -33,7 +32,13 @@ from agent.dashboard.mcp_connections import (
     unseal,
     update_record,
 )
-from agent.dashboard.mcp_http import MCPConnectionError, request_json, resolve_url, validate_url
+from agent.dashboard.mcp_http import (
+    MCPConnectionError,
+    read_json,
+    request_json,
+    resolve_url,
+    validate_url,
+)
 from agent.store import delete_value, get_value, put_value
 from agent.tool_loaders.mcp_transport import mcp_http_client
 
@@ -53,15 +58,7 @@ async def _metadata(urls: list[str]) -> dict[str, Any]:
                     continue
                 if not response.is_success:
                     raise MCPConnectionError(502, "MCP OAuth metadata discovery failed")
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    body.extend(chunk)
-                    if len(body) > 1_048_576:
-                        raise MCPConnectionError(502, "OAuth response exceeds the size limit")
-                data = json.loads(body)
-                if not isinstance(data, dict):
-                    raise ValueError
-                return data
+                return await read_json(response)
     raise MCPConnectionError(404, "MCP OAuth metadata discovery is unavailable")
 
 
@@ -336,13 +333,6 @@ async def _claim_flow(state: str) -> dict[str, Any]:
         raise MCPConnectionError(400, "OAuth state is invalid or expired")
     await delete_value(namespace, state)
     return flow
-
-
-async def access_token(login: str, record: dict[str, Any]) -> str:
-    current = await get_record(login, record["id"])
-    if not current["enabled"] or current["revision"] != record["revision"]:
-        raise MCPConnectionError(409, "MCP connection changed; reconnect")
-    return await access_token_for(login, current)
 
 
 def _needs_refresh(oauth: dict[str, Any]) -> bool:

@@ -2,6 +2,7 @@ import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { WORKSPACE_NAME_PATTERN } from "@/lib/mcp"
 import type { McpTransport } from "@/lib/mcp"
 
 export interface ImportedMCP {
@@ -29,7 +30,7 @@ export function parseMCPConfig(text: string): ImportedMCP[] {
 
   return entries.map(([name, server], index) => {
     const label = `Connection ${index + 1}`
-    if (!/^[a-z][a-z0-9_-]{0,31}$/.test(name))
+    if (!WORKSPACE_NAME_PATTERN.test(name))
       throw new Error(
         `${label}: use a lowercase name with letters, numbers, hyphens, or underscores (1-32 characters).`
       )

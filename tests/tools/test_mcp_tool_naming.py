@@ -2,7 +2,7 @@
 
 import re
 
-from agent.tool_loaders.mcp import group_name, prefixed_tool_name
+from agent.tool_loaders.mcp import prefixed_tool_name
 
 _VALID = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
@@ -21,9 +21,3 @@ def test_same_tool_on_two_connections_gets_distinct_names():
     second = prefixed_tool_name("Notion", "search", scope="b" * 32)
     assert first != second
     assert first == prefixed_tool_name("Notion", "search", scope="a" * 32)
-
-
-def test_group_name_prefers_the_connection_name():
-    assert group_name("Notion", "a" * 32, set()) == "Notion"
-    assert group_name("Notion", "b" * 32, {"Notion"}) == "Notion (bbbbbbbb)"
-    assert group_name("Browser", "c" * 32, {"Browser"}) == "Browser (cccccccc)"

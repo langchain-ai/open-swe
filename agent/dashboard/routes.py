@@ -31,7 +31,7 @@ from fastapi.responses import (
 from pydantic import BaseModel, Field
 
 from agent.config import ENV
-from agent.dashboard import mcp_connections
+from agent.dashboard import mcp_connections, mcp_oauth
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
@@ -707,19 +707,17 @@ async def _mcp_result[T](operation: Awaitable[T]) -> T:
         raise HTTPException(502, "MCP connection operation failed; retry or reconnect") from None
 
 
-_McpScope = Literal["user", "workspace"]
-
-
-def _mcp_owner(scope: _McpScope, session: dict[str, Any]) -> str:
+def _mcp_owner(scope: mcp_connections.Scope, session: dict[str, Any]) -> str:
     """The store owner for ``scope``; the shared workspace scope is admin-only."""
     if scope == "workspace":
         _require_admin(session)
-    return mcp_connections.scope_owner(scope, session["sub"])
+        return mcp_connections.WORKSPACE_OWNER
+    return session["sub"]
 
 
 @router.get("/mcp-connections")
 async def get_mcp_connections(
-    scope: _McpScope = "user", session: dict[str, Any] = _SESSION_DEP
+    scope: mcp_connections.Scope = "user", session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     owner = _mcp_owner(scope, session)
     return {
@@ -731,7 +729,7 @@ async def get_mcp_connections(
 @router.post("/mcp-connections")
 async def save_mcp_connection(
     body: dict[str, Any],
-    scope: _McpScope = "user",
+    scope: mcp_connections.Scope = "user",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     owner = _mcp_owner(scope, session)
@@ -741,7 +739,7 @@ async def save_mcp_connection(
 @router.post("/mcp-connections/discover")
 async def discover_mcp_connection(
     body: dict[str, Any],
-    scope: _McpScope = "user",
+    scope: mcp_connections.Scope = "user",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     """List a draft's tools so its allowlist can be chosen before anything is saved."""
@@ -754,7 +752,7 @@ async def discover_mcp_connection(
 async def update_mcp_connection(
     id: str,
     body: dict[str, Any],
-    scope: _McpScope = "user",
+    scope: mcp_connections.Scope = "user",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if "id" in body and body["id"] != id:
@@ -765,7 +763,7 @@ async def update_mcp_connection(
 
 @router.delete("/mcp-connections/{id}", status_code=204)
 async def delete_mcp_connection(
-    id: str, scope: _McpScope = "user", session: dict[str, Any] = _SESSION_DEP
+    id: str, scope: mcp_connections.Scope = "user", session: dict[str, Any] = _SESSION_DEP
 ) -> Response:
     owner = _mcp_owner(scope, session)
     await _mcp_result(mcp_connections.delete_connection(owner, id))
@@ -774,7 +772,7 @@ async def delete_mcp_connection(
 
 @router.post("/mcp-connections/{id}/test")
 async def test_mcp_connection(
-    id: str, scope: _McpScope = "user", session: dict[str, Any] = _SESSION_DEP
+    id: str, scope: mcp_connections.Scope = "user", session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     owner = _mcp_owner(scope, session)
     return await _mcp_result(mcp_connections.discover_connection(owner, id))
@@ -782,7 +780,7 @@ async def test_mcp_connection(
 
 @router.post("/mcp-connections/{id}/headers/reveal")
 async def reveal_mcp_connection_headers(
-    id: str, scope: _McpScope = "user", session: dict[str, Any] = _SESSION_DEP
+    id: str, scope: mcp_connections.Scope = "user", session: dict[str, Any] = _SESSION_DEP
 ) -> JSONResponse:
     """Saved header values for an admin editing a shared connection; never cached."""
     owner = _mcp_owner(scope, session)
@@ -812,7 +810,7 @@ async def mcp_oauth_login(
     challenge = valid_handoff_challenge(desktop_handoff)
     handoff = (challenge, desktop_port) if challenge and desktop_port else None
     url = await _mcp_result(
-        mcp_connections.start_oauth(
+        mcp_oauth.start_oauth(
             session["sub"],
             id,
             f"{_api_base_url()}{_MCP_OAUTH_PATH}/oauth/callback",
@@ -827,8 +825,6 @@ async def mcp_oauth_login(
     ):
         raise HTTPException(502, "MCP OAuth state is missing or invalid")
     cookie = encrypt_token(json.dumps({"owner": session["sub"], "state": states[0]}))
-    if not 0 < len(cookie) <= _MCP_STATE_COOKIE_MAX_LENGTH:
-        raise HTTPException(502, "MCP OAuth state cookie is invalid")
     response = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
     if handoff is None:
         secure, _ = _cookie_security()
@@ -857,9 +853,7 @@ async def mcp_oauth_callback(
     it gets a PKCE-bound code that only the app holding the verifier can redeem;
     the code carries the flow state, never an account.
     """
-    handoff = None
-    if 0 < len(state) <= _MCP_STATE_MAX_LENGTH and state.isascii():
-        handoff = await _mcp_result(mcp_connections.oauth_handoff(state))
+    handoff = await _mcp_result(mcp_oauth.flow_handoff(state))
     if handoff is not None:
         if error or not code:
             return PlainTextResponse(
@@ -901,7 +895,7 @@ async def mcp_oauth_callback(
             raise HTTPException(400, "OAuth state mismatch; restart the connection")
         if error or not code:
             raise HTTPException(400, "MCP OAuth authorization denied or code missing")
-        result = await _mcp_result(mcp_connections.finish_oauth(state, code, owner=session["sub"]))
+        result = await _mcp_result(mcp_oauth.finish_oauth(state, code, owner=session["sub"]))
         response: Response = _plugins_redirect(mcp=result["id"])
     except HTTPException as exc:
         response = _plugins_redirect(mcp_error=str(exc.detail))
@@ -937,7 +931,7 @@ async def mcp_desktop_exchange(
     code = claims.get("code")
     if not isinstance(state, str) or not isinstance(code, str):
         raise HTTPException(400, "malformed handoff code")
-    return await _mcp_result(mcp_connections.finish_oauth(state, code, owner=session["sub"]))
+    return await _mcp_result(mcp_oauth.finish_oauth(state, code, owner=session["sub"]))
 
 
 @router.get("/slack/login")

@@ -45,7 +45,7 @@ def resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
                 elif ip.sixtofour or ip.teredo or ip in _NAT64_NETWORK:
                     # Tunnelled addresses embed an IPv4 target the check cannot see.
                     return False, f"URL resolves to blocked address: {ip_str}", hostname, None
-            if not ip.is_global or ip.is_multicast or ip.is_unspecified:
+            if not ip.is_global or ip.is_multicast:
                 return False, f"URL resolves to blocked address: {ip_str}", hostname, None
 
         return True, "", hostname, addr_infos

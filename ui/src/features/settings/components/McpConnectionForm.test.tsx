@@ -42,7 +42,7 @@ it("edits a local bearer server as a token, not a JSON blob", async () => {
   expect(saved?.record.headers).toEqual({ Authorization: "Bearer new-token" })
 })
 
-it("reports malformed JSON readably and does not save", async () => {
+it("reports malformed stdio JSON readably, then saves the listed passthrough variables", async () => {
   const onSave = mount({ source: "local" })
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "files" },
@@ -56,26 +56,16 @@ it("reports malformed JSON readably and does not save", async () => {
   fireEvent.change(screen.getByLabelText("Arguments (JSON array)"), {
     target: { value: "[-y" },
   })
+  fireEvent.change(screen.getByLabelText(/Environment passthrough/), {
+    target: { value: "MY_KEY, OTHER" },
+  })
   fireEvent.click(screen.getByRole("button", { name: "Save server" }))
   expect((await screen.findByRole("alert")).textContent).toBe(
     "Arguments must be a JSON array of strings."
   )
   expect(onSave).not.toHaveBeenCalled()
-})
-
-it("sends only the listed passthrough variables for stdio servers", async () => {
-  const onSave = mount({ source: "local" })
-  fireEvent.change(screen.getByLabelText("Name"), {
-    target: { value: "files" },
-  })
-  fireEvent.change(screen.getByLabelText("Transport"), {
-    target: { value: "stdio" },
-  })
-  fireEvent.change(screen.getByLabelText("Command"), {
-    target: { value: "npx" },
-  })
-  fireEvent.change(screen.getByLabelText(/Environment passthrough/), {
-    target: { value: "MY_KEY, OTHER" },
+  fireEvent.change(screen.getByLabelText("Arguments (JSON array)"), {
+    target: { value: '["-y"]' },
   })
   fireEvent.click(screen.getByRole("button", { name: "Save server" }))
   await vi.waitFor(() => expect(onSave).toHaveBeenCalled())

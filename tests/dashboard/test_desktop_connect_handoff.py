@@ -159,9 +159,9 @@ def test_desktop_mcp_authorization_hands_off_and_finishes_under_the_session(
         finished.append((value, code, owner))
         return {"id": "connection"}
 
-    monkeypatch.setattr(routes.mcp_connections, "start_oauth", start_oauth)
-    monkeypatch.setattr(routes.mcp_connections, "oauth_handoff", oauth_handoff)
-    monkeypatch.setattr(routes.mcp_connections, "finish_oauth", finish_oauth)
+    monkeypatch.setattr(routes.mcp_oauth, "start_oauth", start_oauth)
+    monkeypatch.setattr(routes.mcp_oauth, "flow_handoff", oauth_handoff)
+    monkeypatch.setattr(routes.mcp_oauth, "finish_oauth", finish_oauth)
 
     with _client() as client:
         client.cookies.set(COOKIE_NAME, issue_session(login="alice", email=None, avatar_url=None))

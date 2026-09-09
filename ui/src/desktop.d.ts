@@ -159,9 +159,9 @@ type ConnectProvider = "slack" | `mcp-connections/${string}`
 declare global {
   interface Window {
     openSweDesktop?: {
-      getMcpServers?: McpDesktopBridge["getMcpServers"]
-      saveMcpServer?: McpDesktopBridge["saveMcpServer"]
-      deleteMcpServer?: McpDesktopBridge["deleteMcpServer"]
+      getMcpServers: McpDesktopBridge["getMcpServers"]
+      saveMcpServer: McpDesktopBridge["saveMcpServer"]
+      deleteMcpServer: McpDesktopBridge["deleteMcpServer"]
       isDesktop: true
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>

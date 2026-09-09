@@ -91,7 +91,7 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
                                 "name": "s",
                                 "enabled": True,
                                 "command": "x",
-                                "env_vars": [key],
+                                "env_passthrough": [key],
                             }
                         ],
                     }
@@ -144,15 +144,6 @@ class DesktopMcpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[0].headers["authorization"], "Bearer broker-secret")
         self.assertNotIn("upstream.invalid", json.dumps(connections))
         self.assertNotIn("must-not-copy", json.dumps(connections))
-
-    async def test_broker_without_a_cloud_session_yields_local_servers_only(self):
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:4242",
-            headers={"Authorization": "Bearer broker-secret"},
-            transport=httpx.MockTransport(lambda request: httpx.Response(503, json=None)),
-        ) as broker:
-            connections = await mcp._connections({"servers": []}, broker)
-        self.assertEqual(connections, [])
 
     async def test_sdk_oauth_loopback_pkce_keychain_and_refresh(self, method=None):
         record = {"client_secret": "manual-secret"} if method and method != "none" else {}

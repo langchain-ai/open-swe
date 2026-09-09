@@ -30,12 +30,12 @@ the workspace's branch and discovers its pull request when the GitHub CLI is ins
 ## Local MCP servers
 
 Desktop reads `~/.open-swe/mcp.json` again at the start of every local run. The file uses the
-standard `mcpServers` map; stdio entries accept `command`, `args`, `cwd`, `env`, and either
-`env_vars` or `env_passthrough`. HTTP entries accept `url` and `headers`, including localhost
+standard `mcpServers` map; stdio entries accept `command`, `args`, `cwd`, `env`, and
+`env_passthrough`. HTTP entries accept `url` and `headers`, including localhost
 URLs. Commands are executables plus argument arrays, not shell command strings. The login-shell
 environment is resolved once when Electron starts; `${VAR}` and `${env:VAR}` substitute its values
-without shell evaluation. A stdio server receives only the login variables listed in `env_vars`
-or `env_passthrough`, its own `env` entries, and the MCP SDK's small default set (`HOME`, `PATH`,
+without shell evaluation. A stdio server receives only the login variables listed in
+`env_passthrough`, its own `env` entries, and the MCP SDK's small default set (`HOME`, `PATH`,
 `USER`, ...). Only configure commands you trust: they run on the device with your permissions.
 
 ```json
@@ -50,7 +50,7 @@ or `env_passthrough`, its own `env` entries, and the MCP SDK's small default set
 }
 ```
 
-The existing `getMcpServers`, `saveMcpServer`, and `deleteMcpServer` preload methods manage this
+The `getMcpServers`, `saveMcpServer`, and `deleteMcpServer` preload methods manage this
 file through trusted-renderer IPC. Enable switches live separately in `userData/mcp-enabled.json`.
 Invalid JSON is reported rather than overwritten. OAuth credentials never appear in these public
 records or in `mcp.json`: encrypted blobs under `userData/mcp-credentials` use Electron safeStorage
@@ -65,27 +65,13 @@ are not supported in the config file. A registered callback port must remain ava
 fails rather than changing an existing client's registered redirect. The interactive browser leg
 for one local server is serialized across concurrent runs; established sessions are not.
 
-### Agent integration contract
+### Agent integration
 
-Import `agent.desktop_mcp` at desktop graph startup, **before constructing any shell backend**.
-It consumes and removes `OPEN_SWE_MCP_BROKER_URL` / `OPEN_SWE_MCP_BROKER_TOKEN` from the process
-environment so tools cannot inherit the broker capability. Electron supplies these variables through
-the existing `BackendSupervisor.providerEnv` plumbing; do not accept them from run configuration,
-thread metadata, model arguments, or MCP server JSON.
-
-```python
-from agent.desktop_mcp import local_mcp_tools
-
-async with local_mcp_tools() as mcp_tools:
-    await run_local_agent(extra_tools=mcp_tools)
-```
-
-`run_local_agent` above denotes the caller's existing agent assembly/invocation, not a new API.
-The context must enclose the **entire run**, including streaming and subagent calls. It retains
-stdio processes, MCP client sessions and HTTP transports in an `AsyncExitStack`; cancellation or
-failure closes them. `await local_connections()` alternatively returns enabled transport records
-for a trusted loader; those records can contain local headers and environment and must never be
-exposed to the model, renderer, traces, or durable run metadata.
+`agent.desktop_mcp` is imported at desktop graph startup, before any shell backend exists. It
+consumes and removes `OPEN_SWE_MCP_BROKER_URL` / `OPEN_SWE_MCP_BROKER_TOKEN` from the process
+environment so tools cannot inherit the broker capability; Electron supplies them through
+`BackendSupervisor.providerEnv`. `local_mcp_tools()` encloses the entire run and closes the stdio
+processes, MCP sessions and HTTP transports it opened when the run ends.
 
 The authenticated, loopback-only Electron broker exposes:
 
@@ -105,13 +91,9 @@ The authenticated, loopback-only Electron broker exposes:
 
 Electron attaches its own dashboard session cookie and `Origin: open-swe://app` to every cloud
 call; the session cookie never leaves Electron and the broker bearer token is never forwarded. The
-loader never sees the upstream MCP URL or its secrets. Local names override matching cloud names,
-including disabled local entries. Cloud list or connection failures surface rather than silently
-omitting tools. With no cloud session, local servers and local OAuth do not require a cloud backend.
-
-The graph owner must wire the context above in `server.py`; this desktop module does not register
-routes. The backend owner must expose the authenticated list and proxy routes. No new Python
-local dashboard route or dependency is needed.
+loader never sees the upstream MCP URL or its secrets. An enabled local server overrides a cloud
+connection of the same name. With no cloud session, local servers and local OAuth do not require a
+cloud backend.
 
 ## How it connects
 

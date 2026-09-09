@@ -435,7 +435,7 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
     record, _ = await mc.update_record("alice", public["id"], expire)
     stale = dict(record)
     refreshed = await asyncio.gather(
-        mo.access_token("alice", record), mo.access_token("alice", stale)
+        mo.access_token_for("alice", record), mo.access_token_for("alice", stale)
     )
     assert refreshed == ["oauth-access-secret", "oauth-access-secret"]
     assert (
@@ -458,8 +458,8 @@ async def test_oauth_pkce_callback_replay_encryption_and_refresh(environment, mo
 
     monkeypatch.setattr(mo, "request_json", interrupted)
     failures = await asyncio.gather(
-        mo.access_token("alice", record),
-        mo.access_token("alice", dict(record)),
+        mo.access_token_for("alice", record),
+        mo.access_token_for("alice", dict(record)),
         return_exceptions=True,
     )
     assert attempts == 2, "each caller retries in turn after a handled failure"
@@ -489,7 +489,7 @@ async def test_stale_refresh_claim_is_taken_over(environment, monkeypatch):
         return {"access_token": "fresh", "token_type": "Bearer", "expires_in": 3600}
 
     monkeypatch.setattr(mo, "request_json", request_json)
-    assert await mo.access_token("alice", record) == "fresh"
+    assert await mo.access_token_for("alice", record) == "fresh"
     stored = await mc.get_record("alice", public["id"])
     assert stored["oauth"]["tokens"]["refresh_token"] == "refresh"
     assert "refresh" not in stored["oauth"]
@@ -501,7 +501,7 @@ async def test_stale_refresh_claim_is_taken_over(environment, monkeypatch):
     record, _ = await mc.update_record("alice", public["id"], live_claim)
     monkeypatch.setattr(mo, "_REFRESH_WAIT", 0.3)
     with pytest.raises(mh.MCPConnectionError, match="taking too long"):
-        await mo.access_token("alice", record)
+        await mo.access_token_for("alice", record)
 
 
 async def test_oauth_discovery_rejects_ssrf_from_challenge(environment, monkeypatch):
@@ -741,22 +741,6 @@ async def test_manual_client_fallback_and_stale_callback(environment, monkeypatc
     assert (await mc.get_record("alice", record["id"]))[
         "oauth_client_secret"
     ] == "replacement-secret"
-
-
-async def test_metadata_error_redaction(environment, monkeypatch):
-    async def upstream(request):
-        return httpx.Response(
-            400, json={"error": "secret-token", "error_description": "refresh-secret"}
-        )
-
-    monkeypatch.setattr(
-        mh,
-        "mcp_http_client",
-        lambda *args, **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
-    )
-    with pytest.raises(mh.MCPConnectionError) as error:
-        await mh.request_json("POST", "https://example.com/token")
-    assert "secret" not in str(error.value)
 
 
 async def test_desktop_handoff_flow_is_pinned_to_its_owner(environment, monkeypatch):

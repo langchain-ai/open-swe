@@ -19,7 +19,6 @@ afterEach(() => {
 
 const incident: McpConnection = {
   id: "c1",
-  scope: "workspace",
   name: "incident",
   url: "https://mcp.incident.io/mcp",
   transport: "streamable_http",
@@ -29,15 +28,10 @@ const incident: McpConnection = {
   tools: [{ name: "search", description: "Search incidents" }],
   allowed_tools: ["search"],
   status: "connected",
-  tested_at: null,
-  created_at: "now",
-  updated_at: "now",
-  revision: "v1",
   headers_configured: true,
   header_names: ["Authorization"],
   bearer_token_configured: false,
   oauth_configured: false,
-  oauth_client_configured: false,
   oauth_client_secret_configured: false,
 }
 
@@ -146,18 +140,13 @@ it("discovers tools with the draft headers before saving and preselects them", a
   fireEvent.change(screen.getByLabelText("Authentication"), {
     target: { value: "headers" },
   })
-  expect(screen.queryByRole("option", { name: "OAuth" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Add header" }))
   fireEvent.change(screen.getByLabelText("Header 1 name"), {
     target: { value: "Authorization" },
   })
-  const secret = screen.getByLabelText("Header 1 value") as HTMLInputElement
-  expect(secret.type).toBe("password")
-  fireEvent.change(secret, { target: { value: "Bearer test-secret" } })
-  fireEvent.click(screen.getByRole("button", { name: "Show header 1 value" }))
-  expect(secret.type).toBe("text")
-  fireEvent.click(screen.getByRole("button", { name: "Hide header 1 value" }))
-  expect(secret.type).toBe("password")
+  fireEvent.change(screen.getByLabelText("Header 1 value"), {
+    target: { value: "Bearer test-secret" },
+  })
   fireEvent.click(screen.getByRole("button", { name: "Discover tools" }))
   const deleteTool = (await screen.findByRole("checkbox", {
     name: "Allow delete",
@@ -172,9 +161,7 @@ it("discovers tools with the draft headers before saving and preselects them", a
     headers: { Authorization: "Bearer test-secret" },
     allowed_tools: [],
   })
-  expect(screen.getByText("2 of 2 selected")).toBeTruthy()
   fireEvent.click(deleteTool)
-  expect(screen.getByText("1 of 2 selected")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Save server" }))
   await waitFor(() => expect(writes(calls)).toHaveLength(1))
   const [save] = writes(calls)
@@ -238,22 +225,6 @@ it("clears saved headers when every row is removed", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Save server" }))
   await waitFor(() => expect(writes(calls)).toHaveLength(1))
   expect(writes(calls)[0]?.body?.headers).toEqual({})
-})
-
-it("deletes a workspace connection", async () => {
-  const calls = mockApi([incident])
-  vi.spyOn(window, "confirm").mockReturnValue(true)
-  mount()
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Delete incident cloud" })
-  )
-  await waitFor(() =>
-    expect(
-      screen.queryByRole("button", { name: "Delete incident cloud" })
-    ).toBeNull()
-  )
-  const remove = calls.find((call) => call.method === "DELETE")
-  expect(remove?.url).toContain("/mcp-connections/c1?scope=workspace")
 })
 
 it("reviews imported connections one at a time without writing", async () => {

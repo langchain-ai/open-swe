@@ -54,7 +54,6 @@ function validateServer(name, server) {
     "args",
     "env",
     "cwd",
-    "env_vars",
     "env_passthrough",
     "url",
     "headers",
@@ -111,7 +110,7 @@ function validateServer(name, server) {
   } else if (!text(server.command) || !server.command.trim()) {
     throw new Error("MCP command is required");
   }
-  for (const key of ["args", "env_vars", "env_passthrough"]) {
+  for (const key of ["args", "env_passthrough"]) {
     if (
       server[key] !== undefined &&
       (!Array.isArray(server[key]) || !server[key].every(text))
@@ -263,24 +262,16 @@ class DesktopMcp {
         encryptedSecret = fs.readFileSync(previousSecret);
     }
     if (changed) {
-      Object.defineProperty(document.mcpServers, name, {
-        value: server,
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
+      document.mcpServers = { ...document.mcpServers, [name]: server };
       atomicWrite(
         this.options.configPath,
         `${JSON.stringify(document, null, 2)}\n`,
       );
     }
-    const toggles = readJson(this.options.togglesPath, {});
-    Object.defineProperty(toggles, name, {
-      value: enabled,
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    });
+    const toggles = {
+      ...readJson(this.options.togglesPath, {}),
+      [name]: enabled,
+    };
     atomicWrite(this.options.togglesPath, JSON.stringify(toggles));
     if (previous && (changed || clientSecret))
       this.clearCredentials(name, previous);
@@ -364,14 +355,17 @@ class DesktopMcp {
       Origin: "open-swe://app",
     };
   }
-  async cloudConnections(response) {
+  async requireCloud(response) {
     const cloud = await this.options.cloudRuntime();
-    if (!cloud) {
+    if (!cloud)
       response
         .writeHead(503, { "Content-Type": "application/json" })
         .end("null");
-      return;
-    }
+    return cloud;
+  }
+  async cloudConnections(response) {
+    const cloud = await this.requireCloud(response);
+    if (!cloud) return;
     const upstream = await fetch(
       new URL("/dashboard/api/mcp-connections", cloud.backend_url),
       {
@@ -386,13 +380,8 @@ class DesktopMcp {
       .end(body);
   }
   async cloudProxy(request, response, id) {
-    const cloud = await this.options.cloudRuntime();
-    if (!cloud) {
-      response
-        .writeHead(503, { "Content-Type": "application/json" })
-        .end("null");
-      return;
-    }
+    const cloud = await this.requireCloud(response);
+    if (!cloud) return;
     const headers = { ...this.cloudHeaders(cloud) };
     for (const name of PROXY_REQUEST_HEADERS) {
       const value = request.headers[name];
@@ -421,7 +410,7 @@ class DesktopMcp {
         signal: AbortSignal.timeout(CLOUD_TIMEOUT),
       } as any,
     );
-    const outgoing: Record<string, string> = { "Cache-Control": "no-store" };
+    const outgoing: Record<string, string> = {};
     for (const name of PROXY_RESPONSE_HEADERS) {
       const value = upstream.headers.get(name);
       if (value !== null) outgoing[name] = value;
@@ -486,9 +475,6 @@ class DesktopMcp {
         ) {
           await this.cloudConnections(response);
           return;
-        } else if (proxy && request.url.includes("?")) {
-          response.writeHead(400).end("Query strings are not allowed");
-          return;
         } else if (
           request.method === "POST" &&
           ["/credentials", "/open"].includes(request.url)
@@ -533,10 +519,9 @@ class DesktopMcp {
     this.url = `http://127.0.0.1:${this.broker.address().port}`;
   }
   async close() {
-    if (!this.broker) return;
     this.broker.closeAllConnections();
     await new Promise<void>((resolve) => this.broker.close(() => resolve()));
   }
 }
 
-module.exports = { DesktopMcp, resolveLoginEnvironment, validateServer };
+module.exports = { DesktopMcp, resolveLoginEnvironment };

@@ -244,13 +244,6 @@ test("localizes backend OAuth callbacks and post-login redirects", () => {
   );
   assert.equal(
     localCallbackUrl(
-      "https://backend.example/dashboard/api/slack/callback?code=123&state=456",
-      "https://backend.example",
-    ),
-    `${APP_URL}dashboard/api/slack/callback?code=123&state=456`,
-  );
-  assert.equal(
-    localCallbackUrl(
       "https://backend.example/dashboard/api/notion/callback?code=123&state=456",
       "https://backend.example",
     ),

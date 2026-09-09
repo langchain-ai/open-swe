@@ -107,7 +107,7 @@ async def _connections(
             # Only listed login variables reach the child; the MCP SDK adds its
             # small safe default set (HOME, PATH, ...) on top.
             child_env: dict[str, str] = {}
-            for key in server.get("env_vars", []) + server.get("env_passthrough", []):
+            for key in server.get("env_passthrough", []):
                 if key not in env or key.startswith(_RESERVED_ENV_PREFIXES):
                     raise ValueError(f"MCP environment variable is not available: {key}")
                 child_env[key] = env[key]

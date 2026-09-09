@@ -394,9 +394,9 @@ def test_mcp_oauth_encrypted_browser_binding(monkeypatch) -> None:
     state = "mcp-browser-state"
     start = AsyncMock(return_value=f"https://mcp.example/authorize?state={state}")
     finish = AsyncMock(return_value={"id": "connection"})
-    monkeypatch.setattr(routes.mcp_connections, "start_oauth", start)
-    monkeypatch.setattr(routes.mcp_connections, "finish_oauth", finish)
-    monkeypatch.setattr(routes.mcp_connections, "oauth_handoff", AsyncMock(return_value=None))
+    monkeypatch.setattr(routes.mcp_oauth, "start_oauth", start)
+    monkeypatch.setattr(routes.mcp_oauth, "finish_oauth", finish)
+    monkeypatch.setattr(routes.mcp_oauth, "flow_handoff", AsyncMock(return_value=None))
     session = {"sub": "alice"}
     app = FastAPI()
     app.include_router(routes.router)

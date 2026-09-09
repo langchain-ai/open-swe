@@ -149,7 +149,7 @@ from agent.tool_loaders.corridor_mcp import (
 )
 from agent.tool_loaders.currents import load_currents_tools
 from agent.tool_loaders.langsmith import load_langsmith_tools
-from agent.tool_loaders.mcp import desktop_tool_groups, load_mcp_groups
+from agent.tool_loaders.mcp import load_mcp_groups
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
     approve_plan,
@@ -1224,7 +1224,7 @@ async def get_agent(
         **mcp_groups,
     }
     if local_run and not stop_summary_mode:
-        integration_tool_groups.update(desktop_tool_groups(local_tools))
+        integration_tool_groups["Device MCP"] = list(local_tools)
     if not stop_summary_mode and not local_run:
         browser_tools = load_browser_tools()
         if browser_tools:

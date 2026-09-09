@@ -46,20 +46,24 @@ async def resolve_url(value: str, *, allow_query: bool = False) -> httpx.URL:
     return url
 
 
+async def read_json(response: httpx.Response) -> dict[str, Any]:
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        body.extend(chunk)
+        if len(body) > 1_048_576:
+            raise MCPConnectionError(502, "OAuth response exceeds the size limit")
+    data = json.loads(body)
+    if not isinstance(data, dict):
+        raise ValueError
+    return data
+
+
 async def request_json(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
     try:
         async with asyncio.timeout(30), mcp_http_client(timeout=httpx.Timeout(20)) as client:
             async with client.stream(method, url, **kwargs) as response:
                 if not response.is_success:
                     raise MCPConnectionError(502, "OAuth endpoint rejected the request")
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    body.extend(chunk)
-                    if len(body) > 1_048_576:
-                        raise MCPConnectionError(502, "OAuth response exceeds the size limit")
-                data = json.loads(body)
-                if not isinstance(data, dict):
-                    raise ValueError
-                return data
+                return await read_json(response)
     except httpx.HTTPError, ValueError, TimeoutError:
         raise MCPConnectionError(502, "Invalid OAuth endpoint response") from None

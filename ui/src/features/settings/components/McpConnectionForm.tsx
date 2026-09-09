@@ -12,6 +12,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet"
+import { WORKSPACE_NAME_PATTERN } from "@/lib/mcp"
 import type {
   LocalMcpServer,
   McpAuthType,
@@ -39,9 +40,18 @@ export type McpSave =
 type HeaderRow = { name: string; value: string; revealed: boolean }
 type Transport = McpTransport | "stdio"
 
-export const WORKSPACE_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/
-export const WORKSPACE_NAME_MESSAGE =
+const WORKSPACE_NAME_MESSAGE =
   "Use a lowercase name such as incident. Dots and spaces are not allowed."
+
+function assertHttpUrl(value: string): void {
+  const endpoint = new URL(value)
+  if (
+    !["http:", "https:"].includes(endpoint.protocol) ||
+    endpoint.username ||
+    endpoint.password
+  )
+    throw new Error("Enter an HTTP(S) URL without embedded credentials.")
+}
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -63,8 +73,8 @@ function parseJson(text: string, fallback: string, message: string): unknown {
   }
 }
 
-function stringMap(text: string, label: string): Record<string, string> {
-  const message = `${label} must be a JSON object with string values.`
+function stringMap(text: string): Record<string, string> {
+  const message = "Environment must be a JSON object with string values."
   const value = parseJson(text, "{}", message)
   if (
     !value ||
@@ -263,13 +273,7 @@ export function McpConnectionForm({
     if (workspace && !WORKSPACE_NAME_PATTERN.test(trimmed))
       throw new Error(WORKSPACE_NAME_MESSAGE)
     if (transport === "stdio") throw new Error("Choose a remote transport.")
-    const endpoint = new URL(url)
-    if (
-      !["http:", "https:"].includes(endpoint.protocol) ||
-      endpoint.username ||
-      endpoint.password
-    )
-      throw new Error("Enter an HTTP(S) URL without embedded credentials.")
+    assertHttpUrl(url)
     const record: McpConnectionInput = {
       ...(cloud ? { id: cloud.id } : {}),
       name: trimmed,
@@ -350,15 +354,7 @@ export function McpConnectionForm({
       if (transport === "sse") throw new Error("Choose a supported transport.")
       if (transport === "stdio" && !command.trim())
         throw new Error("Enter a command.")
-      if (transport === "streamable_http") {
-        const endpoint = new URL(url)
-        if (
-          !["http:", "https:"].includes(endpoint.protocol) ||
-          endpoint.username ||
-          endpoint.password
-        )
-          throw new Error("Enter an HTTP(S) URL without embedded credentials.")
-      }
+      if (transport === "streamable_http") assertHttpUrl(url)
       await onSave({
         source,
         record: {
@@ -369,10 +365,9 @@ export function McpConnectionForm({
             ? {
                 command: command.trim(),
                 args: stringList(args),
-                env: stringMap(env, "Environment"),
+                env: stringMap(env),
                 env_passthrough: passthrough.split(/[\s,]+/).filter(Boolean),
                 cwd: cwd.trim() || undefined,
-                env_vars: local?.env_vars,
               }
             : {
                 url: url.trim(),

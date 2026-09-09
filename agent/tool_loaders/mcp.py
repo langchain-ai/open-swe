@@ -14,10 +14,11 @@ from langchain_mcp_adapters.interceptors import MCPToolCallRequest, MCPToolCallR
 from langchain_mcp_adapters.sessions import create_session
 from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 from mcp import ClientSession
-from mcp.types import PaginatedRequestParams, Tool
+from mcp.types import Tool
 
 from agent.dashboard.mcp_connections import (
     WORKSPACE_OWNER,
+    catalog,
     connection_config,
     get_record,
     list_records,
@@ -46,21 +47,8 @@ def prefixed_tool_name(server: str, tool: str, *, scope: str = "") -> str:
     return f"mcp_{clean_server}_{clean_tool}_{digest}"
 
 
-def desktop_tool_groups(tools: Sequence[BaseTool]) -> dict[str, Sequence[BaseTool]]:
-    """Desktop tools arrive already named by ``agent.desktop_mcp``."""
-    return {"Device MCP": list(tools)}
-
-
-def group_name(name: str, connection_id: str, taken: Iterable[str]) -> str:
-    """The connection's own name, suffixed only when another group already uses it."""
-    candidate = name
-    if candidate in taken:
-        candidate = f"{name} ({connection_id[:8]})"
-    return candidate
-
-
 def _version(record: dict[str, Any]) -> tuple[Any, ...]:
-    return tuple(record.get(key) for key in ("updated_at", "tested_at", "oauth_configured"))
+    return record.get("updated_at"), record.get("tested_at")
 
 
 def _auth_failure(error: BaseException) -> bool:
@@ -140,8 +128,8 @@ class _Connection:
         if session is None:
             async with create_session(await self._config()) as fresh:
                 await fresh.initialize()
-                return await _catalog(fresh)
-        return await _catalog(session)
+                return await catalog(fresh)
+        return await catalog(session)
 
     async def _invoke(self, definition: Tool, arguments: dict[str, Any]) -> Any:
         async def forward_arguments(
@@ -198,22 +186,6 @@ class _Connection:
                 raise RuntimeError("MCP connection unavailable; retry later or reconnect") from None
 
 
-async def _catalog(session: ClientSession) -> list[Tool]:
-    tools: list[Tool] = []
-    cursor = None
-    cursors: set[str] = set()
-    for _ in range(100):
-        result = await session.list_tools(params=PaginatedRequestParams(cursor=cursor))
-        tools.extend(result.tools)
-        cursor = result.nextCursor
-        if not cursor:
-            return tools
-        if cursor in cursors:
-            raise MCPConnectionError(502, "Invalid MCP catalog pagination")
-        cursors.add(cursor)
-    raise MCPConnectionError(502, "MCP catalog exceeds the page limit")
-
-
 async def load_mcp_groups(
     login: str | None,
     *,
@@ -246,7 +218,9 @@ async def load_mcp_groups(
             )
             continue
         connection = _Connection(owner, record, stack)
-        label = group_name(record["name"], record["id"], taken)
+        label = record["name"]
+        if label in taken:
+            label = f"{label} ({record['id'][:8]})"
         taken.add(label)
         groups[label] = IntegrationGroup(
             tool_names=[

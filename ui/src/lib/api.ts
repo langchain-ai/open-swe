@@ -634,25 +634,25 @@ export interface ReviewerEvalStatus {
 }
 
 export const api = {
-  mcpConnections: (scope: McpScope = "user") =>
+  mcpConnections: (scope: McpScope) =>
     request<McpConnectionsPayload>(`/mcp-connections?scope=${scope}`),
-  saveMcpConnection: (body: McpConnectionInput, scope: McpScope = "user") =>
+  saveMcpConnection: (body: McpConnectionInput, scope: McpScope) =>
     request<McpConnection>(
       body.id
         ? `/mcp-connections/${encodeURIComponent(body.id)}?scope=${scope}`
         : `/mcp-connections?scope=${scope}`,
       { method: body.id ? "PUT" : "POST", body: JSON.stringify(body) }
     ),
-  deleteMcpConnection: (id: string, scope: McpScope = "user") =>
+  deleteMcpConnection: (id: string, scope: McpScope) =>
     request<void>(`/mcp-connections/${encodeURIComponent(id)}?scope=${scope}`, {
       method: "DELETE",
     }),
-  testMcpConnection: (id: string, scope: McpScope = "user") =>
+  testMcpConnection: (id: string, scope: McpScope) =>
     request<McpConnection>(
       `/mcp-connections/${encodeURIComponent(id)}/test?scope=${scope}`,
       { method: "POST" }
     ),
-  discoverMcpConnection: (body: McpConnectionInput, scope: McpScope = "user") =>
+  discoverMcpConnection: (body: McpConnectionInput, scope: McpScope) =>
     request<{ tools: Array<McpToolInfo> }>(
       `/mcp-connections/discover?scope=${scope}`,
       { method: "POST", body: JSON.stringify(body) }

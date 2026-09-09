@@ -19,6 +19,7 @@ from urllib.parse import parse_qsl
 
 import httpx
 from langchain_mcp_adapters.sessions import Connection, create_session
+from mcp import ClientSession
 from mcp.types import PaginatedRequestParams, Tool
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
@@ -88,14 +89,6 @@ _PUBLIC_FIELDS = (
 )
 
 
-def scope_owner(scope: Scope, login: str) -> str:
-    return WORKSPACE_OWNER if scope == "workspace" else login
-
-
-def _scope(owner: str) -> Scope:
-    return "workspace" if owner == WORKSPACE_OWNER else "user"
-
-
 def _namespace(owner: str) -> list[str]:
     if not isinstance(owner, str) or not owner or len(owner) > 256:
         raise MCPConnectionError(401, "Authentication required")
@@ -156,12 +149,10 @@ async def put_record(owner: str, record: dict[str, Any], *, expected_version: st
 
 
 def public_record(record: dict[str, Any]) -> dict[str, Any]:
-    tools = record.get("tools") or [{"name": name} for name in record.get("tool_names", [])]
+    tools = record.get("tools", [])
     return {
         **{key: record.get(key) for key in _PUBLIC_FIELDS},
-        "scope": _scope(record["owner"]),
-        "transport": record.get("transport", "streamable_http"),
-        "allowed_tools": record.get("allowed_tools"),
+        "scope": "workspace" if record["owner"] == WORKSPACE_OWNER else "user",
         "tools": [
             {"name": tool["name"], "description": tool.get("description", "")} for tool in tools
         ],
@@ -193,10 +184,6 @@ async def list_records(owner: str) -> list[dict[str, Any]]:
 
 async def list_connections(owner: str) -> list[dict[str, Any]]:
     return [public_record(record) for record in await list_records(owner)]
-
-
-async def get_connection(owner: str, connection_id: str) -> dict[str, Any]:
-    return public_record(await get_record(owner, connection_id))
 
 
 async def _migrate_legacy_workspace() -> None:
@@ -340,7 +327,6 @@ _SECURITY_FIELDS = (
 
 async def _prepare(owner: str, data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Validate ``data`` against the saved record; return (existing, merged)."""
-    _namespace(owner)
     if not isinstance(data, dict) or data.keys() - _ALLOWED_INPUT:
         raise MCPConnectionError(400, "Invalid MCP connection fields")
     existing = await get_record(owner, _connection_id(data["id"])) if "id" in data else {}
@@ -497,26 +483,31 @@ async def list_tools(owner: str, record: dict[str, Any]) -> list[Tool]:
     async with asyncio.timeout(_DISCOVERY_TIMEOUT):
         async with create_session(connection) as session:
             await session.initialize()
-            tools: list[Tool] = []
-            names: set[str] = set()
-            cursor = None
-            cursors: set[str] = set()
-            for _ in range(100):
-                result = await session.list_tools(params=PaginatedRequestParams(cursor=cursor))
-                for tool in result.tools:
-                    if tool.name in names:
-                        raise MCPConnectionError(502, "MCP server returned duplicate tool names")
-                    names.add(tool.name)
-                    tools.append(tool)
-                if len(tools) > 10000:
-                    raise MCPConnectionError(502, "MCP catalog exceeds the size limit")
-                cursor = result.nextCursor
-                if not cursor:
-                    return tools
-                if cursor in cursors:
-                    raise MCPConnectionError(502, "Invalid MCP catalog pagination")
-                cursors.add(cursor)
-            raise MCPConnectionError(502, "MCP catalog exceeds the page limit")
+            return await catalog(session)
+
+
+async def catalog(session: ClientSession) -> list[Tool]:
+    """Every tool the server advertises, following pagination cursors."""
+    tools: list[Tool] = []
+    names: set[str] = set()
+    cursor = None
+    cursors: set[str] = set()
+    for _ in range(100):
+        result = await session.list_tools(params=PaginatedRequestParams(cursor=cursor))
+        for tool in result.tools:
+            if tool.name in names:
+                raise MCPConnectionError(502, "MCP server returned duplicate tool names")
+            names.add(tool.name)
+            tools.append(tool)
+        if len(tools) > 10000:
+            raise MCPConnectionError(502, "MCP catalog exceeds the size limit")
+        cursor = result.nextCursor
+        if not cursor:
+            return tools
+        if cursor in cursors:
+            raise MCPConnectionError(502, "Invalid MCP catalog pagination")
+        cursors.add(cursor)
+    raise MCPConnectionError(502, "MCP catalog exceeds the page limit")
 
 
 def _discovery_error(error: BaseException) -> MCPConnectionError:
@@ -580,42 +571,20 @@ async def update_record[T](
     owner: str,
     id: str,
     change: Callable[[dict[str, Any]], Coroutine[Any, Any, T]],
-    *,
-    attempts: int = 3,
 ) -> tuple[dict[str, Any], T]:
     """Read, apply ``change`` and write, retrying when another writer got in between."""
-    for attempt in range(attempts):
+    for attempt in range(3):
         record = await get_record(owner, id)
         result = await change(record)
         try:
             await put_record(owner, record, expected_version=record["version"])
         except MCPConnectionError as exc:
-            if exc.status_code == 409 and attempt < attempts - 1:
+            if exc.status_code == 409 and attempt < 2:
                 await asyncio.sleep(0.05 * (attempt + 1))
                 continue
             raise
         return record, result
     raise MCPConnectionError(409, "MCP connection changed; retry")
-
-
-async def start_oauth(
-    login: str, id: str, redirect_uri: str, *, handoff: tuple[str, int] | None = None
-) -> str:
-    from agent.dashboard.mcp_oauth import start_oauth as start
-
-    return await start(login, id, redirect_uri, handoff=handoff)
-
-
-async def oauth_handoff(state: str) -> tuple[str, int] | None:
-    from agent.dashboard.mcp_oauth import flow_handoff
-
-    return await flow_handoff(state)
-
-
-async def finish_oauth(state: str, code: str, *, owner: str | None = None) -> dict[str, Any]:
-    from agent.dashboard.mcp_oauth import finish_oauth as finish
-
-    return await finish(state, code, owner=owner)
 
 
 def _session_token(owner: str, record: dict[str, Any], upstream_id: str) -> str:

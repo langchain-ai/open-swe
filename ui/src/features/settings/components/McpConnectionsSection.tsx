@@ -29,13 +29,11 @@ type ServerRow =
   | { source: "cloud"; record: McpConnection }
   | { source: "local"; record: LocalMcpServer }
 
-export interface McpNotice {
-  connected?: string
-  error?: string
-}
-
-function toolCount(record: McpConnection): number {
-  return record.allowed_tools?.length ?? record.tool_names.length
+function requireBridge() {
+  const bridge = mcpDesktopBridge()
+  if (!bridge)
+    throw new Error("Local MCP support is unavailable in this desktop version.")
+  return bridge
 }
 
 export function McpConnectionsSection({
@@ -46,7 +44,7 @@ export function McpConnectionsSection({
 }: {
   login: string
   scope?: McpScope
-  notice?: McpNotice
+  notice?: { connected?: string; error?: string }
   onDismissNotice?: () => void
 }) {
   const qc = useQueryClient()
@@ -65,14 +63,7 @@ export function McpConnectionsSection({
   })
   const local = useQuery({
     queryKey: localKey,
-    queryFn: () => {
-      const bridge = mcpDesktopBridge()
-      if (!bridge)
-        throw new Error(
-          "Local MCP support is unavailable in this desktop version."
-        )
-      return bridge.getMcpServers()
-    },
+    queryFn: () => requireBridge().getMcpServers(),
     enabled: localAvailable,
   })
   const [search, setSearch] = useState("")
@@ -90,11 +81,7 @@ export function McpConnectionsSection({
     mutationFn: async (value: McpSave) => {
       if (value.source === "cloud")
         return api.saveMcpConnection(value.record, scope)
-      const bridge = mcpDesktopBridge()
-      if (!bridge)
-        throw new Error(
-          "Local MCP support is unavailable in this desktop version."
-        )
+      const bridge = requireBridge()
       if (
         !editor?.record &&
         local.data?.some((server) => server.name === value.record.name)
@@ -132,11 +119,7 @@ export function McpConnectionsSection({
           scope
         )
       }
-      const bridge = mcpDesktopBridge()
-      if (!bridge)
-        throw new Error(
-          "Local MCP support is unavailable in this desktop version."
-        )
+      const bridge = requireBridge()
       if (kind === "delete") return bridge.deleteMcpServer(row.record.name)
       return bridge.saveMcpServer({
         ...row.record,
@@ -146,6 +129,11 @@ export function McpConnectionsSection({
     onSuccess: refresh,
     onError: (cause: Error) => setError(cause.message),
   })
+  const running = (kind: string, id: string) =>
+    action.isPending &&
+    action.variables?.kind === kind &&
+    action.variables.row.source === "cloud" &&
+    action.variables.row.record.id === id
   const rows: Array<ServerRow> = [
     ...(localAvailable ? (local.data ?? []) : []).map((record): ServerRow => ({
       source: "local",
@@ -331,7 +319,7 @@ export function McpConnectionsSection({
                     {!record.enabled
                       ? "Disabled"
                       : status === "connected" && source === "cloud"
-                        ? `Connected · ${toolCount(row.record)} tools`
+                        ? `Connected · ${row.record.allowed_tools?.length ?? row.record.tool_names.length} tools`
                         : status === "auth_required"
                           ? "Authorization required"
                           : status === "error"
@@ -356,10 +344,7 @@ export function McpConnectionsSection({
                             action.mutate({ row, kind: "authorize" })
                           }
                         >
-                          {action.isPending &&
-                          action.variables?.kind === "authorize" &&
-                          action.variables.row.source === "cloud" &&
-                          action.variables.row.record.id === row.record.id
+                          {running("authorize", row.record.id)
                             ? "Authorizing…"
                             : row.record.oauth_configured
                               ? "Reauthorize"
@@ -372,12 +357,7 @@ export function McpConnectionsSection({
                         disabled={busy || !record.enabled}
                         onClick={() => action.mutate({ row, kind: "test" })}
                       >
-                        {action.isPending &&
-                        action.variables?.kind === "test" &&
-                        action.variables.row.source === "cloud" &&
-                        action.variables.row.record.id === row.record.id
-                          ? "Testing…"
-                          : "Test"}
+                        {running("test", row.record.id) ? "Testing…" : "Test"}
                       </Button>
                     </>
                   )}

@@ -1,6 +1,7 @@
 export type McpAuthType = "none" | "bearer" | "headers" | "oauth"
 export type McpScope = "user" | "workspace"
 export type McpTransport = "streamable_http" | "sse"
+export const WORKSPACE_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/
 export type McpConnectionStatus =
   | "untested"
   | "connected"
@@ -20,7 +21,6 @@ export interface McpPreset {
 
 export interface McpConnection extends McpPreset {
   id: string
-  scope: McpScope
   transport: McpTransport
   enabled: boolean
   tool_names: Array<string>
@@ -28,20 +28,15 @@ export interface McpConnection extends McpPreset {
   /** `null` allows every discovered tool. Workspace connections only run listed tools. */
   allowed_tools: Array<string> | null
   status: McpConnectionStatus
-  revision: string
   headers_configured: boolean
   header_names: Array<string>
   bearer_token_configured: boolean
   oauth_configured: boolean
-  oauth_client_configured: boolean
   oauth_client_secret_configured: boolean
   oauth_client_id?: string
   oauth_scope?: string
   oauth_authorization_server?: string
   oauth_token_endpoint_auth_method?: McpConnectionInput["oauth_token_endpoint_auth_method"]
-  tested_at: string | null
-  created_at: string
-  updated_at: string
 }
 
 export interface McpConnectionInput {
@@ -80,7 +75,6 @@ export interface LocalMcpServer {
   args?: Array<string>
   env?: Record<string, string>
   env_passthrough?: Array<string>
-  env_vars?: Array<string>
   cwd?: string
   auth_type?: "none" | "headers" | "oauth"
   oauth_client_id?: string
@@ -98,17 +92,5 @@ export interface McpDesktopBridge {
 }
 
 export function mcpDesktopBridge(): McpDesktopBridge | null {
-  if (typeof window === "undefined") return null
-  const bridge = window.openSweDesktop
-  if (
-    !bridge?.getMcpServers ||
-    !bridge.saveMcpServer ||
-    !bridge.deleteMcpServer
-  )
-    return null
-  return {
-    getMcpServers: bridge.getMcpServers,
-    saveMcpServer: bridge.saveMcpServer,
-    deleteMcpServer: bridge.deleteMcpServer,
-  }
+  return typeof window === "undefined" ? null : (window.openSweDesktop ?? null)
 }
