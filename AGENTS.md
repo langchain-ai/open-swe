@@ -41,7 +41,6 @@ The main agent and middleware stack are assembled in `agent/server.py`. Middlewa
 ## Conventions
 
 - Read relevant code and tests before editing. Fix root causes and keep diffs focused.
-- Do not include test-running or validation sections in pull request descriptions.
 - Use async-only implementations. Add a sync method only when an interface requires it, and then raise `NotImplementedError`.
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - Keep comments minimal and only explain non-obvious reasons.
@@ -54,6 +53,10 @@ The main agent and middleware stack are assembled in `agent/server.py`. Middlewa
 ## Testing
 
 Add tests only when they meaningfully protect observable behavior. Do not add change-detector tests that merely restate constants, mappings, prompt text, source structure, or incidental interactions such as internal call order. Refactors that preserve behavior should not require mechanical test updates; rewrite or remove tests that do. Cover meaningful edge cases and keep tests deterministic.
+
+## Pull Requests
+
+Do not include test-running or validation sections in pull request descriptions.
 
 <!-- OPENWIKI:START -->
 
