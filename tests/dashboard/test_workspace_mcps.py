@@ -79,6 +79,107 @@ async def test_url_change_requires_explicit_header_replacement(fake_store):
     assert saved["header_names"] == []
 
 
+async def test_oauth_secret_is_encrypted_preserved_and_cleared(fake_store):
+    oauth = {
+        "token_url": "https://api.linear.app/oauth/token",
+        "client_id": "test-app",
+        "client_secret": "test-client-secret",
+        "scope": "read,write",
+    }
+    saved = await mcps.save_workspace_mcp(
+        "linear",
+        mcps.WorkspaceMCPUpdate(name="linear", url="https://mcp.linear.app/mcp", oauth=oauth),
+    )
+    assert saved["oauth"]["client_id"] == "test-app"
+    assert "client_secret" not in saved["oauth"]
+    assert "test-client-secret" not in json.dumps(saved)
+    raw = fake_store.values(["workspace_mcps"])["linear"]
+    assert "test-client-secret" not in json.dumps(raw)
+    assert decrypt_token(raw["encrypted_client_secret"]) == "test-client-secret"
+    for fields in ({}, {"oauth": saved["oauth"]}):
+        await mcps.save_workspace_mcp(
+            "linear",
+            mcps.WorkspaceMCPUpdate(name="linear", url=saved["url"], enabled=False, **fields),
+        )
+        assert (
+            fake_store.values(["workspace_mcps"])["linear"]["encrypted_client_secret"]
+            == raw["encrypted_client_secret"]
+        )
+    await mcps.save_workspace_mcp(
+        "linear", mcps.WorkspaceMCPUpdate(name="linear", url=saved["url"], oauth=None)
+    )
+    assert fake_store.values(["workspace_mcps"])["linear"]["encrypted_client_secret"] == ""
+
+
+async def test_new_oauth_connection_requires_secret(fake_store):
+    with pytest.raises(ValueError, match="client secret"):
+        await mcps.save_workspace_mcp(
+            "linear",
+            mcps.WorkspaceMCPUpdate(
+                name="linear",
+                url="https://mcp.linear.app/mcp",
+                oauth={"token_url": "https://api.linear.app/oauth/token", "client_id": "app"},
+            ),
+        )
+    assert await mcps.list_workspace_mcps() == []
+
+
+@pytest.mark.parametrize("saved_header", [False, True])
+async def test_oauth_rejects_explicit_or_saved_authorization_header(fake_store, saved_header):
+    values = {"name": "linear", "url": "https://mcp.linear.app/mcp"}
+    headers = {"authorization": "Bearer test-token"}
+    if saved_header:
+        await mcps.save_workspace_mcp("linear", mcps.WorkspaceMCPUpdate(**values, headers=headers))
+    with pytest.raises(ValueError, match="Remove the Authorization header"):
+        await mcps.save_workspace_mcp(
+            "linear",
+            mcps.WorkspaceMCPUpdate(
+                **values,
+                headers=None if saved_header else headers,
+                oauth={
+                    "token_url": "https://api.linear.app/oauth/token",
+                    "client_id": "app",
+                    "client_secret": "test-client-secret",
+                },
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"url": "https://other.example/mcp"},
+        {"token_url": "https://other.example/token"},
+        {"client_id": "other-app"},
+    ],
+)
+async def test_oauth_secret_cannot_be_reused_for_changed_destinations(fake_store, change):
+    saved = await mcps.save_workspace_mcp(
+        "linear",
+        mcps.WorkspaceMCPUpdate(
+            name="linear",
+            url="https://mcp.linear.app/mcp",
+            oauth={
+                "token_url": "https://api.linear.app/oauth/token",
+                "client_id": "test-app",
+                "client_secret": "test-client-secret",
+            },
+        ),
+    )
+    with pytest.raises(ValueError, match="client secret"):
+        await mcps.save_workspace_mcp(
+            "linear",
+            mcps.WorkspaceMCPUpdate(
+                name="linear",
+                url=change.get("url", saved["url"]),
+                oauth={
+                    **saved["oauth"],
+                    **{key: value for key, value in change.items() if key != "url"},
+                },
+            ),
+        )
+
+
 @pytest.mark.parametrize(
     "fields",
     [
@@ -90,6 +191,19 @@ async def test_url_change_requires_explicit_header_replacement(fake_store):
         {"headers": {"Authorization": "a", "authorization": "b"}},
         {"name": "invalid name"},
         {"transport": "stdio"},
+        {
+            "oauth": {
+                "token_url": "http://example.com/token",
+                "client_id": "app",
+                "client_secret": "secret",
+            }
+        },
+        {
+            "oauth": {
+                "token_url": "https://example.com/token?client_secret=secret",
+                "client_id": "app",
+            }
+        },
         {"allowed_tools": [""]},
         {"allowed_tools": ["x" * 129]},
     ],
@@ -308,6 +422,16 @@ async def test_ordinary_query_parameters_roundtrip_unchanged(fake_store, monkeyp
         ({"url": "http://example.com/mcp"}, "Server URL"),
         ({"transport": "stdio"}, "Transport"),
         ({"headers": {"Authorization": {"test-secret": "test-secret"}}}, "Headers"),
+        (
+            {
+                "oauth": {
+                    "token_url": "http://example.com/token",
+                    "client_id": "app",
+                    "client_secret": "test-secret",
+                }
+            },
+            "OAuth",
+        ),
     ],
 )
 async def test_validation_identifies_fields_without_echoing_input(monkeypatch, fields, message):

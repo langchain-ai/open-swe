@@ -28,6 +28,7 @@ from agent.dashboard.workspace_mcps import (
     list_workspace_mcp_records,
     prepare_workspace_mcp,
 )
+from agent.tool_loaders.mcp_oauth import MCPOAuthError, workspace_mcp_auth
 from agent.tool_loaders.mcp_transport import mcp_http_client
 from agent.utils import ttl_cache
 
@@ -57,6 +58,8 @@ def _connection(record: WorkspaceMCP) -> Connection:
     connection["timeout"] = _TIMEOUT_SECONDS
     connection["sse_read_timeout"] = _TIMEOUT_SECONDS
     connection["httpx_client_factory"] = partial(mcp_http_client, record.url)
+    if auth := workspace_mcp_auth(record):
+        connection["auth"] = auth
     return connection
 
 
@@ -83,6 +86,8 @@ def _discovery_error(error: Exception) -> str:
         current = pending.pop()
         if isinstance(current, BaseExceptionGroup):
             pending.extend(reversed(current.exceptions))
+        elif isinstance(current, MCPOAuthError):
+            return str(current)
         elif isinstance(current, httpx.HTTPStatusError):
             status = current.response.status_code
             hint = {

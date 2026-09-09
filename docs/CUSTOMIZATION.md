@@ -239,12 +239,16 @@ and remote coding-agent threads. The existing `CONFIGURED_ADMINS` and
 
 1. Choose **Add MCP server** and enter a unique lowercase connection name, an
    HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
-2. Add authentication headers. Values are encrypted using `TOKEN_ENCRYPTION_KEY`
+2. Choose **Headers / API key** or **OAuth client credentials** for authentication.
+   For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY`
    in the LangGraph Store; normal dashboard responses only return header names.
    Admins can use the eye icon (**Show saved headers**) to reveal values on demand,
    then the crossed-out eye to clear them from the editor. Entered or imported
    values also have an eye icon to show or hide them. Use headers
    for credentials, rather than URL query parameters.
+   For OAuth, enter the token URL, client ID, client secret, scopes, and the
+   provider's client authentication method. The secret is encrypted in the Store
+   and is never returned to the browser. Leave it blank when editing to keep it.
 3. Choose **Save and discover tools**. For new connections, all discovered tools
    are selected by default. Review the selection, then choose **Save connection**
    to enable those tools. Rediscovering an existing connection preserves its
@@ -277,6 +281,43 @@ It opens each connection for review without saving automatically. Existing
 connections keep their enabled state and selected tools. Local `command` servers
 and environment-variable expansion are not supported.
 
+For a Linear OAuth application, enable **Client credentials tokens** in the
+application's settings, then import this configuration. The `oauth` object is
+an Open SWE extension to the remote MCP JSON format:
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "oauth": {
+        "grant_type": "client_credentials",
+        "token_url": "https://api.linear.app/oauth/token",
+        "client_id": "YOUR_CLIENT_ID",
+        "client_secret": "YOUR_CLIENT_SECRET",
+        "scope": "read,write",
+        "token_endpoint_auth_method": "client_secret_post"
+      }
+    }
+  }
+}
+```
+
+Client credentials require no redirect URI. Open SWE requests a bearer token,
+caches it in memory until shortly before expiry, and obtains another when needed.
+A rejected token is renewed once on HTTP 401. Client credentials go only to the
+configured token URL; bearer tokens go to the MCP server. Both destinations use
+the same public HTTPS address validation and redirect restrictions. An explicit
+`Authorization` header cannot be combined with OAuth.
+
+Other providers can use the same `oauth` settings with their own token URL and
+scope format; `client_secret_basic` sends credentials using HTTP Basic instead
+of the request body. Changing the token URL, client ID, or MCP URL requires
+re-entering the client secret. Sending `oauth: null` removes OAuth credentials;
+omitting `oauth` from a partial API update preserves them. Linear documents this
+flow under [client credentials tokens](https://linear.app/developers/oauth-2-0-authentication#client-credentials-tokens).
+
 Examples for the generic connection form:
 
 | Connection | URL | Authentication headers |
@@ -297,12 +338,12 @@ Allowed tools appear in the agent's **Workspace MCPs** tool group with connectio
 prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming
 collisions. Catalogs are cached for ten minutes
 per settings revision. Changing a connection causes the next run to discover its
-catalog again. Every tool call reloads the current headers and checks whether the
+catalog again. Every tool call reloads the current authentication settings and checks whether the
 connection and tool are still enabled. Disabling or deleting a connection blocks
 subsequent calls from already-loaded tools; it does not cancel an in-flight call.
 
 Editing keeps saved headers unless **Replace headers** is selected. Replacing
-with an empty header list clears authentication. Changing the URL requires
+with an empty header list clears those headers. Changing the URL requires
 explicitly replacing or clearing saved headers. Requests must remain on the
 configured public HTTPS origin; redirects, private addresses, local processes,
 and interactive OAuth login are not supported by this connection manager.
