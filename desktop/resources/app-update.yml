@@ -1,0 +1,4 @@
+provider: github
+owner: langchain-ai
+repo: open-swe
+updaterCacheDirName: open-swe-desktop-updater

@@ -42,6 +42,10 @@
     ],
     "extraResources": [
       {
+        "from": "resources/app-update.yml",
+        "to": "app-update.yml"
+      },
+      {
         "from": "resources/icon.png",
         "to": "icon.png"
       },
