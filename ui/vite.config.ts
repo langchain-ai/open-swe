@@ -198,26 +198,35 @@ const config = defineConfig({
     devtools(),
     nitro({
       routeRules: devRouteRules,
+      // A sandbox service is reached through this server so its LangSmith token
+      // rides as a header on our own request, and hot reload through that proxy
+      // needs the WebSocket upgrade.
+      features: { websocket: true },
       // Registered explicitly: nitro's convention scan does not reach this
-      // directory under the vite plugin. Deployed builds only — dev proxies the
-      // same prefixes through devRouteRules, which has a localhost default the
-      // handler deliberately refuses to have. Only the two prefixes a deployed
-      // dashboard fronts, since proxying `/static` would shadow nitro's assets.
-      handlers: IS_PRODUCTION
-        ? [
-            "/dashboard/api",
-            "/webhooks",
-            // A built server fronting the mock harness fronts its fake-SaaS and
-            // control routes too, so the E2E browser has the one origin a
-            // deployment gives it and reaches the backend the way it really
-            // does — through the handler below. Serving the app from the
-            // harness instead let the suite pass while this proxy was broken.
-            ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
-          ].map((prefix) => ({
-            route: `${prefix}/**`,
-            handler: "./server/backend-proxy.ts",
-          }))
-        : [],
+      // directory under the vite plugin. `/sandbox` is this server's own route
+      // in both dev and production; the backend prefixes below are proxied by a
+      // deployed build only — dev proxies them through devRouteRules, which has
+      // a localhost default the handler deliberately refuses to have. Only the
+      // two prefixes a deployed dashboard fronts, since proxying `/static`
+      // would shadow nitro's assets.
+      handlers: [
+        { route: "/sandbox/**", handler: "./server/sandbox-proxy.ts" },
+        ...(IS_PRODUCTION
+          ? [
+              "/dashboard/api",
+              "/webhooks",
+              // A built server fronting the mock harness fronts its fake-SaaS and
+              // control routes too, so the E2E browser has the one origin a
+              // deployment gives it and reaches the backend the way it really
+              // does — through the handler below. Serving the app from the
+              // harness instead let the suite pass while this proxy was broken.
+              ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
+            ].map((prefix) => ({
+              route: `${prefix}/**`,
+              handler: "./server/backend-proxy.ts",
+            }))
+          : []),
+      ],
       // Nitro gives every node_modules package its own server chunk. The
       // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and
       // splitting that cycle puts the CommonJS interop helper in the SDK's chunk

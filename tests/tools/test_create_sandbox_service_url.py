@@ -32,7 +32,9 @@ class _Backend:
     id = "sandbox-1"
 
 
-def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, _AsyncClient]:
+def _configure(
+    monkeypatch: pytest.MonkeyPatch, *, static_ui: bool = False
+) -> tuple[_Backend, _AsyncClient]:
     monkeypatch.setattr(
         "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
@@ -45,22 +47,40 @@ def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, _AsyncClient]
     monkeypatch.setattr(service_tool, "get_sandbox_backend", get_backend)
     monkeypatch.setattr(service_tool, "unwrap_sandbox_backend", lambda value: value)
     monkeypatch.setattr(service_tool, "get_async_sandbox_client", lambda: client)
+    monkeypatch.setattr(service_tool, "serves_static_ui", lambda: static_ui)
+    monkeypatch.setattr(service_tool, "dashboard_base_url", lambda: "https://dash.example")
     return backend, client
 
 
-async def test_create_sandbox_service_url(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_create_sandbox_service_url_proxies_through_the_dashboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, client = _configure(monkeypatch)
 
-    result = await service_tool.create_sandbox_service_url(3000, expires_in_seconds=3600)
+    result = await service_tool.create_sandbox_service_url(3000)
+
+    assert result == {
+        "url": "https://dash.example/sandbox/thread-1/3000/",
+        "port": 3000,
+        "base_path": "/sandbox/thread-1/3000/",
+    }
+    # The dashboard mints the credential per request; the agent never holds one.
+    assert client.calls == []
+
+
+async def test_create_sandbox_service_url_falls_back_without_a_dashboard_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, client = _configure(monkeypatch, static_ui=True)
+
+    result = await service_tool.create_sandbox_service_url(3000)
 
     assert result == {
         "url": "https://service.example/auth?token=secret",
         "port": 3000,
         "expires_at": "2026-08-27T15:00:00Z",
     }
-    assert "token" not in result
-    assert "service_url" not in result
-    assert client.calls == [("sandbox-1", 3000, {"expires_in_seconds": 3600})]
+    assert client.calls == [("sandbox-1", 3000, {"expires_in_seconds": 86400})]
     assert client.closed is True
 
 
@@ -77,25 +97,10 @@ async def test_create_sandbox_service_url_rejects_invalid_port(
     assert client.calls == []
 
 
-@pytest.mark.parametrize("expires_in_seconds", [True, 0, 86401, 3.5, "600"])
-async def test_create_sandbox_service_url_rejects_invalid_expiry(
-    monkeypatch: pytest.MonkeyPatch,
-    expires_in_seconds: Any,
-) -> None:
-    _, client = _configure(monkeypatch)
-
-    with pytest.raises(
-        ValueError, match="expires_in_seconds must be an integer between 1 and 86400"
-    ):
-        await service_tool.create_sandbox_service_url(3000, expires_in_seconds)
-
-    assert client.calls == []
-
-
 async def test_create_sandbox_service_url_detects_sandbox_change(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    backend, _ = _configure(monkeypatch)
+    backend, _ = _configure(monkeypatch, static_ui=True)
     current = [backend, _Backend()]
     monkeypatch.setattr(service_tool, "unwrap_sandbox_backend", lambda _value: current.pop(0))
 

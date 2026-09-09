@@ -72,6 +72,15 @@ def dashboard_static_dir() -> Path | None:
     return None
 
 
+def serves_static_ui() -> bool:
+    """True when this backend answers UI requests from a build rather than a dashboard app.
+
+    Nothing in that path can proxy a request, so features that need the dashboard
+    app in front of the backend are unavailable.
+    """
+    return not ENV.DASHBOARD_DEV_SERVER_URL.optional() and dashboard_static_dir() is not None
+
+
 def is_single_origin() -> bool:
     """True when the dashboard and the API share this backend's origin: a bundled
     build, or the Vite dev server the backend fronts. ``LANGGRAPH_URL`` is then

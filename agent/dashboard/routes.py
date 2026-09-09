@@ -274,6 +274,9 @@ router = APIRouter(
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
+# Long enough that a browsing session mints once, short enough that a revoked
+# dashboard session loses access soon after.
+_SERVICE_TOKEN_TTL_SECONDS = 3600
 # Module-level so a local harness can point the browser leg at a fake consent
 # page and still run the real login/callback code.
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
@@ -2121,6 +2124,47 @@ async def api_thread_terminal_connection(
         "ticket": issue_terminal_ticket(
             login=session["sub"], email=session.get("email"), thread_id=thread_id
         ),
+    }
+
+
+@router.get("/threads/{thread_id}/service-url")
+async def api_thread_service_url(
+    thread_id: str,
+    port: int,
+    response: Response,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, str]:
+    """Mint a sandbox service credential for the dashboard's service proxy.
+
+    The token, not the ``browser_url`` that carries it, so it stays server-side:
+    the dashboard app attaches it as a header and the browser never holds it.
+    """
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
+        raise HTTPException(400, "sandbox services require a LangSmith sandbox")
+    if isinstance(port, bool) or not 1 <= port <= 65535:
+        raise HTTPException(422, "port must be between 1 and 65535")
+    sandbox_id, _ = await get_dashboard_terminal_sandbox(
+        thread_id, session["sub"], email=session.get("email")
+    )
+    from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+
+    try:
+        async with get_async_sandbox_client() as client:
+            service = await client.service(
+                sandbox_id, port, expires_in_seconds=_SERVICE_TOKEN_TTL_SECONDS
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Could not mint a sandbox service token",
+            extra={"thread_id": thread_id, "sandbox": sandbox_id, "service_port": port},
+            exc_info=True,
+        )
+        raise HTTPException(502, "could not reach the thread sandbox") from exc
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "service_url": service.service_url,
+        "token": service.token,
+        "expires_at": service.expires_at,
     }
 
 
