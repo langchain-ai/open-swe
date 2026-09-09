@@ -302,7 +302,14 @@ export function ReviewQueue() {
                     <span>
                       {item.repo_full_name}#{item.number}
                     </span>
-                    {item.author && <span>by {item.author}</span>}
+                    {item.author && (
+                      <span>
+                        by{" "}
+                        <span className="font-semibold text-foreground">
+                          {item.author}
+                        </span>
+                      </span>
+                    )}
                     <span className="tabular-nums">
                       <span className="text-emerald-600 dark:text-emerald-400">
                         +{item.additions}

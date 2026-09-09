@@ -41,15 +41,15 @@ function statusBadge(review: ReviewSummary) {
 type ReviewsTab = "mine" | "all" | "queue"
 
 const TABS: Array<{ value: ReviewsTab; label: string; testId?: string }> = [
+  { value: "queue", label: "Ready for Review", testId: "review-queue-tab" },
   { value: "mine", label: "My PRs" },
   { value: "all", label: "All" },
-  { value: "queue", label: "Ready for me", testId: "review-queue-tab" },
 ]
 
 function ReviewsPage() {
   const session = useSession()
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<ReviewsTab>("mine")
+  const [tab, setTab] = useState<ReviewsTab>("queue")
   const [page, setPage] = useState(0)
   const mine = tab === "mine"
   const reviews = useQuery({
