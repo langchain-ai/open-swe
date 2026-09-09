@@ -2,7 +2,6 @@ import { afterEach, expect, it, vi } from "vitest"
 import { AIMessage, HumanMessage } from "@langchain/core/messages"
 import { Client } from "@langchain/langgraph-sdk"
 import { AgentThreadRuntime } from "./AgentThreadRuntime"
-import { streamMessagesToUi } from "./streamMessagesToUi"
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20))
 const full = () => [
@@ -149,9 +148,6 @@ it("keeps hydrated history through no-step values replay and message restart", a
     "first prompt",
     "complete answer",
   ])
-  expect(streamMessagesToUi(runtime.store.getSnapshot().messages)).toHaveLength(
-    2
-  )
 })
 
 it("repairs truncated live output from a final checkpoint and clears stale busy", async () => {

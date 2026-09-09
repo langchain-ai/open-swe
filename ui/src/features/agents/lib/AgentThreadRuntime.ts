@@ -142,8 +142,8 @@ export class AgentThreadRuntime {
       .catch(() => undefined)
       .finally(() => this.schedule())
     if (typeof window !== "undefined") {
-      window.addEventListener("online", this.wake)
-      window.addEventListener("focus", this.wake)
+      window.addEventListener("online", this.refresh)
+      window.addEventListener("focus", this.refresh)
     }
   }
 
@@ -160,10 +160,6 @@ export class AgentThreadRuntime {
       connection: this.connection,
       queuedMessages: this.queuedMessages,
     })
-  }
-
-  private wake = () => {
-    void this.refresh()
   }
 
   private schedule(): void {
@@ -291,7 +287,7 @@ export class AgentThreadRuntime {
       () => {
         // A disconnect before acceptance must not silently discard the draft.
         if (this.accepted === pending) {
-          pending?.reject(
+          pending.reject(
             new Error("The message was not accepted. Please retry.")
           )
           this.transcript.reject(ids)
@@ -300,9 +296,9 @@ export class AgentThreadRuntime {
         void this.refresh()
       },
       (error: unknown) => {
-        if (!pending?.didAccept) this.transcript.reject(ids)
+        if (!pending.didAccept) this.transcript.reject(ids)
         if (this.accepted === pending) {
-          pending?.reject(error)
+          pending.reject(error)
           this.accepted = undefined
         }
         if (this.generation <= generation + 1) {
@@ -392,8 +388,8 @@ export class AgentThreadRuntime {
     this.unsubscribe()
     this.release()
     if (typeof window !== "undefined") {
-      window.removeEventListener("online", this.wake)
-      window.removeEventListener("focus", this.wake)
+      window.removeEventListener("online", this.refresh)
+      window.removeEventListener("focus", this.refresh)
     }
   }
 }

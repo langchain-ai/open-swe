@@ -7,7 +7,6 @@ import {
 export class ThreadTranscript {
   private saved: BaseMessage[] = []
   private live = new Map<string, BaseMessage>()
-  private savedIds = new Set<string>()
   private knownIds = new Set<string>()
   private signatures = new Map<string, { json: string; message: BaseMessage }>()
   private step = -Infinity
@@ -27,14 +26,14 @@ export class ThreadTranscript {
       this.signatures.set(message.id, { json, message })
       return message
     })
-    this.savedIds = new Set(
+    const savedIds = new Set(
       this.saved.flatMap((message) => (message.id ? [message.id] : []))
     )
-    for (const id of this.savedIds) this.knownIds.add(id)
+    for (const id of savedIds) this.knownIds.add(id)
     for (const id of this.signatures.keys())
-      if (!this.savedIds.has(id)) this.signatures.delete(id)
+      if (!savedIds.has(id)) this.signatures.delete(id)
     if (settled) this.live.clear()
-    else for (const id of this.savedIds) this.live.delete(id)
+    else for (const id of savedIds) this.live.delete(id)
     this.publish()
   }
 
