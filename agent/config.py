@@ -343,13 +343,6 @@ ENV.var(
     default="/usr/bin/chromium",
 )
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
-ENV.var("CORRIDOR_MCP_URL", "Corridor MCP server URL.", aliases=("CORRIDOR_MCP_SERVER_URL",))
-ENV.var(
-    "CORRIDOR_API_TOKEN",
-    "Corridor API token for the MCP server.",
-    aliases=("CORRIDOR_MCP_TOKEN", "CORRIDOR_TOKEN"),
-    secret=True,
-)
 ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"
 )

@@ -140,11 +140,6 @@ from agent.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from agent.tool_loaders.corridor_mcp import (
-    CORRIDOR_TOOL_NAMES,
-    corridor_configured,
-    load_corridor_tools,
-)
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
@@ -509,11 +504,6 @@ async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
         return await loader()
 
 
-async def _load_corridor_mcp_tools() -> list[Any]:
-    """Corridor MCP tools when the deployment environment has configured them."""
-    return await _cached_tool_loader("tools:corridor", 600, load_corridor_tools)
-
-
 async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     return await ttl_cache.cached(
         f"team-default-model-pair:{kind}",
@@ -608,7 +598,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_issue_number: str,
         draft_prs: bool,
         plan_mode: bool,
-        corridor_enabled: bool,
         admin_environments: bool,
     ) -> None:
         self._thread_id = thread_id
@@ -624,7 +613,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
-        self._corridor_enabled = corridor_enabled
         self._admin_environments = admin_environments
 
     def _prepare_config_fingerprint(self) -> Any:
@@ -799,7 +787,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=self._repo_instructions,
-                corridor_enabled=self._corridor_enabled,
                 environment_name=environment.name if environment else None,
                 environment_instructions=environment.instructions if environment else None,
                 admin_environments=self._admin_environments,
@@ -1124,13 +1111,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         browser_tools = load_browser_tools()
         if browser_tools:
             integration_tool_groups["Browser"] = browser_tools
-    # Corridor's catalog is a static allowlist, so the MCP handshake that used to
-    # run before every first model call now waits until the agent asks for it.
-    if not stop_summary_mode and not local_run and corridor_configured():
-        integration_tool_groups["Corridor"] = IntegrationGroup(
-            tool_names=CORRIDOR_TOOL_NAMES,
-            load=_load_corridor_mcp_tools,
-        )
     if integration_tool_groups:
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
@@ -1235,7 +1215,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
-                    corridor_enabled="Corridor" in integration_tool_groups,
                     admin_environments=admin_thread,
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
