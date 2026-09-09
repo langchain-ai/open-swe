@@ -1909,6 +1909,15 @@ async def api_pr_merge_rate_by_model(
     )
 
 
+@router.get("/analytics/readiness")
+async def api_analytics_readiness(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    from agent.analytics.database import readiness
+
+    return await readiness()
+
+
 @router.get("/analytics/outbox-status")
 async def api_analytics_outbox_status(
     _admin: dict[str, Any] = _ADMIN_DEP,

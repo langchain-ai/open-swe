@@ -1338,15 +1338,13 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
             await task_marked_complete(thread_id, source="github", auto=True)
             await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
-        elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
-            from agent.analytics.emitter import task_rework
-
-            await task_rework(
-                thread_id, source="github", scope="major", reason="pr_reopened"
-            )
             from agent.slack.thread_feedback import post_slack_pr_feedback_prompt
 
             await post_slack_pr_feedback_prompt(thread_id, metadata, pr_url)
+        elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
+            from agent.analytics.emitter import task_rework
+
+            await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
 
 
 async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
