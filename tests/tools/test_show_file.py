@@ -72,6 +72,30 @@ async def test_show_file_detects_patches_by_content(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_show_file_renders_mermaid_files_as_diagrams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure(monkeypatch, {"/workspace/project/flow.mmd": b"graph TD\n  A --> B\n"})
+
+    content, artifact = await show_file_tool._show_file("flow.mmd")
+
+    assert content == "Displayed diagram flow.mmd in the dashboard."
+    assert artifact["kind"] == "diagram"
+    assert artifact["content"] == "graph TD\n  A --> B\n"
+
+
+@pytest.mark.asyncio
+async def test_show_file_renders_markdown_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure(monkeypatch, {"/workspace/project/notes.md": b"# Title\n\ntext\n"})
+
+    content, artifact = await show_file_tool._show_file("notes.md")
+
+    assert content == "Displayed rendered markdown notes.md in the dashboard."
+    assert artifact["kind"] == "markdown"
+    assert artifact["content"] == "# Title\n\ntext\n"
+
+
+@pytest.mark.asyncio
 async def test_show_file_encodes_images(monkeypatch: pytest.MonkeyPatch) -> None:
     data = b"\x89PNG\r\n\x1a\n"
     _configure(monkeypatch, {"/workspace/project/shot.png": data})

@@ -111,6 +111,8 @@ export type ShowFileDisplay =
       endLine: number
     })
   | (ShowFileDisplayBase & { kind: "diff"; content: string })
+  | (ShowFileDisplayBase & { kind: "diagram"; content: string })
+  | (ShowFileDisplayBase & { kind: "markdown"; content: string })
   | (ShowFileDisplayBase & {
       kind: "image"
       mimeType: string

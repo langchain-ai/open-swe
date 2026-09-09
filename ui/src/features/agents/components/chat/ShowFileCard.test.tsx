@@ -15,6 +15,12 @@ vi.mock("@/features/agents/utils/diffUtils", () => ({
   }),
 }))
 
+vi.mock("./Markdown", () => ({
+  Markdown: ({ content }: { content: string }) => (
+    <pre data-testid="markdown">{content}</pre>
+  ),
+}))
+
 vi.mock("@pierre/diffs/react", () => ({
   File: ({
     file,
@@ -85,6 +91,41 @@ describe("ShowFileCard", () => {
       "data:image/png;base64,AAAA"
     )
     expect(screen.queryByRole("button", { name: /comment/i })).toBeNull()
+  })
+
+  it("renders mermaid files through the markdown diagram renderer", () => {
+    render(
+      <ShowFileCard
+        display={{
+          type: "show_file",
+          kind: "diagram",
+          path: ".open-swe/artifacts/flow.mmd",
+          filename: "flow.mmd",
+          title: "Request flow",
+          content: "graph TD\n  A --> B",
+        }}
+      />
+    )
+    expect(screen.getByTestId("markdown").textContent).toBe(
+      "```mermaid\ngraph TD\n  A --> B\n```"
+    )
+    expect(screen.queryByRole("button", { name: /comment/i })).toBeNull()
+  })
+
+  it("renders markdown files through the markdown renderer", () => {
+    render(
+      <ShowFileCard
+        display={{
+          type: "show_file",
+          kind: "markdown",
+          path: "docs/plan.md",
+          filename: "plan.md",
+          title: "Plan",
+          content: "# Plan\n\n- step",
+        }}
+      />
+    )
+    expect(screen.getByTestId("markdown").textContent).toBe("# Plan\n\n- step")
   })
 
   it("pre-selects the requested range and quotes the selection into the composer", () => {

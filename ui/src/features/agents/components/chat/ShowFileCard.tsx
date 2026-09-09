@@ -12,6 +12,7 @@ import {
   selectPatchLines,
   splitPatch,
 } from "@/features/agents/lib/patchSelection"
+import { Markdown } from "./Markdown"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -31,6 +32,10 @@ function orderedRange(range: SelectedLineRange): {
     start: Math.min(range.start, range.end),
     end: Math.max(range.start, range.end),
   }
+}
+
+function mermaidFence(source: string): string {
+  return "```mermaid\n" + source.replace(/```/g, "") + "\n```"
 }
 
 function fenceLanguage(filename: string): string {
@@ -125,7 +130,7 @@ export function ShowFileCard({ display }: { display: ShowFileDisplay }) {
             </span>
           )}
         </button>
-        {display.kind !== "image" && (
+        {(display.kind === "text" || display.kind === "diff") && (
           <Button
             type="button"
             variant="ghost"
@@ -155,6 +160,16 @@ export function ShowFileCard({ display }: { display: ShowFileDisplay }) {
               className="mx-auto block max-w-full object-contain"
               style={{ maxHeight: BODY_MAX_HEIGHT }}
             />
+          )}
+          {display.kind === "diagram" && (
+            <div className="px-3 py-2">
+              <Markdown content={mermaidFence(display.content)} />
+            </div>
+          )}
+          {display.kind === "markdown" && (
+            <div className="px-3 py-2">
+              <Markdown content={display.content} />
+            </div>
           )}
           {display.kind === "text" && (
             <TextBody

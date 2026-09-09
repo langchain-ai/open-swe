@@ -306,6 +306,12 @@ function showFileDisplay(
   if (value.kind === "diff" && typeof value.content === "string") {
     return { ...base, kind: "diff", content: value.content }
   }
+  if (value.kind === "diagram" && typeof value.content === "string") {
+    return { ...base, kind: "diagram", content: value.content }
+  }
+  if (value.kind === "markdown" && typeof value.content === "string") {
+    return { ...base, kind: "markdown", content: value.content }
+  }
   if (
     value.kind === "image" &&
     typeof value.mime_type === "string" &&

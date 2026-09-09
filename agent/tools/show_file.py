@@ -21,6 +21,8 @@ _IMAGE_TYPES = {
     ".svg": "image/svg+xml",
 }
 _DIFF_SUFFIXES = {".patch", ".diff"}
+_DIAGRAM_SUFFIXES = {".mmd", ".mermaid"}
+_MARKDOWN_SUFFIXES = {".md", ".markdown"}
 
 
 async def _show_file(
@@ -77,6 +79,18 @@ async def _show_file(
     except UnicodeDecodeError as exc:
         raise ValueError(f"{relative_path} is not UTF-8 text or a supported image") from exc
 
+    if suffix in _DIAGRAM_SUFFIXES:
+        return (
+            f"Displayed diagram {relative_path} in the dashboard.",
+            {**base, "kind": "diagram", "content": text},
+        )
+
+    if suffix in _MARKDOWN_SUFFIXES:
+        return (
+            f"Displayed rendered markdown {relative_path} in the dashboard.",
+            {**base, "kind": "markdown", "content": text},
+        )
+
     if suffix in _DIFF_SUFFIXES or _looks_like_patch(text):
         return (
             f"Displayed diff {relative_path} in the dashboard.",
@@ -128,8 +142,9 @@ show_file = tool(
     "show_file",
     description="""Render a file from the working directory as a rich card in the dashboard:
 source code with syntax highlighting and line numbers, a unified diff (`.patch`/`.diff` or
-`git diff` output) with per-file highlighting, or an image. The user can select lines in the
-card and comment on them, so this is the way to point at specific code.
+`git diff` output) with per-file highlighting, a Mermaid diagram (`.mmd`/`.mermaid`), rendered
+Markdown (`.md`), or an image. The user can select lines in code and diff cards and comment on
+them, so this is the way to point at specific code.
 
 Never retype diffs, file contents, logs, or generated output into a chat message from memory.
 Write them to a file and show that instead, for example
