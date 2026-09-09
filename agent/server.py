@@ -252,6 +252,9 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
+ENGINE_VALIDATION_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
+    {"delete", "edit_file", "execute", "task", "write_file"}
+)
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
@@ -717,6 +720,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_issue_number: str,
         draft_prs: bool,
         plan_mode: bool,
+        engine_validation: bool,
         corridor_enabled: bool,
         admin_environments: bool,
     ) -> None:
@@ -733,6 +737,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
+        self._engine_validation = engine_validation
         self._corridor_enabled = corridor_enabled
         self._admin_environments = admin_environments
 
@@ -796,15 +801,31 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        configurable = (self._config or {}).get("configurable") or {}
+        configurable["draft_prs"] = self._draft_prs
+        cfg = RunConfig.parse(configurable)
+        if self._engine_validation:
+            async with aphase(self._thread_id, "prepare.await_sandbox"):
+                sandbox_backend = await get_or_create_sandbox_backend_proxy(
+                    self._thread_id
+                ).ready()
+            async with aphase(self._thread_id, "prepare.work_dir"):
+                work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+            return {
+                "work_dir": work_dir,
+                "rendered_system_prompt": construct_system_prompt(
+                    working_dir=work_dir,
+                    default_repo=cfg.repo.model_dump() if cfg.repo else None,
+                    plan_mode=True,
+                    source="engine_validation",
+                ),
+            }
         schedule_thread_title_generation(
             thread_id=self._thread_id,
             messages=state.get("messages") or [],
             model=self._title_model,
             client=client,
         )
-        configurable = (self._config or {}).get("configurable") or {}
-        configurable["draft_prs"] = self._draft_prs
-        cfg = RunConfig.parse(configurable)
         if is_desktop_run(cfg):
             if cfg.local_project_path:
                 schedule_worktree_branch_rename(
@@ -928,6 +949,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
+    engine_validation_requested = (
+        cfg.engine_validation is True or cfg.source == "engine_validation"
+    )
+    engine_validation = cfg.is_engine_validation
+    if engine_validation_requested and not engine_validation:
+        raise RuntimeError("Engine validation requires authenticated service context")
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -938,7 +965,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(bindable_config(config))
 
-    profile_login = resolve_github_login(as_json_object(config))
+    profile_login = (
+        None if engine_validation else resolve_github_login(as_json_object(config))
+    )
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
@@ -952,8 +981,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             if _profile_login and ENV.SANDBOX_TYPE.get() == "langsmith"
             else None
         )
+        github_token = None
+        github_repositories = None
+        if engine_validation:
+            github_token, _ = await resolve_github_token(config, _thread_id)
+            github_repositories = [cfg.repo_full_name]
         return await ensure_sandbox_for_thread(
             _thread_id,
+            github_proxy_token=github_token,
+            github_proxy_repositories=github_repositories,
             environment_slug=environment_slug(_cfg),
             langsmith_credentials=credentials,
         )
@@ -1075,7 +1111,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     sender_draft_prs = profile_draft_prs(sender_profile)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
-    if isinstance(thread_settings.get("model_id"), str):
+    if engine_validation:
+        repo_instructions = None
+    elif isinstance(thread_settings.get("model_id"), str):
         repo_instructions = thread_settings.get("repo_instructions")
     else:
         async with aphase(thread_id, "factory.repo_instructions"):
@@ -1092,7 +1130,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "model_routing_enabled": adaptive_model_routing,
         "repo_instructions": repo_instructions,
     }
-    if not local_run and (
+    if not local_run and not engine_validation and (
         settings_changed or {**thread_settings, **resolved_settings} != thread_settings
     ):
         async with aphase(thread_id, "factory.store_settings"):
@@ -1155,7 +1193,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Plan mode enabled for thread %s", thread_id)
 
     async with aphase(thread_id, "factory.admin_thread"):
-        admin_thread = await _admin_thread(config, profile_login)
+        admin_thread = (
+            False if engine_validation else await _admin_thread(config, profile_login)
+        )
     if admin_thread:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
@@ -1165,7 +1205,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     workspace_mcp_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if not stop_summary_mode and not local_run:
+    if not stop_summary_mode and not local_run and not engine_validation:
         (
             observability_tools,
             workspace_mcp_tools,
@@ -1244,6 +1284,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     ]
     if local_run:
         static_tools = [http_request, fetch_url, web_search]
+    elif engine_validation:
+        static_tools = []
     elif stop_summary_mode:
         static_tools = [slack_read_thread_messages, slack_thread_reply]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
@@ -1258,11 +1300,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     }
     if not stop_summary_mode and not local_run:
         browser_tools = load_browser_tools()
-        if browser_tools:
+        if browser_tools and not engine_validation:
             integration_tool_groups["Browser"] = browser_tools
     # Corridor's catalog is a static allowlist, so the MCP handshake that used to
     # run before every first model call now waits until the agent asks for it.
-    if not stop_summary_mode and not local_run and corridor_configured():
+    if (
+        not stop_summary_mode
+        and not local_run
+        and not engine_validation
+        and corridor_configured()
+    ):
         integration_tool_groups["Corridor"] = IntegrationGroup(
             tool_names=CORRIDOR_TOOL_NAMES,
             load=_load_corridor_mcp_tools,
@@ -1276,13 +1323,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             dynamic_tool_middleware = candidate
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    agent_backend: BackendProtocol = backend
+    agent_backend: BackendProtocol = (
+        ReadOnlyBackend(backend) if engine_validation else backend
+    )
     skill_routes: dict[str, BackendProtocol] = {
         BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
             FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
         ),
     }
-    if is_desktop_run(cfg):
+    if engine_validation:
+        skill_sources = [BUNDLED_SKILLS_ROUTE]
+    elif is_desktop_run(cfg):
         skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
         skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         # The default backend is the user's project, so offloads would land in
@@ -1371,6 +1422,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
+                    engine_validation=engine_validation,
                     corridor_enabled="Corridor" in integration_tool_groups,
                     admin_environments=admin_thread,
                 ),
@@ -1380,9 +1432,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(
                     excluded=(
-                        STOP_SUMMARY_EXCLUDED_TOOLS
-                        if stop_summary_mode
-                        else DEEP_AGENT_EXCLUDED_TOOLS
+                        ENGINE_VALIDATION_EXCLUDED_TOOLS
+                        if engine_validation
+                        else (
+                            STOP_SUMMARY_EXCLUDED_TOOLS
+                            if stop_summary_mode
+                            else DEEP_AGENT_EXCLUDED_TOOLS
+                        )
                     )
                 ),
                 SubdirAgentsReadMiddleware(),
@@ -1394,13 +1450,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     initial_delay=1.0,
                     max_delay=10.0,
                 ),
-                *([] if local_run else [PullRequestCreationGuardMiddleware()]),
-                WorkflowPushGuardMiddleware(),
-                refresh_github_proxy_before_model,
-                *([] if stop_summary_mode else [check_message_queue_before_model]),
+                *(
+                    []
+                    if local_run or engine_validation
+                    else [PullRequestCreationGuardMiddleware()]
+                ),
+                *([] if engine_validation else [WorkflowPushGuardMiddleware()]),
+                *([] if engine_validation else [refresh_github_proxy_before_model]),
+                *(
+                    []
+                    if stop_summary_mode or engine_validation
+                    else [check_message_queue_before_model]
+                ),
                 TimeoutWrapupMiddleware(),
-                notify_step_limit_reached,
-                record_run_usage,
+                *(
+                    []
+                    if engine_validation
+                    else [notify_step_limit_reached, record_run_usage]
+                ),
                 *model_selection_middleware,
                 *fallback_middleware,
                 PlanModeMiddleware(

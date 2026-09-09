@@ -152,6 +152,7 @@ class RunConfig(BaseModel):
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     stop_summary: bool | None = None
+    engine_validation: bool | None = None
 
     # Dashboard review chat
     chat_repo_owner: str | None = None
@@ -237,3 +238,22 @@ class RunConfig(BaseModel):
     @property
     def is_eval(self) -> bool:
         return self.eval is True or self.reviewer_eval is True
+
+    @property
+    def is_engine_validation(self) -> bool:
+        if self.engine_validation is not True or self.source != "engine_validation":
+            return False
+        user = self.get("langgraph_auth_user")
+        identity = (
+            user.get("identity")
+            if isinstance(user, Mapping)
+            else getattr(user, "identity", None)
+        )
+        validation_claim = None
+        if isinstance(user, Mapping):
+            validation_claim = user.get("engine_validation")
+        try:
+            validation_claim = validation_claim or user["engine_validation"]
+        except (KeyError, TypeError):
+            validation_claim = validation_claim or getattr(user, "engine_validation", None)
+        return identity == "issues-agent" and validation_claim is True
