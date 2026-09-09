@@ -111,7 +111,11 @@ export function AgentsHome({
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
   const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
-    initialLocalProject ? "local" : initialRepo ? "cloud" : null
+    initialLocalProject
+      ? "local"
+      : initialRepo || initialNoProject
+        ? "cloud"
+        : null
   )
   const runTarget: RunTarget = isDesktop
     ? cloudEnabled
