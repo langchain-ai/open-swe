@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent.api.app import app
+from agent.github import routes as github_routes
 from agent.github import webhook as github_webhooks
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
@@ -48,18 +49,23 @@ def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
     return f"sha256={sig}"
 
 
-def _post_github_webhook(client: TestClient, event_type: str, payload: dict[object, object]):
+def _post_github_webhook(
+    client: TestClient,
+    event_type: str,
+    payload: dict[object, object],
+    *,
+    delivery_id: str = "",
+):
     """Send a signed GitHub webhook POST request."""
     body = json.dumps(payload, separators=(",", ":")).encode()
-    return client.post(
-        "/webhooks/github",
-        content=body,
-        headers={
-            "X-GitHub-Event": event_type,
-            "X-Hub-Signature-256": _sign_body(body),
-            "Content-Type": "application/json",
-        },
-    )
+    headers = {
+        "X-GitHub-Event": event_type,
+        "X-Hub-Signature-256": _sign_body(body),
+        "Content-Type": "application/json",
+    }
+    if delivery_id:
+        headers["X-GitHub-Delivery"] = delivery_id
+    return client.post("/webhooks/github", content=body, headers=headers)
 
 
 def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
@@ -200,6 +206,44 @@ def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
     assert called["event_type"] == "issues"
+
+
+def test_github_webhook_launches_issue_automation_for_external_author(monkeypatch) -> None:
+    called: dict[str, object] = {}
+
+    async def fake_launch(payload: dict[str, object], delivery_id: str) -> None:
+        called["payload"] = payload
+        called["delivery_id"] = delivery_id
+
+    async def reject_external_author(
+        payload: dict[str, object], event_type: str
+    ) -> dict[str, str] | None:
+        called["gate_calls"] = int(called.get("gate_calls", 0)) + 1
+        return {"status": "ignored", "reason": "Sender is not authorized"}
+
+    monkeypatch.setattr(github_routes, "_launch_issue_automations", fake_launch)
+    monkeypatch.setattr(webhook_common, "_enforce_public_repo_org_gate", reject_external_author)
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+
+    client = TestClient(app)
+    response = _post_github_webhook(
+        client,
+        "issues",
+        {
+            "action": "opened",
+            "issue": {"number": 42, "title": "Public bug", "body": "Please investigate"},
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "sender": {"login": "outside-user"},
+        },
+        delivery_id="delivery-1",
+    )
+
+    assert response.json() == {
+        "status": "ignored",
+        "reason": f"Issue does not mention {webhook_common.describe_open_swe_tags()}",
+    }
+    assert called["delivery_id"] == "delivery-1"
+    assert called.get("gate_calls", 0) == 0
 
 
 def test_github_webhook_ignores_issue_events_without_body_or_title_change(monkeypatch) -> None:

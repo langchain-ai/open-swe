@@ -34,7 +34,8 @@ async def list_automations() -> dict[str, Any]:
 
 async def create_automation(
     prompt: str,
-    schedule: str,
+    schedule: str | None = None,
+    trigger: schedules.AutomationTrigger = "schedule",
     name: str | None = None,
     repo: str | None = None,
     model_id: str | None = None,
@@ -47,7 +48,8 @@ async def create_automation(
 
     Args:
         prompt: Complete instructions for every run.
-        schedule: Five-field UTC cron expression.
+        schedule: Five-field UTC cron expression for scheduled automations.
+        trigger: Run on a schedule or whenever a GitHub issue is opened.
         name: Short display name.
         repo: Optional ``owner/repo`` the configuring admin can access.
         model_id: Optional supported model ID.
@@ -68,6 +70,7 @@ async def create_automation(
             schedules.ScheduleCreateBody(
                 prompt=prompt,
                 schedule=schedule,
+                trigger=trigger,
                 name=name,
                 repo=repo,
                 model_id=model_id,
@@ -88,6 +91,7 @@ async def update_automation(
     automation_id: str,
     prompt: str | None = None,
     schedule: str | None = None,
+    trigger: schedules.AutomationTrigger | None = None,
     name: str | None = None,
     repo: str | None = None,
     clear_repo: bool = False,
@@ -118,6 +122,7 @@ async def update_automation(
     values: dict[str, Any] = {
         "prompt": prompt,
         "schedule": schedule,
+        "trigger": trigger,
         "name": name,
         "model_id": model_id,
         "effort": effort,
