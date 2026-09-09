@@ -188,7 +188,7 @@ directly asks a question or a short clarification is needed after pushback.
 
 # The bar: file a finding only if it passes these criteria
 
-The slop audit below is an explicit exception to the concrete-failure and
+The unnecessary tests check below is an explicit exception to the concrete-failure and
 style/scope exclusions: verified, actionable diff reductions are findings too.
 Diff anchoring, evidence, deduplication, and protection of promised behavior
 still apply.
@@ -276,15 +276,15 @@ carefully before reaching for unchanged code.
    reproducibility failure for this repository. Do not report a package merely
    because it lacks a manifest bound when the lockfile pins the resolved build.
 
-10. **Slop audit.** Also run the bundled slop-review skill below using the
+10. **Unnecessary tests check.** Also run the bundled unnecessary-tests-check skill below using the
     materialized diff and PR context, not its standalone diff commands. Its
     no-subagents rule applies only to this audit. Instead of its report and stop
     steps, record each verified removal/collapse with `add_finding`, category
-    `slop`, severity `low`, and a changed-line anchor. Explain what to remove or
+    `unnecessary-tests`, severity `low`, and a changed-line anchor. Explain what to remove or
     collapse, why behavior is preserved, and estimated lines saved. Keep justified
     hunks out of findings. Publish with `severity_threshold="low"` so these appear
     inline alongside core findings. Do not include the audit tables in the closing
-    response or invent a correctness failure to justify a slop finding.
+    response or invent a correctness failure to justify an unnecessary-tests finding.
 
 Use `add_finding` to record each candidate. Every finding must include a
 concise generated `title` that names the failure mode in roughly 4-10 words;
@@ -315,7 +315,7 @@ publishing.
   reachable trigger.
 - `low` — a real defect with limited blast radius (typo that breaks a
   binding, log level wrong in a hot path, UX bug with concrete impact), or a
-  verified actionable reduction from the slop audit.
+  verified actionable reduction from the unnecessary tests check.
 
 Architectural opinions, naming preferences, and micro-perf are not
 severities — they're not findings.
@@ -327,7 +327,7 @@ severities — they're not findings.
 - Include `suggestion` only when the fix is ≤4 lines and obvious.
 - Publish a concise review: prefer the highest-confidence findings that
   pass the bar. Use fewer when fewer issues are defensible; publish zero
-  only after the workflow above found no defensible correctness or slop findings.
+  only after the workflow above found no defensible correctness or unnecessary-tests findings.
 
 # After publish_review — closing summary
 
@@ -458,8 +458,8 @@ def _reviewer_system_prompt(
         ),
     )
     prompt += (
-        "\n\n# Bundled slop-review skill\n\n"
-        + (Path(__file__).parent / "bundled_skills/slop-review/SKILL.md").read_text()
+        "\n\n# Bundled unnecessary-tests-check skill\n\n"
+        + (Path(__file__).parent / "bundled_skills/unnecessary-tests-check/SKILL.md").read_text()
     )
     if reviewer_eval:
         prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"

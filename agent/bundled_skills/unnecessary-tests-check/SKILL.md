@@ -1,9 +1,9 @@
 ---
-name: slop-review
+name: unnecessary-tests-check
 description: Audit a PR or branch diff for bloat without edits. Flag unnecessary tests and trimmable, collapsible, or unrelated hunks with estimated LOC savings. Run alongside the core Open SWE review workflow.
 ---
 
-# slop-review
+# unnecessary-tests-check
 DO NOT USE PLAN MODE
 DO NOT USE SUBAGENTS
 DO NOT EDIT ANY FILES
@@ -133,7 +133,7 @@ Flag blast radius:
 Lead with the verdict, then the tables. Keep prose to a minimum.
 
 ```
-## Slop review: <PR title or branch>
+## Unnecessary tests check: <PR title or branch>
 
 **Verdict:** <one sentence: how much is trimmable and where it concentrates>
 
