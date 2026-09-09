@@ -1,4 +1,4 @@
-"""OAuth client credentials for workspace MCP connections."""
+"""OAuth client credentials for scoped MCP connections."""
 
 import asyncio
 from collections.abc import AsyncGenerator
@@ -9,9 +9,9 @@ from urllib.parse import quote_plus
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from agent.dashboard.workspace_mcps import WorkspaceMCP, WorkspaceMCPOAuth
 from agent.encryption import decrypt_token
-from agent.tool_loaders.mcp_transport import mcp_http_client
+from agent.mcp.models import MCPConnection, MCPOAuth
+from agent.mcp.transport import mcp_http_client
 
 
 class MCPOAuthError(ValueError):
@@ -29,7 +29,7 @@ class _Token(BaseModel):
 class _ClientCredentialsAuth(httpx.Auth):
     requires_request_body = True
 
-    def __init__(self, settings: WorkspaceMCPOAuth, encrypted_secret: str) -> None:
+    def __init__(self, settings: MCPOAuth, encrypted_secret: str) -> None:
         self._settings = settings
         self._encrypted_secret = encrypted_secret
         self._token = ""
@@ -90,12 +90,14 @@ class _ClientCredentialsAuth(httpx.Auth):
 
 
 @lru_cache(maxsize=128)
-def _cached_auth(_name: str, settings: WorkspaceMCPOAuth, encrypted_secret: str) -> httpx.Auth:
+def _cached_auth(
+    _identity: tuple[str, ...], settings: MCPOAuth, encrypted_secret: str
+) -> httpx.Auth:
     # Credentials and settings identify the cache entry, so rotation cannot reuse old tokens.
     return _ClientCredentialsAuth(settings, encrypted_secret)
 
 
-def workspace_mcp_auth(record: WorkspaceMCP) -> httpx.Auth | None:
+def connection_auth(record: MCPConnection, namespace: tuple[str, ...]) -> httpx.Auth | None:
     if record.oauth is None:
         return None
-    return _cached_auth(record.name, record.oauth, record.encrypted_client_secret)
+    return _cached_auth((*namespace, record.name), record.oauth, record.encrypted_client_secret)

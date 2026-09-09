@@ -10,7 +10,9 @@ import pytest
 from cryptography.fernet import Fernet
 
 from agent.dashboard import workspace_mcps as settings
-from agent.tool_loaders import mcp_oauth, mcp_transport
+from agent.mcp import MCPConnectionUpdate, runtime
+from agent.mcp import oauth as mcp_oauth
+from agent.mcp import transport as mcp_transport
 from agent.tool_loaders import workspace_mcp as loader
 
 
@@ -62,7 +64,7 @@ def oauth_remote(monkeypatch):
 async def oauth_record(method="client_secret_post"):
     return await settings.prepare_workspace_mcp(
         "linear",
-        settings.WorkspaceMCPUpdate.model_validate(
+        MCPConnectionUpdate.model_validate(
             {
                 "name": "linear",
                 "url": "https://mcp.example/mcp",
@@ -78,8 +80,8 @@ async def oauth_record(method="client_secret_post"):
     )
 
 
-def client_for(record):
-    connection = loader._connection(record)
+def client_for(record, namespace=("workspace_mcps",)):
+    connection = runtime._connection(record, namespace)
     factory = connection["httpx_client_factory"]
     assert factory is not None
     return factory(headers=connection["headers"], auth=connection.get("auth"))
@@ -108,6 +110,16 @@ async def test_oauth_authenticates_and_reuses_token_across_connections(
             base64.b64decode(request.headers["Authorization"].split()[1])
             == b"test-app:test-client-secret"
         )
+
+
+async def test_identical_oauth_credentials_do_not_share_tokens_between_owners(
+    fake_store, oauth_remote
+):
+    record = await oauth_record()
+    for owner in ["alice", "bob"]:
+        async with client_for(record, ("user_mcps", owner)) as client:
+            assert (await client.post(record.url, json={})).status_code == 200
+    assert len(oauth_remote["tokens"]) == 2
 
 
 async def test_oauth_retries_unauthorized_only_once(fake_store, oauth_remote):
@@ -217,7 +229,7 @@ async def test_oauth_works_through_real_mcp_discovery_and_execution(fake_store, 
 
     oauth_remote["reply"] = reply
     record = await oauth_record()
-    definitions = await loader._discover_tools(record)
+    definitions = await runtime.discover_tools(record, ("workspace_mcps",))
     assert [tool.name for tool in definitions] == ["search"]
     fake_store.seed(
         ["workspace_mcps"], record.name, {**record.model_dump(), "allowed_tools": ["search"]}

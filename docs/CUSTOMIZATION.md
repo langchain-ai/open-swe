@@ -347,6 +347,27 @@ with an empty header list clears those headers. Changing the URL requires
 explicitly replacing or clearing saved headers. Requests must remain on the
 configured public HTTPS origin; redirects, private addresses, local processes,
 and interactive OAuth login are not supported by this connection manager.
+
+The backend implementation lives in `agent/mcp`: connection models and credential
+preparation, OAuth, HTTPS transport, and tool discovery/execution. Workspace storage
+and dashboard authorization remain in the workspace adapters. Existing stored
+connections and imported JSON need no migration.
+
+For another scope, provide an `MCPSource` with an owner-specific `namespace` plus
+async `list_connections` and `get_connection` callbacks. The caller must authorize
+each source before passing it to `load_mcp_tools(workspace_source, user_source)`.
+Sources are ordered from lowest to highest precedence. Distinct connection names
+contribute tools; a later connection with the same name replaces the entire earlier
+connection, including credentials and allowed tools. Disabled connections and empty
+tool selections also override earlier entries, preventing fallback to broader access.
+Saved secrets must only be preserved from the previous record in the same scope.
+
+Catalog and token caches include the source namespace. Each tool call resolves the
+current winning connection again, checks its allowlist, and refuses to switch scopes
+mid-run. Source lookup errors must raise instead of returning an empty result, so a
+failed lookup cannot expose a lower-precedence connection. Only workspace sources
+are wired into the product today; user-scoped storage, authorization, and UI can use
+this package when added.
 An unavailable server omits its tools without preventing other connections from
 loading. This catalog is not attached to the separate read-only reviewer or
 Investigate graphs.
