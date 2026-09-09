@@ -20,6 +20,7 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
 )
 from agent.slack.responses import FeedbackResponse
+from agent.source_context import SourceContext
 from agent.store import TypedStore
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -98,7 +99,7 @@ def rating_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
 async def post_slack_feedback_prompt(
     thread_id: str, run_id: str, channel_id: str, *, require_answer: bool = False
 ) -> None:
-    """Prompt each requester once per Slack thread, using the qualifying run's mapping."""
+    """Prompt the thread initiator once, using the qualifying run's response mapping."""
     try:
         store = _store(channel_id)
         record = await store.get(run_id)
@@ -110,21 +111,30 @@ async def post_slack_feedback_prompt(
                 return
             if require_answer and mapping.get("should_ask_for_feedback") is not True:
                 return
+        thread_ts = record.thread_ts if record else mapping.get("thread_ts")
+        if not isinstance(thread_ts, str) or not thread_ts:
+            return
+        thread = await langgraph_client().threads.get(thread_id)
+        origin = SourceContext.from_metadata(thread.get("metadata")).slack_thread
+        if (
+            origin is None
+            or not origin.is_at(channel_id, thread_ts)
+            or not origin.triggering_user_id
+        ):
+            return
+        if record is not None and record.user_id != origin.triggering_user_id:
+            return
         if record is None:
-            user_id = mapping.get("triggering_user_id")
-            thread_ts = mapping.get("thread_ts")
             message_ts = mapping.get("message_ts")
-            if not all(
-                isinstance(value, str) and value for value in (user_id, thread_ts, message_ts)
-            ):
+            if not isinstance(message_ts, str) or not message_ts:
                 return
             record = ThreadFeedback(
                 agent_thread_id=thread_id,
                 run_id=run_id,
                 channel_id=channel_id,
-                thread_ts=str(thread_ts),
-                message_ts=str(message_ts),
-                user_id=str(user_id),
+                thread_ts=thread_ts,
+                message_ts=message_ts,
+                user_id=origin.triggering_user_id,
             )
         context = await get_slack_channel_context(channel_id, use_cache=False)
         if not slack_channel_allows_operations(context):

@@ -47,6 +47,17 @@ def context(monkeypatch: pytest.MonkeyPatch, fake_store: Any) -> dict[str, Any]:
     monkeypatch.setattr(feedback, "open_slack_modal", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "create_langsmith_thread_feedback", AsyncMock(return_value=True))
     client = AsyncMock()
+    client.threads.get.return_value = {
+        "metadata": {
+            "source_context": {
+                "slack_thread": {
+                    "channel_id": "C1",
+                    "thread_ts": "1.0",
+                    "triggering_user_id": "U1",
+                }
+            }
+        }
+    }
     locks: set[str] = set()
 
     async def acquire(*, thread_id: str, **kwargs: Any) -> None:
@@ -417,7 +428,7 @@ async def test_failed_prompt_can_be_retried(
     [
         None,
         {"run_id": "run-2"},
-        {"run_id": "run-1", "thread_ts": "1.0", "message_ts": "2.0"},
+        {"run_id": "run-1", "message_ts": "2.0"},
         {"run_id": "run-1", "thread_ts": "1.0", "triggering_user_id": "U1"},
     ],
 )
@@ -488,6 +499,9 @@ async def test_older_rating_retry_does_not_revert_newer_feedback(
 async def test_concurrent_completion_callbacks_post_one_prompt(
     context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch, second_run: str, thread_ts: str
 ) -> None:
+    feedback.langgraph_client().threads.get.return_value["metadata"]["source_context"][
+        "slack_thread"
+    ]["thread_ts"] = thread_ts
     for run_id, message_ts in [("run-1", "2.0"), ("run-2", "3.0")]:
         fake_store.seed(
             ("slack_thread_feedback", "C1"),
@@ -521,7 +535,7 @@ async def test_concurrent_completion_callbacks_post_one_prompt(
         ({}, {}, False),
         ({}, {"agent_thread_id": "thread-2"}, False),
         ({}, {"thread_ts": "4.0"}, True),
-        ({}, {"user_id": "U2"}, True),
+        ({}, {"user_id": "U2"}, False),
         ({}, {"channel_id": "C2"}, True),
         ({"thread_ts": "0"}, {"thread_ts": "0"}, False),
         ({"thread_ts": "0"}, {"thread_ts": "0", "agent_thread_id": "thread-2"}, True),
@@ -539,6 +553,10 @@ async def test_prompt_deduplicates_existing_records_by_requester_and_slack_threa
     previous = {**context, "rating": 4, "comment": "Useful", **previous_changes}
     fake_store.seed(("slack_thread_feedback", "C1"), "run-1", previous)
     current = {**context, "run_id": "run-2", "message_ts": "3.0", **current_changes}
+    origin = feedback.langgraph_client().threads.get.return_value["metadata"]["source_context"][
+        "slack_thread"
+    ]
+    origin.update(channel_id=current["channel_id"], thread_ts=current["thread_ts"])
     monkeypatch.setattr(
         feedback,
         "lookup_slack_run_message_mapping",
@@ -561,6 +579,82 @@ async def test_prompt_deduplicates_existing_records_by_requester_and_slack_threa
     assert ("run-2" in fake_store.values(("slack_thread_feedback", current["channel_id"]))) == (
         should_prompt
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("merged_pr", [False, True])
+async def test_followup_prompts_only_thread_initiator(
+    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch, merged_pr: bool
+) -> None:
+    fake_store.values(("slack_thread_feedback", "C1")).clear()
+    monkeypatch.setattr(
+        feedback,
+        "lookup_slack_run_message_mapping",
+        AsyncMock(
+            return_value={
+                "run_id": "run-1",
+                "triggering_user_id": "U2",
+                "thread_ts": "1.0",
+                "message_ts": "2.0",
+                "should_ask_for_feedback": True,
+            }
+        ),
+    )
+    if merged_pr:
+        await feedback.post_slack_pr_feedback_prompt(
+            "thread-1",
+            {
+                "pull_requests": [
+                    {"url": "pr-url", "slack_feedback": {"run_id": "run-1", "channel_id": "C1"}}
+                ]
+            },
+            "pr-url",
+        )
+    else:
+        await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1", require_answer=True)
+
+    feedback.post_slack_ephemeral_message.assert_awaited_once()
+    assert feedback.post_slack_ephemeral_message.await_args.args[:2] == ("C1", "U1")
+    record = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
+    assert record["user_id"] == "U1"
+    other_user_rating = _action()
+    other_user_rating["user"]["id"] = "U2"
+    await feedback._process_rating(other_user_rating)
+    assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["rating"] is None
+    feedback.create_langsmith_thread_feedback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "origin",
+    [
+        None,
+        {},
+        {"channel_id": "C1", "thread_ts": "1.0"},
+        {"channel_id": "C2", "thread_ts": "1.0", "triggering_user_id": "U1"},
+        {"channel_id": "C1", "thread_ts": "9.0", "triggering_user_id": "U1"},
+    ],
+)
+async def test_prompt_requires_known_initiator_at_same_slack_location(
+    context: Any, fake_store: Any, origin: Any
+) -> None:
+    fake_store.seed(("slack_thread_feedback", "C1"), "run-1", {**context, "prompted": False})
+    feedback.langgraph_client().threads.get.return_value = {
+        "metadata": {"source_context": {"slack_thread": origin}}
+    }
+    await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
+    feedback.post_slack_ephemeral_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_old_unsent_prompt_for_other_user_is_not_reassigned(
+    context: Any, fake_store: Any
+) -> None:
+    previous = {**context, "user_id": "U2", "prompted": False, "rating": 4}
+    fake_store.seed(("slack_thread_feedback", "C1"), "run-1", previous)
+    await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
+    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == previous
 
 
 @pytest.mark.asyncio
