@@ -45,7 +45,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from agent.dashboard.admin import is_admin, is_observability_authorized
+from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -73,11 +73,9 @@ from agent.dashboard.team_settings import (
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
-from agent.dashboard.user_credentials import get_sandbox_langsmith_credentials
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
-from agent.github.org_membership import is_user_active_org_member
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
@@ -142,9 +140,6 @@ from agent.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from agent.tool_loaders.currents import load_currents_tools
-from agent.tool_loaders.datadog_mcp import load_datadog_tools
-from agent.tool_loaders.langsmith import load_langsmith_tools
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
@@ -165,13 +160,6 @@ from agent.tools import (
     get_thread,
     http_request,
     linear_comment,
-    linear_create_issue,
-    linear_delete_issue,
-    linear_get_issue,
-    linear_get_issue_comments,
-    linear_list_teams,
-    linear_search_issues,
-    linear_update_issue,
     list_automations,
     list_environments,
     list_threads,
@@ -358,9 +346,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_start_new_thread",
-        "linear_create_issue",
-        "linear_update_issue",
-        "linear_delete_issue",
         "save_environment",
         "capture_environment_snapshot",
         "delete_environment",
@@ -441,25 +426,6 @@ def _general_purpose_subagent(
     return subagent
 
 
-async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether the triggering user may use the team observability tools.
-
-    Gates on admin / explicitly-authorized emails so prompt-injected runs from
-    untrusted contributors cannot reach the team's Datadog/LangSmith data.
-    """
-    cfg = RunConfig.from_config(config)
-    candidate_login = profile_login or cfg.github_login
-    candidate_emails = [
-        cfg.user_email,
-        cfg.slack_thread.triggering_user_email if cfg.slack_thread else None,
-    ]
-    if any(is_observability_authorized(email, login=candidate_login) for email in candidate_emails):
-        return True
-    return is_observability_authorized(
-        await email_for_login(candidate_login), login=candidate_login
-    )
-
-
 _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
     "id": "system:sender-context",
     "display_name": "Sender context",
@@ -509,34 +475,6 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
     )
 
 
-async def _cached_allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
-    login = _org_member_login(config, profile_login)
-    if not login:
-        return False
-    return await ttl_cache.cached(
-        f"org-member:{login}",
-        300,
-        lambda: _allowed_org_member(config, profile_login),
-    )
-
-
-def _org_member_login(config: RunnableConfig, profile_login: str | None) -> str | None:
-    return profile_login or RunConfig.from_config(config).github_login
-
-
-async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
-    login = _org_member_login(config, profile_login)
-    if not login:
-        return False
-    orgs = dict.fromkeys(
-        org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
-    )
-    for org in orgs:
-        if await is_user_active_org_member(login, org):
-            return True
-    return False
-
-
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
     async def load_with_timeout() -> list[Any]:
         return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
@@ -551,61 +489,14 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
         return []
 
 
-async def _cached_langsmith_tools(profile_login: str | None, *, allow_team: bool) -> list[Any]:
-    scope = "team" if allow_team else "solo"
-    return await _cached_tool_loader(
-        f"tools:langsmith:{profile_login or '-'}:{scope}",
-        300,
-        lambda: load_langsmith_tools(profile_login, allow_team=allow_team),
-    )
-
-
-async def _load_observability_tools(authorized: bool, profile_login: str | None) -> list[Any]:
-    """Load team observability tools for an authorized triggering user."""
-    if not authorized:
-        return []
-    datadog_tools, langsmith_tools = await asyncio.gather(
-        _cached_tool_loader("tools:datadog", 600, load_datadog_tools),
-        _cached_langsmith_tools(profile_login, allow_team=True),
-    )
-    return [*datadog_tools, *langsmith_tools]
-
-
-async def _observability_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
-    """Observability tools the triggering user is allowed to see.
-
-    The authorization gate itself stays uncached — it reads per-run config — so
-    only the credential and membership lookups behind it are reused.
-    """
-    if await _observability_authorized(config, profile_login):
-        return await _load_observability_tools(True, profile_login)
-    if await _cached_allowed_org_member(config, profile_login):
-        return await _cached_langsmith_tools(profile_login, allow_team=True)
-    return await _cached_langsmith_tools(profile_login, allow_team=False)
-
-
-async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any], list[Any]]:
+async def _notion_tools_for(profile_login: str | None) -> list[Any]:
     if not profile_login:
-        return [], []
-    currents_tools, notion_tools = await asyncio.gather(
-        _cached_tool_loader(
-            f"tools:currents:{profile_login}",
-            300,
-            lambda: load_currents_tools(profile_login),
-        ),
-        _cached_tool_loader(
-            f"tools:notion:{profile_login}",
-            300,
-            lambda: load_notion_tools(profile_login),
-        ),
-    )
-    return currents_tools, notion_tools
-
-
-async def _workspace_mcp_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
-    if not await _observability_authorized(config, profile_login):
         return []
-    return await load_workspace_mcp_tools()
+    return await _cached_tool_loader(
+        f"tools:notion:{profile_login}",
+        300,
+        lambda: load_notion_tools(profile_login),
+    )
 
 
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
@@ -930,19 +821,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _cfg: RunConfig = cfg,
-        _profile_login: str | None = profile_login,
     ) -> SandboxBackendProtocol:
         if is_desktop_run(_cfg):
             return create_desktop_backend(_cfg)
-        credentials = (
-            await get_sandbox_langsmith_credentials(_profile_login)
-            if _profile_login and ENV.SANDBOX_TYPE.get() == "langsmith"
-            else None
-        )
         return await ensure_sandbox_for_thread(
             _thread_id,
             environment_slug=environment_slug(_cfg),
-            langsmith_credentials=credentials,
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
@@ -1148,30 +1032,19 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
-    observability_tools: list[Any] = []
     workspace_mcp_tools: list[Any] = []
-    currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        (
-            observability_tools,
-            workspace_mcp_tools,
-            (currents_tools, notion_tools),
-        ) = await asyncio.gather(
-            _phase_result(
-                thread_id,
-                "factory.observability_tools",
-                lambda: _observability_tools_for(config, profile_login),
-            ),
+        workspace_mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.workspace_mcp_tools",
-                lambda: _workspace_mcp_tools_for(config, profile_login),
+                load_workspace_mcp_tools,
             ),
             _phase_result(
                 thread_id,
-                "factory.integration_tools",
-                lambda: _load_integration_tools(profile_login),
+                "factory.notion_tools",
+                lambda: _notion_tools_for(profile_login),
             ),
         )
 
@@ -1197,13 +1070,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         save_user_skill,
         delete_user_skill,
         linear_comment,
-        linear_create_issue,
-        linear_delete_issue,
-        linear_get_issue,
-        linear_get_issue_comments,
-        linear_list_teams,
-        linear_search_issues,
-        linear_update_issue,
         list_threads,
         get_thread,
         manage_thread,
@@ -1238,9 +1104,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
-        "Observability": observability_tools,
         "Workspace MCPs": workspace_mcp_tools,
-        "Currents": currents_tools,
         "Notion": notion_tools,
     }
     if not stop_summary_mode and not local_run:

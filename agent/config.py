@@ -172,8 +172,6 @@ ENV.var(
     "LangGraph Platform control-plane API, used by the legacy LangSmith-brokered GitHub auth.",
     default="https://api.host.langchain.com",
 )
-ENV.var("SANDBOX_LANGSMITH_API_KEY", "LangSmith key for a separate sandbox workspace.", secret=True)
-ENV.var("SANDBOX_LANGSMITH_ENDPOINT", "LangSmith endpoint for a separate sandbox workspace.")
 ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
     "LangSmith key with gateway:invoke for the LLM Gateway.",
@@ -307,9 +305,6 @@ ENV.var(
     secret=True,
 )
 ENV.var("CONFIGURED_ADMINS", "Comma-separated GitHub logins or emails with admin access.")
-ENV.var(
-    "OBSERVABILITY_AUTHORIZED_EMAILS", "Comma-separated emails allowed to use observability tools."
-)
 ENV.var("ADMIN_OIDC_SUBJECTS", "Comma-separated GitHub Actions OIDC subjects allowed as admins.")
 ENV.var("ADMIN_OIDC_AUDIENCE", "Audience required on admin OIDC tokens.", default="open-swe")
 ENV.var(
@@ -348,7 +343,6 @@ ENV.var(
     default="/usr/bin/chromium",
 )
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
-ENV.var("DATADOG_MCP_TOOLSETS", "Datadog MCP toolsets to load.", default="core")
 ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"
 )

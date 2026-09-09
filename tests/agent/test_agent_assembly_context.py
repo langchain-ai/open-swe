@@ -145,11 +145,6 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
     SANDBOX_BACKENDS.pop("thread-ctx", None)
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
-        patch(
-            "agent.server.get_sandbox_langsmith_credentials",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
         patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
         patch(
             "agent.server._cached_agent_routing_models",
@@ -163,8 +158,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
-        patch("agent.server._observability_authorized", new_callable=AsyncMock, return_value=False),
-        patch("agent.server._allowed_org_member", new_callable=AsyncMock, return_value=False),
+        patch("agent.server.load_workspace_mcp_tools", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.load_browser_tools", return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.fallback_model_id_for", return_value=None),
