@@ -140,9 +140,32 @@ describe("useSubmitAgentMessage", () => {
       },
       expect.any(Object)
     )
-    expect(pendingMessages(client)).toEqual([])
+    expect(pendingMessages(client)).toEqual([
+      expect.objectContaining({ id: optimisticId, status: "sending" }),
+    ])
     expect(sidebarStatus(client)).toBe("running")
     expect(queuedCounts.every((count) => count === 0)).toBe(true)
+  })
+
+  it("marks the optimistic message failed when run start rejects", async () => {
+    queueMessage.mockRejectedValueOnce(new AgentsApiError(409, "no active run"))
+    let rejectSubmission: (error: Error) => void = () => {}
+    stream.submit.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectSubmission = reject
+        })
+    )
+    const { client, result } = setup()
+
+    await result.current.mutateAsync({ content: "try me", images: [] })
+    rejectSubmission(new Error("run start failed"))
+
+    await waitFor(() =>
+      expect(pendingMessages(client)).toEqual([
+        expect.objectContaining({ content: "try me", status: "failed" }),
+      ])
+    )
   })
 
   it("shows the queued bubble once a run this client never joined accepts it", async () => {

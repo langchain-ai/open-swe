@@ -151,8 +151,10 @@ export function useSubmitAgentMessage(threadId: string) {
         },
         { config }
       )
-      updateThread((thread) => removePendingMessage(thread, id))
       void submission.catch(() => {
+        updateThread((thread) =>
+          setPendingMessage(thread, { ...pendingMessage, status: "failed" })
+        )
         setAgentThreadStatus(queryClient, threadId, "error")
       })
     },

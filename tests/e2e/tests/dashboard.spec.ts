@@ -92,10 +92,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     releaseProbe();
     await expect(optimisticMessage).toHaveCount(1);
-    await expect(optimisticMessage).not.toHaveAttribute(
-      "data-message-delivery-status",
-      "sending",
-    );
     await waitForStateToContain(page, threadId, prompt);
     await expect(optimisticMessage).toHaveCount(1);
     await expect(optimisticMessage).toHaveAttribute(
