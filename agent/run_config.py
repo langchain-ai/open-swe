@@ -42,6 +42,8 @@ def _reject_bool(value: Any) -> Any:
 
 Int = Annotated[int, BeforeValidator(_reject_bool)]
 
+_UNSERIALIZABLE = "__run_config_unserializable__"
+
 
 class Repo(BaseModel):
     """A GitHub repository as ``configurable["repo"]`` carries it."""
@@ -221,8 +223,15 @@ class RunConfig(BaseModel):
         return cls.from_config(get_config())
 
     def dump(self) -> dict[str, Any]:
-        """The JSON value to store, preserving exactly the keys that were set."""
-        return self.model_dump(mode="json", exclude_unset=True)
+        """The JSON value to store, preserving exactly the keys that were set.
+
+        LangGraph Platform puts a ``ProxyUser`` in ``langgraph_auth_user``, so an
+        extra can be any object; dropping it beats raising and losing the rest.
+        """
+        dumped = self.model_dump(
+            mode="json", exclude_unset=True, fallback=lambda _: _UNSERIALIZABLE
+        )
+        return {key: value for key, value in dumped.items() if value != _UNSERIALIZABLE}
 
     def get(self, key: str) -> Any:
         """Value for ``key``, whether it is a declared field or an extra."""
