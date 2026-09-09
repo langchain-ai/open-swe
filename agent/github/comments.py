@@ -554,7 +554,7 @@ async def _fetch_paginated(
     pathological PRs with thousands of comments.
 
     Args:
-        client: An active httpx async client.
+        client: An active httpx2 async client.
         url: The GitHub API endpoint URL.
         headers: Auth + accept headers.
 

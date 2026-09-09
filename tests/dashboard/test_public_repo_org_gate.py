@@ -399,7 +399,7 @@ def _patch_membership_http(monkeypatch, response: _FakeResponse) -> dict[str, An
     def factory(*_args, **_kwargs) -> _FakeAsyncClient:
         return _FakeAsyncClient(response)
 
-    monkeypatch.setattr(github_org_membership.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(github_org_membership.httpx2, "AsyncClient", factory)
     return seen
 
 

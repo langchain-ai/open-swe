@@ -4,7 +4,7 @@ All GitHub API calls in the reviewer publish path (and gradually everywhere else
 should go through ``github_request`` instead of raw ``httpx2.AsyncClient`` calls.
 This centralises:
 
-- **Timeouts**: httpx defaults to 5 s which is too aggressive for paginated
+- **Timeouts**: httpx2 defaults to 5 s which is too aggressive for paginated
   GitHub/GraphQL fetches.  The default here is 30 s read / 10 s connect.
 - **Retries**: exponential backoff with jitter for retryable HTTP status codes
   and transport errors, gated by method idempotency to prevent duplicate writes.

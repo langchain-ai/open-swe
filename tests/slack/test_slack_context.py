@@ -1464,7 +1464,7 @@ def test_get_slack_permalink_returns_link(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
     link = "https://workspace.slack.com/archives/C123/p1700000000000100"
     monkeypatch.setattr(
-        slack_utils.httpx,
+        slack_utils.httpx2,
         "AsyncClient",
         lambda *a, **k: _FakeAsyncClient({"ok": True, "permalink": link}),
     )
@@ -1477,7 +1477,7 @@ def test_get_slack_permalink_returns_link(monkeypatch: pytest.MonkeyPatch) -> No
 def test_get_slack_permalink_returns_none_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(
-        slack_utils.httpx,
+        slack_utils.httpx2,
         "AsyncClient",
         lambda *a, **k: _FakeAsyncClient({"ok": False, "error": "message_not_found"}),
     )
