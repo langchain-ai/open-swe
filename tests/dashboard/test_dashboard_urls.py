@@ -35,18 +35,38 @@ def test_bundled_dashboard_lives_on_the_backend_origin(
 def test_deployed_dashboard_app_proxies_even_with_a_bundled_build(
     monkeypatch: pytest.MonkeyPatch, bundled: Path
 ) -> None:
-    """Every Platform image bundles a build, so only the origins say who serves users."""
+    """open-swe's own deployment: a dashboard app on its own host, fronting a
+    Platform backend that bundles a build and is reached through that host."""
     monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
-    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dev.open-swe.langchain.dev")
+    monkeypatch.setenv("LANGGRAPH_URL", "https://open-swe-preview-abc.us.langgraph.app")
 
+    assert dashboard_links.dashboard_is_same_origin() is True
     assert dashboard_links.dashboard_proxies_requests() is True
 
 
-def test_bundled_dashboard_proxies_nothing(monkeypatch: pytest.MonkeyPatch, bundled: Path) -> None:
+@pytest.mark.parametrize("explicit_base", [None, "https://backend.example"])
+def test_bundled_dashboard_proxies_nothing(
+    monkeypatch: pytest.MonkeyPatch, bundled: Path, explicit_base: str | None
+) -> None:
+    monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_API_BASE_URL", raising=False)
+    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+    if explicit_base:
+        monkeypatch.setenv("DASHBOARD_BASE_URL", explicit_base)
+    else:
+        monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+
+    assert dashboard_links.dashboard_proxies_requests() is False
+
+
+def test_fresh_platform_deployment_without_a_backend_url_proxies_nothing(
+    monkeypatch: pytest.MonkeyPatch, bundled: Path
+) -> None:
     monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
     monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
-    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+    monkeypatch.delenv("LANGGRAPH_URL", raising=False)
 
     assert dashboard_links.dashboard_proxies_requests() is False
 
