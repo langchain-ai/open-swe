@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 
 import type {
+  PRMergeRateCohort,
   ReviewerStatsPayload,
   UsageLeaderboardPeriod,
   UsageLeaderboardRow,
@@ -48,8 +49,11 @@ function UsagePage() {
     queryKey: ["usageLeaderboard", activePeriod],
     queryFn: () => api.usageLeaderboard(activePeriod, 10),
     enabled: !!session.data,
-    staleTime: 60 * 1000,
-    refetchInterval: 60 * 1000,
+  })
+  const mergeRate = useQuery({
+    queryKey: ["prMergeRateByModel", activePeriod],
+    queryFn: () => api.prMergeRateByModel(activePeriod, 14),
+    enabled: !!session.data,
   })
 
   if (session.isLoading) {
@@ -63,6 +67,38 @@ function UsagePage() {
 
   return (
     <AppShell user={session.data} title="Usage" className="max-w-5xl">
+      <SettingsSection
+        title="PR merge rate by originating model"
+        description="PRs are grouped by open date and the opening run's effective model. Open PRs wait 14 days before becoming mature pending; pending is never failure."
+      >
+        {mergeRate.isLoading ? (
+          <div className="space-y-2 p-4">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+          </div>
+        ) : mergeRate.isError ? (
+          <p className="p-4 text-xs text-destructive">
+            Failed to load PR merge rate: {mergeRate.error.message}
+          </p>
+        ) : mergeRate.data?.cohorts.length ? (
+          <PRMergeRateTable cohorts={mergeRate.data.cohorts} />
+        ) : (
+          <p className="p-6 text-center text-xs text-muted-foreground">
+            No cohort meets the privacy threshold for this period yet.
+          </p>
+        )}
+        {mergeRate.data ? (
+          <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+            Decided rate excludes pending PRs. Mature share includes mature
+            pending PRs. Cohorts smaller than{" "}
+            {mergeRate.data.suppression_threshold} are suppressed. Data is
+            trustworthy from{" "}
+            {mergeRate.data.analytics_epoch ?? "the configured epoch"};
+            completeness: {mergeRate.data.completeness}.
+          </div>
+        ) : null}
+      </SettingsSection>
+
       <SettingsSection
         title="Agent leaderboard"
         description="Ranked by merged PRs, then agent lines of code, PRs opened, and invocations. A thread can contain multiple invocations."
@@ -114,7 +150,7 @@ function UsagePage() {
 
       <SettingsSection
         title="Reviewer stats"
-        description="Issues surfaced by Open SWE Review and how often users addressed them."
+        description="Surfaced, resolved, dismissed, open, and reopened findings are tracked separately."
       >
         {leaderboard.isLoading ? (
           <div className="grid gap-3 p-4 sm:grid-cols-2">
@@ -142,6 +178,64 @@ function UsagePage() {
         </p>
       ) : null}
     </AppShell>
+  )
+}
+
+function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] text-xs">
+        <thead className="border-b border-border text-muted-foreground">
+          <tr>
+            <th className="px-4 py-3 text-left font-normal">
+              Originating model
+            </th>
+            <th className="px-2 py-3 text-right font-normal">Merged</th>
+            <th className="px-2 py-3 text-right font-normal">Closed</th>
+            <th className="px-2 py-3 text-right font-normal">Mature pending</th>
+            <th className="px-2 py-3 text-right font-normal">Waiting</th>
+            <th className="px-2 py-3 text-right font-normal">Decided rate</th>
+            <th className="px-4 py-3 text-right font-normal">Mature share</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {cohorts.map((cohort) => (
+            <tr key={`${cohort.model_id}-${cohort.model_attribution_quality}`}>
+              <td className="px-4 py-3">
+                <div className="font-medium">
+                  {cohort.model_id ?? "Unavailable"}
+                </div>
+                <div className="text-muted-foreground">
+                  {cohort.model_attribution_quality} attribution
+                </div>
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.merged}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.closed_without_merge}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.mature_pending}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.waiting}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.decided_merge_rate == null
+                  ? "—"
+                  : formatPercent(cohort.decided_merge_rate)}
+              </td>
+              <td className="px-4 py-3 text-right tabular-nums">
+                {cohort.mature_cohort_merge_share == null
+                  ? "—"
+                  : formatPercent(cohort.mature_cohort_merge_share)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -249,7 +343,12 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
     {
       label: "Dismissed",
       value: stats.dismissed_findings,
-      helper: `${formatNumber(stats.human_replies)} human replies tracked`,
+      helper: "Dismissal is separate from resolution",
+    },
+    {
+      label: "Reopened",
+      value: stats.reopened_findings,
+      helper: "Findings reopened after a terminal state",
     },
   ]
 

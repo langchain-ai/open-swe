@@ -252,6 +252,15 @@ export interface UserMappingsPage {
 
 export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
 
+export interface AnalyticsMetadata {
+  analytics_epoch: string | null
+  summary_version: number
+  freshness: string
+  completeness: string
+  data_watermark: string | null
+  as_of: string
+}
+
 export interface UsageLeaderboardRow {
   rank: number
   user: {
@@ -290,6 +299,7 @@ export interface ReviewerStatsPayload {
   resolved_after_update: number
   dismissed_findings: number
   unresolved_surfaced_findings: number
+  reopened_findings: number
   resolution_rate: number
   human_replies: number
   severity_counts: Record<string, number>
@@ -297,13 +307,36 @@ export interface ReviewerStatsPayload {
   generated_at_ms: number | null
 }
 
-export interface UsageLeaderboardPayload {
+export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   rows: Array<UsageLeaderboardRow>
   total_members: number
   current_user_rank: number | null
   generated_at_ms: number | null
   reviewer_stats: ReviewerStatsPayload
+}
+
+export interface PRMergeRateCohort {
+  model_id: string | null
+  model_attribution_quality: "effective" | "configured" | "unavailable"
+  merged: number
+  closed_without_merge: number
+  mature_pending: number
+  waiting: number
+  cohort_size: number
+  decided_denominator: number
+  decided_merge_rate: number | null
+  mature_denominator: number
+  mature_cohort_merge_share: number | null
+}
+
+export interface PRMergeRatePayload extends AnalyticsMetadata {
+  metric: "pr_merge_rate_by_originating_model"
+  definition: string
+  maturity_days: number
+  period: UsageLeaderboardPeriod
+  suppression_threshold: number
+  cohorts: PRMergeRateCohort[]
 }
 
 export interface Repository {
@@ -840,6 +873,13 @@ export const api = {
           row.avg_invocation_seconds ?? row.avg_run_seconds ?? 0,
       })),
     })),
+  prMergeRateByModel: (
+    period: UsageLeaderboardPeriod = "30d",
+    maturityDays = 14
+  ) =>
+    request<PRMergeRatePayload>(
+      `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}&maturity_days=${maturityDays}`
+    ),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
