@@ -117,7 +117,7 @@ def _patches(client: _FakeLangSmithClient) -> Any:
         patch(
             "agent.review.trace_context.get_langsmith_credentials", AsyncMock(return_value=creds)
         ),
-        patch("agent.review.trace_context._client", return_value=client),
+        patch("agent.review.trace_context.langsmith_client", return_value=client),
         patch(
             "agent.review.trace_context.get_langsmith_trace_url",
             return_value="https://smith/t/thread-1",

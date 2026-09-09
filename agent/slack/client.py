@@ -62,7 +62,7 @@ class GitHubPrRef:
     url: str
 
 
-def _slack_headers() -> dict[str, str]:
+def slack_headers() -> dict[str, str]:
     if not SLACK_BOT_TOKEN:
         return {}
     return {
@@ -418,7 +418,7 @@ async def _post_slack_message_with_ts(
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/chat.postMessage",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json=payload,
             )
             if response.status_code == 429:
@@ -705,7 +705,7 @@ async def _slack_stream_call(method: str, payload: dict[str, Any]) -> dict[str, 
     async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/{method}", headers=_slack_headers(), json=payload
+                f"{SLACK_API_BASE_URL}/{method}", headers=slack_headers(), json=payload
             )
             if response.status_code == 429:
                 raw_retry_after = response.headers.get("Retry-After")
@@ -816,7 +816,7 @@ async def update_slack_message(
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/chat.update",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json=payload,
             )
             if response.status_code == 429:
@@ -975,7 +975,7 @@ async def post_slack_ephemeral_message(
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/chat.postEphemeral",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json=payload,
             )
             response.raise_for_status()
@@ -1004,7 +1004,7 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/reactions.add",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json=payload,
             )
             response.raise_for_status()
@@ -1029,7 +1029,7 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/users.info",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params={"user": user_id},
             )
             response.raise_for_status()
@@ -1082,7 +1082,7 @@ async def get_slack_channel_info(
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/conversations.info",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params={"channel": channel_id},
             )
             if getattr(response, "status_code", None) == 429:
@@ -1267,7 +1267,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
             try:
                 response = await http_client.get(
                     f"{SLACK_API_BASE_URL}/{method}",
-                    headers=_slack_headers(),
+                    headers=slack_headers(),
                     params=params,
                 )
                 response.raise_for_status()
@@ -1372,7 +1372,7 @@ async def fetch_slack_thread_message_by_ts(
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/{method}",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params=params,
             )
             response.raise_for_status()
@@ -1451,7 +1451,7 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/conversations.history",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params={
                     "channel": channel_id,
                     "latest": message_ts,
@@ -1496,7 +1496,7 @@ async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/chat.getPermalink",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params={"channel": channel_id, "message_ts": message_ts},
             )
             response.raise_for_status()

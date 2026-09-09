@@ -84,7 +84,7 @@ _TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
-_DASHBOARD_STREAM_MODES: tuple[str, ...] = (
+DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "values",
     "updates",
     "messages",
@@ -118,18 +118,18 @@ async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
     return await _create_sandbox(*args, **kwargs)
 
 
-def _agent_version_metadata() -> dict[str, str]:
+def agent_version_metadata() -> dict[str, str]:
     revision = ENV.LANGCHAIN_REVISION_ID.optional()
     return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
 
 
-def _require_json_content_type(content_type: str) -> None:
+def require_json_content_type(content_type: str) -> None:
     media_type = content_type.split(";", 1)[0].strip().lower()
     if media_type != "application/json":
         raise HTTPException(415, "Content-Type must be application/json")
 
 
-def _langgraph_proxy_headers(
+def langgraph_proxy_headers(
     *, content_type: str = "application/json", accept: str | None = None
 ) -> dict[str, str]:
     headers = {"Content-Type": content_type}
@@ -145,7 +145,7 @@ def _thread_is_busy(thread: ThreadLike) -> bool:
     return thread.get("status") == "busy"
 
 
-async def _resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
+async def resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
     """Email used for GitHub/LangSmith auth on a run.
 
     Prefers the admin/self GitHub→email mapping (the work email known to
@@ -282,7 +282,7 @@ async def _ensure_dashboard_github_token(login: str) -> None:
         raise HTTPException(401, "github token unavailable, re-login required")
 
 
-def _thread_source(metadata: Mapping[str, Any]) -> str:
+def thread_source(metadata: Mapping[str, Any]) -> str:
     source = metadata.get("source")
     return source if isinstance(source, str) and source else _DASHBOARD_SOURCE
 
@@ -298,7 +298,7 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _thread_is_readable(metadata: Mapping[str, Any]) -> bool:
+def thread_is_readable(metadata: Mapping[str, Any]) -> bool:
     """Any surfaced-source thread is readable by authenticated users.
 
     Dashboard login is already gated by ``ALLOWED_GITHUB_ORGS`` (see
@@ -306,11 +306,11 @@ def _thread_is_readable(metadata: Mapping[str, Any]) -> bool:
     org member. This lets teammates open "Open in Web" links shared in Slack
     threads with read-only access.
     """
-    return _thread_source(metadata) in _SURFACED_SOURCES
+    return thread_source(metadata) in _SURFACED_SOURCES
 
 
 def _assert_thread_readable(metadata: Mapping[str, Any]) -> None:
-    if not _thread_is_readable(metadata):
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
 
 
@@ -375,14 +375,14 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("resolved") is True
 
 
-def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
+def thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     if slack_thread is None:
         return None
     return slack_thread.permalink.strip() or None
 
 
-def _thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
+def thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     team_id = SLACK_TEAM_ID.strip()
     if (
@@ -414,13 +414,13 @@ def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
 def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
     return (
         _metadata_string(metadata, "thread_category") == "automation"
-        or _thread_source(metadata) == "schedule"
+        or thread_source(metadata) == "schedule"
         or _metadata_string(metadata, "schedule_id") is not None
     )
 
 
 def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
-    source = _thread_source(metadata)
+    source = thread_source(metadata)
     origin = _metadata_string(metadata, "origin") or source
     trigger_kind = _metadata_string(metadata, "trigger_kind") or (
         "schedule_test"
@@ -540,7 +540,7 @@ async def _thread_summary(
         "adminThread": metadata.get("admin_thread") is True,
         "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
-        "source": _thread_source(metadata),
+        "source": thread_source(metadata),
         "origin": origin,
         "threadCategory": thread_category,
         "triggerKind": trigger_kind,
@@ -567,8 +567,8 @@ async def _thread_summary(
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
-        "sourceUrl": _thread_source_url(metadata),
-        "sourceAppUrl": _thread_source_app_url(metadata),
+        "sourceUrl": thread_source_url(metadata),
+        "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
     }
@@ -785,7 +785,7 @@ def _metadata_matches_filters(
         return False
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
-    if source and _thread_source(metadata) != source:
+    if source and thread_source(metadata) != source:
         return False
     if query:
         pull_requests = metadata.get("pull_requests")
@@ -940,7 +940,7 @@ async def _collect_thread_candidates(
                 break
             for thread in batch:
                 metadata = _thread_metadata(thread)
-                if surfaced_only and _thread_source(metadata) not in _SURFACED_SOURCES:
+                if surfaced_only and thread_source(metadata) not in _SURFACED_SOURCES:
                     continue
                 if not _metadata_matches_filters(
                     metadata,
@@ -992,7 +992,7 @@ async def _pinned_thread_summaries(
         except Exception:  # noqa: BLE001
             logger.debug("Could not fetch pinned sidebar thread %s", thread_id, exc_info=True)
             return None
-        if not isinstance(thread, Mapping) or not _thread_is_readable(_thread_metadata(thread)):
+        if not isinstance(thread, Mapping) or not thread_is_readable(_thread_metadata(thread)):
             return None
         return await _summarize_thread(client, thread)
 
@@ -1379,7 +1379,7 @@ async def _create_dashboard_thread_record(
     return as_thread_dict(thread)
 
 
-def _repo_config_from_metadata(metadata: Mapping[str, Any]) -> dict[str, str]:
+def repo_config_from_metadata(metadata: Mapping[str, Any]) -> dict[str, str]:
     owner, name, _ = _metadata_repo(metadata)
     if owner and name:
         return {"owner": owner, "name": name}
@@ -1395,14 +1395,14 @@ async def _build_dashboard_configurable(
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     profile = profile if profile is not None else await get_profile(login) or {}
-    thread_source = _thread_source(metadata)
+    source = thread_source(metadata)
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
-        "source": thread_source,
+        "source": source,
         "github_login": login,
-        "user_email": await _resolve_run_email(login, profile),
+        "user_email": await resolve_run_email(login, profile),
     }
-    repo_config = _repo_config_from_metadata(metadata)
+    repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
     elif metadata.get("repo_explicitly_none") is True:
@@ -1758,12 +1758,12 @@ async def _enrich_run_start_command(
         run_metadata = {}
     run_metadata = {
         **run_metadata,
-        **_agent_version_metadata(),
+        **agent_version_metadata(),
         "prepare_run_id": prepare_run_id,
     }
 
     params["assistant_id"] = _ASSISTANT_ID
-    params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
+    params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
     params["config"] = {**client_config, "configurable": merged_configurable}
     params["metadata"] = run_metadata
@@ -2562,18 +2562,18 @@ async def proxy_dashboard_thread_stream_events(
 ) -> AsyncIterator[bytes]:
     # Preflight here (not in the generator) so auth/content-type failures
     # surface as real HTTP errors before the SSE response starts streaming.
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
-    return _stream_thread_events(thread_id, body, content_type)
+    return stream_thread_events(thread_id, body, content_type)
 
 
-async def _stream_thread_events(
+async def stream_thread_events(
     thread_id: str,
     body: bytes,
     content_type: str,
 ) -> AsyncIterator[bytes]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
-    headers = _langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
+    headers = langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
     try:
         async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
@@ -2598,7 +2598,7 @@ async def _observe_dashboard_run_ttft(
     started_at_ms: int,
 ) -> None:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/stream"
-    headers = _langgraph_proxy_headers(accept="text/event-stream")
+    headers = langgraph_proxy_headers(accept="text/event-stream")
     headers["Last-Event-ID"] = "-1"
     detector = AssistantTextEventDetector(run_id)
     try:
@@ -2636,7 +2636,7 @@ async def proxy_dashboard_thread_commands(
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     received_at_ms = _now_ms()
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -2678,7 +2678,7 @@ async def proxy_dashboard_thread_commands(
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
-    headers = _langgraph_proxy_headers(content_type=content_type)
+    headers = langgraph_proxy_headers(content_type=content_type)
 
     enriched = await _enrich_run_start_command(
         thread_id,
@@ -2762,7 +2762,7 @@ async def proxy_dashboard_thread_history(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
     try:
         payload = json.loads(body or b"{}")
@@ -2776,7 +2776,7 @@ async def proxy_dashboard_thread_history(
     if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
         payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
-    headers = _langgraph_proxy_headers(content_type=content_type)
+    headers = langgraph_proxy_headers(content_type=content_type)
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
@@ -2794,7 +2794,7 @@ async def proxy_dashboard_thread_run_cancel(
 ) -> tuple[int, bytes, str | None]:
     await _authorized_thread_metadata(thread_id, login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
-    headers = _langgraph_proxy_headers()
+    headers = langgraph_proxy_headers()
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(
             url,

@@ -133,7 +133,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     if not repo_config:
         return {"status": "ignored", "reason": "No default repository configured"}
 
-    if not common._is_repo_allowed(repo_config):
+    if not common.is_repo_allowed(repo_config):
         common.logger.warning(
             "Rejecting Linear webhook: repo '%s/%s' not in allowlist",
             repo_config.get("owner"),

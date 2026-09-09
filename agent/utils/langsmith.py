@@ -306,12 +306,12 @@ async def create_langsmith_thread_feedback(
         "feedback_source": {"type": "api", "metadata": source_info or {}},
     }
     try:
-        await client._arequest_with_retries("POST", "/feedback", json=payload)
+        await client._arequest_with_retries("POST", "/feedback", json=payload)  # noqa: SLF001
         return True
     except Exception:  # noqa: BLE001
         pass
     try:
-        await client._arequest_with_retries(
+        await client._arequest_with_retries(  # noqa: SLF001
             "PATCH",
             f"/feedback/{feedback_id}",
             json={"score": score, "comment": comment},

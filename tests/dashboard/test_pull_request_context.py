@@ -8,7 +8,7 @@ from agent.github import pull_request_context
 
 
 def test_actionable_checks_preserve_requiredness() -> None:
-    assert pull_request_context._actionable_check(
+    assert pull_request_context.actionable_check(
         {
             "__typename": "CheckRun",
             "name": "unit",
@@ -25,7 +25,7 @@ def test_actionable_checks_preserve_requiredness() -> None:
         "url": "https://checks/unit",
     }
     assert (
-        pull_request_context._actionable_check(
+        pull_request_context.actionable_check(
             {
                 "__typename": "CheckRun",
                 "name": "optional-skip",
@@ -36,7 +36,7 @@ def test_actionable_checks_preserve_requiredness() -> None:
         )
         is None
     )
-    assert pull_request_context._actionable_check(
+    assert pull_request_context.actionable_check(
         {
             "__typename": "StatusContext",
             "context": "required-policy",
