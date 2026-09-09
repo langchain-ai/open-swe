@@ -132,6 +132,7 @@ def update_code_channel(channel_id: str, **values: Any) -> dict[str, Any] | None
 # --- GitHub ----------------------------------------------------------------
 PULLS: list[dict[str, Any]] = []
 REPO_PRIVATE = [False]
+REVIEW_QUEUE_FAILURE = [False]
 _pr_seq = [0]
 _seed_seq = [0]
 _REMOTES = {
@@ -440,6 +441,14 @@ def repo_private() -> bool:
     return REPO_PRIVATE[0]
 
 
+def set_review_queue_failure(value: bool) -> None:
+    REVIEW_QUEUE_FAILURE[0] = value
+
+
+def review_queue_failure() -> bool:
+    return REVIEW_QUEUE_FAILURE[0]
+
+
 # --- LangSmith snapshots ---------------------------------------------------
 # Captures the environment tools asked for: {"snapshot_id", "name", "sandbox_id"}.
 # The E2E sandbox is the local provider, so there is no real snapshot service —
@@ -467,6 +476,7 @@ def reset() -> None:
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
     REPO_PRIVATE[0] = False
+    REVIEW_QUEUE_FAILURE[0] = False
     _pr_seq[0] = 0
     _seed_seq[0] = 0
     seed_bare_remotes()

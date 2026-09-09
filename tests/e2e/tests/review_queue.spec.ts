@@ -1,5 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
-import { SAME_USER, loginAs, seedPull } from "./helpers/dashboard";
+import {
+  SAME_USER,
+  loginAs,
+  seedPull,
+  setReviewQueueFailure,
+} from "./helpers/dashboard";
 
 test.describe("review queue", () => {
   test("lists only ready pull requests from the repositories the user picked", async ({
@@ -144,6 +149,36 @@ test.describe("review queue", () => {
     await setPaths(page, "fakeorg/demo", "");
     await expect(uiRow).toBeVisible();
     await expect(agentRow).toBeVisible();
+  });
+
+  test("surfaces the GitHub failure instead of an endless skeleton", async ({
+    page,
+  }) => {
+    await page.request.post("/control/reset");
+    await loginAs(page, SAME_USER);
+
+    const ready = await seedPull(page, {
+      owner: "fakeorg",
+      repo: "demo",
+      title: "Ready: add greet helper",
+      check_conclusion: "success",
+      mergeable: true,
+    });
+
+    await page.goto("/agents/reviews?tab=queue");
+    await addRepo(page, "fakeorg/demo");
+    const readyRow = page.getByTestId(`review-queue-row-fakeorg/demo-${ready}`);
+    await expect(readyRow).toBeVisible();
+
+    await setReviewQueueFailure(page, true);
+    await page.reload();
+    const error = page.getByTestId("review-queue-error");
+    await expect(error).toBeVisible();
+    await expect(error).toContainText("could not fetch pull requests");
+
+    await setReviewQueueFailure(page, false);
+    await page.reload();
+    await expect(readyRow).toBeVisible();
   });
 });
 

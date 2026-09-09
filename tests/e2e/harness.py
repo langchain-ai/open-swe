@@ -145,6 +145,15 @@ async def control_repo_private(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "private": value})
 
 
+@app.post("/control/review-queue-failure")
+async def control_review_queue_failure(request: Request) -> JSONResponse:
+    body = await request.json()
+    value = bool(body.get("enabled", False))
+    fakes.set_review_queue_failure(value)
+    clear_review_queue_cache()
+    return JSONResponse({"ok": True, "enabled": value})
+
+
 @app.post("/control/pull-request-health")
 async def control_pull_request_health(request: Request) -> JSONResponse:
     body = await request.json()
@@ -743,11 +752,17 @@ def _search_node(pr: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/fake-gh/graphql")
-async def gh_graphql(request: Request) -> JSONResponse:
+async def gh_graphql(request: Request) -> Response:
     body = await request.json()
     variables = body.get("variables", {})
     query = body.get("query", "")
     if "ReviewQueueSearch" in query:
+        if fakes.review_queue_failure():
+            return HTMLResponse(
+                "<html><head><title>502 Bad Gateway</title></head>"
+                "<body><center><h1>502 Bad Gateway</h1></center></body></html>",
+                status_code=502,
+            )
         # Only the repo qualifiers are honoured; the rest of the search string
         # (author, sort, state) is filtered here or irrelevant to the fake.
         search = variables.get("q")

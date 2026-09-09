@@ -66,6 +66,13 @@ export async function setRepoPrivate(page: Page, value: boolean) {
   expect(res.ok()).toBeTruthy();
 }
 
+export async function setReviewQueueFailure(page: Page, enabled: boolean) {
+  const res = await page.request.post("/control/review-queue-failure", {
+    data: { enabled },
+  });
+  expect(res.ok()).toBeTruthy();
+}
+
 export async function setPullRequestHealth(
   page: Page,
   values: Record<string, unknown>,
