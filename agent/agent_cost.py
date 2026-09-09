@@ -156,12 +156,17 @@ async def run_agent_cost_refresh(
 
 
 async def finalize_agent_invocation_usage(
-    *, invocation_id: str, thread_id: str, state: dict[str, Any] | None
+    *,
+    invocation_id: str,
+    thread_id: str,
+    state: dict[str, Any] | None,
+    status: str = "success",
 ) -> None:
     """Persist terminal invocation usage and schedule deferred cost enrichment."""
     try:
         recorded = await record_agent_invocation_completion(
             invocation_id=invocation_id,
+            status=status,
             usage=summarize_run_usage(state, invocation_id=invocation_id),
         )
         if not recorded and not await agent_invocation_needs_cost_refresh(

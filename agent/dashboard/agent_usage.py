@@ -1,74 +1,47 @@
-"""Open SWE Agent and Review usage telemetry."""
+"""PostgreSQL-backed Open SWE usage analytics."""
 
-import asyncio
-import hashlib
-import json
-import logging
-import math
-import time
-import weakref
-from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-from langgraph_sdk import get_client
-from langgraph_sdk.errors import APIStatusError
-
-from agent.review.findings import coerce_finding, is_surfaced
-from agent.utils.json_types import as_json_object, thread_metadata
+from agent.analytics.emitter import (
+    finding_transition,
+    pr_opened,
+    pr_state,
+    review_published,
+    run_cost,
+    run_started,
+    run_terminal,
+)
+from agent.analytics.queries import usage_leaderboard
+from agent.config import ENV
+from agent.utils.json_types import as_json_object
 from agent.utils.run_usage import RunUsageSummary
 
+<<<<<<< HEAD
 AGENT_INVOCATION_NAMESPACE = ["usage", "v2", "agent_runs"]
 AGENT_PR_NAMESPACE = ["usage", "v2", "agent_prs"]
 REVIEW_NAMESPACE = ["usage", "v2", "reviews"]
 REVIEW_FINDING_NAMESPACE = ["usage", "v2", "review_findings"]
+=======
+>>>>>>> 9c9f4458b (Wire lifecycle events and bounded analytics APIs)
 
-Period = Literal["7d", "30d", "all"]
-_PAGE_SIZE = 1000
-_AGENT_SOURCES = frozenset({"dashboard", "github", "slack", "linear", "schedule"})
-_WRITE_LOCKS: weakref.WeakValueDictionary[tuple[tuple[str, ...], str, int], asyncio.Lock] = (
-    weakref.WeakValueDictionary()
-)
-_USAGE_CACHE: dict[tuple[str, str], tuple[int, dict[str, Any], dict[str, Any] | None]] = {}
-_USAGE_CACHE_TTL_MS = 60_000
-
-LEGACY_THREAD_NAMESPACE = ["agent_usage", "threads"]
-LEGACY_PR_NAMESPACE = ["agent_usage", "prs"]
-BACKFILL_NAMESPACE = ["usage", "v2", "backfill"]
-_BACKFILL_KEY = "legacy_v1"
-
-logger = logging.getLogger(__name__)
-
-
-def _client():
-    return get_client()
-
-
-def _now_ms() -> int:
-    return int(datetime.now(UTC).timestamp() * 1000)
-
-
-def _timestamp_ms(value: object) -> int:
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, int | float):
-        raw = int(value)
-        return raw if raw > 10_000_000_000 else raw * 1000
-    if isinstance(value, str) and value.strip():
-        raw = value.strip()
-        if raw.isdigit():
-            return _timestamp_ms(int(raw))
+def _timestamp(value: object) -> datetime:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        raw = float(value) / 1000 if value > 10_000_000_000 else float(value)
+        return datetime.fromtimestamp(raw, UTC)
+    if isinstance(value, str) and value:
         try:
-            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         except ValueError:
-            return 0
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        return int(parsed.timestamp() * 1000)
-    return 0
+            pass
+    return datetime.now(UTC)
 
 
+<<<<<<< HEAD
 def _normalize_period(period: str | None) -> Period:
     if period == "7d" or period == "all":
         return period
@@ -336,6 +309,13 @@ async def _backfill_legacy_usage() -> None:
         await _client().store.put_item(
             BACKFILL_NAMESPACE, _BACKFILL_KEY, {"completed_at_ms": _now_ms()}
         )
+=======
+def _severity(value: object) -> Literal["low", "medium", "high", "critical"]:
+    severity = str(value or "low").lower()
+    if severity in {"low", "medium", "high", "critical"}:
+        return severity
+    return "low"
+>>>>>>> 9c9f4458b (Wire lifecycle events and bounded analytics APIs)
 
 
 async def record_agent_invocation_usage(
@@ -347,7 +327,10 @@ async def record_agent_invocation_usage(
     model_id: str,
     effort: str | None,
     source: str | None,
+    github_user_id: str | int | None = None,
+    repository: str | None = None,
 ) -> None:
+<<<<<<< HEAD
     """Record one actual agent invocation, idempotently."""
     if not invocation_id or not thread_id:
         return
@@ -377,7 +360,7 @@ async def record_agent_invocation_usage(
 
 
 async def record_agent_invocation_completion(
-    *, invocation_id: str, usage: RunUsageSummary | None
+    *, invocation_id: str, usage: RunUsageSummary | None, status: str = "success"
 ) -> bool:
     """Complete an existing invocation record idempotently."""
     if not invocation_id:
@@ -388,6 +371,8 @@ async def record_agent_invocation_completion(
         if not existing or existing.get("finished_at_ms"):
             return False
         value = {**existing, "invocation_id": invocation_id, "finished_at_ms": _now_ms()}
+        if status != "success":
+            value["status"] = status
         if usage is not None:
             counts = {
                 "input_tokens": usage.input_tokens,
@@ -442,6 +427,53 @@ async def record_agent_invocation_cost(*, invocation_id: str, cost_usd: float) -
         )
 
     await _mutate(AGENT_INVOCATION_NAMESPACE, key, update)
+=======
+    del effort
+    from agent.analytics.directory import upsert_model, upsert_person
+
+    await upsert_person(
+        provider="github",
+        immutable_person_key=github_user_id or github_login,
+        github_login=github_login,
+        email=user_email,
+    )
+    await upsert_model(model_id)
+    await run_started(
+        run_key=run_id,
+        thread_key=thread_id,
+        model=model_id,
+        source=source,
+        immutable_person_key=github_user_id or github_login,
+        repository_key=repository,
+    )
+
+
+async def record_agent_run_completion(
+    *, run_id: str, usage: RunUsageSummary | None, status: str = "success", thread_id: str = ""
+) -> bool:
+    await run_terminal(
+        run_key=run_id,
+        thread_key=thread_id or run_id,
+        status=status,
+        input_tokens=usage.input_tokens if usage else None,
+        output_tokens=usage.output_tokens if usage else None,
+        total_tokens=usage.total_tokens if usage else None,
+        producer_suffix="middleware",
+    )
+    return True
+
+
+async def agent_run_needs_cost_refresh(*, run_id: str) -> bool:
+    return bool(run_id and ENV.ANALYTICS_WORKSPACE_ID.optional())
+
+
+async def mark_agent_cost_refresh_scheduled(*, run_id: str) -> None:
+    del run_id
+
+
+async def record_agent_run_cost(*, run_id: str, cost_usd: float) -> None:
+    await run_cost(run_key=run_id, cost_usd=cost_usd)
+>>>>>>> 9c9f4458b (Wire lifecycle events and bounded analytics APIs)
 
 
 async def record_agent_pr_usage(
@@ -462,82 +494,64 @@ async def record_agent_pr_usage(
     merged: bool = False,
     created_at: object = None,
     merged_at: object = None,
+    run_id: str | None = None,
+    model_id: str | None = None,
+    source: str | None = None,
+    repository_private: bool | None = None,
 ) -> None:
-    """Record an Agent-authored PR while preserving its original attribution."""
-    if not owner or not repo or not pr_number:
+    del github_login, user_email, pr_url, head, base, additions, deletions, changed_files
+    opening_run = run_id or thread_id
+    if not opening_run:
         return
-    key = _store_key("pr", owner.lower(), repo.lower(), pr_number)
-    now_ms = _now_ms()
-
-    def update(existing: dict[str, Any] | None) -> dict[str, Any]:
-        was_merged = bool((existing or {}).get("merged"))
-        value = {
-            **(existing or {}),
-            "owner": owner,
-            "repo": repo,
-            "pr_number": pr_number,
-            "pr_url": pr_url or (existing or {}).get("pr_url", ""),
-            "head": head,
-            "base": base,
-            "additions": max(0, additions),
-            "deletions": max(0, deletions),
-            "changed_files": max(0, changed_files),
-            "state": "closed" if was_merged else state or "open",
-            "merged": was_merged or bool(merged),
-            "merged_at_ms": _timestamp_ms(merged_at) or (existing or {}).get("merged_at_ms", 0),
-            "updated_at_ms": now_ms,
-        }
-        if not existing:
-            value.update(
-                thread_id=thread_id or "",
-                github_login=_login(github_login),
-                user_email=_email(user_email),
-                created_at_ms=_timestamp_ms(created_at) or now_ms,
-            )
-        return value
-
-    await _mutate(AGENT_PR_NAMESPACE, key, update)
+    await pr_opened(
+        owner=owner,
+        repo=repo,
+        number=pr_number,
+        run_key=opening_run,
+        model=model_id,
+        source=source,
+        repository_private=repository_private,
+        occurred_at=_timestamp(created_at),
+    )
+    if merged or state == "closed":
+        await pr_state(
+            owner=owner,
+            repo=repo,
+            number=pr_number,
+            action="closed",
+            merged=merged,
+            source_version=None,
+            occurred_at=_timestamp(merged_at),
+        )
 
 
 async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
-    """Update a known Agent PR from a verified GitHub webhook payload."""
     pr = payload.get("pull_request")
-    repo_payload = payload.get("repository")
-    if not isinstance(pr, dict) or not isinstance(repo_payload, dict):
+    repository = payload.get("repository")
+    if not isinstance(pr, dict) or not isinstance(repository, dict):
         return
-    owner_payload = repo_payload.get("owner")
+    owner_payload = repository.get("owner")
     owner = owner_payload.get("login") if isinstance(owner_payload, dict) else None
-    repo = repo_payload.get("name")
-    number = pr.get("number")
-    if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
+    repo = repository.get("name")
+    number = pr.get("number") or payload.get("number")
+    action = payload.get("action")
+    if (
+        not isinstance(owner, str)
+        or not isinstance(repo, str)
+        or not isinstance(number, int)
+        or action not in {"closed", "reopened"}
+    ):
         return
-    key = _store_key("pr", owner.lower(), repo.lower(), number)
-    existing = await _get(AGENT_PR_NAMESPACE, key)
-    if not existing:
-        return
-    await record_agent_pr_usage(
-        thread_id=existing.get("thread_id") if isinstance(existing.get("thread_id"), str) else None,
-        github_login=existing.get("github_login"),
-        user_email=existing.get("user_email"),
+    updated_at = _timestamp(pr.get("updated_at") or pr.get("closed_at"))
+    await pr_state(
         owner=owner,
         repo=repo,
-        pr_number=number,
-        pr_url=pr.get("html_url"),
-        head=as_json_object(pr.get("head")).get("ref") or existing.get("head", ""),
-        base=as_json_object(pr.get("base")).get("ref") or existing.get("base", ""),
-        additions=_int(pr.get("additions"), existing.get("additions")),
-        deletions=_int(pr.get("deletions"), existing.get("deletions")),
-        changed_files=_int(pr.get("changed_files"), existing.get("changed_files")),
-        state=pr.get("state") if isinstance(pr.get("state"), str) else existing.get("state"),
+        number=number,
+        action=action,
         merged=bool(pr.get("merged")),
-        created_at=pr.get("created_at"),
-        merged_at=pr.get("merged_at"),
+        source_version=int(updated_at.timestamp() * 1_000_000),
+        occurred_at=updated_at,
     )
-
-
-def _finding_surfaced(finding: Mapping[str, Any]) -> bool:
-    record = coerce_finding(dict(finding))
-    return record is not None and is_surfaced(record)
 
 
 async def record_reviewer_publication(
@@ -549,80 +563,37 @@ async def record_reviewer_publication(
     head_sha: str,
     findings: Sequence[Mapping[str, Any]],
 ) -> None:
-    """Record a completed review and its finding cohort."""
-    now_ms = _now_ms()
-
-    def update_review(existing: dict[str, Any] | None) -> dict[str, Any]:
-        return {
-            **(existing or {}),
-            "thread_id": thread_id,
-            "owner": owner,
-            "repo": repo,
-            "pr_number": pr_number,
-            "head_sha": head_sha,
-            "findings_recorded": sum(
-                1 for finding in findings if finding.get("first_seen_sha") == head_sha
-            ),
-            "published_at_ms": (existing or {}).get("published_at_ms") or now_ms,
-        }
-
-    await _mutate(REVIEW_NAMESPACE, _store_key("review", thread_id, head_sha), update_review)
+    await review_published(
+        thread_key=thread_id,
+        owner=owner,
+        repo=repo,
+        number=pr_number,
+        head_sha=head_sha,
+        finding_count=len(findings),
+    )
     for finding in findings:
-        finding_id = finding.get("id")
-        if not isinstance(finding_id, str) or not finding_id:
-            continue
-        key = _store_key("finding", thread_id, finding_id)
-        surfaced = _finding_surfaced(finding)
-
-        def update(
-            existing: dict[str, Any] | None,
-            finding: Mapping[str, Any] = finding,
-            finding_id: str = finding_id,
-            surfaced: bool = surfaced,
-        ) -> dict[str, Any]:
-            value = {
-                **(existing or {}),
-                "thread_id": thread_id,
-                "finding_id": finding_id,
-                "owner": owner,
-                "repo": repo,
-                "pr_number": pr_number,
-                "severity": finding.get("severity") or "",
-                "category": finding.get("category") or "",
-                "status": finding.get("status") or "open",
-                "first_seen_sha": finding.get("first_seen_sha") or "",
-                "last_confirmed_sha": finding.get("last_confirmed_sha") or "",
-                "surfaced_at_ms": (existing or {}).get("surfaced_at_ms")
-                or (now_ms if surfaced else 0),
-                "human_replies": _human_reply_count(finding),
-                "updated_at_ms": now_ms,
-            }
-            if not existing:
-                value["recorded_at_ms"] = now_ms
-            if value["status"] == "resolved" and not value.get("resolved_at_ms"):
-                value["resolved_at_ms"] = now_ms
-                value["resolved_sha"] = value["last_confirmed_sha"]
-            return value
-
-        await _mutate(REVIEW_FINDING_NAMESPACE, key, update)
-
-
-def _human_reply_count(finding: Mapping[str, Any]) -> int:
-    interactions = finding.get("interactions")
-    if isinstance(interactions, list):
-        return sum(
-            1
-            for interaction in interactions
-            if isinstance(interaction, dict) and interaction.get("kind") == "human_reply"
-        )
-    return int(bool(finding.get("last_human_reply_at")))
+        if finding.get("surface_state") == "surfaced":
+            await finding_transition(
+                thread_key=thread_id,
+                finding_key=str(finding.get("id") or ""),
+                owner=owner,
+                repo=repo,
+                number=pr_number,
+                state="surfaced",
+                severity=_severity(finding.get("severity")),
+                category=str(finding.get("category") or "unknown"),
+                version=str(finding.get("last_confirmed_sha") or head_sha),
+            )
 
 
 async def record_reviewer_finding_state(thread_id: str, finding: Mapping[str, Any]) -> None:
-    """Update an already-published finding's outcome state."""
-    finding_id = finding.get("id")
-    if not isinstance(finding_id, str) or not finding_id:
+    pr = as_json_object(finding.get("pr"))
+    owner = str(pr.get("owner") or finding.get("owner") or "")
+    repo = str(pr.get("name") or finding.get("repo") or "")
+    number = pr.get("number") or finding.get("pr_number")
+    if not owner or not repo or not isinstance(number, int):
         return
+<<<<<<< HEAD
     key = _store_key("finding", thread_id, finding_id)
     now_ms = _now_ms()
 
@@ -703,6 +674,21 @@ def _limited_rows(
 def _in_period(record: dict[str, Any], field: str, cutoff_ms: int) -> bool:
     timestamp = _timestamp_ms(record.get(field))
     return timestamp > 0 and timestamp >= cutoff_ms
+=======
+    status = str(finding.get("status") or "open")
+    state = status if status in {"resolved", "dismissed"} else "reopened"
+    await finding_transition(
+        thread_key=thread_id,
+        finding_key=str(finding.get("id") or ""),
+        owner=owner,
+        repo=repo,
+        number=number,
+        state=state,
+        severity=_severity(finding.get("severity")),
+        category=str(finding.get("category") or "unknown"),
+        version=str(finding.get("last_confirmed_sha") or datetime.now(UTC).isoformat()),
+    )
+>>>>>>> 9c9f4458b (Wire lifecycle events and bounded analytics APIs)
 
 
 async def list_agent_usage_leaderboard(
@@ -711,14 +697,13 @@ async def list_agent_usage_leaderboard(
     limit: int,
     current_login: str | None,
     current_email: str | None,
+    admin: bool = False,
 ) -> dict[str, Any]:
-    """Aggregate current usage from complete, paginated telemetry."""
-    started_at = time.monotonic()
-    normalized = _normalize_period(period)
-    logger.info(
-        "Usage leaderboard aggregation started",
-        extra={"usage_period": normalized, "usage_limit": limit},
+    del current_email
+    return await usage_leaderboard(
+        period=period, limit=limit, current_login=current_login, admin=admin
     )
+<<<<<<< HEAD
     cache_key = (normalized, _login(current_login) or _email(current_email))
     cached = _USAGE_CACHE.get(cache_key)
     if cached and _now_ms() - cached[0] < _USAGE_CACHE_TTL_MS:
@@ -913,3 +898,5 @@ async def list_agent_usage_leaderboard(
         },
     )
     return result
+=======
+>>>>>>> 9c9f4458b (Wire lifecycle events and bounded analytics APIs)

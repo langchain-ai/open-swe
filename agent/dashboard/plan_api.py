@@ -313,6 +313,11 @@ async def reject_plan(
         ):
             raise HTTPException(409, "plan is no longer ready for review")
         await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
+        from agent.analytics.emitter import task_rework
+
+        await task_rework(
+            thread_id, source="dashboard", scope="major", reason="plan_review"
+        )
     if rejection is not None and not rejection.dispatch:
         return {"status": PLAN_STATUS_REVISING}
     feedback = format_plan_comments(await list_plan_comments(thread_id, raise_on_error=True))

@@ -794,10 +794,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         invocation_id=cfg.invocation_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
+                        github_user_id=cfg.github_user_id,
                         user_email=self._user_email,
                         model_id=self._model_id,
                         effort=self._effort,
                         source=self._source,
+                        repository=cfg.repo_full_name or None,
                     )
         except Exception:
             logger.debug(
