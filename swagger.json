@@ -123,20 +123,6 @@
         "title": "CommentBody",
         "type": "object"
       },
-      "CurrentsCredentialsUpdate": {
-        "description": "Connect Currents.dev with an organization API key.",
-        "properties": {
-          "api_key": {
-            "title": "Api Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "api_key"
-        ],
-        "title": "CurrentsCredentialsUpdate",
-        "type": "object"
-      },
       "DashboardImageBody": {
         "properties": {
           "base64": {
@@ -3140,106 +3126,6 @@
           }
         ],
         "summary": "Api Put My Instructions",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/my-credentials/currents": {
-      "delete": {
-        "operationId": "disconnect_my_currents_dashboard_api_my_credentials_currents_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Disconnect My Currents Dashboard Api My Credentials Currents Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Disconnect My Currents",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "get": {
-        "operationId": "get_my_currents_status_dashboard_api_my_credentials_currents_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Currents Status Dashboard Api My Credentials Currents Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get My Currents Status",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "put": {
-        "operationId": "connect_my_currents_dashboard_api_my_credentials_currents_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CurrentsCredentialsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Connect My Currents Dashboard Api My Credentials Currents Put",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Connect My Currents",
         "tags": [
           "dashboard"
         ]

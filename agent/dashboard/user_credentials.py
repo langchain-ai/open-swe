@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from pydantic import BaseModel, field_validator
-
 from agent.dashboard.notion_oauth import is_reauth_required_error, refresh_notion_access_token
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value
@@ -15,15 +13,9 @@ from agent.store import delete_value, get_value, now_iso, put_value
 logger = logging.getLogger(__name__)
 
 USER_CREDENTIALS_NAMESPACE: list[str] = ["user_credentials"]
-CURRENTS_KEY = "currents"
 NOTION_KEY = "notion"
 
-CURRENTS_API_BASE = "https://api.currents.dev/v1"
 _NOTION_TOKEN_EXPIRY_SKEW_SECONDS = 300
-
-
-def _last4(value: str) -> str:
-    return value[-4:] if len(value) >= 4 else value
 
 
 def _namespace(login: str) -> list[str]:
@@ -40,34 +32,6 @@ async def _put_provider(login: str, key: str, value: dict[str, Any]) -> None:
 
 async def _delete_provider(login: str, key: str) -> None:
     await delete_value(_namespace(login), key)
-
-
-async def _provider_for_tool_loading(login: str, key: str) -> dict[str, Any] | None:
-    """Read a provider record on the agent's tool-loading path.
-
-    Fail-soft on purpose: these credentials only decide whether an optional
-    integration's tools get loaded, so an unreachable store must cost a run
-    those tools rather than the run itself. Dashboard reads go through
-    :func:`_get_provider` and surface the failure.
-    """
-    try:
-        return await _get_provider(login, key)
-    except Exception:
-        logger.warning("user credentials lookup failed for %s/%s", login, key, exc_info=True)
-        return None
-
-
-class CurrentsCredentialsUpdate(BaseModel):
-    """Connect Currents.dev with an organization API key."""
-
-    api_key: str
-
-    @field_validator("api_key")
-    @classmethod
-    def _require_non_empty(cls, v: object) -> str:
-        if not isinstance(v, str) or not v.strip():
-            raise ValueError("api_key must be a non-empty string")
-        return v.strip()
 
 
 @dataclass(frozen=True)
@@ -325,44 +289,3 @@ async def _load_notion_credentials(
 async def get_notion_access_token(login: str) -> str | None:
     credentials = await get_notion_credentials(login)
     return credentials.access_token if credentials else None
-
-
-async def get_currents_status(login: str) -> dict[str, Any]:
-    """Return a redacted, dashboard-safe view of the user's Currents key."""
-    currents = await _get_provider(login, CURRENTS_KEY)
-    return {
-        "currents": {
-            "connected": True,
-            "api_key_last4": currents.get("api_key_last4", ""),
-            "updated_at": currents.get("updated_at"),
-        }
-        if currents
-        else {"connected": False},
-    }
-
-
-async def connect_currents(login: str, update: CurrentsCredentialsUpdate) -> dict[str, Any]:
-    await _put_provider(
-        login,
-        CURRENTS_KEY,
-        {
-            "encrypted_api_key": encrypt_token(update.api_key),
-            "api_key_last4": _last4(update.api_key),
-            "updated_at": now_iso(),
-        },
-    )
-    return await get_currents_status(login)
-
-
-async def disconnect_currents(login: str) -> dict[str, Any]:
-    await _delete_provider(login, CURRENTS_KEY)
-    return await get_currents_status(login)
-
-
-async def get_currents_api_key(login: str) -> str | None:
-    """Return the decrypted Currents API key, or ``None`` when not connected."""
-    currents = await _provider_for_tool_loading(login, CURRENTS_KEY)
-    if not isinstance(currents, dict):
-        return None
-    api_key = decrypt_token(currents.get("encrypted_api_key", ""))
-    return api_key or None

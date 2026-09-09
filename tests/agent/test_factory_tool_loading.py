@@ -101,7 +101,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
         patch("agent.server.email_for_login", new_callable=AsyncMock, return_value=None),
         patch("agent.server.load_workspace_mcp_tools", side_effect=rendezvous([mcp_tool])),
-        patch("agent.server._load_integration_tools", side_effect=rendezvous(([], []))),
+        patch("agent.server._notion_tools_for", side_effect=rendezvous([])),
     ):
         config = _config()
         config["configurable"]["github_login"] = github_login

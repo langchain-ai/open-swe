@@ -45,11 +45,6 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             new_callable=AsyncMock,
             return_value={"notion": {"connected": True}},
         ),
-        patch(
-            "agent.tools.read_user_settings.get_currents_status",
-            new_callable=AsyncMock,
-            return_value={"currents": {"connected": False}},
-        ),
     ):
         result = await read_user_settings()
 
@@ -65,7 +60,6 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
                 "instructions": "Be concise.",
                 "connections": {
                     "notion": {"connected": True},
-                    "currents": {"connected": False},
                 },
             }
         ],

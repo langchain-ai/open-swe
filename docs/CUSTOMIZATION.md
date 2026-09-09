@@ -276,11 +276,17 @@ Alternatively, choose **Import JSON** and paste a Claude-style configuration:
 }
 ```
 
-Datadog, LangSmith, and Linear agent tools are configured through Workspace MCPs.
-The dedicated Datadog credentials form and built-in LangSmith trace and Linear
-issue tools have been removed. Reconnect Datadog using the MCP configuration above;
-legacy saved Datadog credentials are not migrated automatically. Use the JSON
-import or connection form to add LangSmith and Linear MCP servers as needed.
+Datadog, LangSmith, Linear, and Currents agent tools are configured through
+Workspace MCPs. The dedicated Datadog and Currents credentials forms and built-in
+provider tools have been removed. Reconnect Datadog using the MCP configuration
+above; legacy saved credentials are not migrated automatically. Use the JSON
+import or connection form to add the other MCP servers as needed.
+
+The [Currents MCP server](https://github.com/currents-dev/currents-mcp) wraps the
+Currents REST API. Run its Streamable HTTP server on an HTTPS host reachable by
+Open SWE, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY`
+header. The Currents REST API URL itself does not speak MCP, and the local
+`npx @currents/mcp` command cannot be imported as a workspace connection.
 
 Optional reviewer trace resolution and personal LangSmith credential proxying
 have been removed. Configure agent access to LangSmith through Workspace MCPs.

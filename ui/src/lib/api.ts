@@ -224,16 +224,6 @@ export interface WorkspaceMCPUpdate {
   oauth?: WorkspaceMCPOAuthUpdate | null
 }
 
-export interface CurrentsCredentialStatus {
-  connected: boolean
-  api_key_last4?: string
-  updated_at?: string | null
-}
-
-export interface CurrentsConnectBody {
-  api_key: string
-}
-
 export interface NotionCredentialStatus {
   connected: boolean
   token_expires_at?: string | null
@@ -784,17 +774,6 @@ export const api = {
       `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
-  getMyCurrentsStatus: () =>
-    request<CurrentsCredentialStatus>("/my-credentials/currents"),
-  connectCurrents: (body: CurrentsConnectBody) =>
-    request<CurrentsCredentialStatus>("/my-credentials/currents", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  disconnectCurrents: () =>
-    request<CurrentsCredentialStatus>("/my-credentials/currents", {
-      method: "DELETE",
-    }),
   getMyNotionStatus: () =>
     request<NotionCredentialStatus>("/my-credentials/notion"),
   disconnectNotion: () =>

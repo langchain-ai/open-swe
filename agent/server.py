@@ -145,7 +145,6 @@ from agent.tool_loaders.corridor_mcp import (
     corridor_configured,
     load_corridor_tools,
 )
-from agent.tool_loaders.currents import load_currents_tools
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
@@ -495,22 +494,14 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
         return []
 
 
-async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any], list[Any]]:
+async def _notion_tools_for(profile_login: str | None) -> list[Any]:
     if not profile_login:
-        return [], []
-    currents_tools, notion_tools = await asyncio.gather(
-        _cached_tool_loader(
-            f"tools:currents:{profile_login}",
-            300,
-            lambda: load_currents_tools(profile_login),
-        ),
-        _cached_tool_loader(
-            f"tools:notion:{profile_login}",
-            300,
-            lambda: load_notion_tools(profile_login),
-        ),
+        return []
+    return await _cached_tool_loader(
+        f"tools:notion:{profile_login}",
+        300,
+        lambda: load_notion_tools(profile_login),
     )
-    return currents_tools, notion_tools
 
 
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
@@ -1055,13 +1046,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     workspace_mcp_tools: list[Any] = []
-    currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        (
-            workspace_mcp_tools,
-            (currents_tools, notion_tools),
-        ) = await asyncio.gather(
+        workspace_mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.workspace_mcp_tools",
@@ -1069,8 +1056,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
             _phase_result(
                 thread_id,
-                "factory.integration_tools",
-                lambda: _load_integration_tools(profile_login),
+                "factory.notion_tools",
+                lambda: _notion_tools_for(profile_login),
             ),
         )
 
@@ -1131,7 +1118,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "Workspace MCPs": workspace_mcp_tools,
-        "Currents": currents_tools,
         "Notion": notion_tools,
     }
     if not stop_summary_mode and not local_run:
