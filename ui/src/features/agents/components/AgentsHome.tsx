@@ -36,7 +36,11 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
-import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import {
+  modelConfigurable,
+  promptMessage,
+} from "@/features/agents/lib/stream/promptMessage"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -56,17 +60,6 @@ const NEW_AGENT_PANEL_REF = {
   threadId: NEW_AGENT_PANEL_ID,
 }
 
-function promptContent(text: string, images: Array<ImageChunk>) {
-  const trimmed = text.trim()
-  const imageBlocks = images.map((image) => ({
-    type: "image",
-    base64: image.base64,
-    mime_type: image.mimeType,
-    ...(image.fileName ? { file_name: image.fileName } : {}),
-  }))
-  return [...imageBlocks, ...(trimmed ? [{ type: "text", text: trimmed }] : [])]
-}
-
 export function AgentsHome({
   initialRepo,
   initialLocalProject,
@@ -74,7 +67,7 @@ export function AgentsHome({
   initialRepo?: string
   initialLocalProject?: string
 }) {
-  const stream = useAgentThreadRuntime()
+  const stream = useAgentStream()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
@@ -433,11 +426,8 @@ export function AgentsHome({
     setSubmittedDraft(draft)
     setLocalError(null)
 
-    const configurable: Record<string, unknown> = {}
-    if (activeSelection?.modelId && activeSelection.effort) {
-      configurable.agent_model_id = activeSelection.modelId
-      configurable.agent_effort = activeSelection.effort
-    }
+    const configurable: Record<string, unknown> =
+      modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
     if (planMode) configurable.plan_mode = true
@@ -454,9 +444,7 @@ export function AgentsHome({
     }
     void stream
       .submit(
-        {
-          messages: [{ type: "human", content: promptContent(prompt, images) }],
-        },
+        { messages: [promptMessage(prompt, images)] },
         {
           config: { configurable },
           onError: handleCloudSubmitError,
