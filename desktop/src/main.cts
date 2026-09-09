@@ -1042,10 +1042,12 @@ function createMenu() {
         { role: "togglefullscreen" },
       ],
     },
-    {
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
-    },
+    process.platform === "darwin"
+      ? { role: "windowMenu" }
+      : {
+          label: "Window",
+          submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
+        },
     {
       role: "help",
       submenu: [
