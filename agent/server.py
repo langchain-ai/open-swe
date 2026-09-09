@@ -1296,15 +1296,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ),
             )
             for route, routed_model_id, effort in (
-                ("luna_xhigh", "openai:gpt-5.6-luna", "xhigh"),
-                ("terra_high", "openai:gpt-5.6-terra", "high"),
+                ("glm_flash", "fireworks:accounts/fireworks/models/glm-5p3-flash", "high"),
                 ("sol_medium", "openai:gpt-5.6-sol", "medium"),
+                ("astra_low", "openai:gpt-6-astra", "low"),
             )
         }
         model_selection_middleware.append(
             ModelSelectionMiddleware(
                 routing_models,
-                routing_models["luna_xhigh"],
+                routing_models["glm_flash"],
                 initial_plan_mode=plan_mode,
             )
         )
