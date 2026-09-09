@@ -1,6 +1,10 @@
 import { Link } from "@tanstack/react-router"
-import { ArrowLeftIcon, CaretRightIcon } from "@phosphor-icons/react"
-import type { ReactNode } from "react"
+import {
+  ArrowLeftIcon,
+  CaretRightIcon,
+  LinkSimpleIcon,
+} from "@phosphor-icons/react"
+import { useEffect, type ReactNode } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import { AppSidebar } from "@/components/AppSidebar"
@@ -64,6 +68,15 @@ interface SettingsSectionProps {
   description?: string
   action?: ReactNode
   children: ReactNode
+  id?: string
+}
+
+function sectionId(title: string): string {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
 }
 
 /** A titled group of rows rendered as a single card. */
@@ -72,12 +85,27 @@ export function SettingsSection({
   description,
   action,
   children,
+  id = sectionId(title),
 }: SettingsSectionProps) {
+  useEffect(() => {
+    if (window.location.hash === `#${id}`) {
+      document.getElementById(id)?.scrollIntoView()
+    }
+  }, [id])
+
   return (
-    <section className="space-y-3">
+    <section id={id} className="scroll-mt-4 space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-sm font-medium text-foreground">{title}</h2>
+          <h2 className="text-sm font-medium text-foreground">
+            <a
+              href={`#${id}`}
+              className="group flex w-fit items-center gap-1.5"
+            >
+              {title}
+              <LinkSimpleIcon className="size-3.5 opacity-30 transition-opacity group-hover:opacity-60 group-focus-visible:opacity-60" />
+            </a>
+          </h2>
           {description && (
             <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
               {description}
