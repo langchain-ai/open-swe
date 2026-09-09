@@ -120,10 +120,16 @@ async def test_workspace_mcp_catalog_is_reused_until_settings_change(fake_store,
         return [Tool(name=f"search{calls}", inputSchema={"type": "object"})]
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
-    assert (await load_mcp_tools(settings.workspace_mcp_source))[0].name == "mcp_example_search1_882c6b1452"
-    assert (await load_mcp_tools(settings.workspace_mcp_source))[0].name == "mcp_example_search1_882c6b1452"
+    assert (await load_mcp_tools(settings.workspace_mcp_source))[
+        0
+    ].name == "mcp_example_search1_882c6b1452"
+    assert (await load_mcp_tools(settings.workspace_mcp_source))[
+        0
+    ].name == "mcp_example_search1_882c6b1452"
     await save(allowed_tools=["search1", "search2"])
-    assert (await load_mcp_tools(settings.workspace_mcp_source))[0].name == "mcp_example_search2_7f8eb9cd41"
+    assert (await load_mcp_tools(settings.workspace_mcp_source))[
+        0
+    ].name == "mcp_example_search2_7f8eb9cd41"
 
 
 @pytest.mark.parametrize("paginated", [False, True])
