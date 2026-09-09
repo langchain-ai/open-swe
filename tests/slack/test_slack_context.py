@@ -489,6 +489,31 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
         {"type": "context", "elements": [{"type": "mrkdwn", "text": expected_footer}]},
     ]
 
+    async def trace_url(thread_id: str) -> str:
+        assert thread_id == "mapped-thread"
+        return "https://smith.example/trace"
+
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", trace_url)
+    captured.clear()
+    asyncio.run(
+        slack_utils.post_slack_thread_reply_with_ts(
+            "C123",
+            "1.0",
+            "Failed",
+            agent_thread_id="mapped-thread",
+            include_trace_link=True,
+        )
+    )
+    expected_error_footer = f"{expected_footer} • <https://smith.example/trace|View trace>"
+    assert captured["text"] == f"Failed {expected_error_footer}"
+    assert captured["blocks"] == [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Failed"}},
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": expected_error_footer}],
+        },
+    ]
+
     captured.clear()
     asyncio.run(
         slack_utils.post_slack_thread_reply_with_ts(
@@ -1464,7 +1489,7 @@ def test_get_slack_permalink_returns_link(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
     link = "https://workspace.slack.com/archives/C123/p1700000000000100"
     monkeypatch.setattr(
-        slack_utils.httpx,
+        slack_utils.httpx2,
         "AsyncClient",
         lambda *a, **k: _FakeAsyncClient({"ok": True, "permalink": link}),
     )
@@ -1477,7 +1502,7 @@ def test_get_slack_permalink_returns_link(monkeypatch: pytest.MonkeyPatch) -> No
 def test_get_slack_permalink_returns_none_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(
-        slack_utils.httpx,
+        slack_utils.httpx2,
         "AsyncClient",
         lambda *a, **k: _FakeAsyncClient({"ok": False, "error": "message_not_found"}),
     )

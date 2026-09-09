@@ -13,7 +13,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Literal
 
-import httpx
+import httpx2
 
 from agent.github.http import (
     GITHUB_API_BASE,
@@ -68,7 +68,7 @@ async def create_review_check_run(
         async with github_client(token=token) as client:
             response = await github_request(client, "POST", url, json=payload)
             response.raise_for_status()
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.exception(
             "Failed to create review check run for %s/%s@%s "
             "(does the GitHub App have Checks: Read & write?)",
@@ -104,7 +104,7 @@ async def complete_review_check_run(
         async with github_client(token=token) as client:
             response = await github_request(client, "PATCH", url, json=payload)
             response.raise_for_status()
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.exception(
             "Failed to complete review check run %s on %s/%s", check_run_id, owner, repo
         )
@@ -145,7 +145,7 @@ async def post_autofix_status_check(
         async with github_client(token=token) as client:
             response = await github_request(client, "POST", url, json=payload)
             response.raise_for_status()
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.warning("Failed to post auto-fix status check for %s/%s@%s", owner, repo, head_sha)
         return False
     return True

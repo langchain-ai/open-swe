@@ -31,7 +31,7 @@ import patches  # noqa: E402
 patches.apply()
 
 import fakes  # noqa: E402
-import httpx  # noqa: E402
+import httpx2  # noqa: E402
 from e2e_env import (  # noqa: E402
     BASE_URL,
     BOT_USER_ID,
@@ -169,7 +169,7 @@ async def control_queued(thread_id: str = "") -> JSONResponse:
     return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
 
 
-async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> httpx.Response:
+async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> httpx2.Response:
     """POST a signed Events-API delivery to the real /webhooks/slack route."""
     raw = json.dumps(payload).encode()
     req_ts = str(int(time.time()))
@@ -184,12 +184,12 @@ async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> 
         headers["X-Slack-Retry-Num"] = retry_num
         headers["X-Slack-Retry-Reason"] = "http_timeout"
 
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://harness") as client:
         return await client.post("/webhooks/slack", content=raw, headers=headers)
 
 
-async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx.Response:
+async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response:
     raw = urlencode({"payload": json.dumps(payload)}).encode()
     req_ts = str(int(time.time()))
     base = f"v0:{req_ts}:{raw.decode()}".encode()
@@ -199,12 +199,12 @@ async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx.Response:
         "X-Slack-Request-Timestamp": req_ts,
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://harness") as client:
         return await client.post("/webhooks/slack/interactivity", content=raw, headers=headers)
 
 
-async def _slack_send_result(payload: dict[str, Any], resp: httpx.Response) -> JSONResponse:
+async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> JSONResponse:
     event = payload["event"]
     channel = str(event["channel"])
     thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])

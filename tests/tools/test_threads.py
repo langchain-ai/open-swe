@@ -1,4 +1,5 @@
 import importlib
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -475,9 +476,10 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     assert result["mode"] == "started"
     awaited = proxy.await_args
     assert awaited is not None
-    command = awaited.args[2]
-    assert b'"method": "run.start"' in command
-    assert b'"plan_mode": true' in command
+    command = json.loads(awaited.args[2])
+    assert isinstance(command["id"], int)
+    assert command["method"] == "run.start"
+    assert command["params"]["config"]["configurable"]["plan_mode"] is True
 
 
 async def test_manage_thread_update_plan_preserves_format_and_bounds_response(

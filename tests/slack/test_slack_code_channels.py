@@ -252,7 +252,7 @@ async def test_code_channel_replies_are_posted_top_level(monkeypatch: pytest.Mon
     client.post.return_value = response
 
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setattr(slack_utils.httpx, "AsyncClient", lambda **_kwargs: client)
+    monkeypatch.setattr(slack_utils.httpx2, "AsyncClient", lambda **_kwargs: client)
 
     await slack_utils._post_slack_message_with_ts(
         "C-code", "done", thread_ts=webhook_common.CODE_CHANNEL_SESSION_TS

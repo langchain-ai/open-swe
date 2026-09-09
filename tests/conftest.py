@@ -4,12 +4,15 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 
 from agent import store as agent_store
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
+
+
+class _FakeStoreNotFoundError(Exception):
+    status_code = 404
 
 
 class FakeStore:
@@ -31,11 +34,7 @@ class FakeStore:
     async def get_item(self, namespace: Sequence[str], key: str) -> dict[str, Any]:
         value = self.values(namespace).get(key)
         if value is None:
-            raise httpx.HTTPStatusError(
-                "not found",
-                request=httpx.Request("GET", "http://test"),
-                response=httpx.Response(404),
-            )
+            raise _FakeStoreNotFoundError
         return {"value": dict(value)}
 
     async def put_item(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:

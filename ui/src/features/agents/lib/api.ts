@@ -275,6 +275,11 @@ export const agentsApi = {
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  renameThread: (threadId: string, title: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
   resolveThread: (threadId: string, resolved: boolean) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/resolve`,
