@@ -62,6 +62,7 @@ import type {
   ChatSort,
   OrganizeMode,
   PinnedSort,
+  RecentsPlacement,
 } from "@/features/agents/lib/sidebarPrefs"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
@@ -128,6 +129,7 @@ const NAV = [
 
 /** Threads shown per project before the group needs a "Show more". */
 const PROJECT_PREVIEW_COUNT = 5
+const PROMOTED_RECENTS_COUNT = 5
 
 function cloudProjectAliases(
   projects: ReadonlyArray<SidebarProject>
@@ -531,6 +533,20 @@ export function AgentsSidebar({
           <MenuRadioItem value="updated">Last updated</MenuRadioItem>
         </MenuRadioGroup>
       </MenuGroup>
+      {projectMode && (
+        <MenuGroup>
+          <MenuGroupLabel>Unprojected chats</MenuGroupLabel>
+          <MenuRadioGroup
+            value={prefs.recentsPlacement}
+            onValueChange={(value) =>
+              setView({ recentsPlacement: value as RecentsPlacement })
+            }
+          >
+            <MenuRadioItem value="below-projects">Below projects</MenuRadioItem>
+            <MenuRadioItem value="above-projects">Above projects</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
+      )}
       <MenuSeparator />
       <MenuGroup>
         <MenuCheckboxItem
@@ -554,6 +570,52 @@ export function AgentsSidebar({
         </MenuCheckboxItem>
       </MenuGroup>
     </>
+  )
+
+  const promotedRecents =
+    projectMode && prefs.recentsPlacement === "above-projects"
+      ? recents.slice(0, PROMOTED_RECENTS_COUNT)
+      : recents
+  const canLoadMoreRecents =
+    prefs.recentsPlacement !== "above-projects" && recentsQuery.hasMore
+  const recentsSection = (promotedRecents.length > 0 || canLoadMoreRecents) && (
+    <section className="mb-3">
+      <SidebarSectionHeader
+        label="Recents"
+        collapsed={sectionCollapsed("recents")}
+        onToggleCollapsed={() => toggleSectionCollapsed("recents")}
+        menu={
+          <SidebarSectionMenu label="Recents options">
+            {viewMenuItems}
+          </SidebarSectionMenu>
+        }
+        action={
+          <SidebarSectionAction
+            label="New thread"
+            icon={<NotePencilIcon className="size-4" />}
+            onClick={() => {
+              layout.closeOnMobile()
+              void navigate({ to: "/agents" })
+            }}
+          />
+        }
+      />
+      {!sectionCollapsed("recents") && (
+        <>
+          {promotedRecents.map((item) => (
+            <SidebarThreadRow key={item.key} {...rowProps(item)} />
+          ))}
+          {canLoadMoreRecents && (
+            <LoadMoreThreadsOnScroll
+              label="Load more threads"
+              root={scrollViewport}
+              loading={recentsQuery.isFetchingNextPage}
+              onLoadMore={recentsQuery.fetchNextPage}
+            />
+          )}
+        </>
+      )}
+    </section>
   )
 
   const renderProjectGroup = (group: HydratedProjectGroup) => (
@@ -766,6 +828,10 @@ export function AgentsSidebar({
               </section>
             )}
 
+            {projectMode &&
+              prefs.recentsPlacement === "above-projects" &&
+              recentsSection}
+
             {projectMode && (unpinnedGroups.length > 0 || isDesktop) && (
               <section className="mb-3">
                 <SidebarSectionHeader
@@ -793,45 +859,8 @@ export function AgentsSidebar({
               </section>
             )}
 
-            {(recents.length > 0 || recentsQuery.hasMore) && (
-              <section className="mb-3">
-                <SidebarSectionHeader
-                  label="Recents"
-                  collapsed={sectionCollapsed("recents")}
-                  onToggleCollapsed={() => toggleSectionCollapsed("recents")}
-                  menu={
-                    <SidebarSectionMenu label="Recents options">
-                      {viewMenuItems}
-                    </SidebarSectionMenu>
-                  }
-                  action={
-                    <SidebarSectionAction
-                      label="New thread"
-                      icon={<NotePencilIcon className="size-4" />}
-                      onClick={() => {
-                        layout.closeOnMobile()
-                        void navigate({ to: "/agents" })
-                      }}
-                    />
-                  }
-                />
-                {!sectionCollapsed("recents") && (
-                  <>
-                    {recents.map((item) => (
-                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                    ))}
-                    {recentsQuery.hasMore && (
-                      <LoadMoreThreadsOnScroll
-                        label="Load more threads"
-                        root={scrollViewport}
-                        loading={recentsQuery.isFetchingNextPage}
-                        onLoadMore={recentsQuery.fetchNextPage}
-                      />
-                    )}
-                  </>
-                )}
-              </section>
-            )}
+            {(!projectMode || prefs.recentsPlacement === "below-projects") &&
+              recentsSection}
             {isEmpty && !cloudError && !localThreads.isError && (
               <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
                 {hasActiveFilters(prefs.filters)
