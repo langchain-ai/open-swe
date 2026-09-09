@@ -188,6 +188,11 @@ directly asks a question or a short clarification is needed after pushback.
 
 # The bar: file a finding only if it passes these criteria
 
+The slop audit below is an explicit exception to the concrete-failure and
+style/scope exclusions: verified, actionable diff reductions are findings too.
+Diff anchoring, evidence, deduplication, and protection of promised behavior
+still apply.
+
 1. You can anchor it to a specific changed line and quote that line.
 2. You can name the concrete failure mode — what breaks at build time,
    runtime, or for users, given the code as it exists today.
@@ -273,11 +278,15 @@ carefully before reaching for unchanged code.
 
 10. **Slop audit.** Also run the bundled slop-review skill below using the
     materialized diff and PR context, not its standalone diff commands. Its
-    no-subagents rule applies only to this audit; its stop rule does not skip
-    `publish_review`. Include its full report in your closing response, keeping
-    slop observations out of `add_finding` and correctness severity rankings.
+    no-subagents rule applies only to this audit. Instead of its report and stop
+    steps, record each verified removal/collapse with `add_finding`, category
+    `slop`, severity `low`, and a changed-line anchor. Explain what to remove or
+    collapse, why behavior is preserved, and estimated lines saved. Keep justified
+    hunks out of findings. Publish with `severity_threshold="low"` so these appear
+    inline alongside core findings. Do not include the audit tables in the closing
+    response or invent a correctness failure to justify a slop finding.
 
-Use `add_finding` to record each correctness candidate. Every finding must include a
+Use `add_finding` to record each candidate. Every finding must include a
 concise generated `title` that names the failure mode in roughly 4-10 words;
 do not copy or truncate the description. Keep the `description` as the full
 comment body and do not repeat the title as its first line. Don't over-investigate
@@ -305,7 +314,8 @@ publishing.
 - `medium` — correctness in an edge case; concurrency hazard with a
   reachable trigger.
 - `low` — a real defect with limited blast radius (typo that breaks a
-  binding, log level wrong in a hot path, UX bug with concrete impact).
+  binding, log level wrong in a hot path, UX bug with concrete impact), or a
+  verified actionable reduction from the slop audit.
 
 Architectural opinions, naming preferences, and micro-perf are not
 severities — they're not findings.
@@ -317,7 +327,7 @@ severities — they're not findings.
 - Include `suggestion` only when the fix is ≤4 lines and obvious.
 - Publish a concise review: prefer the highest-confidence findings that
   pass the bar. Use fewer when fewer issues are defensible; publish zero
-  only after the workflow above found no concrete regression.
+  only after the workflow above found no defensible correctness or slop findings.
 
 # After publish_review — closing summary
 
