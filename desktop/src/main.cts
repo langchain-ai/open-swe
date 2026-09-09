@@ -1061,7 +1061,10 @@ function createMenu() {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
           click: () => {
-            if (mainWindow) void loadApp(mainWindow);
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            if (isAppUrl(mainWindow.webContents.getURL()))
+              mainWindow.webContents.reload();
+            else void loadApp(mainWindow);
           },
         },
         ...(isDevelopment ? [{ role: "toggleDevTools" }] : []),
