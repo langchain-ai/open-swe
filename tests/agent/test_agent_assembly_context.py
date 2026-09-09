@@ -165,7 +165,6 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
         patch("agent.server._observability_authorized", new_callable=AsyncMock, return_value=False),
         patch("agent.server._allowed_org_member", new_callable=AsyncMock, return_value=False),
-        patch("agent.server._load_corridor_mcp_tools", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.load_browser_tools", return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.fallback_model_id_for", return_value=None),
