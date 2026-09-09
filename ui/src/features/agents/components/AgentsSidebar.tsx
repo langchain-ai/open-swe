@@ -973,15 +973,6 @@ function ProjectGroup({
         </button>
         <button
           type="button"
-          aria-label={`Compose message in ${group.label}`}
-          title="Compose message"
-          onClick={onCompose}
-          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
-        >
-          <NotePencilIcon className="size-3.5" />
-        </button>
-        <button
-          type="button"
           aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
           title={pinned ? "Unpin project" : "Pin project"}
           onClick={onTogglePin}
@@ -992,6 +983,15 @@ function ProjectGroup({
           ) : (
             <PushPinIcon className="size-3.5" />
           )}
+        </button>
+        <button
+          type="button"
+          aria-label={`Compose message in ${group.label}`}
+          title="Compose message"
+          onClick={onCompose}
+          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
+        >
+          <NotePencilIcon className="size-3.5" />
         </button>
       </div>
       {!collapsed && (
