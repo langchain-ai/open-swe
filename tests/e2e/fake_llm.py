@@ -10,6 +10,7 @@ the preceding tool result, exactly as a real model would.
 import json
 import os
 import re
+import shlex
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -138,17 +139,20 @@ _IFRAME_HTML = """<!doctype html>
 </html>
 """
 
-_SHOW_USER_DIFF_PATH = "/workspace/show-user.patch"
-_SHOW_USER_DIFF = """diff --git a/greet.py b/greet.py
---- a/greet.py
-+++ b/greet.py
-@@ -1,3 +1,4 @@
- def greet(name):
--    return "hi " + name
-+    return f"hi {name}"
-+
-
-"""
+_SHOW_USER_DIFF_LINES = (
+    "diff --git a/greet.py b/greet.py",
+    "--- a/greet.py",
+    "+++ b/greet.py",
+    "@@ -1,2 +1,2 @@",
+    " def greet(name):",
+    '-    return "hi " + name',
+    '+    return f"hi {name}"',
+)
+# The command produces the patch itself: the harness runs SANDBOX_TYPE=local, so a
+# path written through the filesystem tools is not visible to a shell command.
+_SHOW_USER_DIFF_COMMAND = "printf '%s\\n' " + " ".join(
+    shlex.quote(line) for line in _SHOW_USER_DIFF_LINES
+)
 
 _DESKTOP_PR_PAYLOAD = json.dumps(
     {
@@ -744,15 +748,9 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     ),
     "show_user_diff": (
         _tool_step(
-            "Writing a file to diff.",
-            "write_file",
-            {"file_path": _SHOW_USER_DIFF_PATH, "content": _SHOW_USER_DIFF},
-            "call-show-user-diff-write",
-        ),
-        _tool_step(
             "Showing the diff.",
             "show_user",
-            {"command": f"cat {_SHOW_USER_DIFF_PATH}", "title": "Show User E2E Diff"},
+            {"command": _SHOW_USER_DIFF_COMMAND, "title": "Show User E2E Diff"},
             "call-show-user-diff",
         ),
         StepSpec(content="Showed the diff card."),
