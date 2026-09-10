@@ -401,7 +401,7 @@ async def _export_current_feedback(record: ThreadFeedback) -> None:
         return
     synced = await create_langsmith_thread_feedback(
         record.agent_thread_id,
-        f"slack_rating:{record.channel_id}:{record.user_id}:{record.run_id}",
+        "rating",
         score=(record.rating - 1) / 4 if record.rating is not None else None,
         comment=record.comment or None,
         source_info={

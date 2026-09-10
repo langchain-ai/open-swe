@@ -631,7 +631,7 @@ async def test_comment_submission_updates_same_feedback(context: Any, fake_store
     await tasks()
     assert feedback.create_langsmith_thread_feedback.await_args.args == (
         "thread-1",
-        "slack_rating:C1:U1:run-1",
+        "rating",
     )
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 0.25
 
