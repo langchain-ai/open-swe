@@ -10,7 +10,7 @@ import posixpath
 from collections.abc import Iterable
 from urllib.parse import quote
 
-import httpx
+import httpx2
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +69,12 @@ async def fetch_agents_md(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx2.AsyncClient(timeout=timeout) as client:
         for filename in _AGENT_DOC_FILENAMES:
             url = f"https://api.github.com/repos/{owner}/{repo}/contents/{filename}"
             try:
                 response = await client.get(url, headers=headers, params={"ref": ref})
-            except httpx.HTTPError:
+            except httpx2.HTTPError:
                 logger.exception("Failed to fetch %s from %s/%s@%s", filename, owner, repo, ref)
                 return None
 
@@ -145,7 +145,7 @@ async def fetch_scoped_agents_md(
         headers["Authorization"] = f"Bearer {token}"
 
     semaphore = asyncio.Semaphore(_SCOPED_FETCH_CONCURRENCY)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx2.AsyncClient(timeout=timeout) as client:
 
         async def _fetch(candidate: str) -> tuple[str, str] | None:
             directory = posixpath.dirname(candidate)
@@ -156,7 +156,7 @@ async def fetch_scoped_agents_md(
                 try:
                     async with semaphore:
                         response = await client.get(url, headers=headers, params={"ref": ref})
-                except httpx.HTTPError:
+                except httpx2.HTTPError:
                     logger.exception("Failed to fetch %s from %s/%s@%s", path, owner, repo, ref)
                     return None
                 if response.status_code == 404:

@@ -114,10 +114,11 @@ def test_filter_findings_for_publish_drops_below_threshold_and_resolved() -> Non
     assert [f["id"] for f in surfaced] == ["f_c", "f_a"]
 
 
-def test_filter_findings_for_publish_caps_results() -> None:
+def test_filter_findings_for_publish_is_uncapped_by_default() -> None:
     findings = [_f(id=f"f_{i}", severity="high", file=f"f{i}.py") for i in range(20)]
-    surfaced = filter_findings_for_publish(findings, severity_threshold="medium", cap=5)
-    assert len(surfaced) == 5
+    surfaced = filter_findings_for_publish(findings, severity_threshold="medium")
+    assert len(surfaced) == 20
+    assert len(filter_findings_for_publish(findings, cap=5)) == 5
 
 
 @pytest.mark.asyncio
@@ -484,14 +485,14 @@ async def test_resolve_review_head_sha_falls_back_without_thread_id() -> None:
 
 @pytest.mark.asyncio
 async def test_replace_findings_raises_domain_error_when_thread_missing() -> None:
-    import httpx
+    import httpx2
     from langgraph_sdk.errors import NotFoundError
 
     from agent.review.findings import ReviewerThreadMissingError
 
     not_found = NotFoundError(
         "thread tid not found",
-        response=httpx.Response(404, request=httpx.Request("PATCH", "http://x")),
+        response=httpx2.Response(404, request=httpx2.Request("PATCH", "http://x")),
         body=None,
     )
     fake_client = AsyncMock()
@@ -506,12 +507,12 @@ async def test_replace_findings_raises_domain_error_when_thread_missing() -> Non
 
 
 def _not_found(method: str = "GET") -> Exception:
-    import httpx
+    import httpx2
     from langgraph_sdk.errors import NotFoundError
 
     return NotFoundError(
         "thread tid not found",
-        response=httpx.Response(404, request=httpx.Request(method, "http://x")),
+        response=httpx2.Response(404, request=httpx2.Request(method, "http://x")),
         body=None,
     )
 

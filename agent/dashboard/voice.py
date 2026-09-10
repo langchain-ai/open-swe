@@ -1,4 +1,4 @@
-import httpx
+import httpx2
 from fastapi import HTTPException, Request
 
 from agent.config import ENV
@@ -36,7 +36,7 @@ async def transcribe_audio(request: Request) -> str:
     base_url = (ENV.OPENAI_BASE_URL.optional() or "https://api.openai.com/v1").rstrip("/")
     model = await get_team_transcription_model()
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5)) as client:
+        async with httpx2.AsyncClient(timeout=httpx2.Timeout(30, connect=5)) as client:
             response = await client.post(
                 f"{base_url}/audio/transcriptions",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -45,7 +45,7 @@ async def transcribe_audio(request: Request) -> str:
             )
         response.raise_for_status()
         text = response.json().get("text", "").strip()
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx2.HTTPError, ValueError) as exc:
         raise HTTPException(502, "Voice transcription failed") from exc
     if not text:
         raise HTTPException(422, "No speech was detected")

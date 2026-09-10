@@ -6,9 +6,8 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
-import httpx
+import httpx2
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langsmith.sandbox import (
@@ -20,7 +19,6 @@ from langsmith.sandbox import (
 )
 
 from agent.config import ENV
-from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
 
@@ -50,8 +48,6 @@ PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 PROXY_MODEL_KEY_PLACEHOLDER = "proxy-injected"
-PROXY_LANGSMITH_KEY_PLACEHOLDER = "sandbox-proxy-injected"
-_MANAGED_PROXY_RULE_NAMES = frozenset({"open-swe-langsmith"})
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -62,29 +58,9 @@ def _get_langsmith_api_key() -> str | None:
     return ENV.LANGSMITH_API_KEY.optional()
 
 
-def _get_sandbox_api_key() -> str | None:
-    """LangSmith API key for sandbox operations.
-
-    ``SANDBOX_LANGSMITH_API_KEY`` lets sandboxes run against a different
-    LangSmith workspace than the one used for tracing/other API calls; falls
-    back to the standard key.
-    """
-    return ENV.SANDBOX_LANGSMITH_API_KEY.optional() or _get_langsmith_api_key()
-
-
 def _get_sandbox_endpoint() -> str:
-    """LangSmith API **root** for sandbox operations.
-
-    Overridable via ``SANDBOX_LANGSMITH_ENDPOINT`` to pair with
-    ``SANDBOX_LANGSMITH_API_KEY``; falls back to ``LANGSMITH_ENDPOINT``. This is
-    the bare root (e.g. ``https://api.smith.langchain.com``) used to build the
-    proxy-config URL; the SDK clients take :func:`_get_sandbox_api_endpoint`.
-    """
-    return (
-        ENV.SANDBOX_LANGSMITH_ENDPOINT.optional()
-        or ENV.LANGSMITH_ENDPOINT.optional()
-        or "https://api.smith.langchain.com"
-    )
+    """Use the deployment's LangSmith API root for sandbox operations."""
+    return ENV.LANGSMITH_ENDPOINT.get()
 
 
 def _get_sandbox_api_endpoint() -> str:
@@ -164,7 +140,7 @@ def _merge_sandbox_create_extra_fields(
     return {**_get_sandbox_create_extra_fields(), **(create_params or {})}
 
 
-def _get_sandbox_proxy_config(
+def get_sandbox_proxy_config(
     create_params: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     proxy_config = _merge_sandbox_create_extra_fields(create_params).get("proxy_config")
@@ -175,7 +151,7 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
     """Merge extra fields until the SDK exposes create-payload passthrough."""
     if not extra:
         return
-    original_post = client._http.post
+    original_post = client._http.post  # noqa: SLF001
 
     async def post_with_extra(url: Any, *args: Any, **kwargs: Any) -> Any:
         payload = kwargs.get("json")
@@ -184,38 +160,7 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
         return await original_post(url, *args, **kwargs)
 
     # RFC moving this into the SDK if it adds a public arbitrary create-fields API.
-    client._http.post = post_with_extra  # ty: ignore[invalid-assignment]
-
-
-def _langsmith_proxy_rule(credentials: LangSmithCredentials) -> dict[str, Any]:
-    endpoint = urlsplit(credentials.endpoint)
-    if (
-        endpoint.scheme != "https"
-        or not endpoint.hostname
-        or endpoint.username is not None
-        or endpoint.password is not None
-        or endpoint.query
-        or endpoint.fragment
-    ):
-        raise ValueError(
-            "LangSmith endpoint must be an absolute HTTPS URL without credentials, query, or fragment"
-        )
-    try:
-        port = endpoint.port
-    except ValueError as exc:
-        raise ValueError("LangSmith endpoint has an invalid port") from exc
-    host = endpoint.hostname.lower()
-    match_host = f"{host}:{port}" if port and port != 443 else host
-    normalized_endpoint = urlunsplit(("https", match_host, endpoint.path.rstrip("/"), "", ""))
-    return {
-        "name": "open-swe-langsmith",
-        "match_hosts": [match_host],
-        "headers": [{"name": "x-api-key", "type": "opaque", "value": credentials.api_key}],
-        "env_vars": {
-            "LANGSMITH_API_KEY": PROXY_LANGSMITH_KEY_PLACEHOLDER,
-            "LANGSMITH_ENDPOINT": normalized_endpoint,
-        },
-    }
+    client._http.post = post_with_extra  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
 def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
@@ -275,7 +220,7 @@ def _stagehand_proxy_rules() -> list[dict[str, Any]]:
     ]
 
 
-def _retry_after_seconds(response: httpx.Response | None) -> float | None:
+def _retry_after_seconds(response: httpx2.Response | None) -> float | None:
     if response is None:
         return None
     raw = response.headers.get("Retry-After")
@@ -289,9 +234,9 @@ def _retry_after_seconds(response: httpx.Response | None) -> float | None:
 
 
 def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
-    if isinstance(exc, httpx.HTTPStatusError):
+    if isinstance(exc, httpx2.HTTPStatusError):
         return exc.response.status_code in PROXY_CONFIG_RETRYABLE_STATUS_CODES
-    return isinstance(exc, httpx.TransportError)
+    return isinstance(exc, httpx2.TransportError)
 
 
 def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
@@ -357,18 +302,18 @@ async def _create_sandbox_with_retry(
     raise RuntimeError("unreachable sandbox retry state")
 
 
-def _with_response_body(exc: BaseException) -> httpx.HTTPStatusError | None:
+def _with_response_body(exc: BaseException) -> httpx2.HTTPStatusError | None:
     """Re-raisable copy of ``exc`` carrying the response body, or ``None`` to re-raise as-is.
 
     ``raise_for_status`` builds its message from the status line and an MDN link
     only, so the API's own explanation of a rejection never reaches the logs.
     """
-    if not isinstance(exc, httpx.HTTPStatusError):
+    if not isinstance(exc, httpx2.HTTPStatusError):
         return None
     body = exc.response.text.strip()[:PROXY_CONFIG_ERROR_BODY_CHARS]
     if not body:
         return None
-    return httpx.HTTPStatusError(
+    return httpx2.HTTPStatusError(
         f"{exc}\nResponse body: {body}",
         request=exc.request,
         response=exc.response,
@@ -376,7 +321,7 @@ def _with_response_body(exc: BaseException) -> httpx.HTTPStatusError | None:
 
 
 async def _patch_proxy_config(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     url: str,
     payload: dict[str, Any],
     api_key: str,
@@ -401,7 +346,7 @@ async def _patch_proxy_config(
                 raise
             retry_after = (
                 _retry_after_seconds(exc.response)
-                if isinstance(exc, httpx.HTTPStatusError)
+                if isinstance(exc, httpx2.HTTPStatusError)
                 else None
             )
             delay = (
@@ -437,12 +382,11 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
-async def _configure_github_proxy(
+async def configure_github_proxy(
     sandbox_name: str,
     github_token: str,
     *,
     base_proxy_config: dict[str, Any] | None = None,
-    langsmith_credentials: LangSmithCredentials | None = None,
 ) -> None:
     """Configure sandbox proxy to inject managed credentials for outbound traffic.
 
@@ -454,9 +398,8 @@ async def _configure_github_proxy(
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
         github_token: GitHub token to inject as Authorization header.
         base_proxy_config: Additional persisted proxy settings to preserve.
-        langsmith_credentials: Triggering user's LangSmith credentials, if connected.
     """
-    api_key = _get_sandbox_api_key()
+    api_key = _get_langsmith_api_key()
     if not api_key:
         logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
         return
@@ -464,22 +407,22 @@ async def _configure_github_proxy(
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
+    # Retire rules saved by the former personal LangSmith connection.
     preserved_rules = [
         rule
         for rule in (custom_rules if isinstance(custom_rules, list) else [])
-        if not isinstance(rule, dict) or rule.get("name") not in _MANAGED_PROXY_RULE_NAMES
+        if not isinstance(rule, dict) or rule.get("name") != "open-swe-langsmith"
     ]
     proxy_config["rules"] = [
         *preserved_rules,
-        *([_langsmith_proxy_rule(langsmith_credentials)] if langsmith_credentials else []),
         *_github_proxy_rules(github_token),
         *_stagehand_proxy_rules(),
     ]
     payload = {"proxy_config": proxy_config}
-    async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
+    async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
                 raise
             logger.warning(
@@ -495,8 +438,42 @@ async def _configure_github_proxy(
 def get_async_sandbox_client() -> AsyncSandboxClient:
     """Build an ``AsyncSandboxClient`` from the resolved sandbox LangSmith credentials."""
     return AsyncSandboxClient(
-        api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_api_endpoint()
+        api_key=_get_langsmith_api_key(), api_endpoint=_get_sandbox_api_endpoint()
     )
+
+
+async def capture_snapshot_with_tag(
+    client: AsyncSandboxClient,
+    sandbox_id: str,
+    name: str,
+    tag: str,
+    *,
+    timeout: int,
+) -> Any:
+    """Capture ``sandbox_id`` as ``name:tag``.
+
+    Snapshots are Docker-style: ``name:tag`` is a mutable pointer at immutable
+    content, so re-capturing a tag moves it rather than colliding. The Python SDK
+    has no ``tag`` parameter yet, so the field is injected into the capture body
+    the same way ``_install_create_extra_fields`` injects sandbox-create fields.
+    Drop this for a plain ``capture_snapshot(..., tag=...)`` once
+    langchain-ai/langsmith-sdk#3447 ships.
+    """
+    # Reaching into the SDK's transport is the whole mechanism: there is no public
+    # seam for a field the client does not model.
+    original_post = client._http.post  # noqa: SLF001
+
+    async def post_with_tag(url: Any, *args: Any, **kwargs: Any) -> Any:
+        payload = kwargs.get("json")
+        if str(url).endswith("/snapshot") and isinstance(payload, dict):
+            kwargs["json"] = {**payload, "tag": tag}
+        return await original_post(url, *args, **kwargs)
+
+    client._http.post = post_with_tag  # noqa: SLF001 # ty: ignore[invalid-assignment]
+    try:
+        return await client.capture_snapshot(sandbox_id, name, timeout=timeout)
+    finally:
+        client._http.post = original_post  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
 async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
@@ -535,7 +512,7 @@ async def create_langsmith_sandbox_from_params(
         raise ValueError("timeout must be an integer")
 
     async with AsyncSandboxClient(
-        api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_api_endpoint()
+        api_key=_get_langsmith_api_key(), api_endpoint=_get_sandbox_api_endpoint()
     ) as client:
         _install_create_extra_fields(client, extra_params)
         sandbox = await client.create_sandbox(**sdk_params)
@@ -575,7 +552,7 @@ async def create_langsmith_sandbox(
     Returns:
         SandboxBackendProtocol instance
     """
-    api_key = _get_sandbox_api_key()
+    api_key = _get_langsmith_api_key()
     (
         default_snapshot_id,
         default_fs_capacity_bytes,
@@ -608,15 +585,15 @@ async def create_langsmith_sandbox(
     )
 
     if sandbox_id is None and github_token:
-        proxy_config = _get_sandbox_proxy_config(create_params)
+        proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:
-            await _configure_github_proxy(
+            await configure_github_proxy(
                 backend.id,
                 github_token,
                 base_proxy_config=proxy_config,
             )
         else:
-            await _configure_github_proxy(backend.id, github_token)
+            await configure_github_proxy(backend.id, github_token)
 
     return backend
 
@@ -743,7 +720,7 @@ class LangSmithProvider(SandboxProvider):
     """LangSmith sandbox provider implementation."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or _get_sandbox_api_key()
+        self._api_key = api_key or _get_langsmith_api_key()
         self._api_endpoint = _get_sandbox_api_endpoint()
         if not self._api_key:
             msg = "LANGSMITH_API_KEY not set"
