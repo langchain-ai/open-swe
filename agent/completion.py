@@ -24,7 +24,6 @@ from agent.config import ENV
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
 from agent.invocation import resolve_invocation_id, with_invocation_id
-from agent.linear.client import comment_on_linear_issue
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
@@ -202,8 +201,6 @@ async def _post_failure_reply(
         return False
 
     if source == "linear":
-        if ctx.linear_issue and ctx.linear_issue.id:
-            return await comment_on_linear_issue(ctx.linear_issue.id, text)
         return False
 
     if source in ("github", "github_issue"):

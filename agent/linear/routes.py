@@ -1,11 +1,23 @@
 """Linear webhook HTTP routes."""
 
+import re
+
 from fastapi import APIRouter
 
 from agent.linear import webhook as service
 from agent.webhooks import common
 
 router = APIRouter()
+
+_ISSUE_IDENTIFIER_RE = re.compile(r"/issue/([A-Za-z][A-Za-z0-9_]*-\d+)(?:/|$)")
+
+
+def _issue_url(payload_url: object) -> tuple[str, str]:
+    if not isinstance(payload_url, str):
+        return "", ""
+    base_url = payload_url.split("#", 1)[0]
+    match = _ISSUE_IDENTIFIER_RE.search(base_url)
+    return base_url, match.group(1) if match else ""
 
 
 @router.post("/webhooks/linear")
@@ -67,17 +79,17 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         common.logger.debug("Ignoring webhook: comment doesn't mention %s", tags)
         return {"status": "ignored", "reason": f"Comment doesn't mention {tags}"}
 
-    issue = data.get("issue", {})
-    if not issue:
-        common.logger.debug("Ignoring webhook: no issue data in comment")
-        return {"status": "ignored", "reason": "No issue data in comment"}
-
-    # Fetch full issue details to get project info (webhook doesn't include it)
-    issue_id = issue.get("id", "")
-    full_issue = await common.fetch_linear_issue_details(issue_id)
-    if not full_issue:
-        common.logger.warning("Failed to fetch full issue details, using webhook data")
-        full_issue = issue
+    nested_issue = data.get("issue")
+    issue = dict(nested_issue) if isinstance(nested_issue, dict) else {}
+    issue_id = issue.get("id") or data.get("issueId")
+    if not isinstance(issue_id, str) or not issue_id:
+        common.logger.debug("Ignoring webhook: no issue id in comment")
+        return {"status": "ignored", "reason": "No issue id in comment"}
+    issue_url, identifier = _issue_url(payload.get("url"))
+    issue["id"] = issue_id
+    issue.setdefault("title", identifier or "Linear issue")
+    issue.setdefault("identifier", identifier)
+    issue.setdefault("url", issue_url)
 
     repo_config = common.extract_repo_from_text(
         comment_body, default_owner=common.DEFAULT_REPO_OWNER
@@ -90,7 +102,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
             repo_config["name"],
         )
     else:
-        comment_user_email = (data.get("user") or {}).get("email")
+        comment_user_email = (data.get("user") or payload.get("actor") or {}).get("email")
         try:
             profile_repo = await common.get_profile_default_repo(
                 await common.resolve_login_from_email_async(comment_user_email)
@@ -106,26 +118,6 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
                 profile_repo["name"],
             )
             repo_config = profile_repo
-
-    if not repo_config:
-        team = full_issue.get("team", {})
-        team_name = team.get("name", "") if team else ""
-        project = full_issue.get("project")
-        project_name = project.get("name", "") if project else ""
-
-        team_identifier = team_name.strip() if team_name else ""
-        project_key = project_name.strip() if project_name else ""
-
-        repo_config = common.get_repo_config_from_team_mapping(team_identifier, project_key)
-
-        common.logger.debug(
-            "Team/project lookup result",
-            extra={
-                "team_name": team_identifier,
-                "project_name": project_key,
-                "repo_config": repo_config,
-            },
-        )
 
     if not repo_config:
         repo_config = await common.get_team_default_repo()
@@ -146,7 +138,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
 
     issue["triggering_comment"] = comment_body
     issue["triggering_comment_id"] = data.get("id", "")
-    comment_user = data.get("user", {})
+    comment_user = data.get("user") or payload.get("actor") or {}
     if comment_user:
         issue["comment_author"] = comment_user
 

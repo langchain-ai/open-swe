@@ -107,9 +107,9 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
         tool.name if hasattr(tool, "name") else tool.__name__
         for tool in build_agent.call_args.kwargs["tools"]
     }
-    assert "linear_comment" in tool_names
     assert not tool_names.intersection(
         {
+            "linear_comment",
             "linear_create_issue",
             "linear_delete_issue",
             "linear_get_issue",
