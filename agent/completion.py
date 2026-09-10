@@ -31,8 +31,8 @@ from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
-from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
+from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.user_messages import warning
 
@@ -94,9 +94,7 @@ _REASON_FOLLOW_UP = {
 }
 
 
-def _failure_text(
-    status: str, dashboard_url: str | None = None, reason_code: str | None = None
-) -> str:
+def _failure_text(status: str, trace_url: str | None = None, reason_code: str | None = None) -> str:
     reason = _REASON_TEXT.get(reason_code or "")
     if reason is None:
         if status == "timeout":
@@ -107,8 +105,8 @@ def _failure_text(
             reason = "the run hit an unexpected error"
     follow_up = _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
     text = warning(f"Open SWE wasn't able to finish that — {reason}. {follow_up}")
-    if dashboard_url:
-        text += f" You can view the error in <{dashboard_url}|Open SWE Web>."
+    if trace_url:
+        text += f" View the error in <{trace_url}|LangSmith>."
     return text
 
 
@@ -185,24 +183,25 @@ async def _post_failure_reply(
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
     ctx = SourceContext.from_metadata(metadata)
-    text = _failure_text(status, reason_code=reason_code)
 
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            slack_text = _failure_text(status, dashboard_thread_url(thread_id), reason_code)
+            trace_url = await get_langsmith_trace_url(thread_id)
+            slack_text = _failure_text(status, trace_url, reason_code)
             return await post_slack_thread_reply(
                 location[0],
                 location[1],
                 slack_text,
                 agent_thread_id=thread_id,
-                include_trace_link=True,
             )
         return False
 
     if source == "linear":
         if ctx.linear_issue and ctx.linear_issue.id:
-            return await comment_on_linear_issue(ctx.linear_issue.id, text)
+            return await comment_on_linear_issue(
+                ctx.linear_issue.id, _failure_text(status, reason_code=reason_code)
+            )
         return False
 
     if source in ("github", "github_issue"):
@@ -213,7 +212,12 @@ async def _post_failure_reply(
         if isinstance(repo_config, dict) and isinstance(number, int):
             token = await get_github_app_installation_token()
             if token:
-                return await post_github_comment(repo_config, number, text, token=token)
+                return await post_github_comment(
+                    repo_config,
+                    number,
+                    _failure_text(status, reason_code=reason_code),
+                    token=token,
+                )
         return False
 
     logger.info("No failure-reply channel for thread %s (source=%s)", thread_id, source)
