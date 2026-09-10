@@ -37,6 +37,26 @@ test.describe("show_user", () => {
     await expect(card.getByRole("button", { name: /^Comment/ })).toBeDisabled();
   });
 
+  // Mermaid renders through Streamdown's diagram plugin, which needs a real
+  // browser: jsdom has no SVG layout, so only an e2e can prove it draws.
+  test("renders a .mmd file as a drawn diagram, not source", async ({
+    page,
+  }) => {
+    await startWebThread(page, "E2E_SHOW_USER_DIAGRAM show me the flow");
+
+    const card = page.locator("section").filter({ hasText: "Mermaid Diagram" });
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    // A drawn diagram, not highlighted source. Scoped to the diagram container
+    // because the card header's chevron is an <svg> too, so a bare `svg`
+    // locator passes without anything having been drawn.
+    const diagram = card.locator("[data-mermaid-diagram]");
+    await expect(diagram).toBeVisible({ timeout: 30_000 });
+    await expect(diagram.locator("svg")).toBeVisible();
+    // Mermaid puts node labels in the SVG, so finding them proves it drew.
+    await expect(diagram).toContainText("show_user");
+    await expect(diagram).toContainText("File type");
+  });
+
   test("renders no card when the command fails", async ({ page }) => {
     await startWebThread(page, "E2E_SHOW_USER_FAIL show me the output");
 

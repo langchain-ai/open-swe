@@ -154,6 +154,15 @@ _SHOW_USER_DIFF_COMMAND = "printf '%s\\n' " + " ".join(
     shlex.quote(line) for line in _SHOW_USER_DIFF_LINES
 )
 
+_SHOW_USER_MERMAID_LINES = (
+    "flowchart LR",
+    "    A[User request] --> B[show_user]",
+    "    B --> C{File type}",
+)
+_SHOW_USER_MERMAID_COMMAND = "printf '%s\\n' " + " ".join(
+    shlex.quote(line) for line in _SHOW_USER_MERMAID_LINES
+)
+
 _DESKTOP_PR_PAYLOAD = json.dumps(
     {
         "head": FEATURE_BRANCH,
@@ -755,6 +764,19 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Showed the diff card."),
     ),
+    "show_user_diagram": (
+        _tool_step(
+            "Showing the diagram.",
+            "show_user",
+            {
+                "command": _SHOW_USER_MERMAID_COMMAND,
+                "path": ".open-swe/artifacts/demo.mmd",
+                "title": "Mermaid Diagram",
+            },
+            "call-show-user-diagram",
+        ),
+        StepSpec(content="Showed the diagram card."),
+    ),
     "show_user_command_failure": (
         _tool_step(
             "Showing output from a command that fails.",
@@ -1071,6 +1093,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "show_user_diff",
         lambda ctx: ctx.human_count <= 1 and "E2E_SHOW_USER_DIFF" in ctx.first_text,
+    ),
+    ScriptRule(
+        "show_user_diagram",
+        lambda ctx: ctx.human_count <= 1 and "E2E_SHOW_USER_DIAGRAM" in ctx.first_text,
     ),
     ScriptRule(
         "desktop",
