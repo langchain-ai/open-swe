@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { createPortal } from "react-dom"
 import { SidebarSimpleIcon } from "@phosphor-icons/react"
 
 import { cn } from "@/lib/utils"
@@ -118,7 +119,10 @@ export function SidebarFrame({
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   if (collapsed) {
-    return (
+    // Electron resolves window drag regions in DOM order, ignoring z-index, so
+    // a page header marked draggable would swallow clicks on this floating
+    // toggle if it came earlier. Portal it after all content to keep it last.
+    return createPortal(
       <button
         type="button"
         aria-label="Expand sidebar"
@@ -130,7 +134,8 @@ export function SidebarFrame({
         )}
       >
         <SidebarSimpleIcon className="size-4" />
-      </button>
+      </button>,
+      document.body
     )
   }
 
