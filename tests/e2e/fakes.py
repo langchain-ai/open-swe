@@ -21,6 +21,7 @@ from e2e_env import (
     SECOND_REPO,
     TMP,
 )
+from pydantic import BaseModel
 
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
@@ -260,6 +261,14 @@ def create_pull(
     return pr
 
 
+class SeedCheckRun(BaseModel):
+    """One check run to hang off a seeded pull request's head commit."""
+
+    name: str = "ci"
+    conclusion: str | None = None
+    required: bool = False
+
+
 def seed_pull(
     owner: str,
     repo: str,
@@ -268,6 +277,7 @@ def seed_pull(
     draft: bool = False,
     mergeable: bool = True,
     check_conclusion: str | None = None,
+    check_runs: list[SeedCheckRun] | None = None,
     additions: int = 0,
     deletions: int = 0,
     files: int = 0,
@@ -303,14 +313,19 @@ def seed_pull(
     pull["mergeable"] = mergeable
     pull["mergeable_state"] = "clean" if mergeable else "dirty"
     pull["author"] = author
-    if check_conclusion is not None:
+    seeded = check_runs
+    if seeded is None and check_conclusion is not None:
+        seeded = [SeedCheckRun(name="ci", conclusion=check_conclusion, required=True)]
+    if seeded:
         pull["check_runs"] = [
             {
-                "name": "ci",
-                "status": "completed",
-                "conclusion": check_conclusion,
-                "html_url": "https://checks.example/ci",
+                "name": check.name,
+                "status": "completed" if check.conclusion else "in_progress",
+                "conclusion": check.conclusion,
+                "required": check.required,
+                "html_url": f"https://checks.example/{check.name}",
             }
+            for check in seeded
         ]
     return pull
 

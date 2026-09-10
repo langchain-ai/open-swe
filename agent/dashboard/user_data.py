@@ -5,7 +5,7 @@ user's data is one prefix search away while each feature still writes its own
 record and cannot clobber another's.
 """
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field
 
@@ -35,11 +35,15 @@ class UserDocument[RecordT: BaseModel]:
         await delete_value(self.namespace(login), self.key)
 
 
+ReviewQueueChecksMode = Literal["required", "all", "ignore"]
+
+
 class ReviewQueueRepo(BaseModel):
     """A followed repo, optionally narrowed to pull requests touching ``paths``."""
 
     full_name: str
     paths: list[str] = Field(default_factory=list)
+    checks: ReviewQueueChecksMode = "required"
 
 
 def _as_repos(value: Any) -> Any:

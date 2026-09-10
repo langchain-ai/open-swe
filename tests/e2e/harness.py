@@ -49,6 +49,7 @@ from fastapi.responses import (  # noqa: E402
     RedirectResponse,
     Response,
 )
+from pydantic import ValidationError  # noqa: E402
 
 # Slack-user directory the fake ``users.info`` resolves: the default sender used
 # by the automated tests plus the named manual-test users.
@@ -178,6 +179,17 @@ async def control_seed_pull(request: Request) -> JSONResponse:
     check_conclusion = body.get("check_conclusion")
     if check_conclusion is not None and not isinstance(check_conclusion, str):
         raise HTTPException(400, "check_conclusion must be a string or null")
+    raw_check_runs = body.get("check_runs")
+    if raw_check_runs is not None and not isinstance(raw_check_runs, list):
+        raise HTTPException(400, "check_runs must be a list of objects")
+    try:
+        check_runs = (
+            None
+            if raw_check_runs is None
+            else [fakes.SeedCheckRun.model_validate(entry) for entry in raw_check_runs]
+        )
+    except ValidationError as exc:
+        raise HTTPException(400, "check_runs entries must be {name, conclusion, required}") from exc
     file_paths = body.get("file_paths")
     if file_paths is not None and (
         not isinstance(file_paths, list) or not all(isinstance(path, str) for path in file_paths)
@@ -190,6 +202,7 @@ async def control_seed_pull(request: Request) -> JSONResponse:
         draft=bool(body.get("draft", False)),
         mergeable=bool(body.get("mergeable", True)),
         check_conclusion=check_conclusion,
+        check_runs=check_runs,
         additions=int(body.get("additions", 0)),
         deletions=int(body.get("deletions", 0)),
         files=int(body.get("files", 0)),
@@ -733,6 +746,17 @@ def _status_check_rollup(pr: dict[str, Any]) -> dict[str, str] | None:
     return {"state": "PENDING" if pending else "SUCCESS"}
 
 
+def _details_rollup(pr: dict[str, Any]) -> dict[str, Any] | None:
+    rollup = _status_check_rollup(pr)
+    if rollup is None:
+        return None
+    nodes = [
+        *(fakes.check_graphql(check) for check in pr["check_runs"]),
+        *(fakes.status_graphql(status) for status in pr["statuses"]),
+    ]
+    return {**rollup, "contexts": {"totalCount": len(nodes), "nodes": nodes}}
+
+
 def _search_node(pr: dict[str, Any]) -> dict[str, Any]:
     return {
         "number": pr["number"],
@@ -775,7 +799,7 @@ async def gh_graphql(request: Request) -> Response:
             if pull["state"] == "open" and f"{pull['owner']}/{pull['repo']}".lower() in wanted
         ]
         return JSONResponse({"data": {"search": {"issueCount": len(nodes), "nodes": nodes}}})
-    if "ReviewQueueFiles" in query:
+    if "ReviewQueueDetails" in query:
         data: dict[str, Any] = {}
         for index in range(len(variables) // 3):
             owner = variables.get(f"o{index}")
@@ -795,7 +819,10 @@ async def gh_graphql(request: Request) -> Response:
                     "files": {
                         "totalCount": len(pull["files"]),
                         "nodes": [{"path": file["filename"]} for file in pull["files"]],
-                    }
+                    },
+                    "commits": {
+                        "nodes": [{"commit": {"statusCheckRollup": _details_rollup(pull)}}]
+                    },
                 }
             }
         return JSONResponse({"data": data})

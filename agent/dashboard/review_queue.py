@@ -5,9 +5,10 @@ search, so the authorization boundary is GitHub itself and the TTL cache is
 keyed by login — a cached row for a private PR is never served to an account
 that lacks access.
 
-Changed files come from a second batched query: asking for `files` inside a
-100-result search is expensive enough that GitHub answers HTTP 502 once the
-followed repos hold a few hundred open PRs.
+Changed files and per-check required-ness come from a second batched query:
+asking for `files` inside a 100-result search is expensive enough that GitHub
+answers HTTP 502 once the followed repos hold a few hundred open PRs, and
+`isRequired` is only answerable per pull request anyway.
 """
 
 import asyncio
@@ -15,7 +16,7 @@ import logging
 import re
 import time
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import httpx2
 from fastapi import HTTPException
@@ -41,10 +42,21 @@ _MAX_REPOS = 50
 _MAX_PATHS_PER_REPO = 20
 _MAX_PATH_LENGTH = 200
 _FILE_PAGE_SIZE = 100
-_FILES_BATCH_SIZE = 20
+_CONTEXT_PAGE_SIZE = 100
+_DETAILS_BATCH_SIZE = 20
 _CACHE_TTL_SECONDS = 60.0
 _CACHE_MAX_ENTRIES = 500
 _REVIEW_LOOKUP_CONCURRENCY = 10
+
+_PASSING_CHECK_CONCLUSIONS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
+_FAILING_CHECK_CONCLUSIONS = {
+    "FAILURE",
+    "TIMED_OUT",
+    "ACTION_REQUIRED",
+    "STARTUP_FAILURE",
+    "CANCELLED",
+}
+_FAILING_STATUS_STATES = {"FAILURE", "ERROR"}
 
 _SEARCH_PREFIX = "is:pr is:open draft:false archived:false -author:@me sort:updated-desc "
 
@@ -91,6 +103,7 @@ class ReviewQueueItem(BaseModel):
     updated_at: str
     matched_paths: list[str] = Field(default_factory=list)
     files_truncated: bool = False
+    optional_failures: int = 0
     ai_review: ReviewQueueAiReview | None = None
 
 
@@ -178,18 +191,59 @@ class _SearchResponse(BaseModel):
     errors: list[Any] | None = None
 
 
-class _FilesPullRequest(BaseModel):
-    files: _SearchFiles = Field(default_factory=_SearchFiles)
+class _CheckContext(BaseModel):
+    """One `CheckRun` or `StatusContext` on the head commit."""
 
-
-class _FilesRepository(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    pull_request: _FilesPullRequest | None = Field(default=None, alias="pullRequest")
+    typename: str = Field(default="", alias="__typename")
+    name: str = ""
+    status: str | None = None
+    conclusion: str | None = None
+    context: str = ""
+    state: str | None = None
+    is_required: bool = Field(default=False, alias="isRequired")
 
 
-class _FilesResponse(BaseModel):
-    data: dict[str, _FilesRepository | None] | None = None
+class _CheckContexts(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_count: int = Field(default=0, alias="totalCount")
+    nodes: list[_CheckContext] = Field(default_factory=list)
+
+
+class _DetailsRollup(BaseModel):
+    state: str | None = None
+    contexts: _CheckContexts | None = None
+
+
+class _DetailsCommit(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    status_check_rollup: _DetailsRollup | None = Field(default=None, alias="statusCheckRollup")
+
+
+class _DetailsCommitNode(BaseModel):
+    commit: _DetailsCommit | None = None
+
+
+class _DetailsCommits(BaseModel):
+    nodes: list[_DetailsCommitNode] = Field(default_factory=list)
+
+
+class _DetailsPullRequest(BaseModel):
+    files: _SearchFiles = Field(default_factory=_SearchFiles)
+    commits: _DetailsCommits = Field(default_factory=_DetailsCommits)
+
+
+class _DetailsRepository(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    pull_request: _DetailsPullRequest | None = Field(default=None, alias="pullRequest")
+
+
+class _DetailsResponse(BaseModel):
+    data: dict[str, _DetailsRepository | None] | None = None
     errors: list[Any] | None = None
 
 
@@ -199,9 +253,17 @@ class _ReadyQueue(BaseModel):
 
 
 _PullKey = tuple[str, int]
-_PullIdentity = tuple[str, str, int]
 
-_CacheKey = tuple[str, tuple[tuple[str, tuple[str, ...]], ...]]
+
+class _PullNeed(NamedTuple):
+    owner: str
+    repo: str
+    number: int
+    files: bool
+    contexts: bool
+
+
+_CacheKey = tuple[str, tuple[tuple[str, tuple[str, ...], str], ...]]
 
 _cache: dict[_CacheKey, tuple[float, _ReadyQueue]] = {}
 
@@ -269,7 +331,11 @@ async def set_review_queue_repos(login: str, repos: list[ReviewQueueRepo]) -> Re
             continue
         seen.add(full_name.lower())
         normalized.append(
-            ReviewQueueRepo(full_name=full_name, paths=_normalize_paths(full_name, entry.paths))
+            ReviewQueueRepo(
+                full_name=full_name,
+                paths=_normalize_paths(full_name, entry.paths),
+                checks=entry.checks,
+            )
         )
     if len(normalized) > _MAX_REPOS:
         raise HTTPException(400, f"at most {_MAX_REPOS} repos can be followed")
@@ -277,7 +343,7 @@ async def set_review_queue_repos(login: str, repos: list[ReviewQueueRepo]) -> Re
     return await REVIEW_QUEUE_REPOS.put(login, ReviewQueueRepos(repos=normalized))
 
 
-def _checks_pass(pull: _SearchPullRequest) -> bool:
+def _rollup_passes(pull: _SearchPullRequest) -> bool:
     head = pull.commits.nodes[0] if pull.commits.nodes else None
     commit = head.commit if head is not None else None
     if commit is None:
@@ -288,8 +354,45 @@ def _checks_pass(pull: _SearchPullRequest) -> bool:
     return rollup is None or rollup.state == "SUCCESS"
 
 
-def _is_ready(pull: _SearchPullRequest) -> bool:
-    return not pull.is_draft and pull.mergeable == "MERGEABLE" and _checks_pass(pull)
+def _is_mergeable(pull: _SearchPullRequest) -> bool:
+    return not pull.is_draft and pull.mergeable == "MERGEABLE"
+
+
+def _context_passed(context: _CheckContext) -> bool:
+    if context.typename == "StatusContext":
+        return context.state == "SUCCESS"
+    return (context.conclusion or "") in _PASSING_CHECK_CONCLUSIONS
+
+
+def _context_failed(context: _CheckContext) -> bool:
+    if context.typename == "StatusContext":
+        return (context.state or "") in _FAILING_STATUS_STATES
+    return (context.conclusion or "") in _FAILING_CHECK_CONCLUSIONS
+
+
+class _HeadChecks(NamedTuple):
+    contexts: list[_CheckContext]
+    truncated: bool
+
+    def required_pass(self) -> bool:
+        if self.truncated:
+            return False
+        return all(_context_passed(context) for context in self.contexts if context.is_required)
+
+    def optional_failures(self) -> int:
+        return sum(
+            1 for context in self.contexts if not context.is_required and _context_failed(context)
+        )
+
+
+def _head_checks(details: _DetailsPullRequest | None) -> _HeadChecks:
+    head = details.commits.nodes[0] if details and details.commits.nodes else None
+    commit = head.commit if head is not None else None
+    rollup = commit.status_check_rollup if commit is not None else None
+    contexts = rollup.contexts if rollup is not None else None
+    if contexts is None:
+        return _HeadChecks([], False)
+    return _HeadChecks(contexts.nodes, contexts.total_count > _CONTEXT_PAGE_SIZE)
 
 
 def _path_match(files: _SearchFiles, paths: list[str]) -> tuple[list[str], bool] | None:
@@ -310,7 +413,10 @@ def _path_match(files: _SearchFiles, paths: list[str]) -> tuple[list[str], bool]
 
 
 def _to_item(
-    pull: _SearchPullRequest, matched_paths: list[str], files_truncated: bool
+    pull: _SearchPullRequest,
+    matched_paths: list[str],
+    files_truncated: bool,
+    optional_failures: int,
 ) -> ReviewQueueItem | None:
     full_name = pull.repository.name_with_owner
     if not _valid_full_name(full_name):
@@ -331,6 +437,7 @@ def _to_item(
         updated_at=pull.updated_at,
         matched_paths=matched_paths,
         files_truncated=files_truncated,
+        optional_failures=optional_failures,
     )
 
 
@@ -342,21 +449,36 @@ def _fetch_failed(login: str, phase: str, count: int) -> HTTPException:
     return HTTPException(502, "could not fetch pull requests from GitHub")
 
 
-def _build_files_query(identities: Sequence[_PullIdentity]) -> tuple[str, dict[str, Any]]:
+def _contexts_selection(index: int) -> str:
+    return (
+        "commits(last: 1) { nodes { commit { statusCheckRollup { state"
+        f" contexts(first: {_CONTEXT_PAGE_SIZE}) {{ totalCount nodes {{ __typename"
+        f" ... on CheckRun {{ name status conclusion"
+        f" isRequired(pullRequestNumber: $n{index}) }}"
+        f" ... on StatusContext {{ context state"
+        f" isRequired(pullRequestNumber: $n{index}) }} }} }} }} }} }}"
+    )
+
+
+def _build_details_query(needs: Sequence[_PullNeed]) -> tuple[str, dict[str, Any]]:
     declarations: list[str] = []
     selections: list[str] = []
     variables: dict[str, Any] = {}
-    for index, (owner, repo, number) in enumerate(identities):
+    for index, need in enumerate(needs):
         declarations.append(f"$o{index}:String!,$r{index}:String!,$n{index}:Int!")
+        fields: list[str] = []
+        if need.files:
+            fields.append(f"files(first: {_FILE_PAGE_SIZE}) {{ totalCount nodes {{ path }} }}")
+        if need.contexts:
+            fields.append(_contexts_selection(index))
         selections.append(
             f"p{index}: repository(owner:$o{index}, name:$r{index}) {{"
-            f" pullRequest(number:$n{index}) {{"
-            f" files(first: {_FILE_PAGE_SIZE}) {{ totalCount nodes {{ path }} }} }} }}"
+            f" pullRequest(number:$n{index}) {{ {' '.join(fields)} }} }}"
         )
-        variables[f"o{index}"] = owner
-        variables[f"r{index}"] = repo
-        variables[f"n{index}"] = number
-    query = f"query ReviewQueueFiles({','.join(declarations)}) {{ {' '.join(selections)} }}"
+        variables[f"o{index}"] = need.owner
+        variables[f"r{index}"] = need.repo
+        variables[f"n{index}"] = need.number
+    query = f"query ReviewQueueDetails({','.join(declarations)}) {{ {' '.join(selections)} }}"
     return query, variables
 
 
@@ -364,20 +486,26 @@ def _pull_key(pull: _SearchPullRequest) -> _PullKey:
     return pull.repository.name_with_owner.lower(), pull.number
 
 
-def _pull_identity(pull: _SearchPullRequest) -> _PullIdentity:
-    owner, repo = pull.repository.name_with_owner.split("/", 1)
-    return owner, repo, pull.number
+def _pull_need(pull: _SearchPullRequest, repo: ReviewQueueRepo) -> _PullNeed:
+    owner, name = pull.repository.name_with_owner.split("/", 1)
+    return _PullNeed(
+        owner=owner,
+        repo=name,
+        number=pull.number,
+        files=bool(repo.paths),
+        contexts=repo.checks == "required",
+    )
 
 
-async def _fetch_files(
-    login: str, pulls: list[_SearchPullRequest], token: str
-) -> dict[_PullKey, _SearchFiles]:
-    """Changed paths for the given PRs, batched into aliased queries of `_FILES_BATCH_SIZE`."""
-    files: dict[_PullKey, _SearchFiles] = {}
+async def _fetch_details(
+    login: str, needs: list[tuple[_PullKey, _PullNeed]], token: str
+) -> dict[_PullKey, _DetailsPullRequest]:
+    """Changed paths and head-commit checks, batched into aliased queries of 20."""
+    details: dict[_PullKey, _DetailsPullRequest] = {}
     async with github_client(token=token) as client:
-        for start in range(0, len(pulls), _FILES_BATCH_SIZE):
-            chunk = pulls[start : start + _FILES_BATCH_SIZE]
-            query, variables = _build_files_query([_pull_identity(pull) for pull in chunk])
+        for start in range(0, len(needs), _DETAILS_BATCH_SIZE):
+            chunk = needs[start : start + _DETAILS_BATCH_SIZE]
+            query, variables = _build_details_query([need for _, need in chunk])
             try:
                 response = await github_request(
                     client,
@@ -386,24 +514,28 @@ async def _fetch_files(
                     json={"query": query, "variables": variables},
                 )
                 response.raise_for_status()
-                payload = _FilesResponse.model_validate(response.json())
+                payload = _DetailsResponse.model_validate(response.json())
             except (httpx2.HTTPError, ValueError, ValidationError) as exc:
-                raise _fetch_failed(login, "files", len(pulls)) from exc
+                raise _fetch_failed(login, "details", len(needs)) from exc
 
             if payload.errors or payload.data is None:
-                raise _fetch_failed(login, "files", len(pulls))
+                raise _fetch_failed(login, "details", len(needs))
 
-            for index, pull in enumerate(chunk):
+            for index, (key, _) in enumerate(chunk):
                 repository = payload.data.get(f"p{index}")
                 pull_request = repository.pull_request if repository is not None else None
                 if pull_request is not None:
-                    files[_pull_key(pull)] = pull_request.files
-    return files
+                    details[key] = pull_request
+    return details
 
 
 async def _search_ready_items(login: str, repos: list[ReviewQueueRepo], token: str) -> _ReadyQueue:
     query = _SEARCH_PREFIX + " ".join(f"repo:{repo.full_name}" for repo in repos)
-    paths_by_repo = {repo.full_name.lower(): repo.paths for repo in repos}
+    repos_by_name = {repo.full_name.lower(): repo for repo in repos}
+
+    def followed(key: _PullKey) -> ReviewQueueRepo:
+        return repos_by_name.get(key[0]) or ReviewQueueRepo(full_name=key[0])
+
     try:
         async with github_client(token=token) as client:
             response = await github_request(
@@ -420,25 +552,38 @@ async def _search_ready_items(login: str, repos: list[ReviewQueueRepo], token: s
     if payload.errors or payload.data is None:
         raise _fetch_failed(login, "search", len(repos))
 
-    ready: list[_SearchPullRequest] = []
+    candidates: list[_SearchPullRequest] = []
     for node in payload.data.search.nodes:
         try:
             pull = _SearchPullRequest.model_validate(node)
         except ValidationError:
             continue
-        if _is_ready(pull) and _valid_full_name(pull.repository.name_with_owner):
-            ready.append(pull)
+        if not _is_mergeable(pull) or not _valid_full_name(pull.repository.name_with_owner):
+            continue
+        if followed(_pull_key(pull)).checks == "all" and not _rollup_passes(pull):
+            continue
+        candidates.append(pull)
 
-    filtered = [pull for pull in ready if paths_by_repo.get(_pull_key(pull)[0])]
-    files = await _fetch_files(login, filtered, token) if filtered else {}
+    needs = [
+        (_pull_key(pull), need)
+        for pull in candidates
+        if (need := _pull_need(pull, followed(_pull_key(pull)))).files or need.contexts
+    ]
+    details = await _fetch_details(login, needs, token) if needs else {}
 
     items: list[ReviewQueueItem] = []
-    for pull in ready:
+    for pull in candidates:
         key = _pull_key(pull)
-        match = _path_match(files.get(key, _SearchFiles()), paths_by_repo.get(key[0], []))
+        repo = followed(key)
+        detail = details.get(key)
+        checks = _head_checks(detail)
+        if repo.checks == "required" and not checks.required_pass():
+            continue
+        match = _path_match(detail.files if detail is not None else _SearchFiles(), repo.paths)
         if match is None:
             continue
-        item = _to_item(pull, *match)
+        optional_failures = checks.optional_failures() if repo.checks == "required" else 0
+        item = _to_item(pull, *match, optional_failures)
         if item is not None:
             items.append(item)
     return _ReadyQueue(items=items, total_open=payload.data.search.issue_count)
@@ -447,7 +592,10 @@ async def _search_ready_items(login: str, repos: list[ReviewQueueRepo], token: s
 async def _ready_items(login: str, repos: list[ReviewQueueRepo], token: str) -> _ReadyQueue:
     now = time.monotonic()
     _evict_expired(now)
-    key: _CacheKey = (login, tuple((repo.full_name, tuple(repo.paths)) for repo in repos))
+    key: _CacheKey = (
+        login,
+        tuple((repo.full_name, tuple(repo.paths), repo.checks) for repo in repos),
+    )
     cached = _cache.get(key)
     if cached and cached[0] > now:
         return cached[1]

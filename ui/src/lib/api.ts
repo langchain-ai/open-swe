@@ -553,11 +553,15 @@ export interface ReviewQueueItem {
   ai_review: ReviewQueueAiReview | null
   matched_paths: Array<string>
   files_truncated: boolean
+  optional_failures: number
 }
+
+export type ReviewQueueChecksMode = "required" | "all" | "ignore"
 
 export interface ReviewQueueRepo {
   full_name: string
   paths: Array<string>
+  checks: ReviewQueueChecksMode
 }
 
 export interface ReviewQueueReposPayload {

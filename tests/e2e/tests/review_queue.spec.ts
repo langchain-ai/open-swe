@@ -151,6 +151,74 @@ test.describe("review queue", () => {
     await expect(agentRow).toBeVisible();
   });
 
+  test("honours the per-repo checks mode", async ({ page }) => {
+    await page.request.post("/control/reset");
+    await loginAs(page, SAME_USER);
+
+    const optionalRed = await seedPull(page, {
+      owner: "fakeorg",
+      repo: "demo",
+      title: "Ready: only an optional check is red",
+      check_runs: [
+        { name: "ci", conclusion: "success", required: true },
+        { name: "lint", conclusion: "failure", required: false },
+      ],
+    });
+    const requiredRed = await seedPull(page, {
+      owner: "fakeorg",
+      repo: "demo",
+      title: "Blocked: the required check is red",
+      check_runs: [
+        { name: "ci", conclusion: "failure", required: true },
+        { name: "lint", conclusion: "success", required: false },
+      ],
+    });
+    const allGreen = await seedPull(page, {
+      owner: "fakeorg",
+      repo: "demo",
+      title: "Ready: everything is green",
+      check_runs: [
+        { name: "ci", conclusion: "success", required: true },
+        { name: "lint", conclusion: "success", required: false },
+      ],
+    });
+
+    await page.goto("/agents/reviews?tab=queue");
+    await addRepo(page, "fakeorg/demo");
+
+    const optionalRedRow = page.getByTestId(
+      `review-queue-row-fakeorg/demo-${optionalRed}`,
+    );
+    const requiredRedRow = page.getByTestId(
+      `review-queue-row-fakeorg/demo-${requiredRed}`,
+    );
+    const allGreenRow = page.getByTestId(
+      `review-queue-row-fakeorg/demo-${allGreen}`,
+    );
+
+    await expect(optionalRedRow).toBeVisible();
+    await expect(allGreenRow).toBeVisible();
+    await expect(requiredRedRow).toHaveCount(0);
+    await expect(
+      optionalRedRow.getByTestId("review-queue-optional-failures"),
+    ).toHaveText(/1 optional/);
+
+    await setChecksMode(page, "fakeorg/demo", "all");
+    await expect(allGreenRow).toBeVisible();
+    await expect(optionalRedRow).toHaveCount(0);
+    await expect(requiredRedRow).toHaveCount(0);
+
+    await setChecksMode(page, "fakeorg/demo", "ignore");
+    await expect(optionalRedRow).toBeVisible();
+    await expect(requiredRedRow).toBeVisible();
+    await expect(allGreenRow).toBeVisible();
+
+    await setChecksMode(page, "fakeorg/demo", "required");
+    await expect(optionalRedRow).toBeVisible();
+    await expect(allGreenRow).toBeVisible();
+    await expect(requiredRedRow).toHaveCount(0);
+  });
+
   test("surfaces the GitHub failure instead of an endless skeleton", async ({
     page,
   }) => {
@@ -201,4 +269,18 @@ async function setPaths(page: Page, nameWithOwner: string, paths: string) {
   await input.fill(paths);
   await page.getByTestId("review-queue-paths-save").click();
   await expect(input).toBeHidden();
+}
+
+// The same chip editor carries the checks mode: pick one, then save.
+async function setChecksMode(
+  page: Page,
+  nameWithOwner: string,
+  mode: "required" | "all" | "ignore",
+) {
+  await page.getByTestId(`review-queue-chip-${nameWithOwner}`).click();
+  const option = page.getByTestId(`review-queue-checks-${mode}`);
+  await expect(option).toBeVisible();
+  await option.click();
+  await page.getByTestId("review-queue-paths-save").click();
+  await expect(option).toBeHidden();
 }

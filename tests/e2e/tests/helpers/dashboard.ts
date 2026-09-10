@@ -90,6 +90,11 @@ export type SeedPullValues = {
   draft?: boolean;
   mergeable?: boolean;
   check_conclusion?: "success" | "failure" | null;
+  check_runs?: Array<{
+    name: string;
+    conclusion?: string | null;
+    required?: boolean;
+  }>;
   additions?: number;
   deletions?: number;
   files?: number;

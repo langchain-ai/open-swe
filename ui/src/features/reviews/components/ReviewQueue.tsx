@@ -12,6 +12,7 @@ import {
 } from "@phosphor-icons/react"
 
 import type {
+  ReviewQueueChecksMode,
   ReviewQueueItem,
   ReviewQueueRepo,
   ReviewQueueReposPayload,
@@ -115,7 +116,7 @@ function ReviewQueueRepoPicker({
     onChange(
       selected.has(full_name)
         ? repos.filter((r) => r.full_name !== full_name)
-        : [...repos, { full_name, paths: [] }]
+        : [...repos, { full_name, paths: [], checks: "required" }]
     )
   }
 
@@ -188,13 +189,29 @@ function ReviewQueueRepoPicker({
   )
 }
 
+const CHECKS_OPTIONS: Array<{
+  value: ReviewQueueChecksMode
+  label: string
+}> = [
+  { value: "required", label: "Required checks passed" },
+  { value: "all", label: "All checks passed" },
+  { value: "ignore", label: "Ignore checks" },
+]
+
 function chipLabel(repo: ReviewQueueRepo) {
-  if (repo.paths.length === 0) return repo.full_name
-  const summary =
-    repo.paths.length <= 2
-      ? repo.paths.join(", ")
-      : `${repo.paths.length} paths`
-  return `${repo.full_name} · ${summary}`
+  const parts: Array<string> = []
+  if (repo.paths.length > 0) {
+    parts.push(
+      repo.paths.length <= 2
+        ? repo.paths.join(", ")
+        : `${repo.paths.length} paths`
+    )
+  }
+  if (repo.checks !== "required") {
+    parts.push(repo.checks === "all" ? "all checks" : "ignores checks")
+  }
+  if (parts.length === 0) return repo.full_name
+  return `${repo.full_name} · ${parts.join(" · ")}`
 }
 
 function ReviewQueueRepoChip({
@@ -209,11 +226,14 @@ function ReviewQueueRepoChip({
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
+  const [checks, setChecks] = useState<ReviewQueueChecksMode>(repo.checks)
 
   const savePaths = useMutation({
     mutationFn: (paths: Array<string>) =>
       api.setReviewQueueRepos(
-        repos.map((r) => (r.full_name === repo.full_name ? { ...r, paths } : r))
+        repos.map((r) =>
+          r.full_name === repo.full_name ? { ...r, paths, checks } : r
+        )
       ),
     onSuccess: (payload: ReviewQueueReposPayload) => {
       qc.setQueryData(REPOS_QUERY_KEY, payload)
@@ -229,6 +249,7 @@ function ReviewQueueRepoChip({
         setOpen(next)
         if (next) {
           setText(repo.paths.join("\n"))
+          setChecks(repo.checks)
           savePaths.reset()
         }
       }}
@@ -242,7 +263,28 @@ function ReviewQueueRepoChip({
         {chipLabel(repo)}
       </PopoverTrigger>
       <PopoverPopup align="start" className="w-72 max-w-none" side="bottom">
-        <p className="text-xs font-medium text-foreground">
+        <p className="text-xs font-medium text-foreground">Checks</p>
+        <div className="mt-2 space-y-1">
+          {CHECKS_OPTIONS.map((option) => (
+            <label
+              key={option.value}
+              className="flex items-center gap-2 text-xs text-foreground"
+            >
+              <input
+                type="radio"
+                name={`review-queue-checks-${repo.full_name}`}
+                value={option.value}
+                checked={checks === option.value}
+                onChange={() => setChecks(option.value)}
+                data-testid={`review-queue-checks-${option.value}`}
+                disabled={savePaths.isPending}
+                className="size-3.5 accent-foreground"
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+        <p className="mt-3 text-xs font-medium text-foreground">
           Only PRs touching these paths
         </p>
         <Textarea
@@ -451,6 +493,17 @@ export function ReviewQueue() {
                         {path}
                       </span>
                     ))}
+                    {item.optional_failures > 0 && (
+                      <span
+                        data-testid="review-queue-optional-failures"
+                        title="Non-required checks failing on this PR"
+                        className="rounded bg-muted px-1 font-mono text-[11px] text-amber-600 dark:text-amber-400"
+                      >
+                        {item.optional_failures} optional{" "}
+                        {item.optional_failures === 1 ? "check" : "checks"}{" "}
+                        failing
+                      </span>
+                    )}
                     {item.files_truncated && (
                       <span
                         title="Too many files to confirm the path match"
