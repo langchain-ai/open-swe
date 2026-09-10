@@ -187,6 +187,7 @@ from agent.dashboard.threads.diffs import (
 from agent.dashboard.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_projects,
+    list_dashboard_thread_slack_channels,
     list_dashboard_threads,
     list_dashboard_threads_page,
     pin_dashboard_thread,
@@ -1948,6 +1949,24 @@ async def api_list_thread_projects(
     )
 
 
+@router.get("/threads/slack-channels")
+async def api_list_thread_slack_channels(
+    include_resolved: bool = False,
+    include_automations: bool = False,
+    all: bool = False,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, Any]]:
+    if all and not _session_is_admin(session):
+        raise HTTPException(403, "admin only")
+    return await list_dashboard_thread_slack_channels(
+        session["sub"],
+        email=session.get("email"),
+        include_resolved=include_resolved,
+        include_automations=include_automations,
+        include_all=all,
+    )
+
+
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
     session: dict[str, Any] = _SESSION_DEP,
@@ -1987,13 +2006,18 @@ async def api_list_threads_page(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    slack_channel_id: str | None = None,
+    without_slack_channel: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
-    if repo and ownerless:
-        raise HTTPException(400, "repo and ownerless are mutually exclusive")
+    if sum(bool(value) for value in (repo, ownerless, slack_channel_id, without_slack_channel)) > 1:
+        raise HTTPException(
+            400,
+            "repo, ownerless, slack_channel_id, and without_slack_channel are mutually exclusive",
+        )
     if repo:
         owner, separator, name = repo.strip().partition("/")
         if not separator or not owner or not name or "/" in name:
@@ -2014,6 +2038,8 @@ async def api_list_threads_page(
         automation_id=automation_id,
         repo=repo,
         ownerless=ownerless,
+        slack_channel_id=slack_channel_id,
+        without_slack_channel=without_slack_channel,
         sort_by=sort_by,
     )
 

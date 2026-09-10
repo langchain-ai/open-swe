@@ -572,6 +572,50 @@ async def test_thread_summary_includes_slack_source_urls_for_public_repo(monkeyp
     )
 
 
+async def test_thread_summary_includes_slack_channel_identity(monkeypatch) -> None:
+    patch_thread_module(monkeypatch, "SLACK_TEAM_ID", "T-default")
+    summary = await thread_summary._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "source_context": {
+                    "slack_thread": {
+                        "channel_id": "C123",
+                        "team_id": "T123",
+                        "thread_ts": "123.456",
+                        "channel_context": {"name": "team-open-swe"},
+                    }
+                },
+            }
+        )
+    )
+
+    assert summary["slackChannel"] == {
+        "id": "C123",
+        "teamId": "T123",
+        "name": "team-open-swe",
+    }
+
+
+async def test_thread_summary_excludes_direct_messages_from_slack_channels() -> None:
+    summary = await thread_summary._thread_summary(
+        _thread_with_metadata(
+            {
+                "source": "slack",
+                "source_context": {
+                    "slack_thread": {
+                        "channel_id": "D123",
+                        "thread_ts": "123.456",
+                        "channel_context": {"is_im": True},
+                    }
+                },
+            }
+        )
+    )
+
+    assert summary["slackChannel"] is None
+
+
 async def test_thread_summary_includes_code_channel_url(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "SLACK_TEAM_ID", "T team&workspace")
     summary = await thread_summary._thread_summary(
@@ -2214,6 +2258,85 @@ async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata
     assert searches == [
         {"participant_logins": {"octocat": True}},
         {"github_login": "octocat"},
+    ]
+
+
+async def test_list_dashboard_threads_page_filters_slack_channels(monkeypatch) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    cast(dict[str, object], threads[0]["metadata"])["source_context"] = {
+        "slack_thread": {"channel_id": "C123", "team_id": "T1"}
+    }
+    cast(dict[str, object], threads[1]["metadata"])["source_context"] = {
+        "slack_thread": {"channel_id": "C456", "team_id": "T1"}
+    }
+    searches: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            searches.append(metadata)
+            return threads[offset : offset + limit]
+
+    client = SimpleNamespace(
+        threads=FakeThreads(), runs=SimpleNamespace(list=AsyncMock(return_value=[]))
+    )
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+
+    channel = await thread_listing.list_dashboard_threads_page("octocat", slack_channel_id="C123")
+    channel_less = await thread_listing.list_dashboard_threads_page(
+        "octocat", without_slack_channel=True
+    )
+
+    assert [item["id"] for item in channel["items"]] == ["t0"]
+    assert [item["id"] for item in channel_less["items"]] == ["t2"]
+    assert searches[0]["source_context"] == {"slack_thread": {"channel_id": "C123"}}
+
+
+async def test_list_dashboard_slack_channels_scopes_and_enriches(monkeypatch) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    cast(dict[str, object], threads[0]["metadata"])["source_context"] = {
+        "slack_thread": {
+            "channel_id": "C123",
+            "team_id": "T1",
+            "channel_context": {"name": "legacy-name"},
+        }
+    }
+    cast(dict[str, object], threads[1]["metadata"])["source_context"] = {
+        "slack_thread": {"channel_id": "C123", "team_id": "T1"}
+    }
+    cast(dict[str, object], threads[2]["metadata"])["source_context"] = {
+        "slack_thread": {"channel_id": "C456", "team_id": "T1"}
+    }
+    searches: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            searches.append(metadata)
+            return threads[offset : offset + limit]
+
+    async def get_channel(channel_id: str, *, team_id: str):
+        assert team_id == "T1"
+        if channel_id == "C123":
+            return SimpleNamespace(label="renamed-channel")
+        return None
+
+    patch_thread_module(
+        monkeypatch,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+    patch_thread_module(monkeypatch, "get_slack_channel", get_channel)
+
+    result = await thread_listing.list_dashboard_thread_slack_channels("octocat")
+
+    assert searches == [
+        {"participant_logins": {"octocat": True}},
+        {"github_login": "octocat"},
+    ]
+    assert result == [
+        {"id": "C123", "teamId": "T1", "name": "renamed-channel", "updatedAt": 3},
+        {"id": "C456", "teamId": "T1", "name": "C456", "updatedAt": 1},
     ]
 
 

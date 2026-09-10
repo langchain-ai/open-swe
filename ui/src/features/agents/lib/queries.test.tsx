@@ -15,6 +15,7 @@ import {
   useSidebarActiveThread,
   useSidebarProjectThreads,
   useSidebarRecents,
+  useSidebarSlackChannelThreads,
   useThreadsPage,
 } from "./queries"
 import type { InfiniteData } from "@tanstack/react-query"
@@ -303,6 +304,42 @@ describe("sidebar queries", () => {
         scope: "interactive",
         sortBy: "created_at",
       })
+    )
+  })
+
+  it("scopes Recents to threads without channels in Slack mode", async () => {
+    const listThreads = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockResolvedValue(page)
+    const client = testClient()
+    renderHook(() => useSidebarRecents({ projectMode: "slack" }), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+
+    await waitFor(() =>
+      expect(listThreads).toHaveBeenCalledWith(
+        expect.objectContaining({ withoutSlackChannel: true })
+      )
+    )
+  })
+
+  it("filters Slack channel pages by channel id", async () => {
+    const listThreads = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockResolvedValue(page)
+    const client = testClient()
+    renderHook(() => useSidebarSlackChannelThreads({ channelId: "C123" }), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+
+    await waitFor(() =>
+      expect(listThreads).toHaveBeenCalledWith(
+        expect.objectContaining({ slackChannelId: "C123" })
+      )
     )
   })
 
