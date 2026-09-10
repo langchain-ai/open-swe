@@ -4,7 +4,8 @@ import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 
 import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api"
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import { AppShell } from "@/components/AppShell"
+import { SettingsRow, SettingsSection } from "@/components/patterns/settings"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { SettingsPanel, SettingsSection } from "@/components/AppShell"
+import { SettingsPanel, SettingsSection } from "@/components/patterns/settings"
 import { Button } from "@/components/ui/button"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import { Skeleton } from "@/components/ui/skeleton"

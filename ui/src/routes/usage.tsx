@@ -6,7 +6,8 @@ import type {
   UsageLeaderboardPeriod,
   UsageLeaderboardRow,
 } from "@/lib/api"
-import { AppShell, SettingsSection } from "@/components/AppShell"
+import { AppShell } from "@/components/AppShell"
+import { SettingsSection } from "@/components/patterns/settings"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   Select,

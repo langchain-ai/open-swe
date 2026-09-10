@@ -2,12 +2,12 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
 import type { ModelOption } from "@/lib/api"
+import { AppShell } from "@/components/AppShell"
 import {
-  AppShell,
   SettingsNavRow,
   SettingsRow,
   SettingsSection,
-} from "@/components/AppShell"
+} from "@/components/patterns/settings"
 import { Button } from "@/components/ui/button"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Input } from "@/components/ui/input"

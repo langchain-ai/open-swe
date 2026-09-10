@@ -25,7 +25,9 @@ export const Route = createRootRouteWithContext<{
   queryClient: QueryClient
 }>()({
   beforeLoad: ({ context, location }) =>
-    resolveSessionOnServer(context.queryClient, location.href),
+    location.pathname === "/design-system"
+      ? undefined
+      : resolveSessionOnServer(context.queryClient, location.href),
   head: () => ({
     meta: [
       { charSet: "utf-8" },

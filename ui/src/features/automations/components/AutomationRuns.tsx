@@ -4,6 +4,7 @@ import { IoLogoSlack } from "react-icons/io5"
 
 import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/patterns/empty-state"
 import { useThreadsPage } from "@/features/agents/lib/queries"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
@@ -32,11 +33,7 @@ export function AutomationRuns({
   const grouped = groupAutomationRuns(runs)
 
   if (runsQuery.isLoading) {
-    return (
-      <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
-        Loading automation runs…
-      </div>
-    )
+    return <EmptyState description="Loading automation runs…" />
   }
   if (runsQuery.isError) {
     return (
@@ -58,11 +55,7 @@ export function AutomationRuns({
     )
   }
   if (runs.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
-        No automation runs yet.
-      </div>
-    )
+    return <EmptyState description="No automation runs yet." />
   }
 
   return (

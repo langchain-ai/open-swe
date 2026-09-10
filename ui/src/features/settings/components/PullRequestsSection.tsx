@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SettingsRow, SettingsSection } from "@/components/patterns/settings"
 import {
   Select,
   SelectContent,

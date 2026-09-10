@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SettingsRow, SettingsSection } from "@/components/patterns/settings"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 

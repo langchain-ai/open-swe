@@ -4,7 +4,7 @@ import { IoLogoSlack } from "react-icons/io5"
 import { SiNotion } from "react-icons/si"
 
 import type { SessionUser } from "@/lib/api"
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { SettingsRow, SettingsSection } from "@/components/patterns/settings"
 import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
 import { cn } from "@/lib/utils"
