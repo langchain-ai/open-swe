@@ -7,7 +7,7 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 type SendResult = {
   thread_ts: string;
   thread_id: string;
-  webhook: { status: string; reason?: string };
+  webhook: { status: string };
 };
 
 async function send(
@@ -78,7 +78,7 @@ test.describe("Slack busy-thread follow-ups", () => {
       channel,
       thread_ts: threadTs,
     });
-    expect(busy.webhook.status, busy.webhook.reason).toBe("accepted");
+    expect(busy.webhook.status).toBe("accepted");
     await expect
       .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
       .toBe("busy");

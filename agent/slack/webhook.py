@@ -77,20 +77,18 @@ def _interrupts_active_run(
     text: str,
     bot_user_id: str,
     *,
-    treat_all_messages_as_mentions: bool,
     code_channel: bool,
     message_update: bool,
     explicit_request: bool,
-    untagged_reply: bool,
 ) -> bool:
-    return (
-        explicit_request
-        or untagged_reply
+    return not message_update and (
+        not code_channel
+        or explicit_request
         or _is_explicit_slack_request(
             text,
             bot_user_id,
-            treat_all_messages_as_mentions=treat_all_messages_as_mentions and not code_channel,
-            message_update=message_update,
+            treat_all_messages_as_mentions=False,
+            message_update=False,
         )
     )
 
@@ -841,11 +839,9 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     interrupt_active_run = _interrupts_active_run(
         text,
         bot_user_id,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions,
         code_channel=code_channel,
         message_update=message_update,
         explicit_request=request.explicit_request,
-        untagged_reply=untagged_reply,
     )
     run_input = _slack_context_input(
         context_messages,
