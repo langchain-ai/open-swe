@@ -240,3 +240,27 @@ async def test_manage_thread_denies_private_thread_outside_private_context(
     result = await tools.manage_thread("private-thread", "cancel")
     assert result["success"] is True
     cancel.assert_awaited_once()
+
+
+async def test_admin_cancel_reaches_private_thread_without_exporting_details(
+    private_thread, monkeypatch
+):
+    cancel = AsyncMock(return_value={"id": "private-thread", "title": "Secret", "status": "idle"})
+    monkeypatch.setattr(tools, "admin_cancel_dashboard_thread", cancel)
+    monkeypatch.setattr(
+        tools,
+        "get_dashboard_thread",
+        AsyncMock(
+            return_value={"id": "private-thread", "visibility": "private", "title": "Secret"}
+        ),
+    )
+    monkeypatch.setattr(tools, "_config", lambda: {"configurable": {"thread_id": "current"}})
+    monkeypatch.setattr(tools, "is_admin", lambda email, login=None: login == "admin")
+    monkeypatch.setattr(
+        tools, "_actor", AsyncMock(return_value=tools._Actor(login="admin", email=None, name="a"))
+    )
+
+    result = await tools.manage_thread("private-thread", "admin_cancel")
+
+    assert result == {"success": True, "thread": {"id": "private-thread", "status": "idle"}}
+    cancel.assert_awaited_once_with("private-thread", "admin")

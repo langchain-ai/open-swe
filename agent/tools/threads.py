@@ -606,7 +606,7 @@ async def _private_thread_context(actor: _Actor) -> bool:
 
 
 async def _authorized_locator(
-    locator: str, actor: _Actor
+    locator: str, actor: _Actor, *, admin_override: bool = False
 ) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
     langsmith_locator = parse_langsmith_locator(locator)
     slack_locator = parse_slack_thread_url(locator)
@@ -650,7 +650,11 @@ async def _authorized_locator(
             email=actor.email,
             mark_viewed=False,
         )
-    if summary.get("visibility") == "private" and not await _private_thread_context(actor):
+    if (
+        summary.get("visibility") == "private"
+        and not admin_override
+        and not await _private_thread_context(actor)
+    ):
         raise HTTPException(404, "thread not found")
     return thread_id, summary
 
@@ -982,8 +986,11 @@ async def manage_thread(
 
     try:
         # A private thread is only reachable from its owner's private context,
-        # for management as much as for reading.
-        resolved = await _authorized_locator(thread_id, actor)
+        # for management as much as for reading. Admins keep the dashboard's
+        # power to stop a run anywhere, but the caller's thread may be
+        # workspace-visible, so the response must not carry private details.
+        admin_override = action == "admin_cancel" and actor.admin
+        resolved = await _authorized_locator(thread_id, actor, admin_override=admin_override)
         if isinstance(resolved, dict):
             return resolved
         thread_id, summary = resolved
@@ -1002,6 +1009,11 @@ async def manage_thread(
             return {"success": True, "thread": _list_item(thread)}
         if action == "admin_cancel":
             thread = await admin_cancel_dashboard_thread(thread_id, actor.login)
+            if summary.get("visibility") == "private":
+                return {
+                    "success": True,
+                    "thread": {"id": thread_id, "status": thread.get("status")},
+                }
             return {"success": True, "thread": _list_item(thread)}
         if action in {"resolve", "unresolve"}:
             thread = await resolve_dashboard_thread(
