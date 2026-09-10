@@ -13,6 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button, IconButton } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { CopyButton } from "@/components/ui/copy-button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -118,7 +119,10 @@ export default function DesignSystemGallery() {
             </p>
           </GallerySection>
 
-          <GallerySection title="Actions" source="components/ui/button.tsx">
+          <GallerySection
+            title="Actions"
+            source="components/ui/button.tsx · copy-button.tsx"
+          >
             <div className="flex flex-wrap items-center gap-2">
               <Button>Primary</Button>
               <Button variant="secondary">Secondary</Button>
@@ -126,6 +130,11 @@ export default function DesignSystemGallery() {
               <Button variant="ghost">Ghost</Button>
               <Button variant="destructive">Destructive</Button>
               <Button disabled>Disabled</Button>
+              <CopyButton
+                text="Hello from Open SWE"
+                label="Copy example text"
+                size="icon"
+              />
               <Tooltip>
                 <TooltipTrigger
                   render={

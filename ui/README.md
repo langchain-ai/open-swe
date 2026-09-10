@@ -24,13 +24,52 @@ from production builds.
 | Layer | Location | Responsibility |
 | --- | --- | --- |
 | Foundations | `src/styles/tokens.css` | Semantic colors, radii, typography, animation tokens, and light/dark/agents theme values |
-| Primitives | `src/components/ui/` | Buttons, inputs, menus, tooltips, cards, badges, alerts, and other reusable controls |
+| Primitives | `src/components/ui/` | Buttons, copy actions, inputs, menus, tooltips, cards, badges, alerts, and other reusable controls |
 | Patterns | `src/components/patterns/` | Page headers, settings groups/rows/panels/navigation, and empty states |
 | Shell | `src/components/AppShell.tsx` | Application sidebar and settings-page layout |
 | Features | `src/features/` | Domain state, queries, permissions, and feature-specific components |
 
 The system builds on the existing primitives. It is part of this package and
 does not require a separate component library or Storybook installation.
+
+### Component breakdown
+
+| Group | Components | Current consumers |
+| --- | --- | --- |
+| Actions | `Button`, `IconButton`, `CopyButton` | Shared controls across the app; messages and code blocks share clipboard handling and feedback |
+| Forms | `Input`, `Textarea`, `Label`, `Switch`, `Select`, `Combobox`, `InputGroup` | Settings and feature forms |
+| Surfaces and feedback | `Card`, `Badge`, `Alert`, `Skeleton`, `Tooltip`, `Popover`, `Menu`, `Sheet` | Shared surfaces, status, loading, and overlays |
+| Page structure | `PageHeader`, `EmptyState` | Settings shell, Skills, Automations, automation runs |
+| Settings structure | `SettingsSection`, `SettingsRow`, `SettingsPanel`, `SettingsNavRow` | Account, preferences, connections, workspace MCPs, admin, and other settings pages |
+| Chat presentation | `Markdown`, `CodeBlock`, `Messages`, `AgentTurn`, `ReasoningBlock` | Agent transcripts; these remain in `features/agents/components/`, with small controls imported from the shared layer |
+| Composer and agent workflow | `ChatComposer`, `AgentComposerDock`, environment/model selectors, tool results, approvals, diffs | Agent-specific state and actions remain in their feature |
+
+`CopyButton` accepts `text`, an optional accessible `label`, and button styling
+props. It copies text unchanged, shows success only after the clipboard write
+succeeds, and resets feedback after 1.5 seconds. For example:
+
+```tsx
+import { CopyButton } from "@/components/ui/copy-button"
+
+<CopyButton text={messageText} label="Copy message" />
+```
+
+### LangChain chat UI reuse
+
+[Agent Chat UI](https://github.com/langchain-ai/agent-chat-ui) is LangChain's
+generic chat interface for LangGraph servers with a `messages` state key.
+[Deep Agents UI](https://github.com/langchain-ai/deep-agents-ui) adds Deep Agents
+workflows such as files and step-by-step debugging. Both repositories are
+Next.js applications with private package manifests, rather than published
+drop-in component packages.
+
+Open SWE already uses `@langchain/react` and the LangGraph SDK for streaming in
+`AgentStreamProvider` and review chat. Keep that shared streaming integration
+and use the upstream apps as references for presentation patterns. Adopting an
+entire Next.js starter would require adapting Open SWE's TanStack Start routing,
+Electron integration, composer, approvals, and sandbox tools. This pass instead
+centralizes the existing theme and reusable presentation components; further
+chat extraction should follow demonstrated reuse across agent and review chat.
 
 ### Compose a settings section
 

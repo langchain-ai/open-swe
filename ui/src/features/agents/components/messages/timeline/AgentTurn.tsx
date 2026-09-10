@@ -10,7 +10,6 @@ import {
   selectCollapsedTurnItems,
   splitWorkAndReply,
 } from "../renderItems"
-import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
@@ -19,6 +18,7 @@ import type { ReactNode } from "react"
 import type { RenderItem } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
+import { CopyButton } from "@/components/ui/copy-button"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
 import { SubagentGroup } from "@/features/agents/components/subagents"
@@ -317,7 +317,8 @@ export function AgentTurn({
 
       <div className="mt-1 flex items-center gap-1">
         {replyText && !isStreaming && (
-          <MessageCopyButton
+          <CopyButton
+            label="Copy message"
             className="opacity-0 transition-opacity duration-200 group-hover/turn:opacity-100 focus-visible:opacity-100"
             text={replyText}
           />
