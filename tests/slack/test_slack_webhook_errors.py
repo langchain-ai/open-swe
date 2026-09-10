@@ -561,7 +561,7 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
     monkeypatch.setattr(
         slack_webhook.common, "resolve_slack_links_in_context", AsyncMock(return_value=("", []))
     )
-    monkeypatch.setattr(slack_webhook.common, "login_for_slack_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_webhook.common, "login_for_slack_id", AsyncMock(return_value="alice"))
     monkeypatch.setattr(slack_webhook.common, "is_bot_token_only_mode", lambda: True)
     monkeypatch.setattr(slack_webhook.common, "thread_exists", AsyncMock(return_value=False))
     monkeypatch.setattr(
@@ -614,3 +614,11 @@ async def test_errored_dm_owner_falls_back_to_email_mapping(
     kwargs = upsert.await_args.kwargs
     assert kwargs["visibility"] == "private"
     assert kwargs["owner_login"] == "alice"
+
+    # An unmapped DM sender (bot-token-only mode) gets a collaborative thread,
+    # never a private one nobody can open.
+    monkeypatch.setattr(slack_webhook.common, "login_for_email", AsyncMock(return_value=None))
+    await slack_webhook._mark_slack_thread_errored("t1", request, None)
+    kwargs = upsert.await_args.kwargs
+    assert kwargs["visibility"] == "public"
+    assert kwargs["owner_login"] == ""
