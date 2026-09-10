@@ -14,10 +14,12 @@ from langgraph_sdk.client import LangGraphClient
 from agent.slack.client import (
     SlackStreamError,
     append_slack_stream,
+    delete_slack_stream,
     start_slack_stream,
     stop_slack_stream,
     store_slack_run_mapping,
 )
+from agent.slack.code_channels import is_code_channel_session
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 
 logger = logging.getLogger(__name__)
@@ -132,6 +134,7 @@ class SlackThinkingStream:
         self.mapping_thread_ts = mapping_thread_ts
         self.original_message_ts = original_message_ts
         self.message_ts: str | None = None
+        self.hidden = False
         self.steps: dict[tuple[tuple[str, ...], str], Step] = {}
         self.pending: dict[str, Step] = {}
         self.last_flush = monotonic()
@@ -139,8 +142,11 @@ class SlackThinkingStream:
         self.disabled = False
 
     async def start(self) -> bool:
+        thinking_only = not is_code_channel_session(self.thread_ts)
         initial = Step(
-            _step_id(self.run_id, (), "startup"), "Preparing the agent workspace", "in_progress"
+            _step_id(self.run_id, (), "startup"),
+            "Thinking..." if thinking_only else "Preparing the agent workspace",
+            "in_progress",
         )
         try:
             self.message_ts = await start_slack_stream(
@@ -154,6 +160,8 @@ class SlackThinkingStream:
             logger.info("Slack Thinking Steps unavailable for run %s: %s", self.run_id, exc.code)
             return False
         self.steps[((), "startup")] = initial
+        if thinking_only:
+            self.hidden = True
         await store_slack_run_mapping(
             self.client,
             self.channel_id,
@@ -167,6 +175,8 @@ class SlackThinkingStream:
         return True
 
     def consume(self, stream_event: Mapping[str, Any]) -> None:
+        if self.hidden:
+            return
         parsed = _event_data(stream_event)
         if parsed is None:
             return
@@ -227,6 +237,17 @@ class SlackThinkingStream:
         self.retry_at = 0.0
 
     async def stop(self, status: str) -> None:
+        if self.hidden:
+            if self.message_ts:
+                try:
+                    await delete_slack_stream(self.channel_id, self.message_ts)
+                except SlackStreamError as exc:
+                    logger.warning(
+                        "Could not delete Slack Thinking Steps for run %s: %s",
+                        self.run_id,
+                        exc.code,
+                    )
+            return
         for step in self.steps.values():
             if step.failed:
                 step.status = "complete" if status == "success" else "error"

@@ -883,7 +883,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         thread_id,
     )
     run_id = run.get("run_id")
-    if code_channel and isinstance(run_id, str) and run_id:
+    if isinstance(run_id, str) and run_id:
         stream_thread_ts = reply_thread_ts or thread_ts
         await stream_slack_thinking_steps(
             client=langgraph_client,

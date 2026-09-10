@@ -525,7 +525,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     assert "old text" not in serialized
     assert "## Conversation Context" not in serialized
     assert await_args.kwargs["explicitly_tagged"] is False
-    thinking.assert_not_awaited()
+    thinking.assert_awaited_once()
     store_args = store_mapping.await_args
     assert store_args is not None
     assert store_args.kwargs["message_ts"] == "1.0"

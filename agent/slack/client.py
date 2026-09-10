@@ -789,6 +789,15 @@ async def stop_slack_stream(
             raise
 
 
+async def delete_slack_stream(channel_id: str, message_ts: str) -> None:
+    """Delete a stopped Slack stream message."""
+    try:
+        await _slack_stream_call("chat.delete", {"channel": channel_id, "ts": message_ts})
+    except SlackStreamError as exc:
+        if exc.code not in {"message_not_found", "cant_delete_message"}:
+            raise
+
+
 async def update_slack_message(
     channel_id: str,
     message_ts: str,

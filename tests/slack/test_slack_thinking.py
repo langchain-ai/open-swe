@@ -71,7 +71,7 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
         thread_id="thread-1",
         run_id="run-1",
         channel_id="C1",
-        thread_ts="1.0",
+        thread_ts="0",
         mapping_thread_ts="1.0",
         original_message_ts="1.1",
         recipient_user_id="U1",
@@ -186,3 +186,51 @@ def test_namespaced_tool_events_have_stable_distinct_ids() -> None:
     assert len(stream.steps) == 2
     assert {step.title for step in stream.steps.values()} == {"Reading auth.py"}
     assert len({step.task_id for step in stream.steps.values()}) == 2
+
+
+async def test_thread_streams_show_thinking_only_and_delete_on_stop(monkeypatch) -> None:
+    start = AsyncMock(return_value="2.0")
+    append = AsyncMock()
+    delete = AsyncMock()
+    stop = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "start_slack_stream", start)
+    monkeypatch.setattr(slack_thinking, "append_slack_stream", append)
+    monkeypatch.setattr(slack_thinking, "delete_slack_stream", delete)
+    monkeypatch.setattr(slack_thinking, "stop_slack_stream", stop)
+    monkeypatch.setattr(slack_thinking, "store_slack_run_mapping", AsyncMock())
+
+    assert await slack_thinking.SlackThinkingStream(
+        client=AsyncMock(),
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="1.0",
+        recipient_user_id="U1",
+        recipient_team_id="T1",
+        mapping_thread_ts="1.0",
+        original_message_ts="1.1",
+    ).start()
+
+    start_chunk = start.await_args.args[2][0]
+    assert start_chunk["title"] == "Thinking..."
+
+    stream = slack_thinking.SlackThinkingStream(
+        client=AsyncMock(),
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="1.0",
+        recipient_user_id="U1",
+        recipient_team_id="T1",
+        mapping_thread_ts="1.0",
+        original_message_ts="1.1",
+    )
+    stream.message_ts = "2.0"
+    stream.hidden = True
+    stream.consume(_event("tools", {"event": "tool-started", "tool_call_id": "c1"}))
+    await stream.flush(force=True)
+    await stream.stop("success")
+
+    assert not append.await_count
+    delete.assert_awaited_once_with("C1", "2.0")
+    stop.assert_not_awaited()
