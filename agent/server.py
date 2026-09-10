@@ -54,7 +54,7 @@ from agent.dashboard.agent_overrides import (
     profile_model_routing_enabled,
     resolve_github_login,
 )
-from agent.dashboard.agent_usage import record_agent_run_usage
+from agent.dashboard.agent_usage import record_agent_invocation_usage
 from agent.dashboard.environments import (
     resolve_environment,
 )
@@ -620,7 +620,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
@@ -762,9 +762,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "plan_mode": self._plan_mode,
                     },
                 )
-                if cfg.prepare_run_id:
-                    await record_agent_run_usage(
-                        run_id=cfg.prepare_run_id,
+                if cfg.invocation_id:
+                    await record_agent_invocation_usage(
+                        invocation_id=cfg.invocation_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
                         user_email=self._user_email,
