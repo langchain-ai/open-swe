@@ -72,6 +72,7 @@ describe("ModelPicker", () => {
 
     const trigger = screen.getByRole("button", { name: "Auto" })
     fireEvent.click(trigger)
+    openModelPane()
     fireEvent.click(screen.getByRole("option", { name: "Auto" }))
 
     expect(onSelectionChange).toHaveBeenCalledWith(null)

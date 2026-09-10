@@ -389,15 +389,6 @@ export function ModelPicker({
             <div ref={modelRowRef} className="mt-1 border-t border-border pt-1">
               <SectionHeading>Model</SectionHeading>
               <OptionRow
-                label="Auto"
-                selected={selection === null}
-                focused={false}
-                onClick={() => {
-                  onSelectionChange?.(null)
-                  close()
-                }}
-              />
-              <OptionRow
                 label={selectedModel.label}
                 selected={false}
                 focused={pane === "models" || mainIndex === modelRowIndex}
