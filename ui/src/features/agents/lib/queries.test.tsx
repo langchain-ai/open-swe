@@ -320,7 +320,7 @@ describe("sidebar queries", () => {
 
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith(
-        expect.objectContaining({ withoutSlackChannel: true })
+        expect.objectContaining({ slackChannelId: "none" })
       )
     )
   })

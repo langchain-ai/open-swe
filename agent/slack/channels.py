@@ -1,6 +1,6 @@
 """Persisted Slack channel identities and metadata."""
 
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, ConfigDict
 
@@ -8,6 +8,21 @@ from agent.slack.oauth import SLACK_TEAM_ID
 from agent.store import TypedStore, now_ms
 
 _UNKNOWN_TEAM = "_unknown"
+
+# Sentinel for "threads with no Slack channel" on the channel filter.
+SLACK_CHANNEL_NONE = "none"
+
+
+class SlackChannelRef(TypedDict):
+    """Channel identity carried on a thread summary."""
+
+    id: str
+    teamId: str
+    name: str
+
+
+class SlackChannelSummary(SlackChannelRef):
+    updatedAt: int
 
 
 class SlackChannel(BaseModel):

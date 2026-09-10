@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.slack.channels import SlackChannelRef
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
@@ -165,7 +166,7 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("resolved") is True
 
 
-def thread_slack_channel(metadata: Mapping[str, Any]) -> dict[str, str] | None:
+def thread_slack_channel(metadata: Mapping[str, Any]) -> SlackChannelRef | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     if slack_thread is None or not slack_thread.channel_id.strip():
         return None
@@ -173,11 +174,11 @@ def thread_slack_channel(metadata: Mapping[str, Any]) -> dict[str, str] | None:
     if channel_context.get("is_im") is True or channel_context.get("is_mpim") is True:
         return None
     name = channel_context.get("name") or channel_context.get("name_normalized")
-    return {
-        "id": slack_thread.channel_id.strip(),
-        "teamId": slack_thread.team_id.strip() or SLACK_TEAM_ID.strip(),
-        "name": name.strip() if isinstance(name, str) else "",
-    }
+    return SlackChannelRef(
+        id=slack_thread.channel_id.strip(),
+        teamId=slack_thread.team_id.strip() or SLACK_TEAM_ID.strip(),
+        name=name.strip() if isinstance(name, str) else "",
+    )
 
 
 def thread_source_url(metadata: Mapping[str, Any]) -> str | None:

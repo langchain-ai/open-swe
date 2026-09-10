@@ -576,7 +576,7 @@ export function useSidebarRecents({
       ...(projectMode === true
         ? { ownerless: true }
         : projectMode === "slack"
-          ? { withoutSlackChannel: true }
+          ? { slackChannelId: "none" }
           : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },

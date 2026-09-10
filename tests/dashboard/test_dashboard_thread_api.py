@@ -2285,7 +2285,7 @@ async def test_list_dashboard_threads_page_filters_slack_channels(monkeypatch) -
 
     channel = await thread_listing.list_dashboard_threads_page("octocat", slack_channel_id="C123")
     channel_less = await thread_listing.list_dashboard_threads_page(
-        "octocat", without_slack_channel=True
+        "octocat", slack_channel_id="none"
     )
 
     assert [item["id"] for item in channel["items"]] == ["t0"]

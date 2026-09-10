@@ -29,6 +29,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Use async-only implementations. Add a sync method only when an interface requires it, and then raise `NotImplementedError`.
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - Keep comments minimal and only explain non-obvious reasons.
+- Avoid `Any` in Python and `any` in TypeScript; define precise boundary types instead.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
 
 ## Testing

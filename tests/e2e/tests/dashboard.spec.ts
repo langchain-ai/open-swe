@@ -635,6 +635,58 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible();
   });
 
+  test("groups sidebar threads by Slack channel", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "open-swe.agents.sidebar-prefs",
+        JSON.stringify({ organize: "slack" }),
+      );
+    });
+    await page.route("**/dashboard/api/threads/slack-channels?*", (route) =>
+      route.fulfill({
+        json: [{ id: "C123", teamId: "T1", name: "engineering", updatedAt: 2 }],
+      }),
+    );
+    await page.route("**/dashboard/api/threads/page?*", (route) => {
+      const channel = new URL(route.request().url()).searchParams.get(
+        "slack_channel_id",
+      );
+      const items =
+        channel === "C123"
+          ? [
+              {
+                id: "channel-thread",
+                title: "Channel thread",
+                repo: "",
+                repoFullName: "",
+                branch: "",
+                status: "idle",
+                resolved: false,
+                viewed: true,
+                source: "slack",
+                createdAt: 2,
+                updatedAt: 2,
+              },
+            ]
+          : [];
+      return route.fulfill({
+        json: { items, limit: 10, offset: 0, hasMore: false },
+      });
+    });
+
+    await loginAs(page, SAME_USER);
+    const channelLessRequest = page.waitForRequest((request) =>
+      request.url().includes("slack_channel_id=none"),
+    );
+    await page.goto("/agents");
+
+    await expect(
+      page.getByRole("button", { name: "engineering" }),
+    ).toBeVisible();
+    await expect(page.getByText("Channel thread")).toBeVisible();
+    await channelLessRequest;
+  });
+
   // A slow sidebar used to render as a blank column, indistinguishable from an
   // account with no threads.
   test("shows a loading placeholder while the sidebar list is in flight", async ({

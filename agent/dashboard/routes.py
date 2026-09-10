@@ -155,6 +155,7 @@ from agent.dashboard.skills import (
     update_organization_skill,
     update_skill,
 )
+from agent.dashboard.slack_channels_api import slack_channels_router
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     TranscriptionSettingsUpdate,
@@ -187,7 +188,6 @@ from agent.dashboard.threads.diffs import (
 from agent.dashboard.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_projects,
-    list_dashboard_thread_slack_channels,
     list_dashboard_threads,
     list_dashboard_threads_page,
     pin_dashboard_thread,
@@ -273,6 +273,7 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 router.include_router(feedback_router)
+router.include_router(slack_channels_router)
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
@@ -1949,24 +1950,6 @@ async def api_list_thread_projects(
     )
 
 
-@router.get("/threads/slack-channels")
-async def api_list_thread_slack_channels(
-    include_resolved: bool = False,
-    include_automations: bool = False,
-    all: bool = False,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> list[dict[str, Any]]:
-    if all and not _session_is_admin(session):
-        raise HTTPException(403, "admin only")
-    return await list_dashboard_thread_slack_channels(
-        session["sub"],
-        email=session.get("email"),
-        include_resolved=include_resolved,
-        include_automations=include_automations,
-        include_all=all,
-    )
-
-
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
     session: dict[str, Any] = _SESSION_DEP,
@@ -2007,16 +1990,15 @@ async def api_list_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     slack_channel_id: str | None = None,
-    without_slack_channel: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
-    if sum(bool(value) for value in (repo, ownerless, slack_channel_id, without_slack_channel)) > 1:
+    if sum(bool(value) for value in (repo, ownerless, slack_channel_id)) > 1:
         raise HTTPException(
             400,
-            "repo, ownerless, slack_channel_id, and without_slack_channel are mutually exclusive",
+            "repo, ownerless, and slack_channel_id are mutually exclusive",
         )
     if repo:
         owner, separator, name = repo.strip().partition("/")
@@ -2039,7 +2021,6 @@ async def api_list_threads_page(
         repo=repo,
         ownerless=ownerless,
         slack_channel_id=slack_channel_id,
-        without_slack_channel=without_slack_channel,
         sort_by=sort_by,
     )
 

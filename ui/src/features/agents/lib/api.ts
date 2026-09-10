@@ -129,7 +129,6 @@ export interface ThreadsPageParams {
   repo?: string
   ownerless?: boolean
   slackChannelId?: string
-  withoutSlackChannel?: boolean
   sortBy?: ThreadSortBy
 }
 
@@ -240,8 +239,6 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
     search.set("ownerless", String(params.ownerless))
   if (params.slackChannelId)
     search.set("slack_channel_id", params.slackChannelId)
-  if (params.withoutSlackChannel != null)
-    search.set("without_slack_channel", String(params.withoutSlackChannel))
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
