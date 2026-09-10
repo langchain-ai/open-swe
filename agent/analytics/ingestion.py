@@ -57,6 +57,10 @@ async def ingest(event: EventEnvelope) -> bool:
         raise ValueError("event occurred before the configured analytics epoch")
     async with transaction() as conn:
         subject_id = event.finding_id or event.pr_id
+        if event.event_name == EventName.FEEDBACK_SUBMITTED:
+            subject_id = event.event_id
+        elif event.event_name == EventName.FEEDBACK_WITHDRAWN:
+            subject_id = event.payload.model_dump()["submission_event_id"]
         if subject_id is not None:
             # Serialize creation and outcomes even before a projection row exists.
             await conn.execute(
@@ -218,8 +222,10 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
         await conn.execute(
             text(
                 "INSERT INTO feedback_projection (workspace_id, feedback_id, run_id, task_id, "
-                "user_id, sentiment, rating, submitted_at) VALUES (:workspace_id, :feedback_id, "
-                ":run_id, :task_id, :user_id, :sentiment, :rating, :occurred_at) ON CONFLICT "
+                "user_id, sentiment, rating, submitted_at, withdrawn_at) VALUES (:workspace_id, :feedback_id, "
+                ":run_id, :task_id, :user_id, :sentiment, :rating, :occurred_at, "
+                "(SELECT withdrawn_at FROM feedback_withdrawal_projection WHERE workspace_id = "
+                ":workspace_id AND feedback_id = :feedback_id)) ON CONFLICT "
                 "(workspace_id, feedback_id) DO NOTHING"
             ),
             {
@@ -234,16 +240,26 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
             },
         )
     elif name == EventName.FEEDBACK_WITHDRAWN:
+        params = {
+            "occurred_at": event.occurred_at,
+            "workspace_id": event.workspace_id,
+            "feedback_id": event.payload.model_dump()["submission_event_id"],
+        }
         await conn.execute(
             text(
-                "UPDATE feedback_projection SET withdrawn_at = :occurred_at WHERE workspace_id "
-                "= :workspace_id AND feedback_id = :feedback_id AND withdrawn_at IS NULL"
+                "INSERT INTO feedback_withdrawal_projection (workspace_id, feedback_id, withdrawn_at) "
+                "VALUES (:workspace_id, :feedback_id, :occurred_at) "
+                "ON CONFLICT (workspace_id, feedback_id) DO UPDATE SET withdrawn_at = "
+                "LEAST(feedback_withdrawal_projection.withdrawn_at, EXCLUDED.withdrawn_at)"
             ),
-            {
-                "occurred_at": event.occurred_at,
-                "workspace_id": event.workspace_id,
-                "feedback_id": event.payload.model_dump()["submission_event_id"],
-            },
+            params,
+        )
+        await conn.execute(
+            text(
+                "UPDATE feedback_projection SET withdrawn_at = LEAST(withdrawn_at, :occurred_at) "
+                "WHERE workspace_id = :workspace_id AND feedback_id = :feedback_id"
+            ),
+            params,
         )
     elif name in {
         EventName.TASK_MARKED_COMPLETE,

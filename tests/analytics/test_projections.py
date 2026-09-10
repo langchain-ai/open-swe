@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from agent.analytics import database, emitter, ingestion, queries, summaries
 from agent.analytics.events import (
     EventName,
+    FeedbackSubmittedPayload,
+    FeedbackWithdrawnPayload,
     FindingStatePayload,
     FindingSurfacedPayload,
     PROpenedPayload,
@@ -641,3 +643,115 @@ async def test_finding_history_survives_late_transitions(
     assert stats["reopened_findings"] == 1
     assert stats["dismissed_findings"] == 1
     assert stats["unresolved_surfaced_findings"] == 0
+
+
+@pytest.mark.parametrize("delivery", [*permutations(range(3)), "concurrent"])
+async def test_feedback_withdrawal_survives_delivery_order(analytics_db, delivery):
+    workspace, transaction = analytics_db
+    submitted = event(
+        workspace,
+        EventName.FEEDBACK_SUBMITTED,
+        FeedbackSubmittedPayload(sentiment="positive", rating=5),
+        run_id=uuid4(),
+        user_id=uuid4(),
+    )
+    events = [
+        submitted,
+        *[
+            event(
+                workspace,
+                EventName.FEEDBACK_WITHDRAWN,
+                FeedbackWithdrawnPayload(submission_event_id=submitted.event_id),
+                day=day,
+            )
+            for day in (1, 2)
+        ],
+    ]
+    if delivery == "concurrent":
+        await asyncio.gather(*(ingestion.ingest(item) for item in events))
+    else:
+        for index in delivery:
+            await ingestion.ingest(events[index])
+    for item in events:
+        assert not await ingestion.ingest(item)
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM feedback_projection"))).mappings().one()
+        assert row["feedback_id"] == submitted.event_id
+        assert row["sentiment"] == "positive"
+        assert row["withdrawn_at"] == DAY + timedelta(days=1)
+        assert (
+            await conn.scalar(
+                text("SELECT count(*) FROM feedback_projection WHERE withdrawn_at IS NULL")
+            )
+            == 0
+        )
+
+    independent = event(
+        workspace,
+        EventName.FEEDBACK_SUBMITTED,
+        submitted.payload,
+        run_id=submitted.run_id,
+        user_id=submitted.user_id,
+    )
+    await ingestion.ingest(
+        event(
+            uuid4(),
+            EventName.FEEDBACK_WITHDRAWN,
+            FeedbackWithdrawnPayload(submission_event_id=independent.event_id),
+            day=1,
+        )
+    )
+    await ingestion.ingest(independent)
+    async with transaction() as conn:
+        assert (
+            await conn.scalar(
+                text("SELECT count(*) FROM feedback_projection WHERE withdrawn_at IS NULL")
+            )
+            == 1
+        )
+
+
+async def test_feedback_migration_recovers_acknowledged_withdrawals(analytics_db):
+    workspace, transaction = analytics_db
+    submissions = [
+        event(
+            workspace,
+            EventName.FEEDBACK_SUBMITTED,
+            FeedbackSubmittedPayload(sentiment="positive", rating=5),
+            run_id=uuid4(),
+        )
+        for _ in range(2)
+    ]
+    withdrawals = [
+        event(
+            workspace,
+            EventName.FEEDBACK_WITHDRAWN,
+            FeedbackWithdrawnPayload(submission_event_id=submitted.event_id),
+            day=1,
+        )
+        for submitted in submissions
+    ]
+    for item in withdrawals:
+        await ingestion.ingest(item)
+    await ingestion.ingest(submissions[0])
+    async with transaction() as conn:
+        # Recreate the old state: acknowledged withdrawals with no retained pending record.
+        await conn.execute(text("UPDATE feedback_projection SET withdrawn_at = NULL"))
+        await conn.execute(text("DROP TABLE feedback_withdrawal_projection"))
+        schema = await conn.scalar(text("SELECT current_schema()"))
+        migration = (
+            Path(database.__file__).with_name("migrations") / "0003_feedback_withdrawals.sql"
+        )
+        await database._run_script(
+            conn, migration.read_text().replace("open_swe_analytics", schema)
+        )
+    await ingestion.ingest(submissions[1])
+    for item in withdrawals:
+        assert not await ingestion.ingest(item)
+    async with transaction() as conn:
+        rows = (
+            (await conn.execute(text("SELECT withdrawn_at FROM feedback_projection")))
+            .scalars()
+            .all()
+        )
+        assert rows == [DAY + timedelta(days=1)] * 2
