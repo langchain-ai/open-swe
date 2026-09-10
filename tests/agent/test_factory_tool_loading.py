@@ -1,9 +1,4 @@
-"""The graph factory's remaining tool loaders must overlap, not run back-to-back.
-
-Each is a cold-cache network round trip (an MCP handshake, credential store
-reads) sitting on the critical path before the run's first model call. Corridor
-no longer appears here: its catalog is static, so it loads on demand instead.
-"""
+"""The graph factory tool loaders must overlap, not run back-to-back."""
 
 import asyncio
 from typing import Any
@@ -41,10 +36,15 @@ def _config() -> RunnableConfig:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("fake_store")
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
-async def test_tool_loaders_run_concurrently_and_gate_mcps(
+@pytest.mark.parametrize("github_login", ["octocat", None])
+async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
     initial_plan_mode: bool,
+    github_login: str | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    barrier = asyncio.Barrier(3)
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+    monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "other@example.com")
+    barrier = asyncio.Barrier(2)
 
     async def delete_incident() -> str:
         return "deleted"
@@ -94,13 +94,31 @@ async def test_tool_loaders_run_concurrently_and_gate_mcps(
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
-        patch("agent.server._observability_tools_for", side_effect=rendezvous([])),
+        patch("agent.server.email_for_login", new_callable=AsyncMock, return_value=None),
         patch("agent.server._mcp_tools_for", side_effect=rendezvous([mcp_tool])),
-        patch("agent.server._load_integration_tools", side_effect=rendezvous(([], []))),
+        patch("agent.server._notion_tools_for", side_effect=rendezvous([])),
     ):
         config = _config()
+        config["configurable"]["github_login"] = github_login
         config["configurable"]["plan_mode"] = initial_plan_mode
         await get_agent(config)
+
+    tool_names = {
+        tool.name if hasattr(tool, "name") else tool.__name__
+        for tool in build_agent.call_args.kwargs["tools"]
+    }
+    assert "linear_comment" in tool_names
+    assert not tool_names.intersection(
+        {
+            "linear_create_issue",
+            "linear_delete_issue",
+            "linear_get_issue",
+            "linear_get_issue_comments",
+            "linear_list_teams",
+            "linear_search_issues",
+            "linear_update_issue",
+        }
+    )
 
     middleware = build_agent.call_args.kwargs["middleware"]
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))

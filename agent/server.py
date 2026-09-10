@@ -45,7 +45,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from agent.dashboard.admin import is_admin, is_observability_authorized
+from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -73,13 +73,11 @@ from agent.dashboard.team_settings import (
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
-from agent.dashboard.user_credentials import get_sandbox_langsmith_credentials
 from agent.dashboard.user_mappings import email_for_login
 from agent.dashboard.user_mcps import user_mcp_source
 from agent.dashboard.workspace_mcps import workspace_mcp_source
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
-from agent.github.org_membership import is_user_active_org_member
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
@@ -124,6 +122,7 @@ from agent.prompt import (
     construct_system_prompt,
     render_open_swe_shared_base,
 )
+from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -145,14 +144,6 @@ from agent.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from agent.tool_loaders.corridor_mcp import (
-    CORRIDOR_TOOL_NAMES,
-    corridor_configured,
-    load_corridor_tools,
-)
-from agent.tool_loaders.currents import load_currents_tools
-from agent.tool_loaders.datadog_mcp import load_datadog_tools
-from agent.tool_loaders.langsmith import load_langsmith_tools
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
@@ -172,19 +163,13 @@ from agent.tools import (
     get_thread,
     http_request,
     linear_comment,
-    linear_create_issue,
-    linear_delete_issue,
-    linear_get_issue,
-    linear_get_issue_comments,
-    linear_list_teams,
-    linear_search_issues,
-    linear_update_issue,
     list_automations,
     list_environments,
     list_threads,
     manage_baby_sit,
     manage_code_channel,
     manage_thread,
+    mark_question_answered,
     notify_automation_channel,
     open_pull_request,
     output_iframe,
@@ -365,9 +350,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_start_new_thread",
-        "linear_create_issue",
-        "linear_update_issue",
-        "linear_delete_issue",
         "save_environment",
         "capture_environment_snapshot",
         "delete_environment",
@@ -430,8 +412,8 @@ def _general_purpose_subagent(
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": (
-            GENERAL_PURPOSE_SUBAGENT["description"]
-            + " It cannot access Slack tools; relay all Slack communication from the main agent."
+            f"{GENERAL_PURPOSE_SUBAGENT['description']} "
+            f"{load_prompt('system/general-purpose-subagent-suffix.md')}"
         ),
         # Deep Agents' default GP prompt covers only task mechanics; the shared
         # base carries the Open SWE identity and conventions (gh proxy usage,
@@ -446,25 +428,6 @@ def _general_purpose_subagent(
     if skills:
         subagent["skills"] = skills
     return subagent
-
-
-async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether the triggering user may use the team observability tools.
-
-    Gates on admin / explicitly-authorized emails so prompt-injected runs from
-    untrusted contributors cannot reach the team's Datadog/LangSmith data.
-    """
-    cfg = RunConfig.from_config(config)
-    candidate_login = profile_login or cfg.github_login
-    candidate_emails = [
-        cfg.user_email,
-        cfg.slack_thread.triggering_user_email if cfg.slack_thread else None,
-    ]
-    if any(is_observability_authorized(email, login=candidate_login) for email in candidate_emails):
-        return True
-    return is_observability_authorized(
-        await email_for_login(candidate_login), login=candidate_login
-    )
 
 
 _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
@@ -516,34 +479,6 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
     )
 
 
-async def _cached_allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
-    login = _org_member_login(config, profile_login)
-    if not login:
-        return False
-    return await ttl_cache.cached(
-        f"org-member:{login}",
-        300,
-        lambda: _allowed_org_member(config, profile_login),
-    )
-
-
-def _org_member_login(config: RunnableConfig, profile_login: str | None) -> str | None:
-    return profile_login or RunConfig.from_config(config).github_login
-
-
-async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
-    login = _org_member_login(config, profile_login)
-    if not login:
-        return False
-    orgs = dict.fromkeys(
-        org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
-    )
-    for org in orgs:
-        if await is_user_active_org_member(login, org):
-            return True
-    return False
-
-
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
     async def load_with_timeout() -> list[Any]:
         return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
@@ -556,39 +491,6 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
     except Exception:
         logger.warning("Failed to load cached tools for %s", key, exc_info=True)
         return []
-
-
-async def _cached_langsmith_tools(profile_login: str | None, *, allow_team: bool) -> list[Any]:
-    scope = "team" if allow_team else "solo"
-    return await _cached_tool_loader(
-        f"tools:langsmith:{profile_login or '-'}:{scope}",
-        300,
-        lambda: load_langsmith_tools(profile_login, allow_team=allow_team),
-    )
-
-
-async def _load_observability_tools(authorized: bool, profile_login: str | None) -> list[Any]:
-    """Load team observability tools for an authorized triggering user."""
-    if not authorized:
-        return []
-    datadog_tools, langsmith_tools = await asyncio.gather(
-        _cached_tool_loader("tools:datadog", 600, load_datadog_tools),
-        _cached_langsmith_tools(profile_login, allow_team=True),
-    )
-    return [*datadog_tools, *langsmith_tools]
-
-
-async def _observability_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
-    """Observability tools the triggering user is allowed to see.
-
-    The authorization gate itself stays uncached — it reads per-run config — so
-    only the credential and membership lookups behind it are reused.
-    """
-    if await _observability_authorized(config, profile_login):
-        return await _load_observability_tools(True, profile_login)
-    if await _cached_allowed_org_member(config, profile_login):
-        return await _cached_langsmith_tools(profile_login, allow_team=True)
-    return await _cached_langsmith_tools(profile_login, allow_team=False)
 
 
 async def _personal_tools_allowed(thread_id: str | None, profile_login: str | None) -> bool:
@@ -614,37 +516,23 @@ async def _personal_tools_allowed(thread_id: str | None, profile_login: str | No
     )
 
 
-async def _load_integration_tools(
-    thread_id: str | None, profile_login: str | None
-) -> tuple[list[Any], list[Any]]:
-    if not await _personal_tools_allowed(thread_id, profile_login):
-        return [], []
-    currents_tools, notion_tools = await asyncio.gather(
-        _cached_tool_loader(
-            f"tools:currents:{profile_login}",
-            300,
-            lambda: load_currents_tools(profile_login),
-        ),
-        _cached_tool_loader(
-            f"tools:notion:{profile_login}",
-            300,
-            lambda: load_notion_tools(profile_login),
-        ),
+async def _notion_tools_for(thread_id: str | None, profile_login: str | None) -> list[Any]:
+    if not profile_login or not await _personal_tools_allowed(thread_id, profile_login):
+        return []
+    return await _cached_tool_loader(
+        f"tools:notion:{profile_login}",
+        300,
+        lambda: load_notion_tools(profile_login),
     )
-    return currents_tools, notion_tools
 
 
-async def _mcp_tools_for(
-    config: RunnableConfig, thread_id: str | None, profile_login: str | None
-) -> list[Any]:
-    """Workspace MCPs for authorized users, plus personal MCPs in the owner's private thread.
+async def _mcp_tools_for(thread_id: str | None, profile_login: str | None) -> list[Any]:
+    """Workspace MCPs for every run, plus personal MCPs inside the owner's private thread.
 
     A personal connection with the same name as a workspace one replaces it entirely
     for that user's runs.
     """
-    sources = []
-    if await _observability_authorized(config, profile_login):
-        sources.append(workspace_mcp_source)
+    sources = [workspace_mcp_source]
     if profile_login and await _personal_tools_allowed(thread_id, profile_login):
         sources.append(user_mcp_source(profile_login))
     return await load_mcp_tools(*sources)
@@ -653,11 +541,6 @@ async def _mcp_tools_for(
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
     async with aphase(thread_id, name):
         return await loader()
-
-
-async def _load_corridor_mcp_tools() -> list[Any]:
-    """Corridor MCP tools when the deployment environment has configured them."""
-    return await _cached_tool_loader("tools:corridor", 600, load_corridor_tools)
 
 
 async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
@@ -754,7 +637,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_issue_number: str,
         draft_prs: bool,
         plan_mode: bool,
-        corridor_enabled: bool,
         admin_environments: bool,
     ) -> None:
         self._thread_id = thread_id
@@ -770,7 +652,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
-        self._corridor_enabled = corridor_enabled
         self._admin_environments = admin_environments
 
     def _prepare_config_fingerprint(self) -> Any:
@@ -945,13 +826,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=self._repo_instructions,
-                corridor_enabled=self._corridor_enabled,
                 environment_name=environment.name if environment else None,
                 environment_instructions=environment.instructions if environment else None,
                 admin_environments=self._admin_environments,
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
+                continued_from_collaborative=bool(cfg.continued_from_thread_id),
             ),
         }
 
@@ -980,19 +861,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _cfg: RunConfig = cfg,
-        _profile_login: str | None = profile_login,
     ) -> SandboxBackendProtocol:
         if is_desktop_run(_cfg):
             return create_desktop_backend(_cfg)
-        credentials = (
-            await get_sandbox_langsmith_credentials(_profile_login)
-            if _profile_login and ENV.SANDBOX_TYPE.get() == "langsmith"
-            else None
-        )
         return await ensure_sandbox_for_thread(
             _thread_id,
             environment_slug=environment_slug(_cfg),
-            langsmith_credentials=credentials,
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
@@ -1198,30 +1072,19 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
-    observability_tools: list[Any] = []
     mcp_tools: list[Any] = []
-    currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        (
-            observability_tools,
-            mcp_tools,
-            (currents_tools, notion_tools),
-        ) = await asyncio.gather(
-            _phase_result(
-                thread_id,
-                "factory.observability_tools",
-                lambda: _observability_tools_for(config, profile_login),
-            ),
+        mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.mcp_tools",
-                lambda: _mcp_tools_for(config, thread_id, profile_login),
+                lambda: _mcp_tools_for(thread_id, profile_login),
             ),
             _phase_result(
                 thread_id,
-                "factory.integration_tools",
-                lambda: _load_integration_tools(thread_id, profile_login),
+                "factory.notion_tools",
+                lambda: _notion_tools_for(thread_id, profile_login),
             ),
         )
 
@@ -1247,17 +1110,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         save_user_skill,
         delete_user_skill,
         linear_comment,
-        linear_create_issue,
-        linear_delete_issue,
-        linear_get_issue,
-        linear_get_issue_comments,
-        linear_list_teams,
-        linear_search_issues,
-        linear_update_issue,
         list_threads,
         get_thread,
         manage_thread,
         manage_baby_sit,
+        mark_question_answered,
         notify_automation_channel,
         open_pull_request,
         *(
@@ -1279,31 +1136,23 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         *(ADMIN_TOOLS if admin_thread else ()),
     ]
-    if local_run:
-        static_tools = [http_request, fetch_url, web_search]
-    elif stop_summary_mode:
-        static_tools = [slack_read_thread_messages, slack_thread_reply]
-    reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    static_tools = apply_tool_descriptions(static_tools)
+    if local_run:
+        static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
+    elif stop_summary_mode:
+        static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
+    reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
-        "Observability": observability_tools,
         "MCPs": mcp_tools,
-        "Currents": currents_tools,
         "Notion": notion_tools,
     }
     if not stop_summary_mode and not local_run:
         browser_tools = load_browser_tools()
         if browser_tools:
             integration_tool_groups["Browser"] = browser_tools
-    # Corridor's catalog is a static allowlist, so the MCP handshake that used to
-    # run before every first model call now waits until the agent asks for it.
-    if not stop_summary_mode and not local_run and corridor_configured():
-        integration_tool_groups["Corridor"] = IntegrationGroup(
-            tool_names=CORRIDOR_TOOL_NAMES,
-            load=_load_corridor_mcp_tools,
-        )
     if integration_tool_groups:
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
@@ -1408,7 +1257,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
-                    corridor_enabled="Corridor" in integration_tool_groups,
                     admin_environments=admin_thread,
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),

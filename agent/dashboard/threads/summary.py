@@ -81,26 +81,54 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
     return None
 
 
-def thread_is_readable(metadata: Mapping[str, Any]) -> bool:
-    """Any surfaced-source thread is readable by authenticated users.
+def thread_is_owner(metadata: Mapping[str, Any], login: str | None) -> bool:
+    owner = metadata.get("owner_login")
+    return bool(
+        isinstance(owner, str)
+        and owner.strip()
+        and login
+        and owner.strip().lower() == login.strip().lower()
+    )
 
-    Dashboard login is already gated by ``ALLOWED_GITHUB_ORGS`` (see
-    ``oauth.enforce_org_login_gate``), so any logged-in user is a trusted
-    org member. This lets teammates open "Open in Web" links shared in Slack
-    threads with read-only access.
-    """
-    return thread_source(metadata) in _SURFACED_SOURCES
+
+def thread_is_private(metadata: Mapping[str, Any]) -> bool:
+    return metadata.get("visibility", "public") != "public"
 
 
-def _assert_thread_readable(metadata: Mapping[str, Any]) -> None:
-    if not thread_is_readable(metadata):
+def thread_is_readable(
+    metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
+) -> bool:
+    """Private threads are visible to their immutable owner and to workspace admins."""
+    return thread_source(metadata) in _SURFACED_SOURCES and (
+        not thread_is_private(metadata)
+        or thread_is_owner(metadata, login)
+        or is_admin(email, login=login)
+    )
+
+
+def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool:
+    """Only the owner may prompt, approve, or open a shell into a private thread."""
+    return thread_is_readable(metadata, login) and (
+        not thread_is_private(metadata) or thread_is_owner(metadata, login)
+    )
+
+
+def _assert_thread_readable(
+    metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
+) -> None:
+    if not thread_is_readable(metadata, login, email):
+        raise HTTPException(404, "thread not found")
+
+
+def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) -> None:
+    if not thread_is_promptable(metadata, login):
         raise HTTPException(404, "thread not found")
 
 
 def _assert_thread_postable(
     metadata: Mapping[str, Any], login: str, email: str | None = None
 ) -> None:
-    _assert_thread_readable(metadata)
+    _assert_thread_promptable(metadata, login)
     if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
         email, login=login
     ):
@@ -347,6 +375,9 @@ async def _thread_summary(
         "effort": effort,
         "planMode": metadata.get("plan_mode") is True,
         "adminThread": metadata.get("admin_thread") is True,
+        "visibility": metadata.get("visibility", "public"),
+        "ownerLogin": metadata.get("owner_login"),
+        "continuedFromThreadId": metadata.get("continued_from_thread_id"),
         "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": thread_source(metadata),

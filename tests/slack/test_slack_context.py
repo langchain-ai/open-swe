@@ -165,6 +165,44 @@ def test_upsert_accumulates_participants_and_pins_source_context(
     assert metadata["title"] == metadata["title_seed"] == "first-gh"
 
 
+def test_upsert_stamps_visibility_and_owner_only_on_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(raise_not_found=True)
+    created: dict = {}
+
+    async def create(*, thread_id: str, if_exists: str, metadata: dict) -> None:
+        created.update(metadata)
+        threads.thread = {"metadata": dict(metadata)}
+        threads.raise_not_found = False
+
+    threads.create = create  # type: ignore[attr-defined]
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="slack", visibility="private", owner_login="Alice"
+        )
+    )
+    assert created["visibility"] == "private"
+    assert created["owner_login"] == "alice"
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="slack", visibility="public", owner_login="bob"
+        )
+    )
+    metadata = cast(dict, threads.thread)["metadata"]
+    assert metadata["visibility"] == "private"
+    assert metadata["owner_login"] == "alice"
+
+
+def test_slack_dm_threads_are_private_and_channel_threads_are_not() -> None:
+    assert slack_webhooks._slack_thread_visibility({"is_im": True}) == "private"
+    assert slack_webhooks._slack_thread_visibility({"is_im": False}) == "public"
+    assert slack_webhooks._slack_thread_visibility(None) == "public"
+
+
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
     bot_user_id = "UBOT"
     messages = [
@@ -1037,7 +1075,9 @@ def test_process_slack_mention_runs_without_a_repository(
         and 'sender="system:slack-context"' in message["content"]
     )
     assert "Default Repository Hint" not in prompt_message["content"]
-    assert "metadata_update" not in captured
+    metadata_update = captured.get("metadata_update", {})
+    assert isinstance(metadata_update, dict)
+    assert "repo" not in metadata_update.get("metadata", {})
 
 
 def test_process_slack_mention_preserves_forwarded_attachment_from_event(

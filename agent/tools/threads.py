@@ -225,7 +225,7 @@ async def list_threads(
     admin_threads: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """List surfaced threads by locator, participant, admin mode, status, source, or text."""
+    """Implement the `list_threads` tool."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -300,6 +300,7 @@ async def list_threads(
             automation_id=automation_id,
             filter_participant_login=filter_participant_login,
             surfaced_only=True,
+            include_private=await _private_thread_context(actor),
             admin_threads=admin_threads,
         )
     except HTTPException as exc:
@@ -590,6 +591,20 @@ def _looks_uuid(value: str) -> bool:
     return True
 
 
+async def _private_thread_context(actor: _Actor) -> bool:
+    from agent.dashboard.threads.summary import thread_is_owner
+
+    thread_id = as_json_object(_config().get("configurable")).get("thread_id")
+    if not isinstance(thread_id, str) or not thread_id:
+        return False
+    try:
+        thread = await langgraph_client().threads.get(thread_id)
+    except Exception:
+        return False
+    metadata = thread_metadata(thread)
+    return metadata.get("visibility") == "private" and thread_is_owner(metadata, actor.login)
+
+
 async def _authorized_locator(
     locator: str, actor: _Actor
 ) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
@@ -635,6 +650,8 @@ async def _authorized_locator(
             email=actor.email,
             mark_viewed=False,
         )
+    if summary.get("visibility") == "private" and not await _private_thread_context(actor):
+        raise HTTPException(404, "thread not found")
     return thread_id, summary
 
 
@@ -694,7 +711,7 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Inspect a thread from its ID, dashboard/Slack/LangSmith URL, or LangSmith run ID."""
+    """Implement the `get_thread` tool."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -930,7 +947,7 @@ async def manage_thread(
     plan_mode: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Perform a dashboard-equivalent action on an Open SWE thread."""
+    """Implement the `manage_thread` tool."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -969,7 +986,7 @@ async def manage_thread(
         if action == "admin_cancel":
             if not actor.admin:
                 return _failure("Only workspace admins can cancel another user's thread")
-            thread = await admin_cancel_dashboard_thread(thread_id)
+            thread = await admin_cancel_dashboard_thread(thread_id, actor.login)
             return {"success": True, "thread": _list_item(thread)}
         if action in {"resolve", "unresolve"}:
             thread = await resolve_dashboard_thread(

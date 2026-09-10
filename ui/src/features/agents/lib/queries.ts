@@ -773,6 +773,8 @@ export function useDeleteAgentSchedule() {
 }
 
 export interface CreateAgentThreadVariables {
+  visibility?: "public" | "private"
+  ownerLogin?: string | null
   prompt: string
   images?: Array<ImageChunk>
   repo?: string | null
@@ -808,6 +810,8 @@ export function optimisticThread(
   }
   return {
     id: threadId,
+    visibility: vars.visibility ?? "public",
+    ownerLogin: vars.ownerLogin ?? null,
     title: text.slice(0, 80) || "New agent",
     repo: repoFullName.split("/")[1] ?? "",
     repoFullName,
@@ -872,6 +876,21 @@ export function useDeleteAgentThread() {
       if (path.includes(`/agents/${threadId}`)) {
         navigate({ to: "/agents" })
       }
+    },
+  })
+}
+
+export function useContinueThreadPrivately() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+
+  return useMutation({
+    mutationFn: (threadId: string) =>
+      agentsApi.continueThreadPrivately(threadId),
+    onSuccess: (thread) => {
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+      invalidateAgentThreadLists(queryClient)
+      navigate({ to: "/agents/$threadId", params: { threadId: thread.id } })
     },
   })
 }

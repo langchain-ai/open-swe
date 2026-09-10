@@ -5,7 +5,7 @@ import binascii
 import logging
 import uuid
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
@@ -37,6 +37,7 @@ from agent.dashboard.threads.summary import (
     repo_config_from_metadata,
     thread_source,
 )
+from agent.dashboard.user_preferences import default_thread_visibility
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -215,9 +216,10 @@ async def _create_dashboard_thread_record(
     effort: str | None = None,
     plan_mode: bool = False,
     admin_thread: bool = False,
+    visibility: Literal["public", "private"] = "public",
     environment: str | None = None,
 ) -> dict[str, Any]:
-    """Create or update dashboard thread metadata without starting a run."""
+    """Create a dashboard thread with immutable ownership and visibility."""
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
@@ -239,6 +241,8 @@ async def _create_dashboard_thread_record(
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "origin": _DASHBOARD_SOURCE,
+        "owner_login": login.strip().lower(),
+        "visibility": visibility,
         "thread_category": "interactive",
         "trigger_kind": "user",
         PARTICIPANT_LOGINS_KEY: merge_participants(None, login),
@@ -267,8 +271,11 @@ async def _create_dashboard_thread_record(
         metadata["repo_explicitly_none"] = True
 
     client = langgraph_client()
-    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    await client.threads.create(
+        thread_id=thread_id,
+        metadata={**metadata, "feedback_initiator_login": login},
+        if_exists="raise",
+    )
     thread = await client.threads.get(thread_id)
     return as_thread_dict(thread)
 
@@ -302,6 +309,9 @@ async def _build_dashboard_configurable(
     # hands out the environment tools, so this only marks intent.
     if metadata.get("admin_thread") is True:
         configurable["admin_thread"] = True
+    continued_from = metadata.get("continued_from_thread_id")
+    if isinstance(continued_from, str) and continued_from:
+        configurable["continued_from_thread_id"] = continued_from
     environment = metadata.get("environment")
     if isinstance(environment, str) and environment:
         configurable["environment"] = environment
@@ -451,12 +461,16 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
+        visibility = client_configurable.get("visibility") or await default_thread_visibility(login)
+        if visibility not in ("public", "private"):
+            raise HTTPException(422, "visibility must be public or private")
         thread = await _create_dashboard_thread_record(
             thread_id,
             login=login,
             email=email,
             repo_config=_parse_repo(client_configurable.get("repo")) or {},
             repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
+            visibility=visibility,
             prompt=_command_prompt_text(content),
             images=command_images,
             model_id=client_configurable.get("agent_model_id"),
@@ -577,6 +591,7 @@ async def _enrich_run_start_command(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     metadata_update["updated_at_ms"] = _now_ms()
+    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(client, thread_id):
@@ -590,7 +605,7 @@ async def _enrich_run_start_command(
             if metadata.get("attention_reason"):
                 metadata_update["attention_reason"] = None
             metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata)
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     else:
         if _is_thread_resolved(metadata):
             metadata_update["resolved"] = False
@@ -598,7 +613,7 @@ async def _enrich_run_start_command(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         metadata = {**metadata, **metadata_update}
-        await client.threads.update(thread_id=thread_id, metadata=metadata)
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
 
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
@@ -611,7 +626,11 @@ async def _enrich_run_start_command(
     if not isinstance(run_metadata, dict):
         run_metadata = {}
     run_metadata = {
-        **run_metadata,
+        **{
+            key: value
+            for key, value in run_metadata.items()
+            if key not in {"visibility", "owner_login"}
+        },
         **agent_version_metadata(),
         "prepare_run_id": prepare_run_id,
     }

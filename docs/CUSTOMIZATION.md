@@ -67,7 +67,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and environment snapshot captures — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and environment snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 
@@ -234,8 +234,10 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 
 Admins can connect generic remote MCP servers under **Admin → Workspace MCPs**.
 Connections belong to this Open SWE deployment and are shared across repositories
-and remote coding-agent threads. The existing `CONFIGURED_ADMINS` and
-`OBSERVABILITY_AUTHORIZED_EMAILS` access rules control which users can load them.
+and remote coding-agent threads. Enabled connections provide baseline tools for
+all users, limited to the tools selected by an admin. Only admins can manage
+connections or reveal saved credentials. Plan mode continues to block workspace
+MCP tools.
 
 1. Choose **Add MCP server** and enter a unique lowercase connection name, an
    HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
@@ -273,6 +275,24 @@ Alternatively, choose **Import JSON** and paste a Claude-style configuration:
   }
 }
 ```
+
+Datadog, LangSmith, Linear, and Currents agent tools are configured through
+Workspace MCPs. The dedicated Datadog and Currents credentials forms and built-in
+provider tools have been removed. Reconnect Datadog using the MCP configuration
+above; legacy saved credentials are not migrated automatically. Use the JSON
+import or connection form to add the other MCP servers as needed.
+
+The [Currents MCP server](https://github.com/currents-dev/currents-mcp) wraps the
+Currents REST API. Run its Streamable HTTP server on an HTTPS host reachable by
+Open SWE, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY`
+header. The Currents REST API URL itself does not speak MCP, and the local
+`npx @currents/mcp` command cannot be imported as a workspace connection.
+
+Optional reviewer trace resolution and personal LangSmith credential proxying
+have been removed. Configure agent access to LangSmith through Workspace MCPs.
+Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and
+`LANGSMITH_ENDPOINT`. Linear webhook intake and replies continue to use the
+existing Linear app setup.
 
 Use the endpoint for your Datadog site (this example uses US5). Replace the key
 placeholders directly in the dashboard. Import supports multiple named servers,
@@ -382,13 +402,12 @@ never visible to, reused by, or revealed to another user. The dashboard API is
 `/dashboard/api/my-mcps` and requires only a signed-in session.
 
 Personal connections load only inside a **private thread owned by the triggering
-user**, the same rule that applies to personal Notion and Currents connections.
-Collaborative (workspace or Slack channel) threads can be prompted by anyone, so they
-run without personal credentials; to use yours, continue the thread privately from the
-dashboard. Personal connections do not require the admin or observability authorization
-that gates workspace connections. Both scopes share the **MCPs** tool group. A personal connection with the
-same name as a workspace connection replaces it entirely for that user's runs, and a
-disabled personal connection hides the workspace one rather than falling back to it.
+user**, the same rule that applies to personal Notion connections. Collaborative
+(workspace or Slack channel) threads can be prompted by anyone, so they run without
+personal credentials; to use yours, continue the thread privately from the dashboard.
+Both scopes share the **MCPs** tool group. A personal connection with the same name as a
+workspace connection replaces it entirely for that user's runs, and a disabled personal
+connection hides the workspace one rather than falling back to it.
 Desktop (local) runs do not load MCP connections yet.
 
 ### Adding a Python tool

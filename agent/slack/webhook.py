@@ -24,6 +24,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.failures import report_slack_failure
@@ -40,34 +41,10 @@ from agent.webhooks import common
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
-_MENTION_PREAMBLE = "You were mentioned in Slack.\n\n"
-
-_UNTAGGED_REPLY_PREAMBLE = (
-    "A message arrived in a Slack thread you are part of. You were NOT tagged in it — "
-    "you are seeing it because you and the sender are the only active participants.\n\n"
-    "Decide first whether the message is actually addressed to you. Continuations of your "
-    "conversation, answers to your questions, and follow-up instructions are addressed to you. "
-    "Someone thinking out loud, talking to another person, or commenting on the thread without "
-    "expecting you to act is not.\n\n"
-    "If it is not addressed to you, end your turn without calling any tool and post nothing, "
-    "including no reaction. Staying silent is the right outcome; an unwanted reply or reaction "
-    "from an untagged message is worse than no reply. If it is "
-    "addressed to you, handle it exactly as you would a direct mention.\n\n"
-)
-
-_CODE_CHANNEL_CONTEXT = (
-    "## Slack Code Channel\n"
-    "The whole channel is one session. Treat messages as addressed to you unless clearly aimed "
-    "at someone else; replies post top-level unless the user started a Slack thread. Use "
-    "`manage_code_channel` for session "
-    "status, title, context, runtime commands, HTML/diff/Block Kit/canvas views, and archival."
-)
-
-_MESSAGE_UPDATE_PREAMBLE = (
-    "A Slack message previously delivered to this thread was edited. Treat the updated text "
-    "below as the current version and as an explicit correction to the earlier message. Do not "
-    "repeat completed work unless the update requires it.\n\n"
-)
+_MENTION_PREAMBLE = f"{load_prompt('runs/slack-mentioned.md')}\n\n"
+_UNTAGGED_REPLY_PREAMBLE = f"{load_prompt('runs/slack-untagged-reply.md')}\n\n"
+_CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
+_MESSAGE_UPDATE_PREAMBLE = f"{load_prompt('runs/slack-message-update.md')}\n\n"
 
 
 def _slack_prompt_preamble(untagged_reply: bool, message_update: bool = False) -> str:
@@ -499,6 +476,13 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
+def _slack_thread_visibility(channel_context: dict[str, Any] | None) -> str:
+    """Bot DMs are private to the person; anything in a channel is collaborative."""
+    if isinstance(channel_context, dict) and channel_context.get("is_im") is True:
+        return "private"
+    return "public"
+
+
 async def _mark_slack_thread_errored(
     thread_id: str, request: SlackRequest, repo: Repo | None
 ) -> None:
@@ -522,6 +506,7 @@ async def _mark_slack_thread_errored(
                     triggering_event_ts=request.event_ts,
                 )
             ),
+            visibility=_slack_thread_visibility(request.channel_context),
         )
     except Exception:  # noqa: BLE001
         common.logger.warning(
@@ -844,6 +829,8 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         title=clean_text if is_first_mention else "",
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         environment=environment_slug,
+        visibility=_slack_thread_visibility(channel_context),
+        owner_login=mapped_login or "",
     )
 
     # An edit corrects a request the agent already has, so it belongs in the

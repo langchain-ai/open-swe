@@ -130,6 +130,7 @@ async def test_list_threads_defaults_to_triggering_user(monkeypatch: pytest.Monk
         automation_id=None,
         filter_participant_login=None,
         surfaced_only=True,
+        include_private=False,
         admin_threads=None,
     )
 
