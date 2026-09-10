@@ -5,7 +5,7 @@ import binascii
 import logging
 import uuid
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
@@ -91,6 +91,7 @@ class ThreadMessageBody(BaseModel):
     images: list[DashboardImageBody] = Field(default_factory=list)
     model_id: str | None = None
     effort: str | None = None
+    model_selection: Literal["auto", "explicit"] = "auto"
     plan_mode: bool = False
     client_message_id: uuid.UUID | None = None
 
@@ -215,6 +216,7 @@ async def _create_dashboard_thread_record(
     model_id: str | None = None,
     effort: str | None = None,
     plan_mode: bool = False,
+    model_selection: str = "auto",
     admin_thread: bool = False,
     environment: str | None = None,
 ) -> dict[str, Any]:
@@ -252,6 +254,7 @@ async def _create_dashboard_thread_record(
         "resolved_model": resolved_model,
         "resolved_effort": resolved_effort,
         "plan_mode": plan_mode,
+        "model_selection": model_selection,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
@@ -303,6 +306,9 @@ async def _build_dashboard_configurable(
         configurable.setdefault(key, value)
     if metadata.get("plan_mode") is True:
         configurable["plan_mode"] = True
+    model_selection = metadata.get("model_selection")
+    if model_selection in {"auto", "explicit"}:
+        configurable["model_selection"] = model_selection
     # The agent re-checks the requesting user against CONFIGURED_ADMINS before it
     # hands out the environment tools, so this only marks intent.
     if metadata.get("admin_thread") is True:
@@ -442,6 +448,15 @@ async def _enrich_run_start_command(
         client_configurable.get("agent_effort"),
     )
     plan_mode_requested = client_configurable.get("plan_mode") is True
+    model_selection = (
+        "explicit"
+        if client_configurable.get("model_selection") == "explicit"
+        or (
+            client_configurable.get("model_selection") is None
+            and bool(client_configurable.get("agent_model_id"))
+        )
+        else "auto"
+    )
     content = _command_message_content(params)
     command_images = _dashboard_images_from_content(content)
     invocation_id = new_invocation_id()
@@ -467,6 +482,7 @@ async def _enrich_run_start_command(
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
+            model_selection=model_selection,
             admin_thread=(
                 client_configurable.get("admin_thread") is True and is_admin(email, login=login)
             ),
@@ -565,6 +581,7 @@ async def _enrich_run_start_command(
     metadata_update: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "plan_mode": plan_mode_requested,
+        "model_selection": model_selection,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
         PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
         "injected_dynamic_context_hashes": sorted(injected),
@@ -606,6 +623,7 @@ async def _enrich_run_start_command(
         metadata = {**metadata, **metadata_update}
         await client.threads.update(thread_id=thread_id, metadata=metadata)
 
+    overrides["model_selection"] = model_selection
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
         login,

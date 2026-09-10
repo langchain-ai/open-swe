@@ -156,6 +156,7 @@ from agent.tools import (
     delete_organization_skill,
     delete_user_skill,
     enter_plan_mode,
+    exit_routing_mode,
     fetch_url,
     get_thread,
     http_request,
@@ -911,6 +912,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_effort = overridden_subagent_effort
 
     adaptive_model_routing = profile_model_routing_enabled(profile)
+    explicit_model_selection = cfg.model_selection == "explicit"
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
@@ -919,6 +921,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_effort = thread_settings.get("subagent_effort")
         adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
+
+    if cfg.source == "slack":
+        adaptive_model_routing = True
+    elif cfg.source == "dashboard":
+        adaptive_model_routing = not explicit_model_selection
 
     # An explicit per-run model choice is the one thing allowed to move a thread
     # off its stored settings; the new choice is then stored in turn.
@@ -1067,6 +1074,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         background_execute,
         background_task,
         enter_plan_mode,
+        exit_routing_mode,
         save_plan,
         save_user_instructions,
         save_user_skill,
@@ -1100,6 +1108,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     ]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    if not adaptive_model_routing:
+        static_tools = [tool for tool in static_tools if tool is not exit_routing_mode]
     static_tools = apply_tool_descriptions(static_tools)
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
@@ -1164,13 +1174,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             )
             for route, (routed_model_id, effort) in routing_defaults.items()
         }
-        model_selection_middleware.append(
-            ModelSelectionMiddleware(
-                routing_models,
-                routing_models["fast"],
-                initial_plan_mode=plan_mode,
-            )
-        )
+        model_selection_middleware.append(ModelSelectionMiddleware(routing_models))
     subagent_model = _make_model_or_defer(
         subagent_model_id,
         use_gateway=use_gateway,

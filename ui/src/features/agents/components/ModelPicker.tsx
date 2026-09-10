@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils"
 export interface ModelPickerProps {
   models: Array<ModelOption>
   selection: ModelSelection | null
-  onSelectionChange?: (next: ModelSelection) => void
+  onSelectionChange?: (next: ModelSelection | null) => void
   disabled?: boolean
   /** Disables models that cannot accept image input (used when images are attached). */
   requireImageSupport?: boolean
@@ -389,6 +389,15 @@ export function ModelPicker({
             <div ref={modelRowRef} className="mt-1 border-t border-border pt-1">
               <SectionHeading>Model</SectionHeading>
               <OptionRow
+                label="Auto"
+                selected={selection === null}
+                focused={false}
+                onClick={() => {
+                  onSelectionChange?.(null)
+                  close()
+                }}
+              />
+              <OptionRow
                 label={selectedModel.label}
                 selected={false}
                 focused={pane === "models" || mainIndex === modelRowIndex}
@@ -419,6 +428,17 @@ export function ModelPicker({
                 aria-label="Models"
                 className="max-h-72 overflow-y-auto py-1"
               >
+                {!query.trim() && (
+                  <OptionRow
+                    label="Auto"
+                    selected={selection === null}
+                    focused={false}
+                    onClick={() => {
+                      onSelectionChange?.(null)
+                      close()
+                    }}
+                  />
+                )}
                 {filteredModels.length === 0 ? (
                   <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
                     No matches

@@ -60,6 +60,23 @@ function openModelPane() {
 }
 
 describe("ModelPicker", () => {
+  it("supports automatic routing", () => {
+    const onSelectionChange = vi.fn()
+    render(
+      <ModelPicker
+        models={MODELS}
+        selection={null}
+        onSelectionChange={onSelectionChange}
+      />
+    )
+
+    const trigger = screen.getByRole("button", { name: "Auto" })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole("option", { name: "Auto" }))
+
+    expect(onSelectionChange).toHaveBeenCalledWith(null)
+  })
+
   it("labels the trigger with the selected model and effort", () => {
     render(
       <ModelPicker
@@ -123,7 +140,12 @@ describe("ModelPicker", () => {
       within(models)
         .getAllByRole("option")
         .map((option) => option.textContent)
-    ).toEqual(["GPT-5.6 Sol High", "Gemini 3.8 Flash Medium", "Kimi K3 High"])
+    ).toEqual([
+      "Auto",
+      "GPT-5.6 Sol High",
+      "Gemini 3.8 Flash Medium",
+      "Kimi K3 High",
+    ])
 
     fireEvent.change(screen.getByLabelText("Search models"), {
       target: { value: "kimi" },

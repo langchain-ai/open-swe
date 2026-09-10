@@ -192,8 +192,31 @@ async def test_model_routing_is_applied_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_model_routing_is_disabled_by_default() -> None:
+async def test_dashboard_uses_routing_by_default() -> None:
     config = _base_config()
+    configurable = cast(dict[str, object], config["configurable"])
+    configurable["source"] = "dashboard"
+    agent = await _capture_create_deep_agent_kwargs(config)
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" in middleware_names
+    assert config["metadata"]["model_routing_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_dashboard_explicit_model_bypasses_routing() -> None:
+    config = _base_config()
+    configurable = cast(dict[str, object], config["configurable"])
+    configurable.update(
+        {
+            "source": "dashboard",
+            "model_selection": "explicit",
+            "agent_model_id": "openai:gpt-5.6-sol",
+            "agent_effort": "medium",
+        }
+    )
     agent = await _capture_create_deep_agent_kwargs(config)
 
     middleware_names = [
@@ -201,12 +224,20 @@ async def test_model_routing_is_disabled_by_default() -> None:
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
     assert config["metadata"]["model_routing_applied"] is False
-    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
-    assert [model for model, _ in calls] == [
-        "openai:gpt-5.6-sol",
-        "openai:gpt-5.6-sol",
-        "openai:gpt-5.6-luna",
+
+
+@pytest.mark.asyncio
+async def test_slack_always_uses_routing() -> None:
+    config = _base_config()
+    configurable = cast(dict[str, object], config["configurable"])
+    configurable.update({"source": "slack", "model_selection": "explicit"})
+    agent = await _capture_create_deep_agent_kwargs(config)
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
+    assert "ModelSelectionMiddleware" in middleware_names
+    assert config["metadata"]["model_routing_applied"] is True
 
 
 @pytest.mark.asyncio

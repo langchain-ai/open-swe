@@ -1,35 +1,42 @@
-from typing import Any, Literal, cast
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import tool
 
-from agent.middleware.model_selection import ModelSelectionMiddleware, RouteDecision
+from agent.middleware.model_selection import ModelSelectionMiddleware
 
 
-def _middleware(
-    route: Literal["fast", "balanced", "performance"] = "fast", *, initial_plan_mode: bool = False
-) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
+@tool
+async def read_file(file_path: str) -> str:
+    """Read a file."""
+    return file_path
+
+
+@tool
+async def edit_file(file_path: str) -> str:
+    """Edit a file."""
+    return file_path
+
+
+@tool
+async def exit_routing_mode(model_route: str) -> str:
+    """Exit routing."""
+    return model_route
+
+
+def _middleware() -> tuple[ModelSelectionMiddleware, dict[str, MagicMock]]:
     models = {profile: MagicMock(name=profile) for profile in ("fast", "balanced", "performance")}
-    structured = AsyncMock(return_value=RouteDecision(model_route=route))
-    classifier = MagicMock()
-    classifier.with_structured_output.return_value.ainvoke = structured
-    return (
-        ModelSelectionMiddleware(
-            cast(Any, models),
-            classifier,
-            initial_plan_mode=initial_plan_mode,
-        ),
-        models,
-        structured,
-    )
+    return ModelSelectionMiddleware(cast(Any, models)), models
 
 
 async def _invoke(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -> ModelRequest:
     request = ModelRequest(
         model=MagicMock(),
-        messages=state["messages"],
+        messages=[HumanMessage(content="Update the README")],
+        tools=[read_file, edit_file, exit_routing_mode],
         state=cast(Any, state),
     )
     seen: list[ModelRequest] = []
@@ -43,36 +50,41 @@ async def _invoke(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -
 
 
 @pytest.mark.asyncio
-async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
-    middleware, models, classifier = _middleware()
-    state = {"messages": [HumanMessage(content="Update the README")]}
+async def test_routing_mode_starts_on_fast_with_read_only_tools() -> None:
+    middleware, models = _middleware()
+    state: dict[str, Any] = {}
 
-    state.update(await middleware.abefore_agent(cast(Any, state), MagicMock()))
+    state.update(middleware.before_agent(state, MagicMock()))
+    request = await _invoke(middleware, state)
 
-    assert state["model_route"] == "fast"
-    assert (await _invoke(middleware, state)).model is models["fast"]
-    classifier.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_plan_mode_uses_performance_route_without_classifier() -> None:
-    middleware, models, classifier = _middleware(initial_plan_mode=True)
-    state = {"messages": [HumanMessage(content="Update the docs")]}
-
-    state.update(await middleware.abefore_agent(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "performance"
-    assert (await _invoke(middleware, state)).model is models["performance"]
-    classifier.assert_not_awaited()
+    assert state == {"routing_mode": True, "model_route": "fast"}
+    assert request.model is models["fast"]
+    assert [tool.name for tool in request.tools] == ["read_file", "exit_routing_mode"]
+    assert request.system_message is not None
+    assert "Routing Mode (ACTIVE)" in request.system_message.text
 
 
 @pytest.mark.asyncio
-async def test_classifier_failure_falls_back_to_balanced_route() -> None:
-    middleware, models, classifier = _middleware()
-    classifier.side_effect = RuntimeError("unavailable")
-    state = {"messages": [HumanMessage(content="Do the task")]}
+@pytest.mark.parametrize("route", ["fast", "balanced", "performance"])
+async def test_selected_route_activates_model_and_hides_exit_tool(route: str) -> None:
+    middleware, models = _middleware()
 
-    state.update(await middleware.abefore_agent(cast(Any, state), MagicMock()))
+    request = await _invoke(
+        middleware,
+        {"routing_mode": False, "model_route": route},
+    )
 
-    assert state["model_route"] == "balanced"
-    assert (await _invoke(middleware, state)).model is models["balanced"]
+    assert request.model is models[route]
+    assert [tool.name for tool in request.tools] == ["read_file", "edit_file"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_selected_route_falls_back_to_balanced() -> None:
+    middleware, models = _middleware()
+
+    request = await _invoke(
+        middleware,
+        {"routing_mode": False, "model_route": "unknown"},
+    )
+
+    assert request.model is models["balanced"]
