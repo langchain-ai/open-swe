@@ -1,11 +1,26 @@
 """Tests for Slack message API utilities."""
 
+import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
 import pytest
 
 from agent.slack import client as slack_utils
+
+
+def test_parse_slack_thread_url_uses_root_thread_timestamp() -> None:
+    assert slack_utils.parse_slack_thread_url(
+        "<https://workspace.slack.com/archives/C123/p1788431248678809"
+        "?thread_ts=1788425314.774339&cid=C123|message>"
+    ) == ("C123", "1788425314.774339")
+
+
+def test_parse_slack_thread_url_defaults_to_message_timestamp() -> None:
+    assert slack_utils.parse_slack_thread_url(
+        "https://workspace.slack.com/archives/C123/p1788431248678809"
+    ) == ("C123", "1788431248.678809")
 
 
 def _ok_response() -> MagicMock:
@@ -34,6 +49,118 @@ def _async_client_cm(post_response: MagicMock) -> AsyncMock:
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=post_response)
     return client_cm
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_feedback_sends_blocks_and_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+    blocks = [{"type": "section", "text": {"type": "plain_text", "text": "Rate this thread"}}]
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        assert await slack_utils.post_slack_ephemeral_message(
+            "C1", "U1", "Rate this thread", "1.0", blocks=blocks
+        )
+    assert client_cm.post.await_args.args[0].endswith("/chat.postEphemeral")
+    assert client_cm.post.await_args.kwargs["json"] == {
+        "channel": "C1",
+        "user": "U1",
+        "text": "Rate this thread",
+        "thread_ts": "1.0",
+        "blocks": blocks,
+    }
+
+
+@pytest.mark.asyncio
+async def test_modal_sends_trigger_and_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+    view = {"type": "modal", "title": {"type": "plain_text", "text": "Feedback"}, "blocks": []}
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        assert await slack_utils.open_slack_modal("trigger-1", view)
+    assert client_cm.post.await_args.args[0].endswith("/views.open")
+    assert client_cm.post.await_args.kwargs["json"] == {"trigger_id": "trigger-1", "view": view}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,body,success",
+    [
+        (200, "ok", True),
+        (200, '{"ok":true}', True),
+        (200, '{"ok":false}', False),
+        (200, "invalid", False),
+        (410, "expired", False),
+        (302, "", False),
+    ],
+)
+async def test_interaction_response_replaces_private_message_without_bot_auth(
+    status: int, body: str, success: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    url = "https://hooks.slack.com/actions/T1/B1/test-response"
+    message = {"replace_original": True, "text": "Saved", "blocks": []}
+    requests: list[httpx2.Request] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(status, text=body)
+
+    transport = httpx2.MockTransport(handle)
+    caplog.set_level(logging.DEBUG, logger="httpx2")
+    with patch.object(slack_utils.httpx2, "AsyncHTTPTransport", return_value=transport):
+        assert await slack_utils.respond_to_slack_interaction(url, message) is success
+    assert len(requests) == 1
+    assert str(requests[0].url) == url
+    assert json.loads(requests[0].content) == message
+    assert "Authorization" not in requests[0].headers
+    assert "test-response" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://hooks.slack.com/actions/test",
+        "https://example.com/actions/test",
+        "https://hooks.slack.com.example.com/actions/test",
+        "https://hooks.slack.com/api/test",
+        "https://hooks.slack.com@127.0.0.1/actions/test",
+        "https://[invalid",
+    ],
+)
+async def test_interaction_response_rejects_non_slack_urls(url: str) -> None:
+    with patch.object(slack_utils.httpx2, "AsyncHTTPTransport") as client:
+        assert not await slack_utils.respond_to_slack_interaction(url, {"delete_original": True})
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_interaction_response_failure_does_not_log_capability_url(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    url = "https://hooks.slack.com/actions/T1/B1/test-response"
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError(f"Failed {url}")
+
+    caplog.set_level(logging.DEBUG, logger="httpx2")
+    with patch.object(
+        slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(handle)
+    ):
+        assert not await slack_utils.respond_to_slack_interaction(url, {"delete_original": True})
+    assert "test-response" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["expired_trigger_id", "ratelimited", "http"])
+async def test_modal_returns_false_on_slack_failure(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_err_response(failure))
+    if failure == "http":
+        client_cm.post.side_effect = httpx2.ConnectError("unavailable")
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        assert not await slack_utils.open_slack_modal("trigger-1", {})
 
 
 @pytest.mark.asyncio

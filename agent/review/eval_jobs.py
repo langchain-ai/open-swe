@@ -14,9 +14,9 @@ from typing import Any, Literal, TypedDict
 
 from agent.config import ENV
 from agent.review.eval_store import (
-    _HEARTBEAT_STALE_SECONDS,
     DEFAULT_EVAL_PROJECT,
     EVALS_NAMESPACE,
+    HEARTBEAT_STALE_SECONDS,
     REVIEWER_EVAL_KEY,
 )
 from agent.review.findings import REVIEW_FINDING_CAP
@@ -129,7 +129,7 @@ def _heartbeat_age_seconds(record: dict[str, Any]) -> float | None:
 
 def _is_heartbeat_fresh(record: dict[str, Any]) -> bool:
     age = _heartbeat_age_seconds(record)
-    return age is not None and age <= _HEARTBEAT_STALE_SECONDS
+    return age is not None and age <= HEARTBEAT_STALE_SECONDS
 
 
 async def get_reviewer_eval_status() -> dict[str, Any]:

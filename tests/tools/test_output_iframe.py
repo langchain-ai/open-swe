@@ -46,7 +46,7 @@ def _configure(
             "expires_at": None,
         }
 
-    monkeypatch.setattr(iframe_tool, "_resolve_sandbox_file", resolve_file)
+    monkeypatch.setattr(iframe_tool, "resolve_sandbox_file", resolve_file)
     monkeypatch.setattr(
         iframe_tool,
         "create_sandbox_file_download_url",

@@ -5,11 +5,17 @@ from pydantic import ValidationError
 
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
+    get_team_agent_routing_models,
     get_team_default_grouping_model,
 )
 
 _REVIEWER_SUBAGENT_PAIR = ("openai:gpt-5.6-sol", "low")
 _GROUPING_PAIR = ("google_genai:gemini-3.8-flash", "low")
+_ROUTING_PAIRS = {
+    "fast": ("google_genai:gemini-3.8-flash", "low"),
+    "balanced": ("openai:gpt-5.6-sol", "medium"),
+    "performance": ("anthropic:claude-opus-5", "high"),
+}
 
 
 def _settings(**overrides: object) -> dict[str, object]:
@@ -57,6 +63,36 @@ async def test_grouping_inherits_when_configured_model_invalid() -> None:
         ),
     ):
         assert await get_team_default_grouping_model() == _REVIEWER_SUBAGENT_PAIR
+
+
+@pytest.mark.asyncio
+async def test_agent_routing_uses_configured_model_pairs() -> None:
+    settings = {
+        f"default_agent_routing_{tier}_{suffix}": value
+        for tier, pair in _ROUTING_PAIRS.items()
+        for suffix, value in zip(("model", "reasoning_effort"), pair, strict=True)
+    }
+    with patch(
+        "agent.dashboard.team_settings.get_team_settings",
+        new_callable=AsyncMock,
+        return_value=settings,
+    ):
+        assert await get_team_agent_routing_models() == _ROUTING_PAIRS
+
+
+def test_team_settings_update_accepts_routing_pairs() -> None:
+    update = TeamSettingsUpdate(
+        **{
+            f"default_agent_routing_{tier}_{suffix}": value
+            for tier, pair in _ROUTING_PAIRS.items()
+            for suffix, value in zip(("model", "reasoning_effort"), pair, strict=True)
+        }
+    )
+    assert update.default_agent_routing_fast_model == _ROUTING_PAIRS["fast"][0]
+    assert (
+        update.default_agent_routing_performance_reasoning_effort
+        == _ROUTING_PAIRS["performance"][1]
+    )
 
 
 def test_team_settings_update_accepts_grouping_pair() -> None:

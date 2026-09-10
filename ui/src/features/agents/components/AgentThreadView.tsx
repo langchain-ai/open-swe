@@ -20,6 +20,7 @@ import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/Rig
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
+import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -36,13 +37,17 @@ import {
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
-import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
+import {
+  visiblePendingMessages,
+  visibleQueuedMessages,
+} from "@/features/agents/lib/queuedMessages"
 import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useReconcileStream } from "@/features/agents/lib/stream/useReconcileStream"
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -85,6 +90,7 @@ export function AgentThreadView({
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentStream()
+  useReconcileStream(thread.id, thread.status === "running")
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -193,11 +199,19 @@ export function AgentThreadView({
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
   )
-  const queuedMessages = useMemo(
-    () => visibleQueuedMessages(thread.queuedMessages, baseMessages),
-    [baseMessages, thread.queuedMessages]
+  const pendingMessages = useMemo(
+    () => visiblePendingMessages(thread.pendingMessages, baseMessages),
+    [baseMessages, thread.pendingMessages]
   )
-  const hasMessages = baseMessages.length > 0
+  const visibleMessages = useMemo(
+    () => [...baseMessages, ...pendingMessages],
+    [baseMessages, pendingMessages]
+  )
+  const queuedMessages = useMemo(
+    () => visibleQueuedMessages(thread.queuedMessages, visibleMessages),
+    [thread.queuedMessages, visibleMessages]
+  )
+  const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedMessages.length > 0
   // The only file list the UI has: whatever the agent has already touched in
   // this thread. Those are also the paths a follow-up is most likely about.
@@ -293,7 +307,7 @@ export function AgentThreadView({
             </div>
           ) : (
             <Messages
-              messages={baseMessages}
+              messages={visibleMessages}
               threadId={thread.id}
               scrollKey={thread.id}
               showPlanArtifact={
@@ -327,6 +341,17 @@ export function AgentThreadView({
               settingUpSandbox={settingUpSandbox}
               pollWorkflowApprovalsWhileActive={isStreaming}
               contentWidthClass="max-w-3xl"
+              footer={
+                !isStreaming &&
+                !sendMessage.isPending &&
+                queuedMessages.length === 0 && (
+                  <ThreadFeedbackCard
+                    key={`${thread.id}:${session.data?.login ?? ""}`}
+                    threadId={thread.id}
+                    login={session.data?.login ?? null}
+                  />
+                )
+              }
             />
           )}
           {!isHydrating && (

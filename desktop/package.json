@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
@@ -41,6 +41,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "resources/app-update.yml",
+        "to": "app-update.yml"
+      },
       {
         "from": "resources/icon.png",
         "to": "icon.png"

@@ -173,6 +173,8 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  deliveryStatus?: "sending" | "failed"
+  optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
@@ -226,6 +228,10 @@ export interface QueuedThreadMessage {
   content: string
   images?: Array<ImageChunk>
   createdAt: number
+}
+
+export interface PendingThreadMessage extends QueuedThreadMessage {
+  status: "sending" | "failed"
 }
 
 export type WorkflowApprovalStatus = "pending" | "approved" | "rejected"
@@ -382,6 +388,7 @@ export interface AgentThread {
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>
+  pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary
   pullRequests?: Array<AgentPullRequest>
   diffStats?: {

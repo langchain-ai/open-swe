@@ -21,6 +21,7 @@ import type {
   ImageChunk,
   Message,
 } from "./types"
+import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 
@@ -536,17 +537,20 @@ export function useSidebarRecents({
   projectMode,
   includeAutomations = false,
   includeResolved = false,
+  sort = "created",
   enabled = true,
 }: {
   projectMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
+  sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
       ...sidebarPageParams({ includeAutomations, includeResolved }),
       ...(projectMode ? { ownerless: true } : {}),
+      sortBy: sort === "created" ? "created_at" : "updated_at",
     },
     enabled
   )
@@ -556,21 +560,28 @@ export function useSidebarProjectThreads({
   repoFullName,
   includeAutomations = false,
   includeResolved = false,
+  sort = "created",
   enabled = true,
 }: {
   repoFullName: string | null
   includeAutomations?: boolean
   includeResolved?: boolean
+  sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
       ...sidebarPageParams({ includeAutomations, includeResolved }),
       ...(repoFullName ? { repo: repoFullName } : {}),
+      sortBy: sort === "created" ? "created_at" : "updated_at",
     },
     enabled && Boolean(repoFullName)
   )
 }
+
+const RUNNING_THREAD_POLL_MS = 3_000
+/** Bounds how long a run started outside this tab stays invisible to the view. */
+const IDLE_THREAD_POLL_MS = 10_000
 
 export function useAgentThread(threadId: string) {
   const queryClient = useQueryClient()
@@ -580,18 +591,28 @@ export function useAgentThread(threadId: string) {
     queryKey,
     queryFn: async ({ queryKey: key }) => {
       const thread = await agentsApi.getThread(threadId)
-      const queuedMessages =
-        queryClient.getQueryData<AgentThread>(key)?.queuedMessages
-      return thread.status === "running" && queuedMessages?.length
-        ? { ...thread, queuedMessages }
-        : thread
+      const cached = queryClient.getQueryData<AgentThread>(key)
+      const queuedMessages = cached?.queuedMessages
+      const pendingMessages = cached?.pendingMessages
+      if (!queuedMessages?.length && !pendingMessages?.length) return thread
+      return {
+        ...thread,
+        ...(thread.status === "running" && queuedMessages?.length
+          ? { queuedMessages }
+          : {}),
+        ...(pendingMessages?.length ? { pendingMessages } : {}),
+      }
     },
-    // Server truth heartbeat while a run is live. The SDK's SSE transport does
-    // not reconnect once a custom `fetch` is supplied (it needs the dashboard
-    // session cookie), so a dropped event stream must not leave the view — and
-    // its stop button — believing the run already ended.
+    // Server truth heartbeat, at two cadences. While a run is live a dropped
+    // event stream must not leave the view — or its stop button — believing
+    // the run already ended. While idle this is the only thing that observes a
+    // run started elsewhere (Slack, GitHub, the scheduler, another tab), since
+    // an idle stream defers its event subscription and would never see it;
+    // `useReconcileStream` compares both against the stream.
     refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 3000 : false,
+      query.state.data?.status === "running"
+        ? RUNNING_THREAD_POLL_MS
+        : IDLE_THREAD_POLL_MS,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and bounce the route back to /agents.
@@ -811,6 +832,7 @@ export interface SendAgentMessageVariables {
   model_id?: string | null
   effort?: string | null
   plan_mode?: boolean
+  client_message_id?: string
 }
 
 export function useCancelAgentThread(threadId: string) {

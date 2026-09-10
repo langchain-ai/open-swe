@@ -3,15 +3,29 @@ from unittest.mock import AsyncMock
 from agent.slack import thinking as slack_thinking
 
 
-class _Part:
-    def __init__(self, event: str, data: dict) -> None:
-        self.event = event
-        self.data = data
+def _event(method: str, data: dict, *, namespace: list[str] | None = None) -> dict:
+    return {
+        "type": "event",
+        "event_id": "1-0",
+        "method": method,
+        "params": {"namespace": namespace or [], "timestamp": 1, "data": data},
+    }
 
 
 async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
-    parts = [
-        _Part(
+    historical = _event(
+        "tools",
+        {
+            "event": "tool-started",
+            "tool_call_id": "old-call",
+            "tool_name": "execute",
+            "input": {"command": "echo historical"},
+        },
+    )
+    events = [
+        historical,
+        _event("lifecycle", {"event": "running"}),
+        _event(
             "tools",
             {
                 "event": "tool-started",
@@ -20,16 +34,30 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
                 "input": {"command": "echo secret-token"},
             },
         ),
-        _Part("tools", {"event": "tool-finished", "tool_call_id": "call-1"}),
+        _event("tools", {"event": "tool-finished", "tool_call_id": "call-1"}),
+        _event("lifecycle", {"event": "completed"}),
     ]
+    events[1]["event_id"] = "synth:run-1:lc||running"
+    events[-1]["event_id"] = "synth:run-1:lc||completed"
 
-    async def join_stream(*_args, **_kwargs):
-        for part in parts:
-            yield part
+    class ThreadStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        def subscribe(self, channels):
+            assert channels == ["lifecycle", "tools"]
+
+            async def iterator():
+                for event in events:
+                    yield event
+
+            return iterator()
 
     client = AsyncMock()
-    client.runs.join_stream = join_stream
-    client.runs.get.return_value = {"status": "success"}
+    client.threads.stream = lambda *_args, **_kwargs: ThreadStream()
     start = AsyncMock(return_value="2.0")
     append = AsyncMock()
     stop = AsyncMock()
@@ -57,6 +85,7 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
     serialized = str(final_chunks)
     assert "Running a development command" in serialized
     assert "echo secret-token" in serialized
+    assert "echo historical" not in serialized
     assert final_chunks[-1]["status"] == "complete"
     assert final_chunks[-1]["output"] == "Completed"
 
@@ -151,8 +180,8 @@ def test_namespaced_tool_events_have_stable_distinct_ids() -> None:
         "input": {"file_path": "/workspace/app/auth.py"},
     }
 
-    stream.consume(_Part("tools|subagent:a", event))
-    stream.consume(_Part("tools|subagent:b", event))
+    stream.consume(_event("tools", event, namespace=["subagent:a"]))
+    stream.consume(_event("tools", event, namespace=["subagent:b"]))
 
     assert len(stream.steps) == 2
     assert {step.title for step in stream.steps.values()} == {"Reading auth.py"}
