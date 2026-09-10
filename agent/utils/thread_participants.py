@@ -11,7 +11,6 @@ from agent.dashboard.agent_overrides import resolve_github_login
 from agent.dashboard.user_mappings import get_mapping, login_for_email, login_for_slack_id
 from agent.github.comments import fetch_github_thread_participants
 from agent.github.thread_token import get_github_token
-from agent.linear.client import fetch_linear_issue_participant_emails
 from agent.slack.client import fetch_slack_thread_messages
 from agent.source_context import SourceContext
 from agent.utils.json_types import as_json_object, thread_metadata
@@ -169,14 +168,8 @@ async def resolve_thread_participant_logins(
         logins.update(mapped)
         unresolved_count += source_unresolved
     elif context.linear_issue is not None:
-        if not context.linear_issue.id:
-            return None, 0, "Linear issue context is incomplete"
-        emails = await fetch_linear_issue_participant_emails(context.linear_issue.id)
-        if emails is None:
-            return None, 0, "Could not verify Linear issue participants"
-        mapped, source_unresolved = await _mapped_email_logins(emails)
-        logins.update(mapped)
-        unresolved_count += source_unresolved
+        if not logins:
+            return None, unresolved_count, "Linear participant metadata is unavailable"
     elif context.github_issue is not None or (source == "github" and context.pr_number is not None):
         issue_number = (
             context.github_issue.number if context.github_issue else None

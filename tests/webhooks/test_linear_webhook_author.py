@@ -58,16 +58,13 @@ def _run_process(
         captured["resolved_email"] = email
         return "zhen" if email == "zhen@example.com" else None
 
+    if full_issue is not None:
+        full_issue["comment_author"] = issue_data.get("comment_author", {})
+        full_issue["triggering_comment_id"] = issue_data.get("triggering_comment_id", "")
+        full_issue["triggering_comment"] = issue_data.get("triggering_comment", "")
+        issue_data = full_issue
     with (
-        patch.object(linear_webhook.common, "react_to_linear_comment", new_callable=AsyncMock),
         patch.object(linear_webhook, "linear_issue_thread_id", return_value="thread-1"),
-        patch.object(
-            linear_webhook.common,
-            "fetch_linear_issue_details",
-            new_callable=AsyncMock,
-            return_value=full_issue
-            or _full_issue(user_email=issue_data.get("comment_author", {}).get("email")),
-        ),
         patch.object(
             linear_webhook.common, "resolve_login_from_email_async", side_effect=fake_resolve_login
         ),
@@ -75,7 +72,6 @@ def _run_process(
         patch.object(
             linear_webhook.common, "upsert_agent_thread_metadata", side_effect=fake_upsert
         ),
-        patch.object(linear_webhook.common, "post_linear_trace_comment", new_callable=AsyncMock),
         patch.object(linear_webhook.common, "resolve_agent_model_id", new_callable=AsyncMock),
         patch.object(linear_webhook.common, "model_supports_images", return_value=True),
         patch.object(

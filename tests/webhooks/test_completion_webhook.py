@@ -402,21 +402,17 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
 
 
 @pytest.mark.asyncio
-async def test_linear_source_comments_on_issue(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_linear_source_without_mcp_cannot_post(
+    monkeypatch: pytest.MonkeyPatch, fake_store
+) -> None:
     client = _FakeClient({"source": "linear", "source_context": {"linear_issue": {"id": "iss_1"}}})
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    comment = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "comment_on_linear_issue", comment)
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "timeout"}
     )
 
-    assert result["status"] == "ok"
-    comment.assert_awaited_once()
-    await_args = comment.await_args
-    assert await_args is not None
-    assert await_args.args[0] == "iss_1"
+    assert result == {"status": "ignored", "reason": "no reply posted"}
 
 
 @pytest.mark.asyncio

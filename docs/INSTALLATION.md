@@ -252,23 +252,10 @@ Open a section when you want that feature; everything above keeps working withou
 Open SWE listens for Linear comments that mention `@openswe`.
 
 1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** only **Comments → Create**.
-2. **Settings → API → Personal API keys → New API key** with **All access**, saved as `LINEAR_API_KEY`.
-3. Map Linear teams and projects to repositories in `agent/linear/team_repo_map.py`:
+2. Add a Linear MCP server named `linear` under **Admin → Workspace MCPs** and select the tools Open SWE may use. Include `save_comment` (or `create_comment` if offered) so the backend can post run, authentication, and sandbox failure notices even after the agent stops.
+3. Set a workspace default repository under **Open SWE Agent**. Add a `repo:owner/name` token or GitHub URL to a Linear comment when the issue belongs to another repository.
 
-```python
-LINEAR_TEAM_TO_REPO = {
-    "My Team": {"owner": "my-org", "name": "my-repo"},
-    "Engineering": {
-        "projects": {
-            "backend": {"owner": "my-org", "name": "backend"},
-            "frontend": {"owner": "my-org", "name": "frontend"},
-        },
-        "default": {"owner": "my-org", "name": "monorepo"},
-    },
-}
-```
-
-A `repo:owner/name` token or GitHub URL in the comment overrides the mapping. **Verify:** comment `@openswe what files are in this repo?` on an issue in a mapped team.
+**Verify:** comment `@openswe what files are in this repo?` on an issue, adding `repo:owner/name` when needed.
 
 </details>
 

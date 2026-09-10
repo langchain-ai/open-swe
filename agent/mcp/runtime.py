@@ -186,6 +186,7 @@ def _wrap_tool(
         args_schema=definition.inputSchema,
         response_format="content_and_artifact",
         handle_tool_error=True,
+        metadata={"mcp_tool_name": definition.name},
     )
 
 
@@ -210,7 +211,7 @@ async def _load_tools(
         return []
 
 
-async def load_mcp_tools(*sources: MCPSource) -> list[BaseTool]:
+async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> list[BaseTool]:
     """Combine sources in precedence order; later connections replace earlier names entirely."""
     try:
         catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
@@ -227,7 +228,9 @@ async def load_mcp_tools(*sources: MCPSource) -> list[BaseTool]:
         *(
             _load_tools(source, record, sources)
             for _, (source, record) in sorted(resolved.items())
-            if record.enabled and record.allowed_tools
+            if record.enabled
+            and record.allowed_tools
+            and (connection_name is None or record.name == connection_name)
         )
     )
     return [tool for group in groups for tool in group]

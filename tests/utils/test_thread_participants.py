@@ -59,7 +59,7 @@ async def test_resolves_slack_participants_from_verified_source_context() -> Non
 
 
 @pytest.mark.asyncio
-async def test_resolves_linear_participants_from_issue_context() -> None:
+async def test_resolves_linear_participants_from_metadata() -> None:
     metadata = {
         "source": "linear",
         "participant_logins": ["owner"],
@@ -68,18 +68,6 @@ async def test_resolves_linear_participants_from_issue_context() -> None:
     with (
         patch.object(participants, "get_client", return_value=_Client(metadata)),
         patch.object(participants, "get_mapping", side_effect=_active_mapping),
-        patch.object(
-            participants,
-            "fetch_linear_issue_participant_emails",
-            new_callable=AsyncMock,
-            return_value={"teammate@example.com"},
-        ) as fetch,
-        patch.object(
-            participants,
-            "login_for_email",
-            new_callable=AsyncMock,
-            return_value="teammate",
-        ),
     ):
         logins, unresolved, error = await participants.resolve_thread_participant_logins(
             {"configurable": {"thread_id": "thread-1", "source": "linear"}}
@@ -87,8 +75,7 @@ async def test_resolves_linear_participants_from_issue_context() -> None:
 
     assert error is None
     assert unresolved == 0
-    assert logins == {"owner", "teammate"}
-    fetch.assert_awaited_once_with("lin-1")
+    assert logins == {"owner"}
 
 
 @pytest.mark.asyncio
