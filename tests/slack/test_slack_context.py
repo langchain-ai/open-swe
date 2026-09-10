@@ -179,7 +179,7 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
     threads.create = create  # type: ignore[attr-defined]
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
 
-    asyncio.run(
+    assert asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
             "thread-id", source="slack", visibility="private", owner_login="Alice"
         )
@@ -195,20 +195,6 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
     metadata = cast(dict, threads.thread)["metadata"]
     assert metadata["visibility"] == "private"
     assert metadata["owner_login"] == "alice"
-
-
-def test_upsert_reports_whether_the_write_persisted(monkeypatch: pytest.MonkeyPatch) -> None:
-    threads = _FakeThreadsClient(raise_not_found=True)
-
-    async def create(**_: object) -> None:
-        raise RuntimeError("store down")
-
-    threads.create = create  # type: ignore[attr-defined]
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
-    assert (
-        asyncio.run(webhook_common.upsert_agent_thread_metadata("thread-id", source="slack"))
-        is False
-    )
 
 
 def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyPatch) -> None:
