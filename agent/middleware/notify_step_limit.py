@@ -14,12 +14,11 @@ from agent.slack.client import (
     post_slack_thread_reply,
 )
 from agent.utils.user_messages import warning
+from coding_agent.builder import MODEL_CALL_LIMIT_MARKER
 from coding_agent.middleware.message_content import content_to_text
 from coding_agent.middleware.trace import scrub_middleware_inputs
 
 logger = logging.getLogger(__name__)
-
-_LIMIT_MARKER = "Model call limits exceeded"
 
 
 @scrub_middleware_inputs
@@ -41,7 +40,7 @@ async def notify_step_limit_reached(
     last_msg = messages[-1]
     content = content_to_text(getattr(last_msg, "content", "") or "")
 
-    if _LIMIT_MARKER not in content:
+    if MODEL_CALL_LIMIT_MARKER not in content:
         return None
 
     cfg = OpenSWERunConfig.from_runtime()

@@ -36,6 +36,7 @@ def test_webapp_does_not_import_agent_stack() -> None:
             "agent.server",
             "agent.middleware",
             "agent.tools",
+            "coding_agent.builder",
             "coding_agent.middleware",
             "coding_agent.tools",
         ],

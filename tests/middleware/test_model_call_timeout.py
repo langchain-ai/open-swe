@@ -53,12 +53,15 @@ class TestModelCallTimeoutMiddleware:
     def test_every_subagent_spec_carries_the_deadline(self) -> None:
         # Subagents compile into their own graphs, so the parent's middleware
         # never wraps their model calls.
+        from deepagents.backends.state import StateBackend
+
         from agent.reviewer import _reviewer_subagent
-        from agent.server import _general_purpose_subagent
+        from coding_agent.builder import CodingAgentBuilder
 
         model = MagicMock()
+        builder = CodingAgentBuilder(model_id="openai:gpt-5.6-sol", backend=StateBackend())
         specs = [
-            _general_purpose_subagent(model, tools=[]),
+            builder._general_purpose_subagent(model, [], None),
             _reviewer_subagent(model),
         ]
         for spec in specs:

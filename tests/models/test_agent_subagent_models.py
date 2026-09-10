@@ -62,10 +62,12 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
                 "subagent_reasoning_effort": "xhigh",
             },
         ),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
+        patch("coding_agent.builder.fallback_model_id_for", return_value=None),
+        patch(
+            "coding_agent.builder.make_model", side_effect=[main_model, subagent_model]
+        ) as make_model,
         patch("agent.server.construct_system_prompt", return_value="prompt"),
-        patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("coding_agent.builder.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 
@@ -133,10 +135,12 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
                 "reasoning_effort": "high",
             },
         ),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
+        patch("coding_agent.builder.fallback_model_id_for", return_value=None),
+        patch(
+            "coding_agent.builder.make_model", side_effect=[main_model, subagent_model]
+        ) as make_model,
         patch("agent.server.construct_system_prompt", return_value="prompt"),
-        patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("coding_agent.builder.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 
@@ -200,10 +204,12 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
             },
         ),
         patch("agent.server.get_team_fable_enabled", new_callable=AsyncMock, return_value=False),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
+        patch("coding_agent.builder.fallback_model_id_for", return_value=None),
+        patch(
+            "coding_agent.builder.make_model", side_effect=[main_model, subagent_model]
+        ) as make_model,
         patch("agent.server.construct_system_prompt", return_value="prompt"),
-        patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("coding_agent.builder.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 

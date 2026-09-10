@@ -7,6 +7,7 @@ from agent import server
 from agent.dashboard.threads import runs as thread_runs
 from agent.dashboard.threads import summary as thread_summary
 from agent.prompt import construct_system_prompt
+from coding_agent import builder
 from tests.conftest import patch_thread_module
 
 
@@ -40,7 +41,7 @@ def test_plan_mode_prompt_requests_slack_approval_options() -> None:
 
 
 def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
-    excluded = server.PLAN_MODE_EXCLUDED_TOOLS
+    excluded = builder.PLAN_MODE_EXCLUDED_TOOLS | server.PLAN_MODE_EXCLUDED_PLATFORM_TOOLS
     for tool in (
         "task",
         "manage_baby_sit",

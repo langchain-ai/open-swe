@@ -16,7 +16,8 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
-from agent.server import DesktopAgentState, _registered_tool_name, get_agent
+from agent.server import DesktopAgentState, get_agent
+from coding_agent.builder import registered_tool_name
 from coding_agent.sandboxes.read_only_backend import ReadOnlyBackend
 from coding_agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 
@@ -95,10 +96,10 @@ async def _capture_create_deep_agent_kwargs(
             new_callable=AsyncMock,
             return_value=thread_settings or {},
         ),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=fake_make_model),
+        patch("coding_agent.builder.fallback_model_id_for", return_value=None),
+        patch("coding_agent.builder.make_model", side_effect=fake_make_model),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
-        patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("coding_agent.builder.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 
@@ -160,9 +161,9 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
         patch("agent.server.load_workspace_mcp_tools", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.load_browser_tools", return_value=[]),
-        patch("agent.server.make_model", return_value=MagicMock()),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
+        patch("coding_agent.builder.make_model", return_value=MagicMock()),
+        patch("coding_agent.builder.fallback_model_id_for", return_value=None),
+        patch("coding_agent.builder.create_deep_agent", return_value=_DummyAgent()),
     ):
         agent_task = asyncio.create_task(get_agent(_base_config()))
         await asyncio.wait_for(started.wait(), timeout=1)
@@ -624,8 +625,8 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
 
     gp = next(s for s in subagents if s["name"] == "general-purpose")
     assert "cannot access Slack tools" in gp["description"]
-    parent_names = {_registered_tool_name(tool) for tool in parent_tools}
-    subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
+    parent_names = {registered_tool_name(tool) for tool in parent_tools}
+    subagent_names = {registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
         "manage_code_channel",
         "notify_automation_channel",

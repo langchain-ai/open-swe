@@ -255,17 +255,19 @@ def test_plan_file_path_for_thread_uses_plans_dir_and_slug() -> None:
 
 
 def test_external_mutations_excluded_in_plan_mode() -> None:
-    from agent.server import PLAN_MODE_EXCLUDED_TOOLS
+    from coding_agent.builder import PLAN_MODE_EXCLUDED_TOOLS
 
     assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
     assert "create_sandbox_service_url" in PLAN_MODE_EXCLUDED_TOOLS
 
 
 def test_file_edit_tools_available_in_plan_mode_for_plan_file() -> None:
-    from agent.server import PLAN_MODE_EXCLUDED_TOOLS
+    from agent.server import PLAN_MODE_EXCLUDED_PLATFORM_TOOLS
+    from coding_agent.builder import PLAN_MODE_EXCLUDED_TOOLS
 
-    assert "write_file" not in PLAN_MODE_EXCLUDED_TOOLS
-    assert "edit_file" not in PLAN_MODE_EXCLUDED_TOOLS
+    excluded = PLAN_MODE_EXCLUDED_TOOLS | PLAN_MODE_EXCLUDED_PLATFORM_TOOLS
+    assert "write_file" not in excluded
+    assert "edit_file" not in excluded
 
 
 class _FakeReq:
