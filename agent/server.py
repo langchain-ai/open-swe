@@ -1021,6 +1021,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
     source = cfg.source or "dashboard"
+    configurable["source"] = source
     user_email = cfg.user_email or ""
 
     # Plan mode is entered only when the model decides to (the `enter_plan_mode`

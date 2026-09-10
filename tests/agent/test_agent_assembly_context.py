@@ -304,6 +304,17 @@ async def test_desktop_agent_honors_gateway_environment(
 
 
 @pytest.mark.asyncio
+async def test_agent_defaults_missing_run_source_before_prepare() -> None:
+    config = _base_config()
+
+    await _capture_create_deep_agent_kwargs(config)
+
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    assert configurable["source"] == "dashboard"
+
+
+@pytest.mark.asyncio
 async def test_agent_does_not_add_custom_repair_middleware() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     middleware = captured["middleware"]
