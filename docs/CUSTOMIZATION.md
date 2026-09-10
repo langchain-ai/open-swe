@@ -412,13 +412,6 @@ Desktop (local) runs do not load MCP connections yet. GitHub PR follow-ups targe
 private thread are rejected unless the commenter owns that thread, before credentials
 are read or a run is dispatched.
 
-If a pre-release deployment already stored mixed-case personal MCP namespaces, pause
-MCP writes and runs before upgrading. Run
-`uv run python scripts/normalize_user_mcp_logins.py --url <deployment-url>` with the
-deployment's API credentials to preview the migration, then repeat with `--apply`.
-The script preserves encrypted records and aborts on duplicate connection names across
-case variants; resolve those manually before retrying. Workspace connections are unchanged.
-
 ### Adding a Python tool
 
 Create a new file in `agent/tools/`, define a function, and add it to the tools list.
