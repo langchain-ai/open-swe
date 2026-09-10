@@ -32,6 +32,47 @@ describe("splitPatch", () => {
     expect(files[1]?.patch).not.toContain("+TWO")
   })
 
+  // A deleted line whose content starts `-- ` renders as `--- foo`, and an
+  // added one as `+++ foo` — byte-identical to a file header pair.
+  it("keeps deleted lines that look like file headers inside their hunk", () => {
+    const patch = [
+      "--- a/opts.txt",
+      "+++ b/opts.txt",
+      "@@ -1,3 +1,3 @@",
+      " keep",
+      "--- option",
+      "+++ added",
+      " tail",
+    ].join("\n")
+    const files = splitPatch(patch)
+    expect(files).toHaveLength(1)
+    expect(files[0]?.path).toBe("opts.txt")
+    expect(files[0]?.patch).toContain("--- option")
+    expect(selectPatchLines(files[0]!.patch, "deletions", 1, 2)).toEqual([
+      " keep",
+      "--- option",
+    ])
+  })
+
+  it("still splits a real second file that follows a completed hunk", () => {
+    const patch = [
+      "--- a/x.txt",
+      "+++ b/x.txt",
+      "@@ -1,2 +1,1 @@",
+      " keep",
+      "--- option",
+      "--- a/y.txt",
+      "+++ b/y.txt",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+    ].join("\n")
+    expect(splitPatch(patch).map((file) => file.path)).toEqual([
+      "x.txt",
+      "y.txt",
+    ])
+  })
+
   it("splits plain unified diffs on the next file header", () => {
     const patch = [
       "--- a/x.txt",

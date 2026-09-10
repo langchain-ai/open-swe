@@ -377,6 +377,21 @@ async def test_show_user_rejects_oversized_files_before_download(
 
 
 @pytest.mark.asyncio
+async def test_show_user_rejects_a_file_that_grows_after_the_size_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _configure(monkeypatch, {f"{WORK_DIR}/growing.log": b"small"})
+    oversized = b"x" * (show_user_tool.MAX_TEXT_BYTES + 1)
+
+    async def grown_download(paths: list[str]) -> list[Any]:
+        return [SimpleNamespace(path=paths[0], content=oversized, error=None)]
+
+    monkeypatch.setattr(backend, "adownload_files", grown_download)
+    with pytest.raises(ValueError, match="limit"):
+        await show_user_tool._show_user("growing.log")
+
+
+@pytest.mark.asyncio
 async def test_show_user_rejects_binary_non_images(monkeypatch: pytest.MonkeyPatch) -> None:
     _configure(monkeypatch, {f"{WORK_DIR}/blob.bin": b"\xff\xfe\x00\x01"})
 

@@ -107,7 +107,7 @@ After showing a card, reference it ("the highlighted lines in the card above") r
 
 ## Dense or interactive visuals
 
-For a layout, a state comparison, an infographic, or a concept too dense for Mermaid, write one focused `.html` file and publish it with `show_user` (dashboard) or `slack_attach_html` (Slack). Read the `html-artifacts` skill first for the authoring rules. Match the product's colors, type, and components; use real labels and data.
+For a layout, a state comparison, an infographic, or a concept too dense for Mermaid, write one focused `.html` file and publish it with `show_user` (hosted dashboard runs), `save_plan` (anywhere, including desktop), or `slack_attach_html` (Slack). `show_user` serves the preview from a signed sandbox URL, so it needs a hosted LangSmith sandbox and returns an error on desktop or another provider. Read the `html-artifacts` skill first for the authoring rules. Match the product's colors, type, and components; use real labels and data.
 
 ## Surface
 

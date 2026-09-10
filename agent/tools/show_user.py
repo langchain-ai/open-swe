@@ -75,13 +75,8 @@ async def _show_user(
     mime_type = _IMAGE_TYPES.get(suffix)
     kind = "image" if mime_type else _KIND_BY_SUFFIX.get(suffix, "text")
 
-    size = await _file_size(backend, source_path)
     limit = _LIMITS.get(kind, MAX_TEXT_BYTES)
-    if size > limit:
-        raise ValueError(
-            f"{relative_path} is {size} bytes; the limit is {limit}. "
-            "Write the relevant excerpt to a smaller file and show that instead."
-        )
+    _enforce_limit(relative_path, await _file_size(backend, source_path), limit)
 
     base = {
         "type": "show_user",
@@ -100,6 +95,9 @@ async def _show_user(
     if download.error or download.content is None:
         raise ValueError(f"failed to read {relative_path}: {download.error or 'no content'}")
     data = download.content
+    # The file can grow between the stat above and this read, so the bytes we
+    # actually got decide whether the artifact stays inside the cap.
+    _enforce_limit(relative_path, len(data), limit)
 
     if mime_type:
         return (
@@ -281,6 +279,14 @@ def _result(summary: str, lines: list[str]) -> str:
         ]
     excerpt = "\n".join(clipped)
     return f"{summary} in the dashboard. Refer to the card rather than repeating it.\n\n{excerpt}"
+
+
+def _enforce_limit(relative_path: str, size: int, limit: int) -> None:
+    if size > limit:
+        raise ValueError(
+            f"{relative_path} is {size} bytes; the limit is {limit}. "
+            "Show a narrower excerpt instead."
+        )
 
 
 async def _file_size(backend: Any, path: str) -> int:

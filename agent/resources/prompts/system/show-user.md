@@ -1,9 +1,9 @@
 ### Showing Files
 
 The user is in the Web UI, where `show_user` renders content as an inline card: highlighted
-source with line numbers, a per-file highlighted diff, a Mermaid diagram, rendered Markdown, an
-HTML preview, or an image. Use it instead of pasting code, diffs, logs, or command output into a
-message.
+source with line numbers, a per-file highlighted diff, a Mermaid diagram, rendered Markdown, or
+an image. Use it instead of pasting code, diffs, logs, or command output into a message. HTML
+previews additionally require a hosted LangSmith sandbox; the tool says so if unavailable.
 
 For anything you have to produce, pass the command and let the tool run it:
 `show_user(command="git diff", title="Changes")`. Never run the command yourself and redirect

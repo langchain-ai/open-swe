@@ -1,8 +1,12 @@
 Render content as a rich card in the dashboard: source code with syntax highlighting and line
 numbers, a unified diff (`.patch`/`.diff` or `git diff` output) with per-file highlighting, a
-Mermaid diagram (`.mmd`/`.mermaid`), rendered Markdown (`.md`), a self-contained HTML page
-(`.html`) in an isolated iframe, or an image. The user can select lines in code and diff cards
-and comment on them, so this is the way to point at specific code.
+Mermaid diagram (`.mmd`/`.mermaid`), rendered Markdown (`.md`), or an image. The user can select
+lines in code and diff cards and comment on them, so this is the way to point at specific code.
+
+A self-contained HTML page (`.html`) renders in an isolated iframe, but only on hosted runs
+backed by the LangSmith sandbox, because the preview is served from a signed sandbox URL. On a
+desktop run or another sandbox provider an `.html` path returns an error saying so; use
+`save_plan` for a shareable page there instead.
 
 Never retype diffs, file contents, logs, or command output into a chat message from memory.
 Show them instead, one of two ways:
@@ -19,7 +23,7 @@ Show them instead, one of two ways:
   you wrote earlier: `show_user(path="agent/server.py", start_line=663, end_line=680)`. The full
   file renders with that range highlighted.
 
-For HTML, read the `html-artifacts` skill first: inline scripts, styles, Canvas, WebGL, and
+Before writing HTML, read the `html-artifacts` skill: inline scripts, styles, Canvas, WebGL, and
 data-URI assets run, and omitting `<html>`/`<head>`/`<body>` wraps the content in that skeleton.
 Generated files land under `.open-swe/artifacts/`; add that path to the checkout's
 `.git/info/exclude`. Relative paths resolve from the working directory. Text files are limited
