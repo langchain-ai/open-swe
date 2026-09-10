@@ -36,6 +36,7 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
         "allow_admin_thread": True,
     }
     assert called["body"].repo == "langchain-ai/open-swe"
+    assert called["body"].thread_mode == "reuse"
 
 
 async def test_automation_tools_recheck_admin(monkeypatch) -> None:  # noqa: ANN001
