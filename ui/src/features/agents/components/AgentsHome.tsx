@@ -79,8 +79,10 @@ export function AgentsHome({
   })
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
-  const activeSelection = selection ?? defaultSelection
-  const handleSelectionChange = (next: ModelSelection) => {
+  const [autoSelected, setAutoSelected] = useState(false)
+  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
+  const handleSelectionChange = (next: ModelSelection | null) => {
+    setAutoSelected(next === null)
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }

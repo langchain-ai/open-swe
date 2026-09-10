@@ -225,6 +225,9 @@ async def send_dashboard_message(
 
     prompt = body.content.strip()
     now_ms = _now_ms()
+    # Queued follow-ups are consumed by the run already in flight, whose graph is
+    # fixed, so Auto-vs-explicit routing is deliberately not recorded here; the
+    # next run.start carries the picker state and applies it.
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     handoff_metadata = dict(metadata)
     metadata_update: dict[str, Any] = {
