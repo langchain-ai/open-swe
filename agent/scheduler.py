@@ -52,9 +52,9 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
             return {"result": {"status": "missing_thread_id"}}
         return {"result": await monitor_background_tasks(thread_id)}
     if task == "session_cost":
-        return {"result": await run_session_cost_refresh(state.model_dump())}
+        return {"result": await run_session_cost_refresh(state.model_dump(exclude_none=True))}
     if task == "agent_cost":
-        return {"result": await run_agent_cost_refresh(state.model_dump())}
+        return {"result": await run_agent_cost_refresh(state.model_dump(exclude_none=True))}
     schedule_id = state.schedule_id or cfg.schedule_id
     if not schedule_id:
         logger.warning("Scheduled agent tick missing schedule_id")
