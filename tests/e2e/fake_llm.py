@@ -824,6 +824,16 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-edit",
         ),
         _tool_step(
+            "Refining the greeting.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'return f"Hello, {name}!"',
+                "new_string": 'return f"Hello, {name.strip()}!"',
+            },
+            "call-edit-refine",
+        ),
+        _tool_step(
             "Committing and pushing the change.",
             "execute",
             {"command": _COMMIT_SCRIPT},

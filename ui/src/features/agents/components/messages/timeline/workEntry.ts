@@ -2,6 +2,7 @@ import { formatJsonToolResult } from "./toolResultJson"
 import type {
   AcpToolStatus,
   Chunk,
+  DiffData,
   ToolExecutionChunk,
 } from "@/features/agents/lib/types"
 import {
@@ -135,6 +136,84 @@ export function latestDiff(chunk: ToolExecutionChunk) {
   return chunk.diffs?.length
     ? chunk.diffs[chunk.diffs.length - 1]
     : chunk.diffData
+}
+
+export function combinedEditDiff(
+  chunks: Array<ToolExecutionChunk>
+): DiffData | undefined {
+  const diffs = chunks.flatMap((chunk) => {
+    const diff = latestDiff(chunk)
+    return diff ? [diff] : []
+  })
+  const first = diffs[0]
+  const last = diffs[diffs.length - 1]
+  if (!first || !last) return undefined
+
+  let originalContent = first.originalContent
+  let newContent = first.newContent
+  for (const diff of diffs.slice(1)) {
+    if (diff.originalContent === null) {
+      newContent = diff.newContent
+      continue
+    }
+    const index = newContent.indexOf(diff.originalContent)
+    if (index >= 0) {
+      newContent =
+        newContent.slice(0, index) +
+        diff.newContent +
+        newContent.slice(index + diff.originalContent.length)
+      continue
+    }
+    originalContent = [originalContent, diff.originalContent]
+      .filter((content): content is string => content !== null)
+      .join("\n")
+    newContent = [newContent, diff.newContent].join("\n")
+  }
+
+  return { ...last, originalContent, newContent, isNewFile: first.isNewFile }
+}
+
+export function describeEditGroup(
+  chunks: Array<ToolExecutionChunk>,
+  projectPath?: string
+): WorkEntryView {
+  const latestChunk = chunks[chunks.length - 1]
+  const diff = combinedEditDiff(chunks)
+  if (!latestChunk) {
+    return {
+      icon: "square-pen",
+      heading: "Edited",
+      preview: null,
+      tone: "tool",
+      status: "completed",
+      expandedText: null,
+    }
+  }
+  if (!diff) return describeWorkEntry(latestChunk, projectPath)
+  return {
+    ...describeWorkEntry(
+      { ...latestChunk, diffData: diff, diffs: undefined },
+      projectPath
+    ),
+    heading: chunks.some((chunk) => chunk.status === "error")
+      ? "Failed to edit"
+      : chunks.some(
+            (chunk) =>
+              chunk.status === "pending" || chunk.status === "in_progress"
+          )
+        ? "Editing"
+        : diff.isNewFile
+          ? "Created"
+          : "Edited",
+    status: chunks.some((chunk) => chunk.status === "error")
+      ? "error"
+      : chunks.some((chunk) => chunk.status === "pending")
+        ? "pending"
+        : chunks.some((chunk) => chunk.status === "in_progress")
+          ? "in_progress"
+          : "completed",
+    tone: chunks.some((chunk) => chunk.status === "error") ? "error" : "tool",
+  }
 }
 
 export function describeWorkEntry(

@@ -20,6 +20,11 @@ export type RenderItem =
       chunks: Array<ToolExecutionChunk>
     }
   | { type: "edit-item"; key: string; chunk: ToolExecutionChunk }
+  | {
+      type: "edit-group"
+      key: string
+      chunks: Array<ToolExecutionChunk>
+    }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
@@ -72,6 +77,14 @@ function attentionItems(
   item: RenderItem,
   includeUnfinished: boolean
 ): Array<RenderItem> {
+  if (item.type === "edit-group") {
+    return item.chunks.some((chunk) =>
+      toolNeedsAttention(chunk, includeUnfinished)
+    )
+      ? [item]
+      : []
+  }
+
   if (item.type === "explored-group" || item.type === "subagent-group") {
     return item.chunks
       .filter((chunk) => toolNeedsAttention(chunk, includeUnfinished))
@@ -114,6 +127,7 @@ export function countWorkActions(items: Array<RenderItem>): number {
     if (item.type === "explored-group" || item.type === "subagent-group") {
       return count + item.chunks.length
     }
+    if (item.type === "edit-group") return count + item.chunks.length
     if (
       item.type === "edit-item" ||
       item.type === "shell-item" ||
@@ -177,6 +191,45 @@ function isReplyTool(chunk: ToolExecutionChunk): boolean {
  */
 function isSubagentTool(chunk: ToolExecutionChunk): boolean {
   return chunk.toolKind === "task"
+}
+
+function editFilePath(chunk: ToolExecutionChunk): string | null {
+  const diff = chunk.diffs?.length
+    ? chunk.diffs[chunk.diffs.length - 1]
+    : chunk.diffData
+  if (diff?.filePath) return diff.filePath
+  const path =
+    chunk.input?.file_path ?? chunk.input?.path ?? chunk.input?.target_file
+  return typeof path === "string" && path.trim() ? path.trim() : null
+}
+
+function collapseRepeatedEdits(items: Array<RenderItem>): Array<RenderItem> {
+  const groups = new Map<string, Array<ToolExecutionChunk>>()
+  for (const item of items) {
+    if (item.type !== "edit-item") continue
+    const path = editFilePath(item.chunk)
+    if (!path) continue
+    const group = groups.get(path) ?? []
+    group.push(item.chunk)
+    groups.set(path, group)
+  }
+
+  const renderedGroups = new Set<string>()
+  return items.flatMap<RenderItem>((item) => {
+    if (item.type !== "edit-item") return [item]
+    const path = editFilePath(item.chunk)
+    const chunks = path ? groups.get(path) : undefined
+    if (!path || !chunks || chunks.length === 1) return [item]
+    if (renderedGroups.has(path)) return []
+    renderedGroups.add(path)
+    return [
+      {
+        type: "edit-group" as const,
+        key: `edit-group-${item.chunk.toolCallId}`,
+        chunks,
+      },
+    ]
+  })
 }
 
 export function buildRenderItems(
@@ -306,7 +359,7 @@ export function buildRenderItems(
   }
 
   flushGroups()
-  return items
+  return collapseRepeatedEdits(items)
 }
 
 export function summarizeExploration(

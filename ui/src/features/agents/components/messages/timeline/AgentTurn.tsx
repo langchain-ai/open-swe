@@ -12,7 +12,12 @@ import {
 } from "../renderItems"
 import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
-import { describeWorkEntry, latestDiff } from "./workEntry"
+import {
+  combinedEditDiff,
+  describeEditGroup,
+  describeWorkEntry,
+  latestDiff,
+} from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
 import { ShellEntryBody } from "./entryBodies"
 import type { ReactNode } from "react"
@@ -31,11 +36,6 @@ import { formatElapsed } from "@/lib/utils"
  */
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
 
-/**
- * One row per edit call, showing only what the call targeted. The diff lives in
- * the turn's changed-files card and the side panel, both of which read git —
- * rendering a per-call diff here made repeated edits of one file look duplicated.
- */
 function EditWorkEntry({
   chunk,
   projectPath,
@@ -50,6 +50,25 @@ function EditWorkEntry({
       timestamp={chunk.timestamp}
       body={diff ? <DiffView diffData={diff} snippet /> : undefined}
       defaultExpanded={chunk.status === "pending"}
+    />
+  )
+}
+
+function EditWorkGroup({
+  chunks,
+  projectPath,
+}: {
+  chunks: Array<ToolExecutionChunk>
+  projectPath?: string
+}) {
+  const diff = combinedEditDiff(chunks)
+  const latestChunk = chunks[chunks.length - 1]
+  return (
+    <WorkEntryRow
+      entry={describeEditGroup(chunks, projectPath)}
+      timestamp={latestChunk?.timestamp}
+      body={diff ? <DiffView diffData={diff} snippet /> : undefined}
+      defaultExpanded={chunks.some((chunk) => chunk.status === "pending")}
     />
   )
 }
@@ -220,6 +239,15 @@ export function AgentTurn({
           <EditWorkEntry
             key={item.key}
             chunk={item.chunk}
+            projectPath={projectPath}
+          />
+        )
+
+      case "edit-group":
+        return (
+          <EditWorkGroup
+            key={item.key}
+            chunks={item.chunks}
             projectPath={projectPath}
           />
         )

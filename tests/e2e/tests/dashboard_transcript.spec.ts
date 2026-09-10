@@ -50,7 +50,7 @@ test.describe("finished transcript (shared fixture thread)", () => {
     await page.unroute("**/stream/events");
   });
 
-  test("folds the agent's work and expands an Edit into an inline diff", async () => {
+  test("folds repeated edits into one expandable combined diff", async () => {
     await page.goto(`/agents/${threadId}`);
     await expectTranscriptVisible(page);
 
@@ -66,7 +66,7 @@ test.describe("finished transcript (shared fixture thread)", () => {
     await expect(edit).toHaveCount(0);
 
     await worked.click();
-    await expect(edit).toBeVisible();
+    await expect(edit).toHaveCount(1);
     await expect(acknowledgement).toBeVisible();
     expect(
       await acknowledgement.evaluate(
@@ -90,7 +90,8 @@ test.describe("finished transcript (shared fixture thread)", () => {
     ).toContainText('return "Hello!"');
     await expect(
       inlineDiff.locator('[data-line][data-line-type="change-addition"]'),
-    ).toContainText('return f"Hello, {name}!"');
+    ).toContainText('return f"Hello, {name.strip()}!"');
+    await expect(inlineDiff).not.toContainText('return f"Hello, {name}!"');
     await expect(inlineDiff).toHaveAttribute("data-disable-line-numbers");
     await expect(inlineDiff).not.toContainText("normalize");
   });
