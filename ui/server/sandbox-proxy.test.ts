@@ -107,6 +107,30 @@ describe("sandboxProxy", () => {
     ])
   })
 
+  it("contains sandbox content in an opaque origin", async () => {
+    mockFetch(
+      () =>
+        new Response("<script>fetch('/dashboard/api/threads')</script>", {
+          headers: {
+            "content-type": "text/html",
+            // The service must not be able to relax its own containment.
+            "content-security-policy":
+              "sandbox allow-same-origin allow-scripts",
+            "content-security-policy-report-only": "default-src *",
+          },
+        })
+    )
+
+    const response = await sandboxProxy(request("/sandbox/thread-g/3000/"))
+
+    expect(response.headers.get("content-security-policy")).toBe(
+      "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
+    )
+    expect(
+      response.headers.get("content-security-policy-report-only")
+    ).toBeNull()
+  })
+
   it("redirects to a trailing slash so relative URLs resolve", async () => {
     const fetchMock = mockFetch(() => new Response("ok"))
 

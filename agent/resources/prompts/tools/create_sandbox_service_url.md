@@ -9,3 +9,7 @@ The service is served under `base_path`, so anything it serves from a root-absol
 Start dev servers with that base path — `vite --base=<base_path>`, Next.js `basePath`,
 `ng build --base-href` — and their WebSockets and hot reload work through the proxy too. Static
 files and JSON APIs need no configuration.
+
+The page runs with `Content-Security-Policy: sandbox`, so it holds no dashboard privileges: it
+cannot read the dashboard's API, and browser storage is unavailable to it. Scripts, forms, and
+WebSockets still run.

@@ -177,6 +177,20 @@ function rewriteSetCookie(value: string, target: Target): string {
   return attributes.join(";")
 }
 
+// A sandbox serves agent-authored code, and this proxy serves it from the
+// dashboard's own origin, where a script could read `/dashboard/api` with the
+// viewer's session. `sandbox` drops the response into an opaque origin, so it
+// keeps no dashboard authority; `allow-same-origin` would hand it straight back.
+// The upstream never gets to relax this, so it is set after its headers, not with them.
+const CONTAINMENT_CSP =
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
+
+function contain(headers: Headers): Headers {
+  headers.delete("content-security-policy-report-only")
+  headers.set("content-security-policy", CONTAINMENT_CSP)
+  return headers
+}
+
 function isWebSocketUpgrade(req: Request): boolean {
   return (req.headers.get("upgrade") ?? "").toLowerCase() === "websocket"
 }
@@ -260,6 +274,7 @@ export default async function sandboxProxy(event: { req: Request }) {
   for (const cookie of upstream.headers.getSetCookie()) {
     headers.append("set-cookie", rewriteSetCookie(cookie, target))
   }
+  contain(headers)
 
   return new Response(upstream.body, {
     status: upstream.status,
