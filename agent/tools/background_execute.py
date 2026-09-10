@@ -6,7 +6,7 @@ import logging
 import shlex
 import textwrap
 import uuid
-from typing import Any, Literal
+from typing import Any
 
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
@@ -14,6 +14,10 @@ from agent.sandboxes.state import SANDBOX_BACKENDS
 logger = logging.getLogger(__name__)
 
 TASK_ROOT = "/tmp/open-swe-background-tasks"
+# Task ids are prefixed so the one poll tool can route an id to the thing that
+# knows how to read it, without the caller having to say which kind it is.
+TASK_PREFIX = "cmd"
+TASK_KIND = "sandbox_command"
 LAUNCH_LOCK = f"{TASK_ROOT}/.launch-lock"
 DEFAULT_TIMEOUT_SECONDS = 3600
 MAX_TIMEOUT_SECONDS = 86_400
@@ -303,7 +307,7 @@ async def background_execute(
         wait = await backend.aexecute(wait_for_monitor, timeout=15)
         if getattr(wait, "exit_code", None) != 0:
             raise RuntimeError("background-task monitor is busy")
-        task_id = str(uuid.uuid4())
+        task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
         state = await execute(backend, _launch_command(task_id, command, timeout))
         wait = await backend.aexecute(wait_for_monitor, timeout=15)
         if getattr(wait, "exit_code", None) != 0:
@@ -327,18 +331,35 @@ async def background_execute(
         return {"success": False, "error": str(exc)}
 
 
-async def background_task(
-    action: Literal["status", "list", "stop"], task_id: str | None = None
-) -> dict[str, Any]:
-    """Implement the `background_task` tool."""
-    if action in {"status", "stop"} and not task_id:
-        return {"success": False, "error": f"task_id is required for {action}"}
-    try:
-        _, backend = _current_backend()
-        script = control_script(action, task_id)
-        result = await execute(
-            backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
-        )
-        return {"success": True, **result}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+def owns_task(task_id: str) -> bool:
+    """Whether this id names a sandbox command.
+
+    Unprefixed ids are ours too: they are what `background_execute` minted
+    before task kinds existed, and such a task can still be running in a
+    sandbox that predates this code.
+    """
+    from agent.dashboard.environment_refresh import owns_task as refresh_owns_task
+
+    return not refresh_owns_task(task_id)
+
+
+async def _control(action: str, task_id: str | None) -> dict[str, Any]:
+    _, backend = _current_backend()
+    script = control_script(action, task_id)
+    return await execute(backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3")
+
+
+async def task_status(task_id: str) -> dict[str, Any]:
+    state = await _control("status", task_id)
+    return {"kind": TASK_KIND, "output_source": "sandbox", **state}
+
+
+async def task_stop(task_id: str) -> dict[str, Any]:
+    state = await _control("stop", task_id)
+    return {"kind": TASK_KIND, **state}
+
+
+async def task_list() -> list[dict[str, Any]]:
+    result = await _control("list", None)
+    tasks = result.get("tasks")
+    return [{"kind": TASK_KIND, **task} for task in tasks] if isinstance(tasks, list) else []
