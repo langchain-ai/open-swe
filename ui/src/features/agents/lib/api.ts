@@ -32,6 +32,7 @@ export interface ThreadMessageRequest {
   model_id?: string | null
   effort?: string | null
   plan_mode?: boolean
+  client_message_id?: string
 }
 
 export interface ScheduleCreateRequest {
@@ -261,8 +262,32 @@ export interface PullRequestSnapshot {
   state: PullRequestLiveState | null
 }
 
+export type ThreadFeedbackRating = "bad" | "good" | "other"
+
+export type ThreadFeedbackSubmission =
+  | { action?: "submit"; rating: ThreadFeedbackRating; comment: string }
+  | { action: "dismiss" }
+
+export interface ThreadFeedback {
+  status: "unavailable" | "ready" | "completed" | "dismissed"
+  rating: ThreadFeedbackRating | null
+  comment: string
+}
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
+  getThreadFeedback: (threadId: string) =>
+    agentsRequest<ThreadFeedback>(
+      `/threads/${encodeURIComponent(threadId)}/feedback`
+    ),
+  submitThreadFeedback: (threadId: string, body: ThreadFeedbackSubmission) =>
+    agentsRequest<ThreadFeedback>(
+      `/threads/${encodeURIComponent(threadId)}/feedback`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    ),
   listThreadProjects: (
     params: {
       includeResolved?: boolean
@@ -402,8 +427,6 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
     ),
-  streamUrl: (threadId: string) =>
-    `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
 }
 
 export type ThreadGroup = "today" | "last7" | "last30" | "older"

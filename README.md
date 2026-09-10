@@ -9,7 +9,7 @@
 </div>
 
 <div align="center">
-  <h3>An open source software factory built on Deep Agents by LangChain.</h3>
+  <h3>An open-source software factory built on Deep Agents by LangChain.</h3>
 </div>
 
 <div align="center">
@@ -74,6 +74,12 @@ Each cloud coding thread is bound to its own persistent sandbox, so the agent ca
 - Define personal and repository coding instructions plus organization-wide review guidelines
 - Swap sandbox providers, middleware, skills, triggers, and delivery policies
 
+## API contract
+
+[`swagger.json`](swagger.json) is the generated OpenAPI 3.1 contract for the custom FastAPI backend (`agent.webapp:app`). Import it into an OpenAPI 3.1-compatible viewer, or run `make run` and open `http://localhost:8000/docs` for interactive API documentation (`/openapi.json` serves the live schema).
+
+Regenerate the file with `make swagger` after changing backend routes or models. It reflects the current route declarations: some request/response schemas and authentication requirements are not yet documented. LangGraph runtime endpoints (such as `/runs`, `/threads`, and `/assistants`) are not included.
+
 ## How it works
 
 ### Deep Agents is the harness
@@ -102,7 +108,7 @@ Cloud tasks run in isolated Linux sandboxes with the development tooling supplie
 
 ### Tools stay curated
 
-Deep Agents supplies the core filesystem, shell, and subagent tools. Open SWE adds focused capabilities for GitHub delivery, Linear, Slack, thread management, web research, browser-based application verification, planning, review, CI monitoring, and connected services. Supported observability and MCP integrations are loaded only when configured and authorized.
+Deep Agents supplies the core filesystem, shell, and subagent tools. Open SWE adds focused capabilities for GitHub delivery, Linear, Slack, thread management, web research, browser-based application verification, planning, review, CI monitoring, and connected services. Personal integrations load using the user's connections. Admin-configured workspace MCP tools are available to all coding-agent users.
 
 ## Work where your team works
 

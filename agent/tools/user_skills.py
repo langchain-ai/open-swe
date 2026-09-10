@@ -21,12 +21,7 @@ def _login() -> str | None:
 
 
 async def save_user_skill(name: str, description: str, instructions: str = "") -> dict[str, Any]:
-    """Create or update a skill owned by the triggering user.
-
-    Call this when the user asks to create or modify a reusable skill. The name
-    must use lowercase letters, numbers, and single hyphens. Changes apply to
-    future runs and cannot affect another user's or a bundled skill.
-    """
+    """Implement the `save_user_skill` tool."""
     login = _login()
     if not login:
         return {"ok": False, "error": "Could not resolve the triggering user's GitHub login"}
@@ -44,7 +39,7 @@ async def save_user_skill(name: str, description: str, instructions: str = "") -
 
 
 async def delete_user_skill(name: str) -> dict[str, Any]:
-    """Delete a skill owned by the triggering user when they explicitly request it."""
+    """Implement the `delete_user_skill` tool."""
     login = _login()
     if not login:
         return {"ok": False, "error": "Could not resolve the triggering user's GitHub login"}

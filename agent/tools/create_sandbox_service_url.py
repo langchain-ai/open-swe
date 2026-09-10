@@ -10,18 +10,7 @@ _DIRECT_EXPIRES_IN_SECONDS = 86400
 
 
 async def create_sandbox_service_url(port: int) -> dict[str, Any]:
-    """Create a browser URL for a service listening in the active LangSmith sandbox.
-
-    The service must listen on `0.0.0.0` at the specified port. The dashboard proxies the URL
-    and attaches the sandbox credential itself, so the link is short, never expires, and only
-    signed-in users who can read this thread can reach the service.
-
-    The service is served under `base_path`, so anything it serves from a root-absolute URL
-    (`/assets/app.js`, `/@vite/client`) is requested from the dashboard root and never reaches
-    it. Start dev servers with that base path — `vite --base=<base_path>`, Next.js `basePath`,
-    `ng build --base-href` — and their WebSockets and hot reload work through the proxy too.
-    Static files and JSON APIs need no configuration.
-    """
+    """Implement the `create_sandbox_service_url` tool."""
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("port must be an integer between 1 and 65535")
 

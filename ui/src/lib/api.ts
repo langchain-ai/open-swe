@@ -100,19 +100,6 @@ export async function transcribeAudio(audio: Blob): Promise<string> {
   return response.text
 }
 
-export interface PRTraceResolutionResult {
-  resolved: boolean
-  detail: string
-  project: string | null
-  thread_id: string | null
-  confidence: number | null
-  evidence: Array<string>
-  trace_url: string | null
-  run_count: number
-  first_turn: string | null
-  last_turn: string | null
-}
-
 export interface SessionUser {
   login: string
   email: string | null
@@ -150,6 +137,7 @@ export interface Profile {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  model_routing_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
@@ -164,6 +152,7 @@ export interface ProfileUpdate {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  model_routing_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
@@ -176,12 +165,17 @@ export interface TeamSettings {
   gateway_enabled?: boolean | null
   transcription_model?: string
   fable_enabled?: boolean
-  review_tracing_project?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
   default_agent_subagent_reasoning_effort?: string | null
+  default_agent_routing_fast_model?: string | null
+  default_agent_routing_fast_reasoning_effort?: string | null
+  default_agent_routing_balanced_model?: string | null
+  default_agent_routing_balanced_reasoning_effort?: string | null
+  default_agent_routing_performance_model?: string | null
+  default_agent_routing_performance_reasoning_effort?: string | null
   default_repo?: string | null
   default_reviewer_model?: string | null
   default_reviewer_reasoning_effort?: string | null
@@ -196,40 +190,38 @@ export interface TeamSettings {
   updated_at?: string | null
 }
 
-export interface ProviderCredentialStatus {
-  connected: boolean
-  site?: string
-  endpoint?: string
-  api_key_last4?: string
-  updated_at?: string | null
+export interface WorkspaceMCPOAuth {
+  grant_type?: "client_credentials"
+  token_url: string
+  client_id: string
+  scope?: string
+  token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic"
 }
 
-export interface TeamCredentialsStatus {
-  datadog: ProviderCredentialStatus
-  langsmith: ProviderCredentialStatus
+export type WorkspaceMCPOAuthUpdate = WorkspaceMCPOAuth & {
+  client_secret?: string | null
 }
 
-export interface DatadogConnectBody {
-  site: string
-  api_key: string
-  app_key: string
+export interface WorkspaceMCP {
+  name: string
+  url: string
+  transport: "streamable_http" | "sse"
+  enabled: boolean
+  allowed_tools: string[]
+  header_names: string[]
+  oauth?: WorkspaceMCPOAuth | null
+  revision: string
+  updated_at: string
 }
 
-export interface LangSmithConnectBody {
-  api_key: string
-  endpoint?: string | null
-}
-
-export interface ApiKeyCredentialStatus {
-  connected: boolean
-  api_key_last4?: string
-  updated_at?: string | null
-}
-
-export type CurrentsCredentialStatus = ApiKeyCredentialStatus
-
-export interface CurrentsConnectBody {
-  api_key: string
+export interface WorkspaceMCPUpdate {
+  name: string
+  url: string
+  transport: WorkspaceMCP["transport"]
+  enabled: boolean
+  allowed_tools: string[]
+  headers?: Record<string, string> | null
+  oauth?: WorkspaceMCPOAuthUpdate | null
 }
 
 export interface NotionCredentialStatus {
@@ -762,47 +754,26 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ transcription_model }),
     }),
-  getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
-  connectDatadog: (body: DatadogConnectBody) =>
-    request<TeamCredentialsStatus>("/team-credentials/datadog", {
+  getWorkspaceMCPs: () => request<WorkspaceMCP[]>("/workspace-mcps"),
+  revealWorkspaceMCPHeaders: (name: string) =>
+    request<Record<string, string>>(
+      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
+    request<WorkspaceMCP>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  disconnectDatadog: () =>
-    request<TeamCredentialsStatus>("/team-credentials/datadog", {
+  deleteWorkspaceMCP: (name: string) =>
+    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
-  connectLangSmith: (body: LangSmithConnectBody) =>
-    request<TeamCredentialsStatus>("/team-credentials/langsmith", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  disconnectLangSmith: () =>
-    request<TeamCredentialsStatus>("/team-credentials/langsmith", {
-      method: "DELETE",
-    }),
-  getMyCurrentsStatus: () =>
-    request<CurrentsCredentialStatus>("/my-credentials/currents"),
-  connectCurrents: (body: CurrentsConnectBody) =>
-    request<CurrentsCredentialStatus>("/my-credentials/currents", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  disconnectCurrents: () =>
-    request<CurrentsCredentialStatus>("/my-credentials/currents", {
-      method: "DELETE",
-    }),
-  getMyLangSmithStatus: () =>
-    request<ApiKeyCredentialStatus>("/my-credentials/langsmith"),
-  connectMyLangSmith: (body: CurrentsConnectBody) =>
-    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  disconnectMyLangSmith: () =>
-    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
-      method: "DELETE",
-    }),
+  discoverWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   getMyNotionStatus: () =>
     request<NotionCredentialStatus>("/my-credentials/notion"),
   disconnectNotion: () =>
@@ -866,11 +837,6 @@ export const api = {
       pr_url: string
     }>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
-      { method: "POST" }
-    ),
-  resolveTrace: (owner: string, repo: string, number: number) =>
-    request<PRTraceResolutionResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/resolve-trace`,
       { method: "POST" }
     ),
   createReviewComment: (

@@ -10,9 +10,9 @@ import hashlib
 import logging
 
 from agent.review.style_jobs import (
-    _client,
     build_continual_run_configurable,
     build_continual_run_input,
+    langgraph_client,
 )
 from agent.review.styles import REVIEW_STYLES
 
@@ -36,7 +36,7 @@ async def ensure_continual_cron(full_name: str) -> str | None:
         return record.continual_cron_id
 
     try:
-        cron = await _client().crons.create(
+        cron = await langgraph_client().crons.create(
             _ASSISTANT_ID,
             schedule=_daily_schedule(full_name),
             input=build_continual_run_input(full_name),
@@ -61,7 +61,7 @@ async def remove_continual_cron(full_name: str) -> None:
     if not cron_id:
         return
     try:
-        await _client().crons.delete(cron_id)
+        await langgraph_client().crons.delete(cron_id)
     except Exception:
         logger.debug("Could not delete continual cron %s for %s", cron_id, full_name, exc_info=True)
     await REVIEW_STYLES.set_continual_cron(full_name, None)
