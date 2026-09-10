@@ -816,7 +816,15 @@ export const api = {
   usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
     request<UsageLeaderboardPayload>(
       `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
-    ),
+    ).then((payload) => ({
+      ...payload,
+      rows: payload.rows.map((row) => ({
+        ...row,
+        invocations: row.invocations ?? row.agent_runs ?? 0,
+        avg_invocation_seconds:
+          row.avg_invocation_seconds ?? row.avg_run_seconds ?? 0,
+      })),
+    })),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
