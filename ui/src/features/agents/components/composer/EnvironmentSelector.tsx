@@ -51,6 +51,7 @@ export function EnvironmentSelector({
         onClick={() => setOpen((value) => !value)}
         className="flex max-w-[220px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
       >
+        <span className="shrink-0">Environment:</span>
         <StackIcon className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
           {selected?.name ?? "No environment"}
