@@ -850,6 +850,9 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
     )
     cancel = AsyncMock(side_effect=HTTPException(404, "thread not found"))
     monkeypatch.setattr(threads_tool, "cancel_dashboard_thread", cancel)
+    monkeypatch.setattr(
+        threads_tool, "get_dashboard_thread", AsyncMock(return_value={"id": "thread-1"})
+    )
     state = {
         "messages": [
             {
@@ -1049,6 +1052,9 @@ async def test_manage_thread_delegates_plan_and_workflow_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool, "get_dashboard_thread", AsyncMock(return_value={"id": "thread-1"})
+    )
     approve_plan = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
     approve_workflow = AsyncMock(return_value={"status": "approved", "fingerprint": "fp"})
     monkeypatch.setattr(threads_tool.plan_api, "approve_plan", approve_plan)

@@ -18,12 +18,9 @@ class UserPreferencesUpdate(BaseModel):
     default_visibility: ThreadVisibility
 
 
-def _normalize(login: str, record: dict[str, Any] | None) -> dict[str, Any]:
+def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
     visibility = (record or {}).get("default_visibility")
-    return {
-        "login": login,
-        "default_visibility": (visibility if visibility in ("public", "private") else "private"),
-    }
+    return {"default_visibility": visibility if visibility in ("public", "private") else "private"}
 
 
 async def get_user_preferences(login: str) -> dict[str, Any]:
@@ -33,7 +30,7 @@ async def get_user_preferences(login: str) -> dict[str, Any]:
         # Preferences only pick defaults; a store hiccup must not block a run.
         logger.debug("Could not load user preferences", exc_info=True)
         record = None
-    return _normalize(login, record)
+    return _normalize(record)
 
 
 async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dict[str, Any]:
@@ -46,4 +43,4 @@ async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dic
         "updated_at": now_iso(),
     }
     await put_value(USER_PREFERENCES_NAMESPACE, login, value)
-    return _normalize(login, value)
+    return _normalize(value)

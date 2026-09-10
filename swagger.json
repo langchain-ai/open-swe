@@ -556,6 +556,7 @@
             "default": "submit",
             "enum": [
               "submit",
+              "comment",
               "dismiss"
             ],
             "title": "Action",
@@ -572,8 +573,7 @@
               {
                 "enum": [
                   "bad",
-                  "good",
-                  "other"
+                  "good"
                 ],
                 "type": "string"
               },

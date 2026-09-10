@@ -438,7 +438,6 @@ export function AgentsHome({
       images,
       repo,
       visibility,
-      ownerLogin: session.data?.login ?? null,
       repo_explicitly_none: repoOverride === null,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
@@ -451,7 +450,7 @@ export function AgentsHome({
       modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
-    if (visibility === "private") configurable.visibility = "private"
+    configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment

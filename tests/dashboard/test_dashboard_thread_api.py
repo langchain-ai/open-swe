@@ -288,8 +288,9 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
-    assert configurable["prepare_run_id"] == enriched["params"]["metadata"]["prepare_run_id"]
-    assert configurable["prepare_run_id"]
+    assert configurable["invocation_id"] == enriched["params"]["metadata"]["invocation_id"]
+    assert configurable["prepare_run_id"] == configurable["invocation_id"]
+    assert enriched["params"]["metadata"]["prepare_run_id"] == configurable["invocation_id"]
     messages = enriched["params"]["input"]["messages"]
     assert messages[-1]["content"].startswith(
         '<input-message sender="github:octocat" surface="web" kind="human">'

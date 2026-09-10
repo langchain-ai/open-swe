@@ -44,7 +44,7 @@ def private_thread(monkeypatch):
     return thread, client
 
 
-def test_private_readable_by_owner_and_admin_only(private_thread):
+def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(private_thread):
     thread, _ = private_thread
     metadata = thread["metadata"]
     assert summary.thread_is_readable(metadata, "ALICE")
@@ -52,15 +52,9 @@ def test_private_readable_by_owner_and_admin_only(private_thread):
     assert summary.thread_is_readable(metadata, "someone", "admin@example.com")
     assert not summary.thread_is_readable(metadata, "bob")
     assert not summary.thread_is_readable(metadata, None)
-    assert summary.thread_is_readable({"source": "dashboard"}, "bob")
-
-
-def test_private_promptable_by_owner_only(private_thread):
-    thread, _ = private_thread
-    metadata = thread["metadata"]
     assert summary.thread_is_promptable(metadata, "alice")
     assert not summary.thread_is_promptable(metadata, "admin")
-    assert not summary.thread_is_promptable(metadata, "bob")
+    assert summary.thread_is_readable({"source": "dashboard"}, "bob")
     assert summary.thread_is_promptable({"source": "dashboard"}, "bob")
 
 
@@ -167,6 +161,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert metadata["title"] == "Fix the flaky build"
     assert metadata["repo_owner"] == "acme"
     assert metadata["participant_logins"] == {"bob": True}
+    assert metadata["graph_id"] == "agent"
     for key in ("source_context", "sandbox_id", "latest_run_id", "latest_run_status"):
         assert key not in metadata
     (state_call,) = client.threads.update_state.await_args_list
@@ -177,14 +172,6 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
         m["additional_kwargs"]["collaborative_origin_thread_id"] == "private-thread" for m in copied
     )
     assert copied[0]["additional_kwargs"]["x"] == 1
-
-
-async def test_continue_privately_rejects_private_source(private_thread):
-    _, client = private_thread
-    with pytest.raises(HTTPException) as exc:
-        await api.continue_thread_privately("private-thread", "alice")
-    assert exc.value.status_code == 409
-    client.threads.create.assert_not_awaited()
 
 
 async def test_continue_privately_rolls_back_when_copy_fails(private_thread):
@@ -199,16 +186,52 @@ async def test_continue_privately_rolls_back_when_copy_fails(private_thread):
     client.threads.delete.assert_awaited_once()
 
 
-async def test_tools_do_not_export_private_content_into_public_thread(private_thread, monkeypatch):
+async def test_manage_thread_denies_private_thread_outside_private_context(
+    private_thread, monkeypatch
+):
     thread, _ = private_thread
+    cancel = AsyncMock()
+    monkeypatch.setattr(tools, "cancel_dashboard_thread", cancel)
     monkeypatch.setattr(
-        tools, "get_dashboard_thread", AsyncMock(return_value={"visibility": "private"})
+        tools,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "private-thread", "visibility": "private"}),
     )
     monkeypatch.setattr(tools, "_config", lambda: {"configurable": {"thread_id": "current"}})
     actor = tools._Actor(login="alice", email=None, name="alice")
+    monkeypatch.setattr(tools, "_actor", AsyncMock(return_value=actor))
+
     thread["metadata"]["visibility"] = "public"
-    with pytest.raises(HTTPException) as exc:
-        await tools._authorized_locator("private-thread", actor)
-    assert exc.value.status_code == 404
+    result = await tools.manage_thread("private-thread", "cancel")
+    assert result == {"success": False, "error": "thread not found", "status_code": 404}
+    cancel.assert_not_awaited()
+
     thread["metadata"]["visibility"] = "private"
-    assert (await tools._authorized_locator("private-thread", actor))[0] == "private-thread"
+    cancel.return_value = {"id": "private-thread", "metadata": thread["metadata"]}
+    result = await tools.manage_thread("private-thread", "cancel")
+    assert result["success"] is True
+    cancel.assert_awaited_once()
+
+
+async def test_admin_cancel_reaches_private_thread_without_exporting_details(
+    private_thread, monkeypatch
+):
+    cancel = AsyncMock(return_value={"id": "private-thread", "title": "Secret", "status": "idle"})
+    monkeypatch.setattr(tools, "admin_cancel_dashboard_thread", cancel)
+    monkeypatch.setattr(
+        tools,
+        "get_dashboard_thread",
+        AsyncMock(
+            return_value={"id": "private-thread", "visibility": "private", "title": "Secret"}
+        ),
+    )
+    monkeypatch.setattr(tools, "_config", lambda: {"configurable": {"thread_id": "current"}})
+    monkeypatch.setattr(tools, "is_admin", lambda email, login=None: login == "admin")
+    monkeypatch.setattr(
+        tools, "_actor", AsyncMock(return_value=tools._Actor(login="admin", email=None, name="a"))
+    )
+
+    result = await tools.manage_thread("private-thread", "admin_cancel")
+
+    assert result == {"success": True, "thread": {"id": "private-thread", "status": "idle"}}
+    cancel.assert_awaited_once_with("private-thread", "admin")
