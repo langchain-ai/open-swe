@@ -739,6 +739,14 @@ async def slack_post_message(request: Request) -> JSONResponse:
     return _ok({"ts": ts, "message": {"ts": ts}})
 
 
+@app.post("/fake-slack/chat.delete")
+async def slack_delete_message(request: Request) -> JSONResponse:
+    body = await request.json()
+    if not fakes.delete_slack_message(str(body.get("channel") or ""), str(body.get("ts") or "")):
+        return JSONResponse({"ok": False, "error": "message_not_found"})
+    return _ok()
+
+
 @app.post("/fake-slack/chat.update")
 async def slack_update_message(request: Request) -> JSONResponse:
     body = await request.json()

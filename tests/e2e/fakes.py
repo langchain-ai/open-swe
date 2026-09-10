@@ -87,6 +87,17 @@ def slack_message(channel: str, thread_ts: str, message_ts: str) -> dict[str, An
     )
 
 
+def delete_slack_message(channel: str, message_ts: str) -> bool:
+    for (message_channel, _thread_ts), thread_messages in SLACK_MESSAGES.items():
+        if message_channel != channel:
+            continue
+        for index, message in enumerate(thread_messages):
+            if message["ts"] == message_ts:
+                thread_messages.pop(index)
+                return True
+    return False
+
+
 def update_slack_message(
     channel: str, message_ts: str, *, text: str, blocks: Any = None
 ) -> dict[str, Any] | None:
