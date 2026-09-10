@@ -47,7 +47,6 @@ import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
-import { useReconcileStream } from "@/features/agents/lib/stream/useReconcileStream"
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -90,7 +89,6 @@ export function AgentThreadView({
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentStream()
-  useReconcileStream(thread.id, thread.status === "running")
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -338,6 +336,7 @@ export function AgentThreadView({
               streamIsLoading={stream.isLoading}
               scrollControlRef={scrollControlRef}
               isThinking={isThinking}
+              isOffloading={stream.isOffloading}
               settingUpSandbox={settingUpSandbox}
               pollWorkflowApprovalsWhileActive={isStreaming}
               contentWidthClass="max-w-3xl"
@@ -373,6 +372,7 @@ export function AgentThreadView({
                     : "Only workspace admins can send messages in this thread"
                 }
                 autoFocus={autoFocusComposer}
+                canOffload={!isStreaming}
                 compact
                 disabled={!canPost}
                 busy={isStreaming}

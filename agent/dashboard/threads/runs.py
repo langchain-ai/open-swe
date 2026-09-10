@@ -448,7 +448,12 @@ async def _enrich_run_start_command(
         client_configurable.get("agent_effort"),
     )
     plan_mode_requested = client_configurable.get("plan_mode") is True
+    offload_requested = client_configurable.get("offload_conversation") is True
     content = _command_message_content(params)
+    if isinstance(content, str) and content.strip() == "/offload":
+        offload_requested = True
+    if offload_requested and creating:
+        raise HTTPException(400, "offloading requires an existing conversation")
     command_images = _dashboard_images_from_content(content)
     invocation_id = new_invocation_id()
     overrides = with_invocation_id(None, invocation_id)
@@ -640,6 +645,10 @@ async def _enrich_run_start_command(
         },
         invocation_id,
     )
+
+    if offload_requested:
+        merged_configurable["offload_conversation"] = True
+        params["input"] = {}
 
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
