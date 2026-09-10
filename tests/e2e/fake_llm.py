@@ -63,6 +63,22 @@ def greet(name):
 
 def farewell(name):
     return f"Goodbye, {{name}}!"
+
+def welcome(name):
+    return f"Welcome, {{name}}!"
+
+def thank(name):
+    return f"Thanks, {{name}}!"
+
+def invite(name):
+    return f"Come in, {{name}}!"
+EOF
+cat > helpers.py <<'EOF'
+def display_name(name):
+    return name
+EOF
+cat > notes.md <<'EOF'
+Greeting helpers are available.
 EOF
 """.strip()
 
@@ -814,6 +830,16 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-setup",
         ),
         _tool_step(
+            "Preparing the display helper.",
+            "edit_file",
+            {
+                "file_path": "/repo/helpers.py",
+                "old_string": "return name",
+                "new_string": "return name.strip()",
+            },
+            "call-edit-helper",
+        ),
+        _tool_step(
             "Implementing the greeting.",
             "edit_file",
             {
@@ -832,6 +858,66 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 "new_string": 'return f"Hello, {name.strip()}!"',
             },
             "call-edit-refine",
+        ),
+        _tool_step(
+            "Polishing the greeting.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'return f"Hello, {name.strip()}!"',
+                "new_string": 'return f"Hello, {name.strip().title()}!"',
+            },
+            "call-edit-polish",
+        ),
+        _tool_step(
+            "Making the farewell consistent.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'return f"Goodbye, {name}!"',
+                "new_string": 'return f"Goodbye, {name.strip().title()}!"',
+            },
+            "call-edit-farewell",
+        ),
+        _tool_step(
+            "Making the welcome consistent.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'return f"Welcome, {name}!"',
+                "new_string": 'return f"Welcome, {name.strip().title()}!"',
+            },
+            "call-edit-welcome",
+        ),
+        _tool_step(
+            "Making thanks consistent.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'return f"Thanks, {name}!"',
+                "new_string": 'return f"Thanks, {name.strip().title()}!"',
+            },
+            "call-edit-thank",
+        ),
+        _tool_step(
+            "Making the invitation consistent.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'return f"Come in, {name}!"',
+                "new_string": 'return f"Come in, {name.strip().title()}!"',
+            },
+            "call-edit-invite",
+        ),
+        _tool_step(
+            "Updating the notes.",
+            "edit_file",
+            {
+                "file_path": "/repo/notes.md",
+                "old_string": "Greeting helpers are available.",
+                "new_string": "Greeting helpers normalize display names.",
+            },
+            "call-edit-notes",
         ),
         _tool_step(
             "Committing and pushing the change.",
