@@ -16,7 +16,7 @@ from langgraph.prebuilt import InjectedState
 from agent.dashboard import plan_api, workflow_approval_api
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import resolve_login_from_email_async
-from agent.dashboard.oauth import enforce_org_login_gate
+from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.plan_store import get_plan_content, list_plan_comments
 from agent.dashboard.threads.api import (
@@ -124,7 +124,7 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         login = current_login
         email = None
     try:
-        await enforce_org_login_gate(login)
+        await enforce_github_login_gate(login)
     except HTTPException:
         return None
     return _Actor(login=login, email=email, name=login)
