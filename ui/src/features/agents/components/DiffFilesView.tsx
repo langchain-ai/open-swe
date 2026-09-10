@@ -3,6 +3,7 @@ import {
   MultiFileDiff,
   Virtualizer,
   WorkerPoolContextProvider,
+  useVirtualizer,
 } from "@pierre/diffs/react"
 import {
   FileTree,
@@ -43,10 +44,9 @@ export interface PanelFile {
 // How long to poll for a reveal target: the file may still be windowed out of
 // the virtualizer, and its diff renders a frame or two after that.
 const REVEAL_MAX_FRAMES = 120
-// Rows above the target keep measuring while the smooth scroll runs, so the
-// offset is re-read once the animation has had time to land.
-const REVEAL_SETTLE_MS = 600
-
+// The virtualizer offset is authoritative, but the diff can settle a little more
+// after the smooth scroll lands, so it is re-read once the animation is done.
+const REVEAL_SETTLE_MS = 500
 interface PositionedDiff {
   getLinePosition: (
     lineNumber: number,
@@ -68,26 +68,49 @@ function hasLinePosition(instance: unknown): instance is PositionedDiff {
   )
 }
 
+type DiffVirtualizer = NonNullable<ReturnType<typeof useVirtualizer>>
+
 // Absolute scrollTop that centers a diff line, or null while the diff has no
-// position for it yet.
+// position for it yet. The file's own offset comes from the virtualizer rather
+// than from its client rect: while rows above are still swapping estimated
+// heights for measured ones the rect lies, and the target lands short.
 function diffLineCenterTarget(
   registered: RegisteredDiff,
   lineNumber: number,
   side: SelectionSide,
-  scroller: HTMLElement
+  scroller: HTMLElement,
+  virtualizer: DiffVirtualizer | null
 ): number | null {
   if (!hasLinePosition(registered.instance)) return null
   const line = registered.instance.getLinePosition(lineNumber, side)
   if (!line) return null
-  const hostTop =
-    registered.host.getBoundingClientRect().top -
-    scroller.getBoundingClientRect().top +
-    scroller.scrollTop
+  const hostTop = virtualizer
+    ? virtualizer.getOffsetInScrollContainer(registered.host)
+    : registered.host.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      scroller.scrollTop
   const top = hostTop + line.top - (scroller.clientHeight - line.height) / 2
   return Math.max(
     0,
     Math.min(top, scroller.scrollHeight - scroller.clientHeight)
   )
+}
+
+// The virtualizer instance is only reachable from inside <Virtualizer>, and the
+// component forwards no ref; this lifts it to the parent and doubles as the
+// hidden probe that finds the scroll element.
+function VirtualizerBridge({
+  probeRef,
+  instanceRef,
+}: {
+  probeRef: (node: HTMLDivElement | null) => void
+  instanceRef: React.MutableRefObject<DiffVirtualizer | null>
+}) {
+  const virtualizer = useVirtualizer()
+  useEffect(() => {
+    instanceRef.current = virtualizer ?? null
+  }, [virtualizer, instanceRef])
+  return <div ref={probeRef} aria-hidden className="hidden" />
 }
 
 function findScroller(node: HTMLElement | null): HTMLElement | null {
@@ -225,6 +248,7 @@ export function DiffFilesView({
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const diffRefs = useRef<Record<string, RegisteredDiff>>({})
   const scrollerRef = useRef<HTMLElement | null>(null)
+  const virtualizerRef = useRef<DiffVirtualizer | null>(null)
 
   // The Virtualizer doesn't forward a ref, so a hidden probe inside it finds the
   // scroll element that line reveals have to align against.
@@ -301,7 +325,13 @@ export function DiffFilesView({
         const scroller = scrollerRef.current
         const registered = diffRefs.current[file.filePath]
         if (scroller && registered) {
-          const top = diffLineCenterTarget(registered, line, side, scroller)
+          const top = diffLineCenterTarget(
+            registered,
+            line,
+            side,
+            scroller,
+            virtualizerRef.current
+          )
           if (top !== null) {
             scroller.scrollTo({ top, behavior: "smooth" })
             settleTimer = window.setTimeout(() => {
@@ -310,7 +340,8 @@ export function DiffFilesView({
                 registered,
                 line,
                 side,
-                scroller
+                scroller,
+                virtualizerRef.current
               )
               if (
                 settled !== null &&
@@ -371,7 +402,10 @@ export function DiffFilesView({
               contentClassName="p-0"
               config={DIFF_VIRTUALIZER_CONFIG}
             >
-              <div ref={scrollerProbe} aria-hidden className="hidden" />
+              <VirtualizerBridge
+                probeRef={scrollerProbe}
+                instanceRef={virtualizerRef}
+              />
               {files.map((file) => (
                 <FileDiffSection
                   key={file.filePath}
