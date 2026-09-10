@@ -789,6 +789,27 @@ async def stop_slack_stream(
             raise
 
 
+async def delete_slack_message(channel_id: str, message_ts: str) -> bool:
+    """Delete a Slack message posted by the app."""
+    if not SLACK_BOT_TOKEN:
+        return False
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/chat.delete",
+                headers=slack_headers(),
+                json={"channel": channel_id, "ts": message_ts},
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("ok") or data.get("error") == "message_not_found":
+                return True
+            logger.warning("Slack chat.delete failed: %s", data.get("error"))
+        except httpx2.HTTPError, ValueError:
+            logger.exception("Slack chat.delete request failed")
+        return False
+
+
 async def update_slack_message(
     channel_id: str,
     message_ts: str,
@@ -2082,6 +2103,16 @@ async def lookup_slack_run_message_mapping(
         return None
     value = item.get("value") if isinstance(item, dict) else None
     return value if isinstance(value, dict) else None
+
+
+async def delete_slack_run_thinking_message(
+    langgraph_client: LangGraphClient, channel_id: str, run_id: str
+) -> None:
+    """Delete a run's temporary Thinking message when present."""
+    mapping = await lookup_slack_run_message_mapping(langgraph_client, channel_id, run_id)
+    message_ts = mapping.get("thinking_message_ts") if mapping else None
+    if isinstance(message_ts, str):
+        await delete_slack_message(channel_id, message_ts)
 
 
 async def lookup_slack_thread_run_mapping(

@@ -63,6 +63,7 @@ async def test_reply_records_answer_completion_only_without_pending_choices(
     )
     mapping = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", mapping)
+    monkeypatch.setattr(slack_reply_tool, "delete_slack_run_thinking_message", AsyncMock())
     assert await slack_reply_tool.slack_thread_reply(
         "The answer", should_ask_for_feedback=should_ask_for_feedback, options=options
     ) == {"success": True}

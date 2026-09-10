@@ -251,6 +251,18 @@ async def test_update_slack_message_calls_chat_update(
 
 
 @pytest.mark.asyncio
+async def test_delete_slack_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_ok_response())
+
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        assert await slack_utils.delete_slack_message("C1", "1.1")
+
+    assert client_cm.post.call_args.args[0].endswith("/chat.delete")
+    assert client_cm.post.call_args.kwargs["json"] == {"channel": "C1", "ts": "1.1"}
+
+
+@pytest.mark.asyncio
 async def test_post_slack_thread_reply_with_ts_returns_missing_token_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

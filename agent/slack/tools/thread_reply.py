@@ -8,6 +8,7 @@ from langgraph.prebuilt import InjectedState
 from agent.run_config import RunConfig
 from agent.slack.client import (
     convert_mentions_to_slack_format,
+    delete_slack_run_thinking_message,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
@@ -84,6 +85,8 @@ async def slack_thread_reply(
             triggering_user_id=_triggering_user_id(cfg),
             should_ask_for_feedback=should_ask_for_feedback and not options,
         )
+        if message_ts and run_id:
+            await delete_slack_run_thinking_message(client, channel_id, run_id)
     if message_ts is None:
         return {
             "success": False,

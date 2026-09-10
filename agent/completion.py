@@ -27,7 +27,7 @@ from agent.linear.client import comment_on_linear_issue
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
-from agent.slack.client import post_slack_thread_reply
+from agent.slack.client import delete_slack_run_thinking_message, post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
@@ -323,6 +323,9 @@ async def _handle_successful_run(
     metadata = metadata if isinstance(metadata, dict) else {}
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is not None:
+        await delete_slack_run_thinking_message(client, slack_thread.channel_id, run_id)
     await _settle_code_channel_session(client, thread_id, metadata)
     payload_metadata = payload.get("metadata")
     automated = (
@@ -423,6 +426,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
     await _settle_failed_reviewer_check(thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
     if run_id is None:
@@ -437,6 +441,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     posted = await _post_failure_reply(thread_id, metadata, status, reason_code)
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
+    if run_id and slack_thread is not None:
+        await delete_slack_run_thinking_message(client, slack_thread.channel_id, run_id)
 
     try:
         await client.threads.update(

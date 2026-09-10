@@ -863,6 +863,14 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    thinking_message_ts = None
+    if not code_channel:
+        thinking_message_ts, _ = await slack_utils.post_slack_thread_reply_with_ts(
+            channel_id,
+            thread_ts,
+            ":hourglass_flowing_sand: Thinking...",
+            agent_thread_id=thread_id,
+        )
     try:
         run = await _dispatch_or_queue_slack_run(
             langgraph_client,
@@ -876,6 +884,8 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         # the loading UI this turn switched on.
         if code_channel:
             await common.set_session_status(channel_id, "active")
+        elif thinking_message_ts:
+            await slack_utils.delete_slack_message(channel_id, thinking_message_ts)
         raise
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
@@ -883,6 +893,17 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         thread_id,
     )
     run_id = run.get("run_id")
+    if not code_channel and isinstance(run_id, str) and run_id:
+        await common.store_slack_run_mapping(
+            langgraph_client,
+            channel_id,
+            thread_ts,
+            run_id,
+            message_ts=original_message_ts,
+            triggering_user_id=user_id,
+            agent_thread_id=thread_id,
+            thinking_message_ts=thinking_message_ts,
+        )
     if code_channel and isinstance(run_id, str) and run_id:
         stream_thread_ts = reply_thread_ts or thread_ts
         await stream_slack_thinking_steps(
@@ -897,7 +918,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             recipient_team_id=request.team_id,
         )
     if is_first_mention:
-        if isinstance(run_id, str) and run_id:
+        if code_channel and isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
                 langgraph_client,
                 channel_id,
@@ -912,7 +933,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             "Skipping Slack trace reply for thread %s — agent will reply when run completes",
             thread_id,
         )
-        if isinstance(run_id, str) and run_id:
+        if code_channel and isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
                 langgraph_client,
                 channel_id,
