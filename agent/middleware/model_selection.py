@@ -37,7 +37,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         initial_plan_mode: bool = False,
     ) -> None:
         self._models = dict(models)
-        self._classifier = classifier.with_structured_output(RouteDecision)
+        self._classifier = classifier.with_structured_output(RouteDecision, method="json_schema")
         self._initial_plan_mode = initial_plan_mode
 
     async def abefore_agent(

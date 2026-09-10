@@ -15,15 +15,16 @@ def _middleware(
     structured = AsyncMock(return_value=RouteDecision(model_route=route))
     classifier = MagicMock()
     classifier.with_structured_output.return_value.ainvoke = structured
-    return (
-        ModelSelectionMiddleware(
-            cast(Any, models),
-            classifier,
-            initial_plan_mode=initial_plan_mode,
-        ),
-        models,
-        structured,
+    middleware = ModelSelectionMiddleware(
+        cast(Any, models),
+        classifier,
+        initial_plan_mode=initial_plan_mode,
     )
+    classifier.with_structured_output.assert_called_once_with(
+        RouteDecision,
+        method="json_schema",
+    )
+    return middleware, models, structured
 
 
 async def _invoke(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -> ModelRequest:
