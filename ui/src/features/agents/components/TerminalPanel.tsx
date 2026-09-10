@@ -269,6 +269,63 @@ function ActionButton({
   )
 }
 
+export function TerminalActions({
+  groupId,
+  terminals,
+}: {
+  groupId: string
+  terminals: TerminalGroupsController
+}) {
+  const terminalIds =
+    terminals.state.terminalGroups.find((group) => group.id === groupId)
+      ?.terminalIds ?? []
+  const activeTerminalId = terminalIds.includes(
+    terminals.state.activeTerminalId
+  )
+    ? terminals.state.activeTerminalId
+    : (terminalIds[0] ?? "")
+  const atSplitLimit = terminalIds.length >= MAX_TERMINALS_PER_GROUP
+
+  return (
+    <div className="flex shrink-0 items-center">
+      <ActionButton
+        label={`Split horizontally${atSplitLimit ? " (maximum 4)" : ""}`}
+        disabled={atSplitLimit}
+        onClick={() => terminals.split("horizontal")}
+      >
+        <SquareSplitHorizontal className="size-3.5" />
+      </ActionButton>
+      <ActionButton
+        label={`Split vertically${atSplitLimit ? " (maximum 4)" : ""}`}
+        disabled={atSplitLimit}
+        onClick={() => terminals.split("vertical")}
+      >
+        <SquareSplitVertical className="size-3.5" />
+      </ActionButton>
+      <ActionButton
+        label="Clear terminal"
+        onClick={() => terminals.clear(activeTerminalId)}
+      >
+        <Trash2 className="size-3.5" />
+      </ActionButton>
+      <ActionButton
+        label="Restart terminal"
+        onClick={() => terminals.restart(activeTerminalId)}
+      >
+        <RefreshCw className="size-3.5" />
+      </ActionButton>
+      {terminalIds.length > 1 ? (
+        <ActionButton
+          label="Close terminal"
+          onClick={() => terminals.closeTerminal(activeTerminalId)}
+        >
+          <X className="size-3.5" />
+        </ActionButton>
+      ) : null}
+    </div>
+  )
+}
+
 export function TerminalPanel({
   target,
   cwd,
@@ -287,50 +344,12 @@ export function TerminalPanel({
   )
     ? terminals.state.activeTerminalId
     : (terminalIds[0] ?? "")
-  const atSplitLimit = terminalIds.length >= MAX_TERMINALS_PER_GROUP
 
   return (
     <div
-      className="group/terminal relative flex h-full min-h-0 flex-col"
+      className="relative flex h-full min-h-0 flex-col"
       data-hotkeys="ignore"
     >
-      <div className="absolute top-1 right-2 z-10 flex items-center rounded-md border border-border bg-background/95 opacity-0 shadow-sm transition-opacity group-hover/terminal:opacity-100 focus-within:opacity-100">
-        <ActionButton
-          label={`Split horizontally${atSplitLimit ? " (maximum 4)" : ""}`}
-          disabled={atSplitLimit}
-          onClick={() => terminals.split("horizontal")}
-        >
-          <SquareSplitHorizontal className="size-3.5" />
-        </ActionButton>
-        <ActionButton
-          label={`Split vertically${atSplitLimit ? " (maximum 4)" : ""}`}
-          disabled={atSplitLimit}
-          onClick={() => terminals.split("vertical")}
-        >
-          <SquareSplitVertical className="size-3.5" />
-        </ActionButton>
-        <ActionButton
-          label="Clear terminal"
-          onClick={() => terminals.clear(activeTerminalId)}
-        >
-          <Trash2 className="size-3.5" />
-        </ActionButton>
-        <ActionButton
-          label="Restart terminal"
-          onClick={() => terminals.restart(activeTerminalId)}
-        >
-          <RefreshCw className="size-3.5" />
-        </ActionButton>
-        {terminalIds.length > 1 && (
-          <ActionButton
-            label="Close terminal"
-            onClick={() => terminals.closeTerminal(activeTerminalId)}
-          >
-            <X className="size-3.5" />
-          </ActionButton>
-        )}
-      </div>
-
       {terminals.error && (
         <div className="absolute inset-x-2 top-2 z-10 rounded-md border border-destructive/40 bg-background/95 px-3 py-2 text-xs text-destructive shadow-sm">
           {terminals.error}
