@@ -32,7 +32,10 @@ def new_invocation_id() -> str:
 
 
 def with_invocation_id(value: Mapping[str, Any] | None, invocation_id: str) -> dict[str, Any]:
-    """Return a temporary dual-write representation of an invocation id."""
+    """Write both names until all workers use invocation_id and rollback no longer needs the alias.
+
+    Keep legacy reads for queued jobs, callbacks, and historical metadata.
+    """
     if not invocation_id:
         raise ValueError("invocation_id must be a non-empty string")
     result = dict(value or {})

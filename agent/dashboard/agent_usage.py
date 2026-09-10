@@ -20,7 +20,6 @@ from agent.utils.json_types import as_json_object, thread_metadata
 from agent.utils.run_usage import RunUsageSummary
 
 AGENT_INVOCATION_NAMESPACE = ["usage", "v2", "agent_runs"]
-AGENT_RUN_NAMESPACE = AGENT_INVOCATION_NAMESPACE
 AGENT_PR_NAMESPACE = ["usage", "v2", "agent_prs"]
 REVIEW_NAMESPACE = ["usage", "v2", "reviews"]
 REVIEW_FINDING_NAMESPACE = ["usage", "v2", "review_findings"]
@@ -184,10 +183,10 @@ async def _backfill_legacy_agent_records() -> None:
         if record.get("source") not in _AGENT_SOURCES:
             continue
         key = _store_key("run", f"legacy:{thread_id}")
-        if await _get(AGENT_RUN_NAMESPACE, key):
+        if await _get(AGENT_INVOCATION_NAMESPACE, key):
             continue
         await _client().store.put_item(
-            AGENT_RUN_NAMESPACE,
+            AGENT_INVOCATION_NAMESPACE,
             key,
             {
                 "invocation_id": f"legacy:{thread_id}",
@@ -443,30 +442,6 @@ async def record_agent_invocation_cost(*, invocation_id: str, cost_usd: float) -
         )
 
     await _mutate(AGENT_INVOCATION_NAMESPACE, key, update)
-
-
-async def record_agent_run_usage(**kwargs: Any) -> None:
-    """Compatibility wrapper for callers using the legacy run terminology."""
-    await record_agent_invocation_usage(
-        invocation_id=kwargs.pop("run_id"),
-        **kwargs,
-    )
-
-
-async def record_agent_run_completion(*, run_id: str, usage: RunUsageSummary | None) -> bool:
-    return await record_agent_invocation_completion(invocation_id=run_id, usage=usage)
-
-
-async def agent_run_needs_cost_refresh(*, run_id: str) -> bool:
-    return await agent_invocation_needs_cost_refresh(invocation_id=run_id)
-
-
-async def mark_agent_cost_refresh_scheduled(*, run_id: str) -> None:
-    await mark_agent_invocation_cost_refresh_scheduled(invocation_id=run_id)
-
-
-async def record_agent_run_cost(*, run_id: str, cost_usd: float) -> None:
-    await record_agent_invocation_cost(invocation_id=run_id, cost_usd=cost_usd)
 
 
 async def record_agent_pr_usage(
@@ -761,7 +736,7 @@ async def list_agent_usage_leaderboard(
     await _backfill_legacy_usage()
     cutoff_ms = _period_cutoff_ms(normalized)
     runs, prs, review_records, finding_records = await asyncio.gather(
-        _all(AGENT_RUN_NAMESPACE),
+        _all(AGENT_INVOCATION_NAMESPACE),
         _all(AGENT_PR_NAMESPACE),
         _all(REVIEW_NAMESPACE),
         _all(REVIEW_FINDING_NAMESPACE),

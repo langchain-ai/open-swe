@@ -38,7 +38,7 @@ def test_summarize_run_usage_uses_only_latest_human_turn() -> None:
     assert summary.output_tokens == 300
 
 
-def test_summarize_run_usage_uses_run_id_across_human_messages() -> None:
+def test_summarize_run_usage_reads_legacy_metadata_across_human_messages() -> None:
     first = _message(model="model-a", input_tokens=100, output_tokens=10)
     first.response_metadata["open_swe_run_id"] = "run-1"
     second = _message(model="model-a", input_tokens=200, output_tokens=20)
@@ -56,7 +56,7 @@ def test_summarize_run_usage_uses_run_id_across_human_messages() -> None:
                 other_run,
             ]
         },
-        run_id="run-1",
+        invocation_id="run-1",
     )
 
     assert summary is not None

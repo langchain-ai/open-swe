@@ -179,14 +179,3 @@ async def finalize_agent_invocation_usage(
             extra={"usage_invocation_id": invocation_id, "usage_thread_id": thread_id},
             exc_info=True,
         )
-
-
-async def finalize_agent_run_usage(
-    *, run_id: str, thread_id: str, state: dict[str, Any] | None
-) -> None:
-    """Compatibility wrapper for legacy callers."""
-    await finalize_agent_invocation_usage(
-        invocation_id=run_id,
-        thread_id=thread_id,
-        state=state,
-    )

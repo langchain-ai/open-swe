@@ -68,12 +68,8 @@ def summarize_run_usage(
     state: dict[str, Any] | None,
     *,
     invocation_id: str | None = None,
-    run_id: str | None = None,
 ) -> RunUsageSummary | None:
     """Summarize main-agent usage for one invocation or the latest human turn."""
-    if invocation_id is not None and run_id is not None and invocation_id != run_id:
-        return None
-    invocation_id = invocation_id or run_id
     if not isinstance(state, dict):
         return None
     messages = state.get("messages")
