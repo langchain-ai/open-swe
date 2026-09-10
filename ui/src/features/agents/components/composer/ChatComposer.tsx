@@ -109,7 +109,7 @@ export interface ChatComposerProps {
   onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
   models?: Array<ModelOption>
   selection?: ModelSelection | null
-  onSelectionChange?: (next: ModelSelection) => void
+  onSelectionChange?: (next: ModelSelection | null) => void
   /** Repos the user can target. When provided with onRepoChange, a repo picker is shown. */
   repos?: Array<{ full_name: string }>
   selectedRepo?: string | null
