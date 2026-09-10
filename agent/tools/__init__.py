@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
+    "approve_automation_request": ".automations",
     "approve_plan": ".approve_plan",
     "background_execute": ".background_execute",
     "background_task": ".background_execute",
@@ -12,6 +13,7 @@ _TOOL_MODULES = {
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "create_sandbox_service_url": ".create_sandbox_service_url",
     "delete_automation": ".automations",
+    "deny_automation_request": ".automations",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
@@ -19,6 +21,7 @@ _TOOL_MODULES = {
     "get_thread": ".threads",
     "http_request": ".http_request",
     "linear_comment": "agent.linear.tools.comment",
+    "list_automation_requests": ".automations",
     "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
@@ -63,6 +66,7 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
+    "approve_automation_request",
     "approve_plan",
     "background_execute",
     "background_task",
@@ -71,6 +75,7 @@ __all__ = [
     "create_sandbox_file_download_url",
     "create_sandbox_service_url",
     "delete_automation",
+    "deny_automation_request",
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
@@ -78,6 +83,7 @@ __all__ = [
     "get_thread",
     "http_request",
     "linear_comment",
+    "list_automation_requests",
     "list_automations",
     "list_environments",
     "list_findings",
@@ -135,8 +141,11 @@ if TYPE_CHECKING:
     from agent.tools.add_finding import add_finding
     from agent.tools.approve_plan import approve_plan
     from agent.tools.automations import (
+        approve_automation_request,
         create_automation,
         delete_automation,
+        deny_automation_request,
+        list_automation_requests,
         list_automations,
         trigger_automation,
         update_automation,

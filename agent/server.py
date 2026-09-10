@@ -145,6 +145,7 @@ from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
 from agent.tools import (
+    approve_automation_request,
     approve_plan,
     background_execute,
     background_task,
@@ -156,11 +157,13 @@ from agent.tools import (
     delete_environment,
     delete_organization_skill,
     delete_user_skill,
+    deny_automation_request,
     enter_plan_mode,
     fetch_url,
     get_thread,
     http_request,
     linear_comment,
+    list_automation_requests,
     list_automations,
     list_environments,
     list_threads,
@@ -352,6 +355,8 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "capture_environment_snapshot",
         "delete_environment",
         "create_automation",
+        "approve_automation_request",
+        "deny_automation_request",
         "update_automation",
         "trigger_automation",
         "delete_automation",
@@ -439,7 +444,9 @@ _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
 ADMIN_TOOLS = (
     sandbox_reset,
     list_automations,
-    create_automation,
+    list_automation_requests,
+    approve_automation_request,
+    deny_automation_request,
     update_automation,
     trigger_automation,
     delete_automation,
@@ -1078,6 +1085,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_baby_sit,
         mark_question_answered,
         notify_automation_channel,
+        create_automation,
         open_pull_request,
         *(
             (output_iframe, create_sandbox_file_download_url, create_sandbox_service_url)

@@ -108,6 +108,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
         for tool in build_agent.call_args.kwargs["tools"]
     }
     assert "linear_comment" in tool_names
+    assert "create_automation" in tool_names
     assert not tool_names.intersection(
         {
             "linear_create_issue",

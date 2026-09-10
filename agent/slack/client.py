@@ -692,6 +692,31 @@ async def post_slack_top_level_message_with_ts(
     )
 
 
+async def post_slack_dm(user_id: str, text: str) -> tuple[str | None, str | None]:
+    """Open a direct-message conversation and post a message."""
+    if not SLACK_BOT_TOKEN:
+        return None, "missing_slack_bot_token"
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/conversations.open",
+                headers=slack_headers(),
+                json={"users": user_id},
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (httpx2.HTTPError, ValueError) as exc:
+            logger.exception("Slack conversations.open request failed")
+            return None, f"http_error: {type(exc).__name__}"
+    if not data.get("ok"):
+        return None, str(data.get("error") or "unknown_error")
+    channel = data.get("channel")
+    channel_id = channel.get("id") if isinstance(channel, dict) else None
+    if not isinstance(channel_id, str) or not channel_id:
+        return None, "missing_dm_channel"
+    return await post_slack_top_level_message_with_ts(channel_id, text)
+
+
 class SlackStreamError(Exception):
     def __init__(self, code: str, *, retry_after: float | None = None) -> None:
         super().__init__(code)

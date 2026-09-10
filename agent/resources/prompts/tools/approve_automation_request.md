@@ -1,0 +1,1 @@
+Approve a pending automation request and create it under the requester's identity. The requester receives a Slack DM when creation succeeds.
