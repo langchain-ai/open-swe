@@ -676,9 +676,15 @@ async def test_prompt_uses_exact_run_mapping_and_deduplicates(
         await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
     feedback.post_slack_ephemeral_message.assert_awaited_once()
     call = feedback.post_slack_ephemeral_message.await_args
-    submit = call.kwargs["blocks"][-1]["elements"][0]
-    assert submit["value"] == "run-1"
-    assert submit["action_id"] == "open_swe_feedback_submit"
+    blocks = call.kwargs["blocks"]
+    assert not any(block["type"] == "input" for block in blocks)
+    controls = next(block["elements"][0] for block in blocks if block["type"] == "context_actions")
+    tasks = BackgroundTasks()
+    await routes.slack_interactivity(
+        _request(_action(controls["action_id"], controls["positive_button"]["value"])), tasks
+    )
+    await tasks()
+    assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["choice"] == "good"
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["prompted"] is True
 
 
@@ -1275,3 +1281,80 @@ def test_prompt_without_dashboard_has_no_broken_link(monkeypatch: pytest.MonkeyP
     text = feedback.rating_blocks("run-1", "thread-1")[0]["text"]["text"]
     assert "<" not in text
     assert "this thread" in text
+
+
+@pytest.mark.parametrize("choice,score", [("good", 1.0), ("bad", 0.0)])
+async def test_native_rating_saves_immediately_and_only_bad_opens_comment(
+    context, fake_store, choice, score
+):
+    payload = _action("open_swe_feedback", json.dumps({"run_id": "run-1", "choice": choice}))
+    tasks = BackgroundTasks()
+    assert await routes.slack_interactivity(_request(payload), tasks) == {}
+    saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
+    assert saved["completed"] and saved["choice"] == choice and saved["comment"] == ""
+    if choice == "bad":
+        view = feedback.open_slack_modal.await_args.args[1]
+        assert view["callback_id"] == "open_swe_feedback_note"
+        assert len(view["blocks"]) == 1
+        assert view["blocks"][0]["optional"] is True
+        assert view["blocks"][0]["element"]["type"] == "plain_text_input"
+    else:
+        feedback.open_slack_modal.assert_not_awaited()
+    await tasks()
+    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == score
+    assert fake_store.values(("thread_feedback",))["thread-1"]["status"] == "completed"
+    assert all(
+        b["type"] == "section"
+        for b in feedback.respond_to_slack_interaction.await_args.args[1]["blocks"]
+    )
+
+
+async def test_native_bad_comment_updates_rating_without_overwriting_first_comment(
+    context, fake_store
+):
+    fake_store.seed(
+        ("slack_thread_feedback", "C1"),
+        "run-1",
+        {**context, "completed": True, "choice": "bad", "rating": 1},
+    )
+    payload = _submission("  The tests still fail.  ")
+    payload["view"]["callback_id"] = "open_swe_feedback_note"
+    tasks = BackgroundTasks()
+    assert await routes.slack_interactivity(_request(payload), tasks) == {}
+    await tasks()
+    saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
+    assert saved["comment"] == "The tests still fail."
+    assert saved["rating"] == 1 and saved["completed"]
+    assert (
+        feedback.create_langsmith_thread_feedback.await_args.kwargs["comment"]
+        == "The tests still fail."
+    )
+    payload["view"]["state"]["values"]["feedback_comment"]["comment"]["value"] = "Overwrite"
+    await routes.slack_interactivity(_request(payload), BackgroundTasks())
+    assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == saved
+
+
+@pytest.mark.parametrize("blocked", ["completed", "dismissed", "other_user"])
+async def test_native_rating_cannot_reopen_finished_feedback_or_rate_for_someone_else(
+    context, fake_store, blocked
+):
+    initial = {**context, **({blocked: True} if blocked != "other_user" else {})}
+    fake_store.seed(("slack_thread_feedback", "C1"), "run-1", initial)
+    payload = _action("open_swe_feedback", json.dumps({"run_id": "run-1", "choice": "bad"}))
+    if blocked == "other_user":
+        payload["user"]["id"] = "U2"
+    tasks = BackgroundTasks()
+    await routes.slack_interactivity(_request(payload), tasks)
+    await tasks()
+    assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == initial
+    feedback.open_slack_modal.assert_not_awaited()
+
+
+async def test_native_modal_failure_keeps_saved_bad_rating(context, fake_store):
+    feedback.open_slack_modal.side_effect = RuntimeError("Slack unavailable")
+    tasks = BackgroundTasks()
+    payload = _action("open_swe_feedback", json.dumps({"run_id": "run-1", "choice": "bad"}))
+    assert await routes.slack_interactivity(_request(payload), tasks) == {}
+    await tasks()
+    assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["completed"]
+    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 0.0

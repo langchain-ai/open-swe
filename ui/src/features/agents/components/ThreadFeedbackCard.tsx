@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -10,9 +10,8 @@ import type {
 } from "@/features/agents/lib/api"
 
 const ratings: Array<{ value: ThreadFeedbackRating; label: string }> = [
-  { value: "bad", label: "💩 Bad" },
-  { value: "good", label: "🙂 Good" },
-  { value: "other", label: "💬 Other" },
+  { value: "good", label: "👍 Good" },
+  { value: "bad", label: "👎 Bad" },
 ]
 
 export function ThreadFeedbackCard({
@@ -22,9 +21,22 @@ export function ThreadFeedbackCard({
   threadId: string
   login: string | null
 }) {
+  const queryClient = useQueryClient()
+  const [showComment, setShowComment] = useState(false)
+  const [comment, setComment] = useState("")
   const mutation = useMutation({
     mutationFn: (value: ThreadFeedbackSubmission) =>
       agentsApi.submitThreadFeedback(threadId, value),
+    onSuccess: (data, value) => {
+      queryClient.setQueryData(["thread-feedback", threadId, login], data)
+      setShowComment(
+        "rating" in value &&
+          value.rating === "bad" &&
+          data.status === "completed" &&
+          data.rating === "bad" &&
+          !data.comment
+      )
+    },
   })
   const query = useQuery({
     queryKey: ["thread-feedback", threadId, login],
@@ -37,8 +49,6 @@ export function ThreadFeedbackCard({
     },
     retry: false,
   })
-  const [rating, setRating] = useState<ThreadFeedbackRating | null>(null)
-  const [comment, setComment] = useState("")
   const feedback =
     mutation.data ??
     (query.isFetchedAfterMount && !query.isError ? query.data : undefined)
@@ -50,7 +60,7 @@ export function ThreadFeedbackCard({
     return null
   }
 
-  if (feedback.status === "completed") {
+  if (feedback.status === "completed" && !showComment) {
     return (
       <div
         role="status"
@@ -61,69 +71,82 @@ export function ThreadFeedbackCard({
     )
   }
 
-  const canSubmit =
-    rating !== null && (rating !== "other" || comment.trim().length > 0)
   return (
     <form
       aria-label="Thread feedback"
       className="mt-4 space-y-3 rounded-xl border border-border bg-muted/30 p-4"
       onSubmit={(event) => {
         event.preventDefault()
-        if (!canSubmit || mutation.isPending || !rating) return
-        mutation.mutate({ rating, comment: comment.trim() })
+        if (!showComment || mutation.isPending || !comment.trim()) return
+        mutation.mutate({ action: "comment", comment: comment.trim() })
       }}
     >
-      <p className="text-sm font-medium">How did Open SWE do?</p>
-      <div className="flex gap-2" role="group" aria-label="Rating">
-        {ratings.map((option) => (
-          <Button
-            key={option.value}
-            type="button"
-            variant={rating === option.value ? "secondary" : "outline"}
-            size="sm"
-            aria-pressed={rating === option.value}
+      <p className="text-sm font-medium">
+        {showComment ? "How could Open SWE do better?" : "How did Open SWE do?"}
+      </p>
+      {showComment ? (
+        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+          Comment (optional)
+          <Textarea
+            autoFocus
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            maxLength={3000}
             disabled={mutation.isPending}
-            onClick={() => setRating(option.value)}
+            placeholder="What could be better?"
+            className="min-h-20 text-sm"
+          />
+        </label>
+      ) : (
+        <div className="flex gap-2" role="group" aria-label="Rating">
+          {ratings.map((option) => (
+            <Button
+              key={option.value}
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={mutation.isPending}
+              onClick={() => mutation.mutate({ rating: option.value })}
+            >
+              {option.label}
+            </Button>
+          ))}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate({ action: "dismiss" })}
           >
-            {option.label}
+            Dismiss
           </Button>
-        ))}
-      </div>
-      <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-        Comment ({rating === "other" ? "required" : "optional"})
-        <Textarea
-          value={comment}
-          onChange={(event) => setComment(event.target.value)}
-          required={rating === "other"}
-          maxLength={3000}
-          disabled={mutation.isPending}
-          placeholder="What worked well? What could be better?"
-          className="min-h-20 text-sm"
-        />
-      </label>
+        </div>
+      )}
       {mutation.isError && (
         <p role="alert" className="text-xs text-destructive">
           Your feedback could not be saved. Please try again.
         </p>
       )}
-      <div className="flex items-center gap-2">
-        <Button
-          type="submit"
-          size="sm"
-          disabled={!canSubmit || mutation.isPending}
-        >
-          {mutation.isPending ? "Saving…" : "Submit feedback"}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={mutation.isPending}
-          onClick={() => mutation.mutate({ action: "dismiss" })}
-        >
-          Dismiss
-        </Button>
-      </div>
+      {showComment && (
+        <div className="flex items-center gap-2">
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!comment.trim() || mutation.isPending}
+          >
+            {mutation.isPending ? "Saving…" : "Submit comment"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={mutation.isPending}
+            onClick={() => setShowComment(false)}
+          >
+            Skip
+          </Button>
+        </div>
+      )}
     </form>
   )
 }

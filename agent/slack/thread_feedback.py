@@ -31,6 +31,8 @@ from agent.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 _RATE_PREFIX = "open_swe_feedback_rate_"
+_FEEDBACK_ACTION = "open_swe_feedback"
+_NOTE_ACTION = "open_swe_feedback_note"
 _SELECT_PREFIX = "open_swe_feedback_select_"
 _COMMENT_ACTION = "open_swe_feedback_comment"
 _DISMISS_ACTION = "open_swe_feedback_dismiss"
@@ -132,6 +134,37 @@ def _feedback_inputs(rating: int | None = None, comment: str = "") -> list[dict[
     ]
 
 
+def feedback_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
+    url = dashboard_thread_url(thread_id)
+    thread_link = f"<{url}|this thread>" if url else "this thread"
+    return [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"How did Open SWE do on {thread_link}?"},
+        },
+        {
+            "type": "context_actions",
+            "elements": [
+                {
+                    "type": "feedback_buttons",
+                    "action_id": _FEEDBACK_ACTION,
+                    "positive_button": {
+                        "text": {"type": "plain_text", "text": "Good"},
+                        "value": json.dumps({"run_id": run_id, "choice": "good"}),
+                        "accessibility_label": "Rate this thread Good",
+                    },
+                    "negative_button": {
+                        "text": {"type": "plain_text", "text": "Bad"},
+                        "value": json.dumps({"run_id": run_id, "choice": "bad"}),
+                        "accessibility_label": "Rate this thread Bad",
+                    },
+                }
+            ],
+        },
+        {"type": "actions", "elements": [_dismiss_button(run_id)]},
+    ]
+
+
 def rating_blocks(
     run_id: str,
     thread_id: str,
@@ -142,6 +175,7 @@ def rating_blocks(
     error: str = "",
     selection_ts: Decimal = Decimal(0),
 ) -> list[dict[str, Any]]:
+    """Update selection/submit prompts delivered before the Good/Bad controls."""
     selected_choice = choice or {1: "bad", 5: "good"}.get(rating)
     selection = {"run_id": run_id, "rating": rating, "selection_ts": str(selection_ts)}
     if choice is not None:
@@ -265,9 +299,9 @@ async def post_slack_feedback_prompt(
             posted = await post_slack_ephemeral_message(
                 channel_id,
                 record.user_id,
-                "How did Open SWE do on this thread? Add a rating or comment, then submit feedback.",
+                "How did Open SWE do on this thread? Choose Good or Bad.",
                 thread_ts=record.thread_ts if record.thread_ts != "0" else None,
-                blocks=rating_blocks(run_id, thread_id),
+                blocks=feedback_blocks(run_id, thread_id),
             )
             if posted:
                 record.prompted = True
@@ -292,7 +326,14 @@ def _action(payload: dict[str, Any]) -> dict[str, Any]:
             if isinstance(action_id, str) and (
                 action_id.startswith(_RATE_PREFIX)
                 or action_id.startswith(_SELECT_PREFIX)
-                or action_id in {_COMMENT_ACTION, _DISMISS_ACTION, _SUBMIT_ACTION, _RATING_ACTION}
+                or action_id
+                in {
+                    _FEEDBACK_ACTION,
+                    _COMMENT_ACTION,
+                    _DISMISS_ACTION,
+                    _SUBMIT_ACTION,
+                    _RATING_ACTION,
+                }
             ):
                 return action
     return {}
@@ -301,7 +342,7 @@ def _action(payload: dict[str, Any]) -> dict[str, Any]:
 def is_slack_feedback_payload(payload: dict[str, Any]) -> bool:
     return (payload.get("type") == "block_actions" and bool(_action(payload))) or (
         payload.get("type") == "view_submission"
-        and _object(payload.get("view")).get("callback_id") == _COMMENT_ACTION
+        and _object(payload.get("view")).get("callback_id") in {_COMMENT_ACTION, _NOTE_ACTION}
     )
 
 
@@ -315,11 +356,12 @@ async def _load_feedback(channel_id: str, run_id: str, user_id: str) -> ThreadFe
     return record if slack_channel_allows_operations(context) else None
 
 
-def comment_modal(record: ThreadFeedback, response_url: str = "") -> dict[str, Any]:
-    """Let already-posted rating/comment buttons open the combined feedback form."""
+def comment_modal(
+    record: ThreadFeedback, response_url: str = "", *, comment_only: bool = False
+) -> dict[str, Any]:
     return {
         "type": "modal",
-        "callback_id": _COMMENT_ACTION,
+        "callback_id": _NOTE_ACTION if comment_only else _COMMENT_ACTION,
         "private_metadata": json.dumps(
             {
                 "channel_id": record.channel_id,
@@ -328,9 +370,14 @@ def comment_modal(record: ThreadFeedback, response_url: str = "") -> dict[str, A
             }
         ),
         "title": {"type": "plain_text", "text": "Open SWE feedback"},
-        "submit": {"type": "plain_text", "text": "Submit feedback"},
-        "close": {"type": "plain_text", "text": "Cancel"},
-        "blocks": _feedback_inputs(record.rating, record.comment),
+        "submit": {
+            "type": "plain_text",
+            "text": "Submit comment" if comment_only else "Submit feedback",
+        },
+        "close": {"type": "plain_text", "text": "Skip" if comment_only else "Cancel"},
+        "blocks": [_comment_input()]
+        if comment_only
+        else _feedback_inputs(record.rating, record.comment),
     }
 
 
@@ -462,10 +509,19 @@ async def _save_submission(
     values: dict[str, Any],
     *,
     legacy_modal: bool = False,
+    comment_only: bool = False,
 ) -> ThreadFeedback:
     async with _locked_feedback(record) as current:
         if current is None:
             raise _FeedbackInputError("This feedback is unavailable. Please reopen the prompt.")
+        if comment_only:
+            if current.dismissed or not current.completed or current.choice != "bad":
+                raise _FeedbackInputError("Comments require a submitted Bad rating.")
+            _, comment, _ = _form_values({_COMMENT_BLOCK: values.get(_COMMENT_BLOCK)})
+            if comment and not current.comment:
+                current.comment = comment
+                await _store(current.channel_id).put(current.run_id, current)
+            return current
         if current.completed or current.dismissed:
             return current
         default_rating = current.rating if legacy_modal and _RATING_BLOCK not in values else None
@@ -660,6 +716,41 @@ async def _select_feedback_rating(payload: dict[str, Any]) -> None:
         logger.warning("Could not update Slack feedback rating selection")
 
 
+async def _record_rating(payload: dict[str, Any], background_tasks: BackgroundTasks) -> None:
+    try:
+        async with asyncio.timeout(2.5):
+            selection = _object(json.loads(str(_action(payload).get("value") or "{}")))
+            choice = selection.get("choice")
+            if choice not in {"good", "bad"}:
+                return
+            record = await _load_feedback(
+                str(_object(payload.get("channel")).get("id") or ""),
+                str(selection.get("run_id") or ""),
+                str(_object(payload.get("user")).get("id") or ""),
+            )
+            if record is None:
+                return
+            async with _locked_feedback(record) as current:
+                if current is None or current.completed or current.dismissed:
+                    return
+                current.choice = choice
+                current.rating = 5 if choice == "good" else 1
+                current.completed = True
+                await _store(current.channel_id).put(current.run_id, current)
+                record = current
+            response_url = str(payload.get("response_url") or "")
+            background_tasks.add_task(complete_feedback_prompt, record.agent_thread_id, "completed")
+            background_tasks.add_task(_acknowledge, record, response_url=response_url)
+            background_tasks.add_task(_export_feedback, record)
+            trigger_id = payload.get("trigger_id")
+            if choice == "bad" and isinstance(trigger_id, str) and trigger_id:
+                await open_slack_modal(
+                    trigger_id, comment_modal(record, response_url, comment_only=True)
+                )
+    except Exception:
+        logger.warning("Could not process Slack feedback rating", exc_info=True)
+
+
 async def handle_slack_feedback_interaction(
     payload: dict[str, Any], background_tasks: BackgroundTasks
 ) -> FeedbackResponse:
@@ -678,7 +769,12 @@ async def handle_slack_feedback_interaction(
                         "This feedback is unavailable. Please reopen the form from the prompt."
                     )
                 values = _object(_object(view.get("state")).get("values"))
-                record = await _save_submission(record, values, legacy_modal=True)
+                record = await _save_submission(
+                    record,
+                    values,
+                    legacy_modal=True,
+                    comment_only=view.get("callback_id") == _NOTE_ACTION,
+                )
         except _FeedbackInputError as exc:
             return _comment_error(str(exc))
         except Exception:
@@ -694,6 +790,9 @@ async def handle_slack_feedback_interaction(
 
     action = _action(payload)
     action_id = action.get("action_id")
+    if action_id == _FEEDBACK_ACTION:
+        await _record_rating(payload, background_tasks)
+        return {}
     if action_id == _DISMISS_ACTION:
         background_tasks.add_task(_dismiss_feedback, payload)
         return {}
