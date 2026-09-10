@@ -291,6 +291,60 @@ async def test_agent_session_stopped_cancels_without_followup_work(
     assert dispatched == []
 
 
+async def test_agent_session_stopped_closes_the_streams_slack_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancelling the run does not close a message that is still streaming."""
+    client = FakeClient()
+    _add_thread(client, "0")
+    client.runs.by_status["running"] = [{"run_id": "run-running"}]
+    _patch_handler(monkeypatch, client)
+    monkeypatch.setattr(slack_stop, "set_session_status", _noop_status)
+    stopped: list[tuple[str, str]] = []
+
+    async def stop_stream(channel_id: str, message_ts: str, *args: Any, **kwargs: Any) -> None:
+        stopped.append((channel_id, message_ts))
+
+    monkeypatch.setattr(slack_stop, "stop_slack_stream", stop_stream)
+
+    await slack_stop.process_agent_session_stopped(
+        {
+            "type": "agent_session_stopped",
+            "channel": "C123",
+            "streaming_message_ts": ["2.0", "3.0"],
+        },
+        event_id="EvSessionStopStreams",
+    )
+
+    assert stopped == [("C123", "2.0"), ("C123", "3.0")]
+
+
+async def test_agent_session_stopped_survives_a_stream_that_will_not_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeClient()
+    thread_id = _add_thread(client, "0")
+    client.runs.by_status["running"] = [{"run_id": "run-running"}]
+    _patch_handler(monkeypatch, client)
+    monkeypatch.setattr(slack_stop, "set_session_status", _noop_status)
+
+    async def stop_stream(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("slack said no")
+
+    monkeypatch.setattr(slack_stop, "stop_slack_stream", stop_stream)
+
+    await slack_stop.process_agent_session_stopped(
+        {"type": "agent_session_stopped", "channel": "C123", "streaming_message_ts": ["2.0"]},
+        event_id="EvSessionStopBroken",
+    )
+
+    assert client.threads.updates[0][0] == thread_id
+
+
+async def _noop_status(channel_id: str, status: str) -> bool:
+    return True
+
+
 async def test_duplicate_stop_reaction_has_no_side_effects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

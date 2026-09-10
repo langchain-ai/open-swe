@@ -83,3 +83,6 @@ logs/
 test-results/
 playwright-report/
 blob-report/
+
+# local scratch plans
+*.local.md

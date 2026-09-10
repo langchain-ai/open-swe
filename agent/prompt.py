@@ -53,11 +53,11 @@ def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
     return f"{OPEN_SWE_SHARED_BASE}\n\n{load_prompt('system/sandbox-file-downloads.md')}"
 
 
-def _render_source_guidance(source: str, slack_context: bool) -> str:
+def _render_source_guidance(source: str, slack_context: bool, code_channel: bool = False) -> str:
     if source == "background_task":
         name = "background-task"
     elif source == "slack" and slack_context:
-        name = "slack"
+        name = "slack-code-channel" if code_channel else "slack"
     elif source == "linear":
         name = "linear"
     elif source == "github":
@@ -198,6 +198,7 @@ def construct_system_prompt(
     admin_environments: bool = False,
     source: str = "dashboard",
     slack_context: bool = False,
+    code_channel: bool = False,
     sandbox_file_downloads: bool = False,
 ) -> str:
     del linear_project_id, linear_issue_number
@@ -225,7 +226,7 @@ def construct_system_prompt(
         ),
         source_guidance_section=render_prompt(
             "system/source-context.md",
-            source_guidance=_render_source_guidance(source, slack_context),
+            source_guidance=_render_source_guidance(source, slack_context, code_channel),
         ),
         plan_mode_guidance_section=render_prompt(
             "system/plan-mode-guidance.md",

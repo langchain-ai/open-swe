@@ -36,3 +36,13 @@ class SlackRequest(BaseModel):
             event_id=self.event_id,
             agent_thread_id=self.thread_id,
         )
+
+
+class CodeChannelCommand(BaseModel):
+    """A slash command asking for a code channel, as the route hands it on."""
+
+    channel_id: str
+    user_id: str
+    text: str = ""
+    response_url: str = ""
+    team_id: str = ""

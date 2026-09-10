@@ -14,6 +14,7 @@ missing ids degrade dedupe instead of silencing failure replies.
 
 import hmac
 import logging
+from contextlib import suppress
 from typing import Any
 
 from langchain_core.messages import convert_to_messages
@@ -29,7 +30,8 @@ from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
-from agent.slack.code_channels import is_code_channel_session, set_session_status
+from agent.slack.surfaces import surface_from_metadata
+from agent.slack.surfaces.projector import close_transcript
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -293,24 +295,29 @@ async def _finalize_agent_usage_telemetry(
     )
 
 
-async def _settle_code_channel_session(
-    client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
+async def _settle_surface_activity(
+    client: LangGraphClient, thread_id: str, metadata: dict[str, Any], run_key: str | None = None
 ) -> None:
-    """Return a code channel session to ``active`` once its work stops.
+    """Close out a finished run on its surface, and idle the surface if it is done.
 
-    A later message can already have started another run, so a completion that
-    arrives out of order must not clear the loading UI that run is relying on.
+    The transcript of *this* run is closed either way — a projection lost to a
+    restart would otherwise leave a Slack message streaming forever. Going idle
+    is separate: a later message can already have started another run, so a
+    completion that arrives out of order must not clear that run's loading UI.
     """
-    slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or not is_code_channel_session(slack_thread.thread_ts):
+    surface = surface_from_metadata(metadata)
+    if surface is None or not surface.reports_activity:
         return
+    if run_key and surface.projects_transcript:
+        with suppress(Exception):
+            await close_transcript(client, thread_id=thread_id, run_key=run_key)
     try:
         for status in ("pending", "running"):
             if await client.runs.list(thread_id, status=status, limit=1):
                 return
     except Exception:  # noqa: BLE001
         logger.debug("run-complete: could not list runs for %s", thread_id, exc_info=True)
-    await set_session_status(slack_thread.channel_id, "active")
+    await surface.end_turn()
 
 
 async def _handle_successful_run(
@@ -329,7 +336,8 @@ async def _handle_successful_run(
     metadata = metadata if isinstance(metadata, dict) else {}
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
-    await _settle_code_channel_session(client, thread_id, metadata)
+    invocation_id = _invocation_id(payload)
+    await _settle_surface_activity(client, thread_id, metadata, invocation_id)
     payload_metadata = payload.get("metadata")
     automated = (
         isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
@@ -339,7 +347,6 @@ async def _handle_successful_run(
             await schedule_answer_feedback(thread_id, run_id, metadata)
         except Exception:
             logger.warning("Could not schedule completion feedback", extra={"thread_id": thread_id})
-    invocation_id = _invocation_id(payload)
     if invocation_id is None:
         return {"status": "ignored", "reason": "missing or conflicting invocation_id"}
     if run_id in _scheduled_cost_run_ids(metadata):
@@ -430,7 +437,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     await _settle_failed_reviewer_check(thread_id, metadata)
-    await _settle_code_channel_session(client, thread_id, metadata)
+    await _settle_surface_activity(client, thread_id, metadata, _invocation_id(payload))
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
+    "ask_user_choice": "agent.slack.tools.ask_user_choice",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "create_automation": ".automations",
@@ -53,6 +54,7 @@ _TOOL_MODULES = {
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_move_thread": "agent.slack.tools.move_thread",
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
+    "slack_reply_to_message": "agent.slack.tools.reply_to_message",
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
     "slack_thread_reply": "agent.slack.tools.thread_reply",
     "trigger_automation": ".automations",
@@ -64,6 +66,7 @@ _TOOL_MODULES = {
 __all__ = [
     "add_finding",
     "approve_plan",
+    "ask_user_choice",
     "background_execute",
     "background_task",
     "create_automation",
@@ -112,6 +115,7 @@ __all__ = [
     "slack_attach_html",
     "slack_move_thread",
     "slack_read_thread_messages",
+    "slack_reply_to_message",
     "slack_start_new_thread",
     "slack_thread_reply",
     "trigger_automation",
@@ -125,10 +129,12 @@ if TYPE_CHECKING:
     from agent.github.tools.search_repo_code import search_repo_code
     from agent.linear.tools.comment import linear_comment
     from agent.slack.tools.add_reaction import slack_add_reaction
+    from agent.slack.tools.ask_user_choice import ask_user_choice
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel
     from agent.slack.tools.move_thread import slack_move_thread
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
+    from agent.slack.tools.reply_to_message import slack_reply_to_message
     from agent.slack.tools.request_pr_review import request_pr_review
     from agent.slack.tools.start_new_thread import slack_start_new_thread
     from agent.slack.tools.thread_reply import slack_thread_reply

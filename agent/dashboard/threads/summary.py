@@ -11,8 +11,8 @@ from fastapi import HTTPException
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
 from agent.slack.client import parse_github_pr_url
-from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
+from agent.slack.surfaces import slack_surface
 from agent.source_context import SourceContext
 from agent.utils.json_types import (
     JsonObject,
@@ -187,7 +187,8 @@ def thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
 
 def _code_channel_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or slack_thread.thread_ts != CODE_CHANNEL_SESSION_TS:
+    surface = slack_surface(slack_thread)
+    if slack_thread is None or surface is None or surface.kind != "slack_channel":
         return None
     channel_id = slack_thread.channel_id.strip()
     team_id = SLACK_TEAM_ID.strip()
