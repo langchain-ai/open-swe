@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import type { UseStreamReturn } from "@langchain/react"
 
-export type AgentStream = UseStreamReturn
+export type AgentStream = UseStreamReturn & { isOffloading?: boolean }
 
 export type AgentThreadTransport = "cloud" | "local"
 

@@ -75,6 +75,11 @@ interface SlashCommandSpec {
 
 const SLASH_COMMANDS: Array<SlashCommandSpec> = [
   {
+    command: "offload",
+    label: "/offload",
+    description: "Offload conversation context",
+  },
+  {
     command: "plan",
     label: "/plan",
     description: "Research read-only and propose a plan first",
@@ -97,6 +102,7 @@ export interface ChatComposerProps {
   compact?: boolean
   disabled?: boolean
   busy?: boolean
+  canOffload?: boolean
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
   onStop?: () => void | Promise<void>
@@ -167,7 +173,8 @@ export function buildCommandItems(
   trigger: ComposerTrigger,
   mentionPaths: Array<string>,
   skills: Array<Skill>,
-  includeModelCommand = true
+  includeModelCommand = true,
+  includeOffloadCommand = false
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
 
@@ -189,7 +196,8 @@ export function buildCommandItems(
         (spec) =>
           spec.command.startsWith(query) &&
           !skillNames.has(spec.command) &&
-          (includeModelCommand || spec.command !== "model")
+          (includeModelCommand || spec.command !== "model") &&
+          (includeOffloadCommand || spec.command !== "offload")
       ).map((spec) => ({
         id: `slash:${spec.command}`,
         type: "slash-command" as const,
@@ -225,6 +233,7 @@ export const ChatComposer = memo(function ChatComposer({
   compact = false,
   disabled = false,
   busy = false,
+  canOffload = false,
   activeRun,
   onStop,
   onSubmit,
@@ -351,9 +360,15 @@ export const ChatComposer = memo(function ChatComposer({
   const commandItems = useMemo(
     () =>
       trigger
-        ? buildCommandItems(trigger, mentionPaths, skills, models.length > 0)
+        ? buildCommandItems(
+            trigger,
+            mentionPaths,
+            skills,
+            models.length > 0,
+            canOffload
+          )
         : [],
-    [mentionPaths, models.length, skills, trigger]
+    [mentionPaths, models.length, skills, trigger, canOffload]
   )
   const menuOpen =
     trigger !== null &&
@@ -462,6 +477,15 @@ export const ChatComposer = memo(function ChatComposer({
     const trimmed = (snapshot?.value ?? value).trim()
     if (trimmed.length === 0 && pendingImages.length === 0) return
 
+    if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
+      setDictationError(
+        pendingImages.length
+          ? "Offloading does not accept attachments."
+          : "Offloading requires an idle, existing conversation."
+      )
+      return
+    }
+
     const images = pendingImages
     submittingRef.current = true
     setIsSubmitting(true)
@@ -476,11 +500,16 @@ export const ChatComposer = memo(function ChatComposer({
       submittingRef.current = false
       setIsSubmitting(false)
     }
-  }, [applyPrompt, disabled, onSubmit, pendingImages, value])
+  }, [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload])
 
   const selectCommandItem = useCallback(
     (item: ComposerCommandItem) => {
       if (!trigger) return
+
+      if (item.type === "slash-command" && item.command === "offload") {
+        applyPrompt("/offload ", 9)
+        return
+      }
 
       if (item.type === "path" || item.type === "skill") {
         const next = replaceTextRange(

@@ -4,8 +4,9 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useState,
 } from "react"
-import { useStream } from "@langchain/react"
+import { useChannelEffect, useStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 
 import { agentsApi } from "@/features/agents/lib/api"
@@ -56,6 +57,7 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [cloud]
   )
   const pool = useStreamPool.getState
+  const [isOffloading, setIsOffloading] = useState(false)
 
   const stream = useStream({
     client,
@@ -72,10 +74,12 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     },
     onThreadId: (threadId) => pool().rekey(entry.id, threadId),
     onCreated: () => {
+      setIsOffloading(false)
       pool().runAccepted(entry.id)
       if (cloud) invalidateAgentThreadLists(queryClient)
     },
     onCompleted: () => {
+      setIsOffloading(false)
       if (!cloud) return
       const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
       if (threadId) {
@@ -87,8 +91,22 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     },
   })
 
+  useChannelEffect(stream, ["custom"], {
+    onEvent: (event) => {
+      if (event.method !== "custom" || event.params.namespace.length) return
+      const payload = event.params.data.payload
+      if (payload?.type === "conversation_offloading") {
+        setIsOffloading(payload.status === "started")
+      }
+    },
+    onError: () => setIsOffloading(false),
+  })
+
   const publish = useStreamPool((state) => state.publish)
-  useLayoutEffect(() => publish(entry.id, stream), [entry.id, publish, stream])
+  useLayoutEffect(
+    () => publish(entry.id, { ...stream, isOffloading }),
+    [entry.id, publish, stream, isOffloading]
+  )
 
   return null
 }
