@@ -496,7 +496,7 @@ async def _enrich_run_start_command(
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
-            model_selection=model_selection,
+            model_selection=model_selection or "auto",
             admin_thread=(
                 client_configurable.get("admin_thread") is True and is_admin(email, login=login)
             ),
