@@ -129,6 +129,7 @@ describe("sandboxProxy", () => {
     expect(
       response.headers.get("content-security-policy-report-only")
     ).toBeNull()
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff")
   })
 
   it("redirects to a trailing slash so relative URLs resolve", async () => {

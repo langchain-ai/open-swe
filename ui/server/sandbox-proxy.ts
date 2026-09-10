@@ -188,6 +188,9 @@ const CONTAINMENT_CSP =
 function contain(headers: Headers): Headers {
   headers.delete("content-security-policy-report-only")
   headers.set("content-security-policy", CONTAINMENT_CSP)
+  // The service declares its own content types, and a sniffed one could execute
+  // as script what it labelled as data.
+  headers.set("x-content-type-options", "nosniff")
   return headers
 }
 
