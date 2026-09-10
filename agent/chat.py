@@ -139,7 +139,7 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> object:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "repo_owner": cfg.chat_repo_owner,
             "repo_name": cfg.chat_repo_name,
             "pr_number": cfg.chat_pr_number,

@@ -66,7 +66,7 @@ async def _readable_thread(
 ) -> ThreadLike:
     """Fetch a thread and assert it is readable by the requesting user.
 
-    Read access is granted to any authenticated org member for surfaced-source
+    Read access is granted to any authenticated allowed user for surfaced-source
     threads; ``login``/``email`` are accepted for API parity but not required.
     """
     try:

@@ -54,7 +54,7 @@ from agent.dashboard.agent_overrides import (
     profile_model_routing_enabled,
     resolve_github_login,
 )
-from agent.dashboard.agent_usage import record_agent_run_usage
+from agent.dashboard.agent_usage import record_agent_invocation_usage
 from agent.dashboard.environments import (
     resolve_environment,
 )
@@ -148,7 +148,6 @@ from agent.tools import (
     approve_plan,
     background_execute,
     background_task,
-    capture_environment_snapshot,
     create_automation,
     create_sandbox_file_download_url,
     create_sandbox_service_url,
@@ -171,12 +170,13 @@ from agent.tools import (
     notify_automation_channel,
     open_pull_request,
     output_iframe,
+    publish_environment,
     read_user_settings,
     recreate_sandbox,
+    refresh_environment_start,
     report_platform_issue,
     request_pr_review,
     sandbox_reset,
-    save_environment,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -349,8 +349,8 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_start_new_thread",
-        "save_environment",
-        "capture_environment_snapshot",
+        "publish_environment",
+        "refresh_environment_start",
         "delete_environment",
         "create_automation",
         "update_automation",
@@ -445,8 +445,8 @@ ADMIN_TOOLS = (
     trigger_automation,
     delete_automation,
     list_environments,
-    save_environment,
-    capture_environment_snapshot,
+    publish_environment,
+    refresh_environment_start,
     delete_environment,
     save_organization_skill,
     delete_organization_skill,
@@ -621,7 +621,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
@@ -763,9 +763,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "plan_mode": self._plan_mode,
                     },
                 )
-                if cfg.prepare_run_id:
-                    await record_agent_run_usage(
-                        run_id=cfg.prepare_run_id,
+                if cfg.invocation_id:
+                    await record_agent_invocation_usage(
+                        invocation_id=cfg.invocation_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
                         user_email=self._user_email,

@@ -84,10 +84,10 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
 def thread_is_readable(metadata: Mapping[str, Any]) -> bool:
     """Any surfaced-source thread is readable by authenticated users.
 
-    Dashboard login is already gated by ``ALLOWED_GITHUB_ORGS`` (see
-    ``oauth.enforce_org_login_gate``), so any logged-in user is a trusted
-    org member. This lets teammates open "Open in Web" links shared in Slack
-    threads with read-only access.
+    Dashboard login is already gated by ``ALLOWED_GITHUB_ORGS`` or
+    ``ALLOWED_GITHUB_USERS`` (see ``oauth.enforce_github_login_gate``), so any
+    logged-in user is trusted. This lets teammates open "Open in Web" links
+    shared in Slack threads with read-only access.
     """
     return thread_source(metadata) in _SURFACED_SOURCES
 
