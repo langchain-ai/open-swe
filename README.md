@@ -74,8 +74,6 @@ Each cloud coding session is bound to its own persistent sandbox, so the agent c
 - Define personal and repository coding instructions plus organization-wide review guidelines
 - Swap sandbox providers, middleware, skills, triggers, and delivery policies
 
-See [Terminology and identifiers](docs/TERMINOLOGY.md) for the application-to-LangGraph/LangSmith identity mapping and compatibility rules.
-
 ## API contract
 
 [`swagger.json`](swagger.json) is the generated OpenAPI 3.1 contract for the custom FastAPI backend (`agent.webapp:app`). Import it into an OpenAPI 3.1-compatible viewer, or run `make run` and open `http://localhost:8000/docs` for interactive API documentation (`/openapi.json` serves the live schema).
