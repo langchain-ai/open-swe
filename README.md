@@ -9,7 +9,7 @@
 </div>
 
 <div align="center">
-  <h3>An open-source software factory built on Deep Agents by LangChain.</h3>
+  <h3>An open-source software factory for building, reviewing, and operating code.</h3>
 </div>
 
 <div align="center">
