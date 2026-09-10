@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
 import type {
@@ -46,6 +46,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
+import { api } from "@/lib/api"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -88,6 +89,18 @@ export function AgentsHome({
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
   const cloudEnabled = Boolean(session.data)
+  const preferences = useQuery({
+    queryKey: ["myPreferences"],
+    queryFn: api.getMyPreferences,
+    enabled: cloudEnabled,
+  })
+  // Visibility is fixed once a thread exists, so the only choice is made here,
+  // seeded from the user's default and overridable per thread.
+  const [visibilityOverride, setVisibilityOverride] = useState<
+    "public" | "private" | null
+  >(null)
+  const visibility =
+    visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const environmentOptions = useEnvironmentOptions(cloudEnabled)
   const environments = environmentOptions.data?.environments ?? []
   // undefined = untouched, so the run falls back to the default environment.
@@ -426,6 +439,7 @@ export function AgentsHome({
       prompt,
       images,
       repo,
+      visibility,
       repo_explicitly_none: repoOverride === null,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
@@ -438,6 +452,7 @@ export function AgentsHome({
       modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
+    configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
@@ -506,6 +521,30 @@ export function AgentsHome({
           </div>
         )}
         <AgentComposerDock>
+          {runTarget === "cloud" && !submittedDraft && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <label htmlFor="thread-visibility">Visibility</label>
+              <select
+                id="thread-visibility"
+                value={visibility}
+                onChange={(event) =>
+                  setVisibilityOverride(
+                    event.target.value as "public" | "private"
+                  )
+                }
+                className="rounded-md border border-border bg-background px-2 py-1 text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="private">Private · only you</option>
+                <option value="public">Workspace</option>
+              </select>
+              <span>
+                {visibility === "private"
+                  ? "Only you can view or prompt it; your personal integrations are available."
+                  : "Anyone in the workspace can view and prompt it; personal integrations stay off."}{" "}
+                Visibility cannot change later.
+              </span>
+            </div>
+          )}
           {localError && (
             <div className="mb-3 w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {localError}

@@ -25,6 +25,9 @@ from agent.sandboxes.state import (
 class _FakeSandboxBackend:
     id = "sandbox-1"
 
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        raise NotImplementedError
+
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         return ExecuteResponse(output=f"{self.id}: {command}: {timeout}", exit_code=0)
 
@@ -114,7 +117,18 @@ async def test_sandbox_proxy_offload_falls_back_when_backend_lacks_it() -> None:
     result = await proxy.aexecute_with_offload("cmd", "/capture/path", max_inline_bytes=80_000)
 
     assert result.offloaded is False
-    assert result.response.output == "sandbox-1: cmd: None"
+    assert result.response.output == "sandbox-1: cmd: 300"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_proxy_applies_default_execute_timeout() -> None:
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, _FakeSandboxBackend()), thread_id="t")
+
+    defaulted = await proxy.aexecute("rg pattern /workspace")
+    overridden = await proxy.aexecute("sleep 600", timeout=700)
+
+    assert defaulted.output == "sandbox-1: rg pattern /workspace: 300"
+    assert overridden.output == "sandbox-1: sleep 600: 700"
 
 
 @pytest.mark.asyncio
@@ -145,11 +159,11 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
 
     assert created == ["sandbox-1"]
     assert [result.output for result in results] == [
-        "sandbox-1: cmd-0: None",
-        "sandbox-1: cmd-1: None",
-        "sandbox-1: cmd-2: None",
-        "sandbox-1: cmd-3: None",
-        "sandbox-1: cmd-4: None",
+        "sandbox-1: cmd-0: 300",
+        "sandbox-1: cmd-1: 300",
+        "sandbox-1: cmd-2: 300",
+        "sandbox-1: cmd-3: 300",
+        "sandbox-1: cmd-4: 300",
     ]
     assert proxy.current.id == "sandbox-1"
     SANDBOX_BACKENDS.pop(thread_id, None)
@@ -181,11 +195,11 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
 
     assert reconnected == [thread_id]
     assert [result.output for result in results] == [
-        "sandbox-1: cmd-0: None",
-        "sandbox-1: cmd-1: None",
-        "sandbox-1: cmd-2: None",
-        "sandbox-1: cmd-3: None",
-        "sandbox-1: cmd-4: None",
+        "sandbox-1: cmd-0: 300",
+        "sandbox-1: cmd-1: 300",
+        "sandbox-1: cmd-2: 300",
+        "sandbox-1: cmd-3: 300",
+        "sandbox-1: cmd-4: 300",
     ]
     SANDBOX_BACKENDS.pop(thread_id, None)
 
