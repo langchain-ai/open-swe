@@ -1,6 +1,8 @@
+from types import SimpleNamespace
 from typing import Any, Literal, cast
 from unittest.mock import AsyncMock, patch
 
+import langgraph_sdk
 import pytest
 from langchain_core.tools import StructuredTool
 
@@ -8,7 +10,22 @@ from agent.tool_loaders import notion_mcp
 
 
 @pytest.fixture(autouse=True)
-def _resolve_participant():
+def _resolve_participant(monkeypatch):
+    monkeypatch.setattr(
+        "agent.run_config.get_config",
+        lambda: {"configurable": {"thread_id": "notion-thread", "github_login": "alice"}},
+    )
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(
+                get=AsyncMock(
+                    return_value={"metadata": {"visibility": "private", "owner_login": "alice"}}
+                )
+            )
+        ),
+    )
     with patch.object(notion_mcp, "resolve_participant", AsyncMock(return_value="alice")):
         yield
 

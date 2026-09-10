@@ -12,11 +12,12 @@ from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
 from agent.config import ENV
+from agent.credential_scope import private_credential_login
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import (
     cache_github_token_for_thread,
-    get_github_token_from_thread,
     github_token_principal,
+    invalidate_cached_github_token,
 )
 from agent.linear.client import comment_on_linear_issue
 from agent.run_config import RunConfig
@@ -457,13 +458,10 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
     bot_token, expires_at = await get_github_app_installation_token_with_expiry()
     if not bot_token:
         raise RuntimeError(
-            "Bot-token-only mode is active (LANGSMITH_API_KEY set without "
-            "X_SERVICE_AUTH_JWT_SECRET) but the GitHub App is not configured. "
+            "The GitHub App is not configured for workspace authentication. "
             "Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATION_ID."
         )
-    logger.info(
-        "Using GitHub App installation token for thread %s (bot-token-only mode)", thread_id
-    )
+    logger.info("Using GitHub App installation token", extra={"thread_id": thread_id})
     return _cache_resolved_github_token(
         thread_id, bot_token, expires_at=expires_at, is_bot_token=True
     )
@@ -472,66 +470,13 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
 async def resolve_github_token(
     config: Mapping[str, Any] | RunnableConfig, thread_id: str
 ) -> tuple[str, str | None]:
-    """Resolve a GitHub token from the run config based on the source.
-
-    Routes to the correct auth method depending on the source. Sources that
-    carry a mapped GitHub login (Slack, Linear, dashboard, schedule) resolve a
-    per-user OAuth token from the dashboard store; GitHub runs are login-based;
-    otherwise resolution falls back to email-based auth.
-
-    In bot-token-only mode (LANGSMITH_API_KEY set without
-    X_SERVICE_AUTH_JWT_SECRET), the GitHub App installation token is used
-    for all operations instead of per-user OAuth tokens.
-
-    Raises:
-        RuntimeError: If source is missing or token resolution fails.
-    """
+    """Use workspace bot auth publicly and the verified owner's OAuth privately."""
     cfg = RunConfig.from_config(config)
-    source = cfg.source
-    if not source:
-        logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
-        raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")
-
-    github_login = cfg.github_login
-
-    # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
-    # for sources that carry a mapped GitHub login (Slack, Linear, dashboard).
-    # This is what lets the agent open PRs as the triggering user.
-    if (
-        source in ("slack", "linear", "dashboard", "schedule")
-        and github_login
-        and github_login.strip()
-    ):
-        try:
-            user_token = await _resolve_dashboard_user_token(thread_id, github_login)
-        except ValueError as exc:
-            logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
-            raise RuntimeError(str(exc)) from exc
-        if user_token is not None:
-            return user_token
-        # No valid user token. In bot-token-only mode fall back to the bot so the
-        # deployment stays functional; otherwise block and require auth.
-        if is_bot_token_only_mode():
-            return await _resolve_bot_installation_token(thread_id)
-        raise GitHubUserAuthRequired(source, github_login)
-
-    if is_bot_token_only_mode():
+    login = await private_credential_login(config, thread_id=thread_id)
+    await invalidate_cached_github_token(thread_id)
+    if login is None:
         return await _resolve_bot_installation_token(thread_id)
-
-    try:
-        if source == "github":
-            cached_token, cached_expires_at = await get_github_token_from_thread(
-                thread_id, principal=github_token_principal(login=github_login)
-            )
-            if cached_token:
-                return cached_token, cached_expires_at
-            from agent.dashboard.user_mappings import email_for_login
-
-            email = await email_for_login(github_login)
-            if not email:
-                raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
-            return await resolve_token_from_email(email, source)
-        return await resolve_token_from_email(cfg.user_email, source)
-    except ValueError as exc:
-        logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
-        raise RuntimeError(str(exc)) from exc
+    user_token = await _resolve_dashboard_user_token(thread_id, login)
+    if user_token is None:
+        raise GitHubUserAuthRequired(cfg.source or "private", login)
+    return user_token

@@ -229,7 +229,7 @@ On LangGraph Platform, set them under the deployment's environment variables; sa
 
 **Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Runs it starts act as the GitHub App until the Slack user is linked to a GitHub login, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
 
-**GitHub.** Signing in once is also what lets GitHub-triggered runs act as you: they run as the commenting user and need the token the sign-in stored; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
+**GitHub.** GitHub-triggered conversations are public and use the GitHub App installation identity; the commenter must still have a linked account, and an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
 
 ---
 
@@ -347,6 +347,21 @@ Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `
 - The URL configured in GitHub, Slack, or Linear must be the deployment's URL; GitHub shows each delivery and its response under the App's **Advanced** tab. A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
 - Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create for Linear.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+
+### Thread credential scope
+
+Public threads, including legacy threads without visibility metadata, use the
+GitHub App installation identity for GitHub operations and PR creation. They load
+workspace MCP connections and organization skills. Personal Notion connections,
+user skills, and user custom instructions are available only in a private thread
+started by its immutable owner. The same ownership check applies when a personal
+MCP tool refreshes its credentials at execution time.
+
+Private threads use their owner's stored GitHub OAuth token for server-side
+GitHub operations and PR creation. If that token is unavailable, the owner must
+sign in again; the run does not fall back to the bot. Sandbox GitHub proxy access
+continues to use the GitHub App installation token in both kinds of thread.
+User identity and membership checks still apply to public runs.
 
 ### GitHub authentication errors
 

@@ -1,8 +1,10 @@
 import asyncio
 import sys
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import langgraph_sdk
 import pytest
 
 import agent.tools.open_pull_request  # noqa: F401
@@ -99,6 +101,19 @@ def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _Rout
 
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -> None:
+    configurable.setdefault("thread_id", "pr-thread")
+    metadata = (
+        {"visibility": "public"}
+        if configurable.get("source") == "github"
+        else {"visibility": "private", "owner_login": configurable.get("github_login")}
+    )
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": metadata}))
+        ),
+    )
     monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": configurable})
     monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable}, raising=False)
 
@@ -237,7 +252,7 @@ def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) ->
     assert client.post_calls[0]["headers"]["Authorization"] == "Bearer bot-tok"
 
 
-def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_private_pr_requires_user_token(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
     from agent.dashboard import profiles
@@ -255,7 +270,8 @@ def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPat
     client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 3, "user": {}}))
     _install_client(monkeypatch, client)
 
-    assert _open()["token_kind"] == "bot"
+    with pytest.raises(opr.GitHubUserAuthRequired):
+        _open()
 
 
 def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:

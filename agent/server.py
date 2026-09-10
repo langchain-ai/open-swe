@@ -45,6 +45,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from agent.credential_scope import private_credential_login
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
     load_profile,
@@ -105,6 +106,7 @@ from agent.middleware import (
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     WorkflowPushGuardMiddleware,
+    WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     record_run_usage,
@@ -408,6 +410,7 @@ def _general_purpose_subagent(
     *,
     sandbox_file_downloads: bool = False,
     offloading: ConversationOffloadingMiddleware | None = None,
+    workspace_skills: WorkspaceSkillsMiddleware | None = None,
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -423,10 +426,14 @@ def _general_purpose_subagent(
         + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
-        "middleware": [
-            *_subagent_middleware(dynamic_tools),
-            *([offloading] if offloading else []),
-        ],
+        "middleware": cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [
+                *([workspace_skills] if workspace_skills else []),
+                *_subagent_middleware(dynamic_tools),
+                *([offloading] if offloading else []),
+            ],
+        ),
     }
     if skills:
         subagent["skills"] = skills
@@ -606,10 +613,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         draft_prs: bool,
         plan_mode: bool,
         admin_environments: bool,
+        credential_login: str | None = None,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
         self._profile_login = profile_login
+        self._credential_login = credential_login
         self._repo_instructions = repo_instructions
         self._model_id = model_id
         self._effort = effort
@@ -625,6 +634,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
         return {
+            "credential_login": self._credential_login,
             "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
             "source": self._source,
@@ -741,7 +751,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             environment = await resolve_environment(environment_slug(cfg))
         async with aphase(self._thread_id, "prepare.sender_context"):
             sender_instructions, participant_identities = await asyncio.gather(
-                _resolve_user_custom_instructions(self._profile_login),
+                _resolve_user_custom_instructions(self._credential_login),
                 _thread_participant_identities(self._thread_id),
             )
             sender_context = construct_sender_context(
@@ -825,6 +835,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ).with_config(bindable_config(config))
 
     profile_login = resolve_github_login(as_json_object(config))
+    credential_login = None if is_desktop_run(cfg) else await private_credential_login(config)
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
@@ -841,7 +852,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
-    # authorization and credentialed integrations, which stay personal to them.
+    # authorization. Personal integrations require verified private ownership.
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
     local_run = is_desktop_run(cfg)
@@ -1052,7 +1063,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             _phase_result(
                 thread_id,
                 "factory.notion_tools",
-                lambda: _notion_tools_for(profile_login),
+                lambda: _notion_tools_for(credential_login),
             ),
         )
 
@@ -1104,6 +1115,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         *(ADMIN_TOOLS if admin_thread else ()),
     ]
+    if credential_login is None:
+        personal_tools = (
+            save_user_instructions,
+            save_user_skill,
+            delete_user_skill,
+            read_user_settings,
+        )
+        static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     static_tools = apply_tool_descriptions(static_tools)
@@ -1147,10 +1166,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
         )
         skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
-        if profile_login:
+        if credential_login:
             skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
                 StoreBackend(
-                    namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login)
+                    namespace=lambda _runtime, login=credential_login: (SKILLS_NAMESPACE, login)
                 )
             )
             skill_sources.insert(0, USER_SKILLS_ROUTE)
@@ -1192,6 +1211,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway=use_gateway,
         **title_model_kwargs,
     )
+    workspace_skills = (
+        WorkspaceSkillsMiddleware(backend=agent_backend, sources=skill_sources)
+        if credential_login is None and not local_run
+        else None
+    )
     return create_deep_agent(
         model=main_model,
         system_prompt="",
@@ -1201,6 +1225,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 subagent_model,
                 tools=subagent_tools,
                 skills=skill_sources,
+                workspace_skills=workspace_skills,
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
                 offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
@@ -1216,6 +1241,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     main_model, agent_backend, manual=cfg.offload_conversation is True
                 ),
                 PrepareAgentRunMiddleware(
+                    credential_login=credential_login,
                     thread_id=thread_id,
                     config=config,
                     profile_login=profile_login,
@@ -1231,6 +1257,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     plan_mode=plan_mode,
                     admin_environments=admin_thread,
                 ),
+                *([workspace_skills] if workspace_skills else []),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),

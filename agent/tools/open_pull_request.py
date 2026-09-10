@@ -1,4 +1,4 @@
-"""Open a GitHub pull request attributed to the triggering user."""
+"""Open a GitHub pull request using the thread's credential scope."""
 
 import logging
 from typing import Any
@@ -8,10 +8,12 @@ import httpx2
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.credential_scope import private_credential_login
 from agent.dashboard.agent_usage import record_agent_pr_usage
 from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
+from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,
@@ -30,7 +32,6 @@ from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
-_USER_TOKEN_SOURCES = ("slack", "linear", "dashboard")
 _REFERENCES_HEADING = "## References"
 _ACCESS_FAILURE_CODE = "github_app_access_missing_or_repo_not_found"
 _BRANCH_FAILURE_CODE = "github_pr_branch_not_visible"
@@ -50,31 +51,16 @@ _REPORTED_RESPONSE_HEADERS = (
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
-    """Return ``(token, kind)`` for opening the PR.
+    """Return the workspace bot token or the verified private owner's token."""
+    login = await private_credential_login()
+    if login is None:
+        return await get_github_app_installation_token(), "bot"
+    from agent.dashboard.profiles import get_valid_access_token
 
-    Prefers the triggering user's OAuth token (so the PR is created *as them*)
-    for Slack/Linear/dashboard runs with a mapped GitHub login, resolving it by
-    login from the dashboard OAuth store. Falls back to the GitHub App
-    installation token (creator = open-swe[bot]) for GitHub-triggered runs,
-    unmapped users, or bot-token-only deployments — preserving today's behavior.
-
-    The token is resolved by login rather than read from the shared thread
-    metadata: Slack thread ids are shared across a conversation, so a cached
-    token could belong to a prior triggering user.
-    """
-    cfg = RunConfig.from_runtime()
-    source = cfg.source
-    github_login = cfg.github_login
-
-    if source in _USER_TOKEN_SOURCES and github_login and github_login.strip():
-        from agent.dashboard.profiles import get_valid_access_token
-
-        user_token = await get_valid_access_token(github_login.strip())
-        if user_token:
-            return user_token, "user"
-        logger.info("No valid user token for %s; opening PR as open-swe[bot]", github_login.strip())
-
-    return await get_github_app_installation_token(), "bot"
+    token = await get_valid_access_token(login)
+    if not token:
+        raise GitHubUserAuthRequired(RunConfig.from_runtime().source or "private", login)
+    return token, "user"
 
 
 def _auth_headers(token: str) -> dict[str, str]:
