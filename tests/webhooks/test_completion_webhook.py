@@ -402,7 +402,9 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
 
 
 @pytest.mark.asyncio
-async def test_linear_source_does_not_use_direct_api(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_linear_source_without_mcp_cannot_post(
+    monkeypatch: pytest.MonkeyPatch, fake_store
+) -> None:
     client = _FakeClient({"source": "linear", "source_context": {"linear_issue": {"id": "iss_1"}}})
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
 

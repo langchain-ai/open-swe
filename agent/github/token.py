@@ -18,6 +18,7 @@ from agent.github.thread_token import (
     get_github_token_from_thread,
     github_token_principal,
 )
+from agent.linear.notifications import post_linear_notification
 from agent.run_config import RunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
@@ -248,6 +249,14 @@ async def leave_failure_comment(
     cfg = RunConfig.from_runtime()
 
     if source == "linear":
+        if cfg.linear_issue and cfg.linear_issue.id:
+            await post_linear_notification(
+                cfg.linear_issue.id,
+                warning(
+                    "Open SWE couldn't resolve your GitHub account for this run. Sign in "
+                    "with GitHub in your Open SWE settings, then mention it again."
+                ),
+            )
         return
     if source == "slack":
         active = await get_active_slack_thread(

@@ -292,6 +292,10 @@ have been removed. Configure agent access to LangSmith through Workspace MCPs.
 Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and
 `LANGSMITH_ENDPOINT`. Linear webhook intake uses the signed webhook setup;
 configure Linear replies and other agent operations through Workspace MCPs.
+Automatic failure notices use the workspace connection named `linear` and its
+selected `save_comment` tool (`create_comment` is also supported). These notices
+run independently of the agent and honor the connection's enabled state and tool
+selection. Delivery failures are logged without marking the run as notified.
 
 Use the endpoint for your Datadog site (this example uses US5). Replace the key
 placeholders directly in the dashboard. Import supports multiple named servers,
