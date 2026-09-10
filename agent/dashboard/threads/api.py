@@ -225,6 +225,9 @@ async def send_dashboard_message(
 
     prompt = body.content.strip()
     now_ms = _now_ms()
+    # Queued follow-ups are consumed by the run already in flight, whose graph is
+    # fixed, so Auto-vs-explicit routing is deliberately not recorded here; the
+    # next run.start carries the picker state and applies it.
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     handoff_metadata = dict(metadata)
     metadata_update: dict[str, Any] = {
@@ -232,7 +235,6 @@ async def send_dashboard_message(
         "updated_at_ms": now_ms,
         "feedback_last_activity_at_ms": now_ms,
         "plan_mode": body.plan_mode,
-        "model_selection": body.model_selection,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
         PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
     }
@@ -279,12 +281,6 @@ async def send_dashboard_message(
             str(body.client_message_id) if body.client_message_id else f"queued-{uuid.uuid4()}"
         ),
         "created_at_ms": now_ms,
-        "model_selection": body.model_selection,
-        **(
-            {"agent_model_id": chosen_model, "agent_effort": chosen_effort}
-            if chosen_model and chosen_effort
-            else {}
-        ),
         "sender": {
             "id": f"github:{login}",
             "platform": "github",

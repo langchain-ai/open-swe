@@ -1652,6 +1652,50 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
     assert cast(dict[str, object], payload["sender"])["id"] == "github:teammate"
 
 
+async def test_send_dashboard_message_leaves_model_selection_to_next_run(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+    captured: dict[str, object] = {}
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": "tid",
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "owner",
+                    "model_selection": "explicit",
+                    "model": "openai:gpt-5.6-sol",
+                    "effort": "high",
+                },
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append(metadata)
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    async def active(thread_id: str) -> bool:
+        return True
+
+    async def fake_queue(thread_id: str, payload: dict[str, object]) -> bool:
+        captured["payload"] = payload
+        return True
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_thread_active_status", active)
+    patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue)
+
+    await thread_api.send_dashboard_message(
+        "tid",
+        "owner",
+        thread_runs.ThreadMessageBody(content="switch to auto"),
+    )
+
+    assert updates and all("model_selection" not in update for update in updates)
+    assert "model_selection" not in cast(dict[str, object], captured["payload"])
+
+
 async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

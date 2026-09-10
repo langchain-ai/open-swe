@@ -92,7 +92,6 @@ class ThreadMessageBody(BaseModel):
     images: list[DashboardImageBody] = Field(default_factory=list)
     model_id: str | None = None
     effort: str | None = None
-    model_selection: Literal["auto", "explicit"] = "auto"
     plan_mode: bool = False
     client_message_id: uuid.UUID | None = None
 

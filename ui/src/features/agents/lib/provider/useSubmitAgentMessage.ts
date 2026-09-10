@@ -109,7 +109,6 @@ export function useSubmitAgentMessage(threadId: string) {
           images: vars.images,
           model_id: vars.model_id,
           effort: vars.effort,
-          model_selection: vars.model_selection,
           plan_mode: vars.plan_mode,
           client_message_id: id,
         })

@@ -31,7 +31,6 @@ export interface ThreadMessageRequest {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
-  model_selection?: "auto" | "explicit"
   plan_mode?: boolean
   client_message_id?: string
 }

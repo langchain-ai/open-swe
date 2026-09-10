@@ -141,7 +141,6 @@ export function AgentThreadView({
         images,
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
-        model_selection: activeSelection ? "explicit" : "auto",
         plan_mode: activePlanMode,
       })
       setPlanFeedbackPending(false)
