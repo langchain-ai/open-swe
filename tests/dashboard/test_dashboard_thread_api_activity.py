@@ -1,6 +1,8 @@
 from typing import Any
 
-from agent.dashboard import thread_api
+from agent.dashboard.threads import api as thread_api
+from agent.dashboard.threads import listing as thread_listing
+from tests.conftest import patch_thread_module
 
 
 class FakeThreads:
@@ -70,9 +72,9 @@ async def test_list_dashboard_threads_refreshes_finished_run_status(monkeypatch)
         },
         "success",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
-    results = await thread_api.list_dashboard_threads("octocat")
+    results = await thread_listing.list_dashboard_threads("octocat")
 
     assert results[0]["status"] == "finished"
     assert results[0]["viewed"] is False
@@ -89,7 +91,7 @@ async def test_get_dashboard_thread_marks_finished_thread_viewed(monkeypatch) ->
         },
         "success",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat")
 
@@ -108,7 +110,7 @@ async def test_get_dashboard_thread_marks_viewed_for_any_authenticated_user(monk
         },
         "success",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "someone-else")
 
@@ -126,7 +128,7 @@ async def test_get_dashboard_thread_skips_mark_viewed_when_disabled(monkeypatch)
         },
         "success",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat", mark_viewed=False)
 
@@ -146,7 +148,7 @@ async def test_get_dashboard_thread_does_not_mark_running_thread_viewed(monkeypa
         "running",
         thread_status="busy",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat")
 
@@ -191,7 +193,7 @@ async def test_get_dashboard_thread_hydrates_queued_dashboard_messages(monkeypat
             }
         },
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat")
 

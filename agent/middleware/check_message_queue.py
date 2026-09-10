@@ -23,6 +23,7 @@ from agent.input_messages import (
     visible_dynamic_context_hashes,
 )
 from agent.middleware.trace import scrub_middleware_inputs
+from agent.prompts import load_prompt
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
@@ -164,12 +165,7 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
         logger.debug(
             "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
         )
-    message = (
-        "A PR babysitting event arrived while you were already working on this PR. "
-        "Do not start a separate run for that event. Before finishing, re-check the "
-        "PR's latest CI status and review comments, then address any newly failed "
-        "checks or actionable comments that are clear and deterministic."
-    )
+    message = load_prompt("runs/autofix-event.md")
     details = item.value.get("details")
     if isinstance(details, list):
         joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
@@ -301,6 +297,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                         injected_dynamic_context_hashes=injected,
                     )
                     _flush_blocks(queued_updates, content_blocks, injected)
+                    queue_id = content.get("queue_id")
+                    if isinstance(queue_id, str) and structured:
+                        structured[-1]["id"] = queue_id
                     queued_updates.extend(cast(list[dict[str, Any]], structured))
                 else:
                     content_blocks.extend(blocks)

@@ -146,6 +146,31 @@ function configureAutoUpdater() {
     );
 }
 
+async function checkForDesktopUpdates() {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    if (result?.isUpdateAvailable) {
+      await dialog.showMessageBox({
+        type: "info",
+        message: `${appRuntime.name} ${result.updateInfo.version} is available`,
+        detail: "The update is downloading and will be ready to install soon.",
+      });
+      return;
+    }
+    await dialog.showMessageBox({
+      type: "info",
+      message: `${appRuntime.name} is up to date`,
+      detail: `Version ${app.getVersion()} is the latest available version.`,
+    });
+  } catch (error) {
+    console.warn("Could not check for desktop updates", error);
+    dialog.showErrorBox(
+      `Could not check for ${appRuntime.name} updates`,
+      error.message,
+    );
+  }
+}
+
 function sendDesktopCommand(commandId) {
   if (!isDesktopCommandId(commandId) || !mainWindow || mainWindow.isDestroyed())
     return;
@@ -962,6 +987,11 @@ function createMenu() {
     accelerator: "CmdOrCtrl+,",
     click: () => sendDesktopCommand("open-settings"),
   };
+  const checkForUpdatesItem = {
+    label: "Check for Updates…",
+    enabled: app.isPackaged,
+    click: () => void checkForDesktopUpdates(),
+  };
   const template = [
     ...(process.platform === "darwin"
       ? [
@@ -970,6 +1000,7 @@ function createMenu() {
             submenu: [
               { role: "about" },
               settingsItem,
+              checkForUpdatesItem,
               backendSettingsItem,
               { type: "separator" },
               { role: "services" },
@@ -1030,7 +1061,10 @@ function createMenu() {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
           click: () => {
-            if (mainWindow) void loadApp(mainWindow);
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            if (isAppUrl(mainWindow.webContents.getURL()))
+              mainWindow.webContents.reload();
+            else void loadApp(mainWindow);
           },
         },
         ...(isDevelopment ? [{ role: "toggleDevTools" }] : []),
@@ -1042,10 +1076,12 @@ function createMenu() {
         { role: "togglefullscreen" },
       ],
     },
-    {
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
-    },
+    process.platform === "darwin"
+      ? { role: "windowMenu" }
+      : {
+          label: "Window",
+          submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
+        },
     {
       role: "help",
       submenu: [

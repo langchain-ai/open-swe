@@ -17,6 +17,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.prompts import render_prompt
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
 from agent.webhooks import common
@@ -169,20 +170,16 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         if user_name
         else ""
     )
-    prompt = (
-        f"Please work on the following issue:\n\n"
-        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"## Title: {title}\n\n"
-        f"{triggered_by_line}"
-        f"## Linear Ticket: {identifier} - Ticket ID: {issue_id}\n\n"
-        f"{ticket_url_line}"
-        f"## Description:\n{description}\n\n"
-        "Please analyze this issue and implement the necessary changes. "
-        "If you open a PR for this issue, make sure the PR description links back to "
-        "this Linear ticket and follows this repository's PR conventions for the title, body, "
-        "release note, and/or changelog. Inspect AGENTS.md, PR templates, "
-        ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
-        f"When you're done, commit and push your changes. {tag_instruction}"
+    prompt = render_prompt(
+        "runs/linear-issue.md",
+        repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
+        title=title,
+        triggered_by_line=triggered_by_line,
+        identifier=identifier,
+        issue_id=issue_id,
+        ticket_url_line=ticket_url_line,
+        description=description,
+        tag_instruction=tag_instruction,
     )
     description_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
     image_blocks_by_url: dict[str, dict[str, Any]] = {}
@@ -326,7 +323,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         configurable,
         source="linear",
         input=run_input,
-        metadata=common._AGENT_VERSION_METADATA,
+        metadata=common.AGENT_VERSION_METADATA,
     )
     common.logger.info(
         "LangGraph run dispatched for thread %s (run=%s)",

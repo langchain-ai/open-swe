@@ -26,7 +26,10 @@ vi.mock("@/features/agents/lib/stream/AgentStreamProvider", () => ({
 const queueMessage = vi.fn()
 
 vi.mock("@/features/agents/lib/api", () => ({
-  agentsApi: { queueMessage: () => queueMessage() },
+  agentsApi: {
+    queueMessage: (threadId: string, body: unknown) =>
+      queueMessage(threadId, body),
+  },
   AgentsApiError: class extends Error {
     constructor(
       public readonly status: number,
@@ -88,6 +91,11 @@ function queuedMessages(client: QueryClient) {
     ?.queuedMessages
 }
 
+function pendingMessages(client: QueryClient) {
+  return client.getQueryData<AgentThread>(agentThreadKeys.detail(THREAD_ID))
+    ?.pendingMessages
+}
+
 function sidebarStatus(client: QueryClient) {
   return client.getQueryData<InfiniteData<ThreadsPage>>(
     agentThreadKeys.infinitePages(SIDEBAR_PARAMS)
@@ -102,15 +110,62 @@ beforeEach(() => {
 })
 
 describe("useSubmitAgentMessage", () => {
-  it("never flashes a queued bubble when the send starts a new run", async () => {
-    queueMessage.mockRejectedValueOnce(new AgentsApiError(409, "no active run"))
+  it("shows an optimistic user message before the idle probe resolves", async () => {
+    let rejectProbe: (error: Error) => void = () => {}
+    queueMessage.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectProbe = reject
+        })
+    )
     const { client, queuedCounts, result } = setup()
 
-    await result.current.mutateAsync({ content: "hi", images: [] })
+    const pending = result.current.mutateAsync({ content: "hi", images: [] })
+    await waitFor(() => expect(pendingMessages(client)).toHaveLength(1))
+    const optimisticId = pendingMessages(client)?.[0]?.id
+    expect(pendingMessages(client)?.[0]).toMatchObject({
+      content: "hi",
+      status: "sending",
+    })
+    expect(stream.submit).not.toHaveBeenCalled()
 
-    await waitFor(() => expect(stream.submit).toHaveBeenCalled())
+    rejectProbe(new AgentsApiError(409, "no active run"))
+    await pending
+
+    expect(stream.submit).toHaveBeenCalledWith(
+      {
+        messages: [
+          expect.objectContaining({ id: optimisticId, type: "human" }),
+        ],
+      },
+      expect.any(Object)
+    )
+    expect(pendingMessages(client)).toEqual([
+      expect.objectContaining({ id: optimisticId, status: "sending" }),
+    ])
     expect(sidebarStatus(client)).toBe("running")
     expect(queuedCounts.every((count) => count === 0)).toBe(true)
+  })
+
+  it("marks the optimistic message failed when run start rejects", async () => {
+    queueMessage.mockRejectedValueOnce(new AgentsApiError(409, "no active run"))
+    let rejectSubmission: (error: Error) => void = () => {}
+    stream.submit.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectSubmission = reject
+        })
+    )
+    const { client, result } = setup()
+
+    await result.current.mutateAsync({ content: "try me", images: [] })
+    rejectSubmission(new Error("run start failed"))
+
+    await waitFor(() =>
+      expect(pendingMessages(client)).toEqual([
+        expect.objectContaining({ content: "try me", status: "failed" }),
+      ])
+    )
   })
 
   it("shows the queued bubble once a run this client never joined accepts it", async () => {
@@ -119,6 +174,13 @@ describe("useSubmitAgentMessage", () => {
     await result.current.mutateAsync({ content: "hi", images: [] })
 
     expect(queuedMessages(client)).toHaveLength(1)
+    expect(pendingMessages(client)).toEqual([])
+    expect(queueMessage).toHaveBeenCalledWith(
+      THREAD_ID,
+      expect.objectContaining({
+        client_message_id: queuedMessages(client)?.[0]?.id,
+      })
+    )
     expect(stream.submit).not.toHaveBeenCalled()
   })
 
@@ -137,5 +199,19 @@ describe("useSubmitAgentMessage", () => {
     await waitFor(() => expect(queuedMessages(client)).toHaveLength(1))
     acceptQueue()
     await pending
+  })
+
+  it("keeps a failed optimistic user message", async () => {
+    queueMessage.mockRejectedValueOnce(new AgentsApiError(502, "unavailable"))
+    const { client, result } = setup()
+
+    await expect(
+      result.current.mutateAsync({ content: "try me", images: [] })
+    ).rejects.toThrow("unavailable")
+
+    expect(pendingMessages(client)).toEqual([
+      expect.objectContaining({ content: "try me", status: "failed" }),
+    ])
+    expect(queuedMessages(client)).toBeUndefined()
   })
 })

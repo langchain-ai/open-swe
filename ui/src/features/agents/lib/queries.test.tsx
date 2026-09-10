@@ -289,6 +289,7 @@ describe("sidebar queries", () => {
         resolved: false,
         scope: "interactive",
         ownerless: true,
+        sortBy: "created_at",
       })
     )
 
@@ -300,6 +301,7 @@ describe("sidebar queries", () => {
         offset: 0,
         resolved: false,
         scope: "interactive",
+        sortBy: "created_at",
       })
     )
   })

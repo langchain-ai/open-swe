@@ -15,6 +15,7 @@ from agent.github import webhook as github_webhooks
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
 from agent.slack.client import GitHubPrRef
+from agent.slack.request import SlackRequest
 from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
 from agent.webhooks import common as webhook_common
@@ -38,7 +39,7 @@ def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", resolve)
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", lookup)
-    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
 
 
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
@@ -119,7 +120,7 @@ def test_auto_review_enablement_uses_dashboard_opt_in(monkeypatch) -> None:
 
     assert (
         asyncio.run(
-            webhook_common._is_repo_auto_review_enabled(
+            webhook_common.is_repo_auto_review_enabled(
                 {"owner": "langchain-ai", "name": "open-swe-app"}
             )
         )
@@ -128,7 +129,7 @@ def test_auto_review_enablement_uses_dashboard_opt_in(monkeypatch) -> None:
     assert seen == {"owner": "langchain-ai", "name": "open-swe-app"}
     assert (
         asyncio.run(
-            webhook_common._is_repo_auto_review_enabled(
+            webhook_common.is_repo_auto_review_enabled(
                 {"owner": "langchain-ai", "name": "open-swe"}
             )
         )
@@ -146,7 +147,7 @@ def test_github_webhook_skips_automatic_review_when_disabled(monkeypatch) -> Non
         nonlocal called
         called = True
 
-    monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
+    monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(github_webhooks, "process_github_pr_ready", fake_process_github_pr_ready)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
@@ -316,7 +317,7 @@ def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> 
         "process_github_review_finding_reply",
         fake_process_github_review_finding_reply,
     )
-    monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
+    monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(app)
@@ -388,7 +389,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
 
-    monkeypatch.setattr(webhook_common, "_get_thread_metadata_safe", fake_get_thread_metadata_safe)
+    monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", fake_get_thread_metadata_safe)
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token_with_expiry", fake_get_token_with_expiry
     )
@@ -397,7 +398,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     monkeypatch.setattr(webhook_common, "reconcile_findings_with_review_threads", fake_reconcile)
     monkeypatch.setattr(webhook_common, "list_reviewer_findings", fake_list_findings)
     monkeypatch.setattr(webhook_common, "append_finding_interaction", fake_append_interaction)
-    monkeypatch.setattr(webhook_common, "_store_current_reviewer_run_id", fake_store_current_run_id)
+    monkeypatch.setattr(webhook_common, "store_current_reviewer_run_id", fake_store_current_run_id)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
 
     asyncio.run(
@@ -466,7 +467,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
 
-    monkeypatch.setattr(webhook_common, "_get_thread_metadata_safe", fake_get_thread_metadata_safe)
+    monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", fake_get_thread_metadata_safe)
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token_with_expiry", fake_get_token_with_expiry
     )
@@ -475,7 +476,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     monkeypatch.setattr(webhook_common, "reconcile_findings_with_review_threads", fake_reconcile)
     monkeypatch.setattr(webhook_common, "list_reviewer_findings", fake_list_findings)
     monkeypatch.setattr(webhook_common, "append_finding_interaction", fake_append_interaction)
-    monkeypatch.setattr(webhook_common, "_store_current_reviewer_run_id", fake_store_current_run_id)
+    monkeypatch.setattr(webhook_common, "store_current_reviewer_run_id", fake_store_current_run_id)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
 
     asyncio.run(
@@ -619,7 +620,7 @@ def test_slack_webhook_routes_docs_plz_channel_to_agent(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
-        webhook_common, "_get_slack_channel_context", fake_get_slack_channel_context
+        webhook_common, "resolve_slack_channel_context", fake_get_slack_channel_context
     )
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
@@ -650,9 +651,9 @@ def test_slack_webhook_routes_docs_plz_channel_to_agent(monkeypatch) -> None:
         "channel_context": channel_context,
     }
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
-    assert event_data["channel_context"] == channel_context
-    assert event_data["text"] == "<@UBOT> please update docs"
+    assert isinstance(event_data, SlackRequest)
+    assert event_data.channel_context == channel_context
+    assert event_data.text == "<@UBOT> please update docs"
 
 
 def test_slack_webhook_malformed_review_command_starts_agent(monkeypatch) -> None:
@@ -695,10 +696,8 @@ def test_slack_webhook_malformed_review_command_starts_agent(monkeypatch) -> Non
     assert response.json()["message"] == "Slack mention queued"
     assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
-    assert (
-        event_data["text"] == "<@UBOT> review https://github.com/langchain-ai/open-swe/issues/1244"
-    )
+    assert isinstance(event_data, SlackRequest)
+    assert event_data.text == "<@UBOT> review https://github.com/langchain-ai/open-swe/issues/1244"
 
 
 def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
@@ -728,7 +727,7 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
     monkeypatch.setattr(
         webhook_common,
-        "_is_repo_allowed",
+        "is_repo_allowed",
         lambda repo_config: (_ for _ in ()).throw(
             AssertionError("Slack webhook should not gate inferred repos with allowlists")
         ),
@@ -753,8 +752,8 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     assert response.json()["message"] == "Slack mention queued"
     assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
-    assert event_data["text"] == "<@UBOT> review this branch"
+    assert isinstance(event_data, SlackRequest)
+    assert event_data.text == "<@UBOT> review this branch"
 
 
 def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> None:
@@ -807,9 +806,9 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
         "slack_user_id": "U123",
     }
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
-    assert event_data["thread_ts"] == "1700000000.000100"
-    assert event_data["event_ts"] == "1700000000.000200"
+    assert isinstance(event_data, SlackRequest)
+    assert event_data.thread_ts == "1700000000.000100"
+    assert event_data.event_ts == "1700000000.000200"
 
 
 def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
@@ -865,9 +864,9 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
         "slack_user_id": "U123",
     }
     event_data = captured["event_data"]
-    assert isinstance(event_data, dict)
-    assert event_data["text"] == "please check my branch"
-    assert event_data["treat_all_messages_as_mentions"] is True
+    assert isinstance(event_data, SlackRequest)
+    assert event_data.text == "please check my branch"
+    assert event_data.treat_all_messages_as_mentions is True
 
 
 def test_slack_webhook_accepts_unmentioned_ready_plan_reply(monkeypatch) -> None:
@@ -888,9 +887,7 @@ def test_slack_webhook_accepts_unmentioned_ready_plan_reply(monkeypatch) -> None
     monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(
-        slack_webhooks, "_slack_user_can_reply_to_ready_plan", fake_ready_plan_reply
-    )
+    monkeypatch.setattr(slack_webhooks, "slack_user_can_reply_to_ready_plan", fake_ready_plan_reply)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
 
@@ -913,7 +910,7 @@ def test_slack_webhook_accepts_unmentioned_ready_plan_reply(monkeypatch) -> None
     assert response.json()["message"] == "Slack mention queued"
     assert captured["plan_reply_check"] == ("C123", "1700000000.000100", "U123")
     event_data = cast(dict[str, object], captured["event_data"])
-    assert event_data["text"] == "looks good, go ahead"
+    assert event_data.text == "looks good, go ahead"
 
 
 def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
@@ -923,9 +920,7 @@ def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(
-        slack_webhooks, "_slack_user_can_reply_to_ready_plan", fake_ready_plan_reply
-    )
+    monkeypatch.setattr(slack_webhooks, "slack_user_can_reply_to_ready_plan", fake_ready_plan_reply)
 
     response = _post_slack_webhook(
         TestClient(app),
@@ -1084,7 +1079,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         captured["set_metadata_thread_id"] = thread_id
         captured["set_metadata_kwargs"] = kwargs
 
-    monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
+    monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
@@ -1235,7 +1230,7 @@ def test_process_github_pr_comment_without_email_skips(
     )
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react)
     monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fake_fetch_comments)
-    monkeypatch.setattr(webhook_common, "_trigger_or_queue_run", fake_trigger_or_queue_run)
+    monkeypatch.setattr(webhook_common, "trigger_or_queue_run", fake_trigger_or_queue_run)
 
     asyncio.run(
         github_webhooks.process_github_pr_comment(
@@ -1289,14 +1284,14 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
 
     monkeypatch.setattr(
         webhook_common,
-        "_get_or_resolve_thread_github_token",
+        "get_or_resolve_thread_github_token",
         fake_get_or_resolve_thread_github_token,
     )
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
     monkeypatch.setattr(
-        webhook_common, "_thread_exists", lambda thread_id: asyncio.sleep(0, result=False)
+        webhook_common, "thread_exists", lambda thread_id: asyncio.sleep(0, result=False)
     )
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
@@ -1370,13 +1365,13 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
 
     monkeypatch.setattr(
         webhook_common,
-        "_get_or_resolve_thread_github_token",
+        "get_or_resolve_thread_github_token",
         fake_get_or_resolve_thread_github_token,
     )
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
-    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())

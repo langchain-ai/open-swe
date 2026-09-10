@@ -26,6 +26,8 @@ const THREAD_IDS = {
   dailyScheduled: "73000000-0000-4000-8000-000000000001",
   dailyTest: "73000000-0000-4000-8000-000000000002",
   weeklyRunning: "73000000-0000-4000-8000-000000000003",
+  noProject: "74000000-0000-4000-8000-000000000001",
+  pinnedProject: "74000000-0000-4000-8000-000000000002",
 } as const;
 
 const TITLES = {
@@ -39,6 +41,8 @@ const TITLES = {
   dailyScheduled: "E2E Workspace Daily health scheduled run",
   dailyTest: "E2E Workspace Daily health test run",
   weeklyRunning: "E2E Workspace Weekly cleanup running",
+  noProject: "E2E Workspace No project chat",
+  pinnedProject: "E2E Workspace Pinned project chat",
 } as const;
 
 const SCHEDULE_IDS = {
@@ -730,6 +734,11 @@ test.describe("threads workspace", () => {
     await page.goto("/agents/threads");
 
     const sidebar = page.locator("[data-sidebar-frame]");
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await page
+      .getByRole("menuitemradio", { name: "Last updated", exact: true })
+      .click();
+    await page.keyboard.press("Escape");
     const workspaceLinks = sidebar.locator(
       `a[href^="/agents/"]:has-text("${WORKSPACE_QUERY}")`,
     );
@@ -801,6 +810,81 @@ test.describe("threads workspace", () => {
     const screenshotPath = testInfo.outputPath("unified-thread-sidebar.png");
     await sidebar.screenshot({ path: screenshotPath });
     await testInfo.attach("unified-thread-sidebar", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+  });
+
+  test("groups unprojected chats in a pinnable No project folder", async ({
+    page,
+    request,
+  }, testInfo) => {
+    const now = Date.now();
+    await seedThreads(request, [
+      {
+        id: THREAD_IDS.noProject,
+        metadata: baseMetadata(now, TITLES.noProject, 1_000, {
+          participant_logins: { [ADMIN_USER.login]: true },
+          repo_owner: "",
+          repo_name: "",
+        }),
+      },
+      {
+        id: THREAD_IDS.pinnedProject,
+        metadata: baseMetadata(now, TITLES.pinnedProject, 2_000, {
+          participant_logins: { [ADMIN_USER.login]: true },
+        }),
+      },
+    ]);
+    const loginResponse = await page.request.post("/control/login", {
+      data: ADMIN_USER,
+    });
+    expect(loginResponse.ok()).toBeTruthy();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/agents/threads");
+
+    const sidebar = page.locator("[data-sidebar-frame]");
+    const noProject = sidebar.getByRole("button", {
+      name: "No project",
+      exact: true,
+    });
+    await expect(noProject).toBeVisible();
+    await expect(sidebar).toContainText(TITLES.noProject);
+
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await expect(
+      page.getByRole("menuitemradio", { name: "Created", exact: true }),
+    ).toBeChecked();
+    const sortScreenshotPath = testInfo.outputPath("sort-by-created.png");
+    await page.screenshot({ path: sortScreenshotPath });
+    await testInfo.attach("sort-by-created", {
+      path: sortScreenshotPath,
+      contentType: "image/png",
+    });
+    await page.keyboard.press("Escape");
+
+    await noProject.hover();
+    await sidebar.getByRole("button", { name: "Pin No project" }).click();
+    await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
+    await expect(
+      sidebar.getByRole("button", { name: "No project", exact: true }),
+    ).toBeVisible();
+
+    await page.reload();
+    const pinnedNoProject = sidebar.getByRole("button", {
+      name: "No project",
+      exact: true,
+    });
+    await expect(pinnedNoProject).toBeVisible();
+    await pinnedNoProject.hover();
+    await expect(
+      sidebar.getByRole("button", { name: "Unpin No project" }),
+    ).toBeVisible();
+    await expect(sidebar).toContainText(TITLES.noProject);
+
+    const screenshotPath = testInfo.outputPath("pinned-no-project.png");
+    await sidebar.screenshot({ path: screenshotPath });
+    await testInfo.attach("pinned-no-project", {
       path: screenshotPath,
       contentType: "image/png",
     });
