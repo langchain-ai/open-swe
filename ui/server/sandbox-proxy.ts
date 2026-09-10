@@ -191,6 +191,9 @@ function contain(headers: Headers): Headers {
   // The service declares its own content types, and a sniffed one could execute
   // as script what it labelled as data.
   headers.set("x-content-type-options", "nosniff")
+  // The path carries the thread id, which has no business reaching whatever the
+  // service links out to.
+  headers.set("referrer-policy", "no-referrer")
   return headers
 }
 

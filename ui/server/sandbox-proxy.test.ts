@@ -130,6 +130,7 @@ describe("sandboxProxy", () => {
       response.headers.get("content-security-policy-report-only")
     ).toBeNull()
     expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer")
   })
 
   it("redirects to a trailing slash so relative URLs resolve", async () => {
