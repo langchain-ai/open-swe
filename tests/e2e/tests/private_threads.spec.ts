@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { dismissOnboardingIfShown } from "./helpers/dashboard";
 
 const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 
@@ -28,7 +29,7 @@ test("private threads are owner-only and visibility is fixed at creation", async
     // server records an immutable owner.
     await page.request.post("/control/login", { data: { login: "alice" } });
     await page.goto("/agents");
-    await page.getByRole("button", { name: "Maybe later" }).click();
+    await dismissOnboardingIfShown(page);
     await expect(page.getByLabel("Visibility")).toHaveValue("private");
     const editor = page.getByTestId("composer-editor");
     await editor.fill("Private planning notes");
@@ -48,7 +49,10 @@ test("private threads are owner-only and visibility is fixed at creation", async
     // Visibility cannot be changed in place; the PATCH only knows titles.
     const flip = await page.request.patch(
       `/dashboard/api/threads/${createdId}`,
-      { data: { visibility: "public" } },
+      {
+        headers: { origin: new URL(page.url()).origin },
+        data: { visibility: "public" },
+      },
     );
     expect(flip.status()).toBe(422);
 
