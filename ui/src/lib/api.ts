@@ -386,10 +386,32 @@ export interface SandboxSettings {
 }
 
 /** What a non-admin needs to pick an environment for a new thread. */
+export type EnvironmentRefreshStatus =
+  | "never"
+  | "refreshing"
+  | "success"
+  | "failed"
+
+/** One stage of a rebuild: booting the builder, a script, the capture. */
+export interface EnvironmentRefreshStep {
+  label: string
+  status: "running" | "success" | "failed"
+  started_at?: string
+  finished_at?: string | null
+  exit_code?: number | null
+  log_path?: string | null
+}
+
 export interface EnvironmentOption {
   slug: string
   name: string
   has_snapshot: boolean
+  refresh_status?: EnvironmentRefreshStatus
+  refresh_kind?: "full" | "update" | null
+  refresh_finished_at?: string | null
+  refresh_error?: string | null
+  refresh_log_excerpt?: string | null
+  refresh_steps?: Array<EnvironmentRefreshStep>
 }
 
 export interface EnvironmentOptionList {
