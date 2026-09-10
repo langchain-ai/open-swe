@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fastapi import HTTPException
+from fastapi.responses import Response
 
 from agent.dashboard.options import normalize_model_choice
 from agent.dashboard.threads.access import (
@@ -16,9 +17,11 @@ from agent.dashboard.threads.access import (
 )
 from agent.dashboard.threads.runs import (
     ThreadMessageBody,
+    _attach_dashboard_media,
     _build_dashboard_configurable,
+    _dashboard_media_uploads,
     _notify_slack_web_handoff,
-    _user_message_content,
+    _require_prompt_or_images,
 )
 from agent.dashboard.threads.summary import (
     _DASHBOARD_SOURCE,
@@ -38,9 +41,12 @@ from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
+from agent.media import read_thread_media
 from agent.slack.client import parse_github_pr_url
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
+    QueuedMessage,
+    QueuedSender,
     get_thread_active_status,
     langgraph_client,
     queue_message_for_thread,
@@ -119,42 +125,23 @@ async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[s
         content = entry.get("content") if isinstance(entry, Mapping) else None
         if not isinstance(content, Mapping) or content.get("source") != _DASHBOARD_SOURCE:
             continue
-        queued_id = content.get("queue_id")
-        text = content.get("text")
-        created_at = content.get("created_at_ms")
-        if (
-            not isinstance(queued_id, str)
-            or not queued_id
-            or not isinstance(text, str)
-            or not isinstance(created_at, (int, float))
-            or isinstance(created_at, bool)
-        ):
+        message = QueuedMessage.parse(content)
+        if message is None or not message.queue_id or message.created_at_ms is None:
             continue
-        images = []
-        raw_images = content.get("images")
-        if isinstance(raw_images, list):
-            for image in raw_images:
-                if not isinstance(image, Mapping):
-                    continue
-                base64_data = image.get("base64")
-                mime_type = image.get("mime_type")
-                if not isinstance(base64_data, str) or not isinstance(mime_type, str):
-                    continue
-                mapped_image = {
-                    "kind": "image",
-                    "base64": base64_data,
-                    "mimeType": mime_type,
-                }
-                file_name = image.get("file_name")
-                if isinstance(file_name, str) and file_name:
-                    mapped_image["fileName"] = file_name
-                images.append(mapped_image)
         queued.append(
             {
-                "id": queued_id,
-                "content": text,
-                "images": images,
-                "createdAt": int(created_at),
+                "id": message.queue_id,
+                "content": message.text,
+                "images": [
+                    {
+                        "kind": "attachment",
+                        "name": ref.name,
+                        "mimeType": ref.mime_type,
+                        **({"fileName": ref.file_name} if ref.file_name else {}),
+                    }
+                    for ref in message.media
+                ],
+                "createdAt": message.created_at_ms,
             }
         )
     return queued
@@ -244,8 +231,10 @@ async def send_dashboard_message(
             "thread is idle; start a run via the stream commands endpoint",
         )
 
-    active_model = _metadata_model_id(metadata) if body.images else None
-    content = _user_message_content(prompt, body.images, model_id=active_model)
+    _require_prompt_or_images(prompt, body.images)
+    uploads = _dashboard_media_uploads(
+        body.images, model_id=_metadata_model_id(metadata) if body.images else None
+    )
     if pr_linked or metadata.get("auto_resolved_by_prs") is True:
         async with agent_thread_pr_state_lock(client, thread_id):
             current = await client.threads.get(thread_id)
@@ -265,26 +254,22 @@ async def send_dashboard_message(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    queue_payload: dict[str, Any] = {
-        "text": prompt,
-        "source": _DASHBOARD_SOURCE,
-        "surface": "web",
-        "queue_id": (
-            str(body.client_message_id) if body.client_message_id else f"queued-{uuid.uuid4()}"
+    media = await _attach_dashboard_media(thread_id, uploads, metadata)
+    queued = await queue_message_for_thread(
+        thread_id,
+        QueuedMessage(
+            text=prompt,
+            source=_DASHBOARD_SOURCE,
+            queue_id=(
+                str(body.client_message_id) if body.client_message_id else f"queued-{uuid.uuid4()}"
+            ),
+            created_at_ms=now_ms,
+            sender=QueuedSender(
+                id=f"github:{login}", platform="github", github_login=login, email=email
+            ),
+            media=media,
         ),
-        "created_at_ms": now_ms,
-        "sender": {
-            "id": f"github:{login}",
-            "platform": "github",
-            "github_login": login,
-            **({"email": email} if email else {}),
-        },
-    }
-    if isinstance(content, list):
-        queue_payload["images"] = [
-            block for block in content if isinstance(block, dict) and block.get("type") != "text"
-        ]
-    queued = await queue_message_for_thread(thread_id, queue_payload)
+    )
     if not queued:
         raise HTTPException(502, "failed to queue follow-up message")
     try:
@@ -454,6 +439,30 @@ async def resolve_dashboard_thread(
         raise HTTPException(502, "failed to update thread") from exc
     thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     return await _thread_summary(thread)
+
+
+async def get_dashboard_thread_media(
+    thread_id: str, file_name: str, login: str, *, email: str | None = None
+) -> Response:
+    """One attachment from the thread's sandbox; content-addressed, so cacheable forever."""
+    await _authorized_thread(thread_id, login, email=email)
+    try:
+        found = await read_thread_media(thread_id, file_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Could not read thread media",
+            extra={"thread_id": thread_id, "media_file": file_name},
+            exc_info=True,
+        )
+        raise HTTPException(404, "attachment unavailable") from exc
+    if found is None:
+        raise HTTPException(404, "attachment not found")
+    data, mime_type = found
+    return Response(
+        content=data,
+        media_type=mime_type,
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
 
 
 def _tracked_pull_requests(metadata: Mapping[str, Any]) -> list[object]:

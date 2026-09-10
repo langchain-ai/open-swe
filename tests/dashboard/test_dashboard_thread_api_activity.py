@@ -177,11 +177,12 @@ async def test_get_dashboard_thread_hydrates_queued_dashboard_messages(monkeypat
                             "text": "queued follow-up",
                             "queue_id": "queued-server-id",
                             "created_at_ms": 1700000000123,
-                            "images": [
+                            "media": [
                                 {
-                                    "type": "image",
-                                    "base64": "image-data",
+                                    "path": "/media/abc123-proof.png",
                                     "mime_type": "image/png",
+                                    "sha256": "abc123",
+                                    "size": 10,
                                     "file_name": "proof.png",
                                 }
                             ],
@@ -204,8 +205,8 @@ async def test_get_dashboard_thread_hydrates_queued_dashboard_messages(monkeypat
             "createdAt": 1700000000123,
             "images": [
                 {
-                    "kind": "image",
-                    "base64": "image-data",
+                    "kind": "attachment",
+                    "name": "abc123-proof.png",
                     "mimeType": "image/png",
                     "fileName": "proof.png",
                 }

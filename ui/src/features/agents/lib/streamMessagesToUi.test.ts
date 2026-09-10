@@ -4,6 +4,29 @@ import { describe, expect, it } from "vitest"
 import { streamMessagesToUi } from "./streamMessagesToUi"
 
 describe("streamMessagesToUi", () => {
+  it("turns envelope media references into attachment chunks", () => {
+    const sha = "b".repeat(64)
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "with-attachment",
+        content: [
+          '<input-message sender="github:alice" surface="web" kind="human">',
+          `<media>\n<item>\n<path>/workspace/.open-swe-media/${sha}.jpg</path>`,
+          "<mime_type>image/jpeg</mime_type>",
+          `<sha256>${sha}</sha256>\n<size>9</size>\n</item>\n</media>`,
+          "<content>look</content>",
+          "</input-message>",
+        ].join("\n"),
+      }),
+    ])
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.chunks).toEqual([
+      { kind: "attachment", name: `${sha}.jpg`, mimeType: "image/jpeg" },
+      { kind: "text", text: "look" },
+    ])
+  })
+
   it("hides entity introductions and renders structured senders distinctly", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({

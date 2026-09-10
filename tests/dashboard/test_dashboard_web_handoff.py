@@ -6,6 +6,8 @@ from fastapi import HTTPException
 
 from agent.dashboard.threads import api as thread_api
 from agent.dashboard.threads import runs as thread_runs
+from agent.media import MediaRef, MediaUpload
+from agent.utils.thread_ops import QueuedMessage, QueuedSender
 from tests.conftest import patch_thread_module
 
 
@@ -62,16 +64,16 @@ async def _active_thread(thread_id: str) -> bool:
 
 def _queued_message_without_metadata(
     queued_messages: list[object], expected_queue_id: str | None = None
-) -> dict[str, object]:
+) -> QueuedMessage:
     assert len(queued_messages) == 1
-    queued_message = cast(dict[str, object], queued_messages[0])
-    queue_id = cast(str, queued_message.pop("queue_id"))
+    queued_message = cast(QueuedMessage, queued_messages[0])
+    queue_id = queued_message.queue_id or ""
     if expected_queue_id:
         assert queue_id == expected_queue_id
     else:
         assert queue_id.startswith("queued-")
-    assert isinstance(queued_message.pop("created_at_ms"), int)
-    return queued_message
+    assert isinstance(queued_message.created_at_ms, int)
+    return queued_message.model_copy(update={"queue_id": None, "created_at_ms": None})
 
 
 async def _noop_token_check(login: str) -> None:
@@ -136,11 +138,6 @@ async def test_dashboard_followup_sends_image_content_blocks(
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", _noop_token_check)
     patch_thread_module(monkeypatch, "get_profile", _empty_profile)
     patch_thread_module(monkeypatch, "resolve_run_email", _run_email)
-    patch_thread_module(
-        monkeypatch,
-        "create_image_block",
-        lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
-    )
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
@@ -192,17 +189,18 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
     )
 
     assert client.threads.updates[0]["source"] == "dashboard"
-    assert _queued_message_without_metadata(queued_messages, str(client_message_id)) == {
-        "text": "continue in web",
-        "source": "dashboard",
-        "surface": "web",
-        "sender": {
-            "id": "github:octocat",
-            "platform": "github",
-            "github_login": "octocat",
-            "email": "octocat@example.com",
-        },
-    }
+    assert _queued_message_without_metadata(
+        queued_messages, str(client_message_id)
+    ) == QueuedMessage(
+        text="continue in web",
+        source="dashboard",
+        sender=QueuedSender(
+            id="github:octocat",
+            platform="github",
+            github_login="octocat",
+            email="octocat@example.com",
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -249,17 +247,16 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
         email="octocat@example.com",
     )
 
-    assert _queued_message_without_metadata(queued_messages) == {
-        "text": "continue in web",
-        "source": "dashboard",
-        "surface": "web",
-        "sender": {
-            "id": "github:octocat",
-            "platform": "github",
-            "github_login": "octocat",
-            "email": "octocat@example.com",
-        },
-    }
+    assert _queued_message_without_metadata(queued_messages) == QueuedMessage(
+        text="continue in web",
+        source="dashboard",
+        sender=QueuedSender(
+            id="github:octocat",
+            platform="github",
+            github_login="octocat",
+            email="octocat@example.com",
+        ),
+    )
     assert handoff_updates == [
         {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
     ]
@@ -332,11 +329,16 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     patch_thread_module(monkeypatch, "get_thread_active_status", _active_thread)
     patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue_message_for_thread)
-    patch_thread_module(
-        monkeypatch,
-        "create_image_block",
-        lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
-    )
+    attached: list[MediaUpload] = []
+    ref = MediaRef(path=f"/uploads/{'e' * 64}.png", mime_type="image/png", sha256="e" * 64, size=5)
+
+    async def fake_attach(
+        thread_id: str, uploads: list[MediaUpload], **_: object
+    ) -> list[MediaRef]:
+        attached.extend(uploads)
+        return [ref for _ in uploads]
+
+    patch_thread_module(monkeypatch, "attach_thread_media", fake_attach)
 
     await thread_api.send_dashboard_message(
         "thread-1",
@@ -347,17 +349,14 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         ),
     )
 
-    assert _queued_message_without_metadata(queued_messages) == {
-        "text": "continue in web",
-        "source": "dashboard",
-        "surface": "web",
-        "sender": {
-            "id": "github:octocat",
-            "platform": "github",
-            "github_login": "octocat",
-        },
-        "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
-    }
+    # Bytes go to the sandbox at ingestion; the queue carries only the reference.
+    assert [upload.data for upload in attached] == [b"image"]
+    assert _queued_message_without_metadata(queued_messages) == QueuedMessage(
+        text="continue in web",
+        source="dashboard",
+        sender=QueuedSender(id="github:octocat", platform="github", github_login="octocat"),
+        media=[ref],
+    )
 
 
 @pytest.mark.asyncio

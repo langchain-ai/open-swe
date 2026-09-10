@@ -9,6 +9,7 @@ export type ChunkKind =
   | "tool-execution"
   | "todo"
   | "image"
+  | "attachment"
 
 export type TodoStatus = "pending" | "in_progress" | "completed"
 
@@ -159,6 +160,15 @@ export interface ImageChunk {
   fileName?: string
 }
 
+/** A file the user attached; the bytes live in the thread's sandbox, not the message. */
+export interface AttachmentChunk {
+  kind: "attachment"
+  /** Content-addressed file name served by the thread media endpoint. */
+  name: string
+  mimeType: string
+  fileName?: string
+}
+
 export type Chunk =
   | TextChunk
   | ReasoningChunk
@@ -168,6 +178,7 @@ export type Chunk =
   | ToolExecutionChunk
   | TodoChunk
   | ImageChunk
+  | AttachmentChunk
 
 export interface Message {
   id: string
@@ -226,7 +237,8 @@ export interface AgentSchedule {
 export interface QueuedThreadMessage {
   id: string
   content: string
-  images?: Array<ImageChunk>
+  /** Attachments as stored refs from the server; base64 only for a message this browser just sent. */
+  images?: Array<ImageChunk | AttachmentChunk>
   createdAt: number
 }
 

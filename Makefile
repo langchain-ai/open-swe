@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui tunnel web build-dashboard desktop install-desktop install-checkout swagger
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-local dev-ui tunnel web build-dashboard desktop install-desktop install-checkout swagger
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -9,6 +9,11 @@ all: help
 
 dev:
 	uv run langgraph dev --no-browser --port 2024
+
+# Real model (OPENAI_API_KEY from .env), everything else local: fake Slack and
+# GitHub, fake sign-in, sandbox rooted in a temp dir. Open http://127.0.0.1:3000/login.
+dev-local:
+	bash ./tests/e2e/dev-local.sh
 
 # UI development in one terminal: Vite (`make web`) and the backend fronting it, so
 # http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
@@ -102,6 +107,7 @@ typecheck:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
+	@echo 'dev-local                    - real model, everything else local (fake Slack/GitHub + sign-in) at http://127.0.0.1:3000/login'
 	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
