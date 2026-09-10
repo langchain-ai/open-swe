@@ -92,6 +92,16 @@ def test_dump_drops_extras_that_cannot_be_json_encoded():
         pass
 
     cfg = RunConfig.parse(
-        {"thread_id": "t1", "github_login": "octocat", "langgraph_auth_user": ProxyUser()}
+        {
+            "thread_id": "t1",
+            "github_login": "octocat",
+            "langgraph_auth_user": ProxyUser(),
+            "nested": {"user": ProxyUser()},
+            "custom": {"a": 1},
+        }
     )
-    assert cfg.dump() == {"thread_id": "t1", "github_login": "octocat"}
+    assert cfg.dump() == {
+        "thread_id": "t1",
+        "github_login": "octocat",
+        "custom": {"a": 1},
+    }

@@ -27,6 +27,7 @@ from typing import Annotated, Any, Self
 
 from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
+from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
@@ -41,8 +42,6 @@ def _reject_bool(value: Any) -> Any:
 
 
 Int = Annotated[int, BeforeValidator(_reject_bool)]
-
-_UNSERIALIZABLE = "__run_config_unserializable__"
 
 
 class Repo(BaseModel):
@@ -228,10 +227,17 @@ class RunConfig(BaseModel):
         LangGraph Platform puts a ``ProxyUser`` in ``langgraph_auth_user``, so an
         extra can be any object; dropping it beats raising and losing the rest.
         """
-        dumped = self.model_dump(
-            mode="json", exclude_unset=True, fallback=lambda _: _UNSERIALIZABLE
-        )
-        return {key: value for key, value in dumped.items() if value != _UNSERIALIZABLE}
+        try:
+            return self.model_dump(mode="json", exclude_unset=True)
+        except PydanticSerializationError:
+            logger.warning("Dropping unserializable configurable keys", exc_info=True)
+        encoded: dict[str, Any] = {}
+        for key, value in self.model_dump(exclude_unset=True).items():
+            try:
+                encoded[key] = to_jsonable_python(value)
+            except PydanticSerializationError:
+                continue
+        return encoded
 
     def get(self, key: str) -> Any:
         """Value for ``key``, whether it is a declared field or an extra."""
