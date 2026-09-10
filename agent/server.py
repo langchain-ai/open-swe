@@ -930,7 +930,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     if cfg.source == "slack":
         adaptive_model_routing = True
-    elif cfg.source == "dashboard":
+    elif cfg.source == "dashboard" and cfg.model_selection is not None:
         adaptive_model_routing = not explicit_model_selection
 
     # An explicit per-run model choice is the one thing allowed to move a thread

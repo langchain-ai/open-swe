@@ -1,6 +1,12 @@
+import { useCallback } from "react"
+
 import type { ModelOption } from "@/lib/api"
-import { useOptions } from "@/lib/profile"
-import { useSession } from "@/lib/session"
+import {
+  buildProfileUpdate,
+  useOptions,
+  useProfile,
+  useSaveProfile,
+} from "@/lib/profile"
 
 export interface ModelSelection {
   modelId: string
@@ -9,60 +15,77 @@ export interface ModelSelection {
 
 export interface ModelOptionsResult {
   models: Array<ModelOption>
+  /** `null` means adaptive routing ("Auto"). */
   defaultSelection: ModelSelection | null
   isLoading: boolean
+  /** Persist the picker choice as the user's profile default; `null` re-enables Auto. */
+  persistSelection: (next: ModelSelection | null) => void
 }
 
-const STORAGE_KEY = "open-swe.agents.model-selection"
-
-function storedSelection(
+function toSupportedSelection(
   models: Array<ModelOption>,
-  login: string
+  modelId?: string | null,
+  effort?: string | null
 ): ModelSelection | null {
-  if (typeof window === "undefined" || !login) return null
-  try {
-    const selection = JSON.parse(
-      window.localStorage.getItem(STORAGE_KEY) ?? "null"
-    ) as (Partial<ModelSelection> & { login?: string; mode?: string }) | null
-    if (selection?.login === login && selection.mode === "auto") return null
-    return selection?.login === login &&
-      models.some(
-        (model) =>
-          model.id === selection.modelId &&
-          model.efforts.includes(selection.effort ?? "")
-      )
-      ? (selection as ModelSelection)
-      : null
-  } catch {
-    return null
-  }
-}
-
-export function persistModelSelection(
-  selection: ModelSelection | null,
-  login: string
-): void {
-  if (typeof window === "undefined" || !login) return
-  try {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(selection ? { ...selection, login } : { mode: "auto", login })
-    )
-  } catch {}
+  if (!modelId || !effort) return null
+  const supported = models.some(
+    (model) => model.id === modelId && model.efforts.includes(effort)
+  )
+  return supported ? { modelId, effort } : null
 }
 
 export function useModelOptions(): ModelOptionsResult {
   const optionsQuery = useOptions()
-  const session = useSession()
+  const profileQuery = useProfile()
+  const saveProfile = useSaveProfile()
   const models = optionsQuery.data?.models ?? []
-  const defaultSelection = optionsQuery.data
-    ? storedSelection(models, session.data?.login ?? "")
-    : null
+  const profile = profileQuery.data
+  const routingEnabled = profile?.model_routing_enabled ?? true
+  const teamDefault = toSupportedSelection(
+    models,
+    optionsQuery.data?.default_agent_model,
+    optionsQuery.data?.default_agent_reasoning_effort
+  )
+  const firstModel = models[0]
+  const fallbackSelection =
+    teamDefault ??
+    (firstModel
+      ? { modelId: firstModel.id, effort: firstModel.default_effort }
+      : null)
+  const defaultSelection =
+    optionsQuery.data && !routingEnabled
+      ? (toSupportedSelection(
+          models,
+          profile?.default_model,
+          profile?.reasoning_effort
+        ) ?? fallbackSelection)
+      : null
+
+  const { mutate: save } = saveProfile
+  const persistSelection = useCallback(
+    (next: ModelSelection | null) => {
+      save(
+        buildProfileUpdate(
+          profile,
+          {
+            model_routing_enabled: next === null,
+            ...(next
+              ? { default_model: next.modelId, reasoning_effort: next.effort }
+              : {}),
+          },
+          fallbackSelection?.modelId ?? "",
+          fallbackSelection?.effort ?? ""
+        )
+      )
+    },
+    [save, profile, fallbackSelection?.modelId, fallbackSelection?.effort]
+  )
 
   return {
     models,
     defaultSelection,
-    isLoading: optionsQuery.isLoading || session.isLoading,
+    isLoading: optionsQuery.isLoading || profileQuery.isLoading,
+    persistSelection,
   }
 }
 

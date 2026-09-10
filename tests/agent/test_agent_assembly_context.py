@@ -192,6 +192,34 @@ async def test_model_routing_is_applied_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_model_routing_is_enabled_without_a_profile_preference() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(config, profile={})
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" in middleware_names
+    assert config["metadata"]["model_routing_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_profile_can_opt_out_of_routing_when_run_has_no_selection() -> None:
+    config = _base_config()
+    configurable = cast(dict[str, object], config["configurable"])
+    configurable["source"] = "dashboard"
+    agent = await _capture_create_deep_agent_kwargs(
+        config, profile={"model_routing_enabled": False}
+    )
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["metadata"]["model_routing_applied"] is False
+
+
+@pytest.mark.asyncio
 async def test_dashboard_uses_routing_by_default() -> None:
     config = _base_config()
     configurable = cast(dict[str, object], config["configurable"])

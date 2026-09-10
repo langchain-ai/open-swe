@@ -26,10 +26,7 @@ import {
   useAgentSkills,
   useEnvironmentOptions,
 } from "@/features/agents/lib/queries"
-import {
-  persistModelSelection,
-  useModelOptions,
-} from "@/features/agents/lib/provider/useModelOptions"
+import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
   ensureDesktopModelCredential,
@@ -77,14 +74,14 @@ export function AgentsHome({
   const routePending = useRouterState({
     select: (state) => state.status === "pending",
   })
-  const { models, defaultSelection } = useModelOptions()
+  const { models, defaultSelection, persistSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
   const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
-    persistModelSelection(next, session.data?.login ?? "")
+    persistSelection(next)
   }
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
