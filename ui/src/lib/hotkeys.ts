@@ -152,23 +152,31 @@ export function isHotkeySuppressed(target: EventTarget | null): boolean {
   return Boolean(closestElement(target)?.closest('[data-hotkeys="ignore"]'))
 }
 
+/** Modifier combos (e.g. Cmd/Ctrl+N) stay active while typing; bare keys do not. */
+export function isModifierShortcut(shortcut: string): boolean {
+  const combo = parseCombo(shortcut)
+  return combo.mod || combo.meta || combo.ctrl || combo.alt
+}
+
 export function shouldIgnoreHotkey(
   event: KeyboardEvent,
   enableInFormFields = false,
-  ignoreRepeat = true
+  ignoreRepeat = true,
+  modifierShortcut = false
 ): boolean {
   return (
     event.defaultPrevented ||
     event.isComposing ||
     (ignoreRepeat && event.repeat) ||
     isHotkeySuppressed(event.target) ||
-    (!enableInFormFields && isTypingContext(event.target))
+    (!enableInFormFields && !modifierShortcut && isTypingContext(event.target))
   )
 }
 
 /**
  * Register a global keyboard shortcut. Use "mod" for the platform meta key
  * (Cmd on macOS, Ctrl elsewhere). Accepts one combo or several aliases.
+ * Modifier combos also fire while typing in form fields; bare keys do not.
  */
 export function useHotkey(
   combo: string | Array<string>,
@@ -191,8 +199,17 @@ export function useHotkey(
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return
     const combos = comboKey.split("\u0000")
+    const modifierShortcut = combos.some(isModifierShortcut)
     const onKeyDown = (event: KeyboardEvent) => {
-      if (shouldIgnoreHotkey(event, enableInFormFields, ignoreRepeat)) return
+      if (
+        shouldIgnoreHotkey(
+          event,
+          enableInFormFields,
+          ignoreRepeat,
+          modifierShortcut
+        )
+      )
+        return
       if (!combos.some((value) => eventMatchesShortcut(event, value))) return
       if (preventDefault) event.preventDefault()
       handlerRef.current(event)

@@ -197,7 +197,15 @@ export function AppCommandProvider({
   useEffect(() => {
     if (!enabled || paletteOpen || shortcutReferenceOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (shouldIgnoreHotkey(event)) return
+      if (
+        shouldIgnoreHotkey(
+          event,
+          false,
+          true,
+          event.metaKey || event.ctrlKey || event.altKey
+        )
+      )
+        return
       const desktop = Boolean(window.openSweDesktop)
       const command = commandsRef.current.find(
         (candidate) =>
