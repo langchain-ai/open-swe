@@ -119,7 +119,8 @@ from agent.prompt import (
     construct_system_prompt,
     render_open_swe_shared_base,
 )
-from agent.prompts import apply_tool_descriptions, load_prompt
+from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.review.review_bar import SEVERITY_RUBRIC_SECTION, render_finding_bar
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -156,12 +157,14 @@ from agent.tools import (
     delete_organization_skill,
     delete_user_skill,
     enter_plan_mode,
+    fetch_self_review_diff,
     fetch_url,
     get_thread,
     http_request,
     linear_comment,
     list_automations,
     list_environments,
+    list_inline_findings,
     list_threads,
     manage_baby_sit,
     manage_code_channel,
@@ -172,6 +175,7 @@ from agent.tools import (
     output_iframe,
     publish_environment,
     read_user_settings,
+    record_inline_finding,
     recreate_sandbox,
     refresh_environment_start,
     report_platform_issue,
@@ -182,6 +186,7 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
+    set_inline_finding_disposition,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -426,6 +431,24 @@ def _general_purpose_subagent(
     if skills:
         subagent["skills"] = skills
     return subagent
+
+
+PR_SELF_REVIEW_SYSTEM_PROMPT = render_prompt(
+    "system/pr-self-review.md",
+    finding_bar=render_finding_bar(),
+    severity_rubric=SEVERITY_RUBRIC_SECTION,
+)
+
+
+def _pr_self_review_subagent(model: BaseChatModel) -> SubAgent:
+    return {
+        "name": "pr-self-review",
+        "description": load_prompt("system/pr-self-review-description.md"),
+        "system_prompt": PR_SELF_REVIEW_SYSTEM_PROMPT,
+        "tools": [fetch_self_review_diff, record_inline_finding],
+        "model": model,
+        "middleware": _subagent_model_middleware(),
+    }
 
 
 _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
@@ -1072,6 +1095,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         save_user_skill,
         delete_user_skill,
         linear_comment,
+        list_inline_findings,
+        set_inline_finding_disposition,
         list_threads,
         get_thread,
         manage_thread,
@@ -1198,6 +1223,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
             ),
+            *([] if local_run or stop_summary_mode else [_pr_self_review_subagent(subagent_model)]),
         ],
         skills=skill_sources,
         backend=agent_backend,

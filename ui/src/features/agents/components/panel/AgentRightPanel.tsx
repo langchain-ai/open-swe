@@ -34,6 +34,8 @@ export interface AgentRightPanelProps {
   diffAvailable: boolean
   /** Rendered for the Changes surface; `fullScreen` drives layout-only extras. */
   renderDiff: (state: { fullScreen: boolean }) => ReactNode
+  /** Rendered for the Review surface, when the thread has self-review findings. */
+  renderReview?: (state: { fullScreen: boolean }) => ReactNode
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
   onTerminalOpenFile?: (path: string) => void
@@ -294,6 +296,9 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
     <>
       {activeSurface?.kind === "diff"
         ? props.renderDiff({ fullScreen: maximized })
+        : null}
+      {activeSurface?.kind === "review"
+        ? props.renderReview?.({ fullScreen: maximized })
         : null}
       {/* Terminals stay mounted while hidden so their scrollback survives tab
           switches; every other surface unmounts. */}

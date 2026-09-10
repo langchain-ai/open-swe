@@ -8,6 +8,7 @@ import {
   useAgentThreadWorkingTreeDiff,
 } from "@/features/agents/lib/queries"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
+import { SelfReviewPanel } from "@/features/agents/components/SelfReviewPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import {
@@ -44,6 +45,7 @@ export function AgentGitPanel({
     ""
   )
   const openSurface = useRightPanelStore((state) => state.open)
+  const openFileSurface = useRightPanelStore((state) => state.openFile)
   const activeSurfaceId = useRightPanelStore(
     (state) =>
       selectThreadRightPanelState(state.byThreadKey, threadRef).activeSurfaceId
@@ -148,6 +150,15 @@ export function AgentGitPanel({
       diffAvailable
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
+      renderReview={() => (
+        <SelfReviewPanel
+          threadId={thread.id}
+          pollWhileActive={thread.status === "running"}
+          onOpenFile={(path, line) =>
+            openFileSurface(threadRef, path, line ?? undefined)
+          }
+        />
+      )}
       renderDiff={({ fullScreen }) => (
         <ChangesPanel
           files={files}

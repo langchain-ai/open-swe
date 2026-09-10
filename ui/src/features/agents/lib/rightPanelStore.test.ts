@@ -25,6 +25,21 @@ describe("right panel store", () => {
     expect(state().isOpen).toBe(true)
   })
 
+  it("restores a persisted review surface", () => {
+    const migrated = migratePersistedRightPanelState({
+      byThreadKey: {
+        "cloud:thread-1": {
+          isOpen: true,
+          activeSurfaceId: "review",
+          surfaces: [{ id: "review", kind: "review" }],
+        },
+      },
+    })
+    expect(migrated.byThreadKey["cloud:thread-1"]?.surfaces).toEqual([
+      { id: "review", kind: "review" },
+    ])
+  })
+
   it("keeps terminals as peer tabs and falls back when the active one closes", () => {
     const { openTerminal, closeSurface } = useRightPanelStore.getState()
     openTerminal(ref, "group-a")

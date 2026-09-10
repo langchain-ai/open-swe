@@ -83,6 +83,7 @@ from agent.review.findings import (
 from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.review.review_bar import SEVERITY_RUBRIC_SECTION, render_finding_bar
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -186,7 +187,10 @@ def _reviewer_system_prompt(
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
-        historical_review_guidance="" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
+        finding_bar=render_finding_bar(
+            "" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
+        ),
+        severity_rubric=SEVERITY_RUBRIC_SECTION,
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
             working_dir=working_dir,

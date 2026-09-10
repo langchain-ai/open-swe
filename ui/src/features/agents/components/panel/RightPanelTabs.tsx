@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Bot,
+  ClipboardCheck,
   FileDiff,
   FileIcon,
   Files,
@@ -365,6 +366,8 @@ export function surfaceTitle(
       return terminalLabelsById.get(surface.resourceId) ?? "Terminal"
     case "agents":
       return "Agents"
+    case "review":
+      return "Review"
     case "preview":
       return "Browser"
   }
@@ -384,6 +387,8 @@ function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
       return <TerminalSquare className="size-3 shrink-0" />
     case "agents":
       return <Bot className="size-3 shrink-0" />
+    case "review":
+      return <ClipboardCheck className="size-3 shrink-0" />
   }
 }
 

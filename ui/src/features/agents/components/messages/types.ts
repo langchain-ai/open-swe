@@ -23,6 +23,10 @@ export interface MessagesProps extends ApprovalCallbacks {
   /** Identity for remembering the scroll position across navigation. */
   scrollKey?: string
   showPlanArtifact?: boolean
+  /** Show the pointer card to the thread's self-review findings. */
+  showSelfReview?: boolean
+  /** Reveal the Review surface; the card only points at it. */
+  onOpenSelfReview?: () => void
   emptyState?: React.ReactNode
   footer?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean

@@ -4,6 +4,7 @@
   "dependencies": ["."],
   "graphs": {
     "agent": "./tests/e2e/agent_entrypoint.py:traced_agent",
+    "reviewer": "./tests/e2e/reviewer_entrypoint.py:traced_reviewer_agent",
     "scheduler": "./tests/e2e/scheduler_entrypoint.py:get_scheduler"
   },
   "http": {
