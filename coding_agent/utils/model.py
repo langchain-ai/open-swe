@@ -1,15 +1,22 @@
 import asyncio
+import logging
+from dataclasses import dataclass
 from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
 
 from coding_agent.config import ENV
 from coding_agent.models import DEFAULT_MODEL_ID, model_profile_with_context_override
+from coding_agent.runtime.constants import DEFAULT_LLM_MAX_TOKENS
+from coding_agent.utils.deferred_model import make_deferred_error_model
 from coding_agent.utils.gateway import gateway_env_default, gateway_overrides
 from coding_agent.utils.openai_oauth import (
     build_desktop_openai_oauth_model,
     desktop_openai_oauth_available,
 )
+
+logger = logging.getLogger(__name__)
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
@@ -344,6 +351,25 @@ def provider_model_kwargs(
     elif model_id.startswith("baseten:") and profile_effort in ("low", "high", "max"):
         kwargs["reasoning_effort"] = profile_effort
     return kwargs
+
+
+@dataclass(frozen=True, slots=True)
+class ModelChoice:
+    """A selected model, and how to build it."""
+
+    model_id: str
+    effort: str | None = None
+    use_gateway: bool = False
+    max_tokens: int = DEFAULT_LLM_MAX_TOKENS
+
+    def chat_model(self) -> BaseChatModel:
+        """Build the chat model, deferring setup failures to the first model call."""
+        kwargs = provider_model_kwargs(self.model_id, self.effort, max_tokens=self.max_tokens)
+        try:
+            return make_model(self.model_id, use_gateway=self.use_gateway, **kwargs)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Deferring model setup failure for %s", self.model_id, exc_info=True)
+            return make_deferred_error_model(e, model_id=self.model_id)
 
 
 def validate_local_dev_llm_config() -> None:

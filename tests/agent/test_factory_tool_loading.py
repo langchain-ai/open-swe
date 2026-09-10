@@ -91,7 +91,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server.load_thread_settings", new_callable=AsyncMock, return_value={}),
         patch("coding_agent.builder.fallback_model_id_for", return_value=None),
-        patch("coding_agent.builder.make_model", return_value=MagicMock()),
+        patch("coding_agent.utils.model.make_model", return_value=MagicMock()),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("coding_agent.builder.create_deep_agent", return_value=_DummyAgent()) as build_agent,
         patch("agent.server.email_for_login", new_callable=AsyncMock, return_value=None),

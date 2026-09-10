@@ -147,6 +147,7 @@ from agent.utils.thread_settings import (
 )
 from coding_agent.builder import (
     DEEP_AGENT_EXCLUDED_TOOLS,
+    SANDBOX_URL_TOOLS,
     CodingAgentBuilder,
     CoreToolSet,
     cached_tool_loader,
@@ -186,6 +187,7 @@ from coding_agent.sandboxes.state import (
 from coding_agent.utils import ttl_cache
 from coding_agent.utils.gateway import gateway_env_default
 from coding_agent.utils.json_types import as_json_object, thread_metadata
+from coding_agent.utils.model import ModelChoice
 from coding_agent.utils.startup_trace import aphase
 
 client = get_client()
@@ -905,6 +907,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     elif stop_summary_mode:
         platform_tools = [slack_read_thread_messages, slack_thread_reply]
         core_tools = "none"
+    if sandbox_file_downloads:
+        platform_tools = [*platform_tools, *SANDBOX_URL_TOOLS]
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "Workspace MCPs": workspace_mcp_tools,
         "Notion": notion_tools,
@@ -938,17 +942,25 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 )
             )
             skill_sources.insert(0, USER_SKILLS_ROUTE)
+    routing_models = (
+        {
+            route: ModelChoice(routed_model_id, effort, use_gateway=use_gateway)
+            for route, (routed_model_id, effort) in routing_defaults.items()
+        }
+        if adaptive_model_routing
+        else None
+    )
     builder = CodingAgentBuilder(
-        model_id=model_id,
-        effort=profile_effort,
-        subagent_model_id=subagent_model_id,
-        subagent_effort=subagent_effort,
-        title_model_id=title_model_id,
-        title_effort=title_effort,
-        title_max_tokens=TITLE_GENERATION_MAX_TOKENS,
-        use_gateway=use_gateway,
+        model=ModelChoice(model_id, profile_effort, use_gateway=use_gateway),
+        subagent_model=ModelChoice(subagent_model_id, subagent_effort, use_gateway=use_gateway),
+        title_model=ModelChoice(
+            title_model_id,
+            title_effort,
+            use_gateway=use_gateway,
+            max_tokens=TITLE_GENERATION_MAX_TOKENS,
+        ),
         backend=backend,
-        routing_models=routing_defaults if adaptive_model_routing else None,
+        routing_models=routing_models,
         skill_routes=skill_routes,
         skill_sources=skill_sources,
         state_schema=DesktopAgentState if local_run else None,
@@ -982,19 +994,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 admin_environments=admin_thread,
             )
         ],
-        tool_middleware=[
+        middleware=[
             *([] if local_run else [PullRequestCreationGuardMiddleware()]),
             WorkflowPushGuardMiddleware(),
-        ],
-        subagent_middleware=[WorkflowPushGuardMiddleware()],
-        hook_middleware=[
             refresh_github_proxy_before_model,
             *([] if stop_summary_mode else [check_message_queue_before_model]),
         ],
-        late_hook_middleware=[notify_step_limit_reached, record_run_usage],
+        late_middleware=[notify_step_limit_reached, record_run_usage],
+        subagent_middleware=[WorkflowPushGuardMiddleware()],
         plan_mode=plan_mode,
         plans=DashboardPlanStore,
-        sandbox_file_downloads=sandbox_file_downloads,
         sandbox_failure_notifier=SANDBOX_FAILURE_NOTIFIER,
         background_tasks=BACKGROUND_TASK_MONITOR,
     )

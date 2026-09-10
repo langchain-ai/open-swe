@@ -64,7 +64,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
         ),
         patch("coding_agent.builder.fallback_model_id_for", return_value=None),
         patch(
-            "coding_agent.builder.make_model", side_effect=[main_model, subagent_model]
+            "coding_agent.utils.model.make_model", side_effect=[main_model, subagent_model]
         ) as make_model,
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("coding_agent.builder.create_deep_agent", side_effect=fake_create_deep_agent),
@@ -137,7 +137,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
         ),
         patch("coding_agent.builder.fallback_model_id_for", return_value=None),
         patch(
-            "coding_agent.builder.make_model", side_effect=[main_model, subagent_model]
+            "coding_agent.utils.model.make_model", side_effect=[main_model, subagent_model]
         ) as make_model,
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("coding_agent.builder.create_deep_agent", side_effect=fake_create_deep_agent),
@@ -206,7 +206,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
         patch("agent.server.get_team_fable_enabled", new_callable=AsyncMock, return_value=False),
         patch("coding_agent.builder.fallback_model_id_for", return_value=None),
         patch(
-            "coding_agent.builder.make_model", side_effect=[main_model, subagent_model]
+            "coding_agent.utils.model.make_model", side_effect=[main_model, subagent_model]
         ) as make_model,
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("coding_agent.builder.create_deep_agent", side_effect=fake_create_deep_agent),

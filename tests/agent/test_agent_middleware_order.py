@@ -85,7 +85,7 @@ async def _middleware_names(
         patch("agent.server.load_browser_tools", return_value=browser_tools or []),
         patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("coding_agent.builder.fallback_model_id_for", return_value=fallback_model_id),
-        patch("coding_agent.builder.make_model", return_value=MagicMock()),
+        patch("coding_agent.utils.model.make_model", return_value=MagicMock()),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("coding_agent.builder.create_deep_agent", side_effect=fake_create_deep_agent),
     ):

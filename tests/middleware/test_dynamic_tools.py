@@ -92,9 +92,10 @@ def test_general_purpose_subagent_includes_dynamic_tools() -> None:
     from deepagents.backends.state import StateBackend
 
     from coding_agent.builder import CodingAgentBuilder
+    from coding_agent.utils.model import ModelChoice
 
     middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
-    builder = CodingAgentBuilder(model_id="openai:gpt-5.6-sol", backend=StateBackend())
+    builder = CodingAgentBuilder(model=ModelChoice("openai:gpt-5.6-sol"), backend=StateBackend())
     subagent = builder._general_purpose_subagent(MagicMock(), [], middleware)
 
     assert middleware in subagent.get("middleware", [])

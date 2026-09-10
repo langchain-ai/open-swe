@@ -97,7 +97,7 @@ async def _capture_create_deep_agent_kwargs(
             return_value=thread_settings or {},
         ),
         patch("coding_agent.builder.fallback_model_id_for", return_value=None),
-        patch("coding_agent.builder.make_model", side_effect=fake_make_model),
+        patch("coding_agent.utils.model.make_model", side_effect=fake_make_model),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("coding_agent.builder.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
@@ -161,7 +161,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
         patch("agent.server.load_workspace_mcp_tools", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.load_browser_tools", return_value=[]),
-        patch("coding_agent.builder.make_model", return_value=MagicMock()),
+        patch("coding_agent.utils.model.make_model", return_value=MagicMock()),
         patch("coding_agent.builder.fallback_model_id_for", return_value=None),
         patch("coding_agent.builder.create_deep_agent", return_value=_DummyAgent()),
     ):

@@ -3,7 +3,7 @@
 The builder owns the platform-agnostic half of the stack: model construction,
 the generic tool list, the middleware order, and the general-purpose subagent.
 Platform wiring arrives through constructor seams — a backend, extra tools,
-integration groups, and five middleware splice slots.
+integration groups, and four middleware splice slots.
 """
 
 import asyncio
@@ -46,7 +46,7 @@ from coding_agent.middleware import (
 )
 from coding_agent.plans import PlanStoreFactory
 from coding_agent.prompts import apply_tool_descriptions, load_prompt
-from coding_agent.runtime.constants import DEFAULT_LLM_MAX_TOKENS, MODEL_CALL_RECURSION_LIMIT
+from coding_agent.runtime.constants import MODEL_CALL_RECURSION_LIMIT
 from coding_agent.tools import (
     background_tools,
     create_sandbox_file_download_url,
@@ -59,14 +59,7 @@ from coding_agent.tools import (
 )
 from coding_agent.tools.background_execute import BackgroundTaskMonitor
 from coding_agent.utils import ttl_cache
-from coding_agent.utils.deferred_model import make_deferred_error_model
-from coding_agent.utils.model import (
-    DEFAULT_LLM_REASONING,
-    ModelKwargs,
-    fallback_model_id_for,
-    make_model,
-    provider_model_kwargs,
-)
+from coding_agent.utils.model import ModelChoice, fallback_model_id_for
 
 logger = logging.getLogger(__name__)
 
@@ -111,19 +104,14 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 type CoreToolSet = Literal["full", "web", "none"]
 type OuterMiddlewareFactory = Callable[[BaseChatModel], Sequence[AgentMiddleware[Any, Any, Any]]]
 
-
-def make_model_or_defer(
-    model_id: str,
-    *,
-    use_gateway: bool,
-    **kwargs: Any,
-) -> BaseChatModel:
-    """Build a chat model, deferring setup failures to the first model call."""
-    try:
-        return make_model(model_id, use_gateway=use_gateway, **kwargs)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Deferring model setup failure for %s", model_id, exc_info=True)
-        return make_deferred_error_model(e, model_id=model_id)
+# Signed-URL tools: generic, but only usable on a sandbox provider that serves
+# them, so the caller adds them to its own tool list rather than the builder
+# guessing.
+SANDBOX_URL_TOOLS: tuple[Any, ...] = (
+    output_iframe,
+    create_sandbox_file_download_url,
+    create_sandbox_service_url,
+)
 
 
 def registered_tool_name(value: Any) -> str:
@@ -186,21 +174,18 @@ class CodingAgentBuilder:
     tool, ``"web"`` for read-only web research only, ``"none"`` for platform
     tools alone. ``outer_middleware`` is a factory because the outermost
     middleware typically needs the thread-title model, which this builder owns.
+    ``middleware`` is spliced before ``TimeoutWrapupMiddleware`` and
+    ``late_middleware`` after it.
     """
 
     def __init__(
         self,
         *,
-        model_id: str,
+        model: ModelChoice,
         backend: BackendProtocol,
-        effort: str | None = None,
-        subagent_model_id: str | None = None,
-        subagent_effort: str | None = None,
-        title_model_id: str | None = None,
-        title_effort: str | None = None,
-        title_max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
-        use_gateway: bool = False,
-        routing_models: Mapping[str, tuple[str, str]] | None = None,
+        subagent_model: ModelChoice | None = None,
+        title_model: ModelChoice | None = None,
+        routing_models: Mapping[str, ModelChoice] | None = None,
         skill_routes: Mapping[str, BackendProtocol] = MappingProxyType({}),
         skill_sources: Sequence[str] = (),
         state_schema: type[DeepAgentState] | None = None,
@@ -214,24 +199,17 @@ class CodingAgentBuilder:
         subagent_tool_filter: Callable[[Any], bool] | None = None,
         subagent_prompt_sections: Sequence[str] = (),
         outer_middleware: OuterMiddlewareFactory | None = None,
-        tool_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
+        middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
+        late_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
         subagent_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
-        hook_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
-        late_hook_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
         plan_mode: bool = False,
         plans: PlanStoreFactory | None = None,
-        sandbox_file_downloads: bool = False,
         sandbox_failure_notifier: SandboxFailureNotifier | None = None,
         background_tasks: BackgroundTaskMonitor | None = None,
     ) -> None:
-        self._model_id = model_id
-        self._effort = effort
-        self._subagent_model_id = subagent_model_id or model_id
-        self._subagent_effort = subagent_effort
-        self._title_model_id = title_model_id or model_id
-        self._title_effort = title_effort
-        self._title_max_tokens = title_max_tokens
-        self._use_gateway = use_gateway
+        self._model = model
+        self._subagent_model = subagent_model or model
+        self._title_model = title_model or model
         self._backend = backend
         self._routing_models = routing_models
         self._skill_routes = skill_routes
@@ -245,41 +223,22 @@ class CodingAgentBuilder:
         self._subagent_tool_filter = subagent_tool_filter
         self._subagent_prompt_sections = subagent_prompt_sections
         self._outer_middleware = outer_middleware
-        self._tool_middleware = tool_middleware
+        self._middleware = middleware
+        self._late_middleware = late_middleware
         self._subagent_middleware = subagent_middleware
-        self._hook_middleware = hook_middleware
-        self._late_hook_middleware = late_hook_middleware
         self._plan_mode = plan_mode
         self._plans = plans
-        self._sandbox_file_downloads = sandbox_file_downloads
         self._sandbox_failure_notifier = sandbox_failure_notifier
         self._background_tasks = background_tasks
 
-    def _model(self, model_id: str, effort: str | None, *, max_tokens: int) -> BaseChatModel:
-        return make_model_or_defer(
-            model_id,
-            use_gateway=self._use_gateway,
-            **provider_model_kwargs(model_id, effort, max_tokens=max_tokens),
-        )
-
     def _fallback_middleware(self) -> list[Any]:
-        fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(
-            self._model_id
-        )
-        if not fallback_model_id or fallback_model_id == self._model_id:
+        model_id = self._model.model_id
+        fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(model_id)
+        if not fallback_model_id or fallback_model_id == model_id:
             return []
-        fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-        if fallback_model_id.startswith("openai:"):
-            fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
-        middleware = [
-            ModelFallbackMiddleware(
-                make_model_or_defer(
-                    fallback_model_id, use_gateway=self._use_gateway, **fallback_kwargs
-                )
-            )
-        ]
-        logger.info("Configured model fallback %s -> %s", self._model_id, fallback_model_id)
-        return middleware
+        fallback = ModelChoice(fallback_model_id, use_gateway=self._model.use_gateway)
+        logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
+        return [ModelFallbackMiddleware(fallback.chat_model())]
 
     def _core_tools(self, background_execute: Any, background_task: Any) -> list[Any]:
         if self._core_tool_set == "none":
@@ -290,10 +249,6 @@ class CodingAgentBuilder:
         tools.extend([background_execute, background_task])
         if self._plans is not None:
             tools.extend(plan_tools(self._plans))
-        if self._sandbox_file_downloads:
-            tools.extend(
-                [output_iframe, create_sandbox_file_download_url, create_sandbox_service_url]
-            )
         return tools
 
     def _dynamic_tool_middleware(self, tools: Sequence[Any]) -> DynamicToolMiddleware | None:
@@ -359,25 +314,18 @@ class CodingAgentBuilder:
         )
         dynamic_tool_middleware = self._dynamic_tool_middleware(tools)
 
-        main_model = self._model(self._model_id, self._effort, max_tokens=DEFAULT_LLM_MAX_TOKENS)
+        main_model = self._model.chat_model()
         model_selection_middleware: list[Any] = []
         if self._routing_models is not None:
-            routed = {
-                route: self._model(routed_model_id, effort, max_tokens=DEFAULT_LLM_MAX_TOKENS)
-                for route, (routed_model_id, effort) in self._routing_models.items()
-            }
+            routed = {route: choice.chat_model() for route, choice in self._routing_models.items()}
             model_selection_middleware.append(
                 ModelSelectionMiddleware(routed, routed["fast"], initial_plan_mode=self._plan_mode)
             )
-        subagent_model = self._model(
-            self._subagent_model_id, self._subagent_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
-        )
+        subagent_model = self._subagent_model.chat_model()
         subagent_tools = [
             tool for tool in tools if tool is not background_execute and tool is not background_task
         ]
-        title_model = self._model(
-            self._title_model_id, self._title_effort, max_tokens=self._title_max_tokens
-        )
+        title_model = self._title_model.chat_model()
 
         return create_deep_agent(
             model=main_model,
@@ -411,10 +359,9 @@ class CodingAgentBuilder:
                         initial_delay=1.0,
                         max_delay=10.0,
                     ),
-                    *self._tool_middleware,
-                    *self._hook_middleware,
+                    *self._middleware,
                     TimeoutWrapupMiddleware(),
-                    *self._late_hook_middleware,
+                    *self._late_middleware,
                     *model_selection_middleware,
                     *fallback_middleware,
                     PlanModeMiddleware(

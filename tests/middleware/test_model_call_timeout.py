@@ -57,9 +57,12 @@ class TestModelCallTimeoutMiddleware:
 
         from agent.reviewer import _reviewer_subagent
         from coding_agent.builder import CodingAgentBuilder
+        from coding_agent.utils.model import ModelChoice
 
         model = MagicMock()
-        builder = CodingAgentBuilder(model_id="openai:gpt-5.6-sol", backend=StateBackend())
+        builder = CodingAgentBuilder(
+            model=ModelChoice("openai:gpt-5.6-sol"), backend=StateBackend()
+        )
         specs = [
             builder._general_purpose_subagent(model, [], None),
             _reviewer_subagent(model),
