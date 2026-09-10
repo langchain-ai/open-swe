@@ -1,43 +1,77 @@
+import type { QueryClient } from "@tanstack/react-query"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
-import type { AgentThread } from "@/features/agents/lib/types"
+import type {
+  AgentThread,
+  PendingThreadMessage,
+  QueuedThreadMessage,
+} from "@/features/agents/lib/types"
 import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
-import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import {
+  modelConfigurable,
+  promptMessage,
+} from "@/features/agents/lib/stream/promptMessage"
 
-function messageContent(vars: SendAgentMessageVariables) {
-  const text = vars.content.trim()
-  const imageBlocks =
-    vars.images?.map((image) => ({
-      type: "image",
-      base64: image.base64,
-      mime_type: image.mimeType,
-      ...(image.fileName ? { file_name: image.fileName } : {}),
-    })) ?? []
-  return [...imageBlocks, ...(text ? [{ type: "text", text }] : [])]
+function upsertMessage<T extends QueuedThreadMessage>(
+  messages: Array<T> | undefined,
+  message: T
+): Array<T> {
+  return [...(messages ?? []).filter((item) => item.id !== message.id), message]
 }
 
-function appendQueuedMessage(
+/** A send racing an in-flight stop must land after it, or the stop cancels the run the follow-up just joined. */
+async function waitForCancellation(
+  queryClient: QueryClient,
+  threadId: string
+): Promise<void> {
+  const cancelling = () =>
+    queryClient.isMutating({ mutationKey: agentThreadKeys.cancel(threadId) }) >
+    0
+  if (!cancelling()) return
+  await new Promise<void>((resolve) => {
+    let unsubscribe = () => {}
+    const finishIfCancelled = () => {
+      if (cancelling()) return
+      unsubscribe()
+      resolve()
+    }
+    unsubscribe = queryClient.getMutationCache().subscribe(finishIfCancelled)
+    finishIfCancelled()
+  })
+}
+
+function setPendingMessage(
   thread: AgentThread,
-  vars: SendAgentMessageVariables,
-  id: string,
-  createdAt: number
+  message: PendingThreadMessage
 ): AgentThread {
   return {
     ...thread,
-    queuedMessages: [
-      ...(thread.queuedMessages ?? []),
-      {
-        id,
-        content: vars.content.trim(),
-        images: vars.images,
-        createdAt,
-      },
-    ],
+    pendingMessages: upsertMessage(thread.pendingMessages, message),
+  }
+}
+
+function removePendingMessage(thread: AgentThread, id: string): AgentThread {
+  return {
+    ...thread,
+    pendingMessages: thread.pendingMessages?.filter(
+      (message) => message.id !== id
+    ),
+  }
+}
+
+function setQueuedMessage(
+  thread: AgentThread,
+  message: QueuedThreadMessage
+): AgentThread {
+  return {
+    ...removePendingMessage(thread, message.id),
+    queuedMessages: upsertMessage(thread.queuedMessages, message),
   }
 }
 
@@ -51,112 +85,97 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
 }
 
 /**
- * User-initiated sends from the prompt bar. Prefer this over calling `stream.submit`
- * directly so cache updates and the busy-thread queue path stay consistent.
+ * Submit user messages through the active-run queue or a new stream run.
  *
- * When the thread is idle, submits a new run via the stream commands endpoint.
- * When it is busy, persists the follow-up to the dashboard queue. If stop wins
- * after that persistence, the endpoint starts a replacement run for the queue.
- *
- * @param threadId - The ID of the thread to submit the message to.
- * @returns The mutation object.
+ * A busy thread persists the follow-up to the dashboard queue. If stop wins the
+ * race after that persistence, the endpoint starts a replacement run that
+ * consumes it, so the text is never dropped.
  */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
-  const stream = useAgentThreadRuntime()
+  const stream = useAgentStream()
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
-      const waitForCancellation = async () => {
-        if (
-          !queryClient.isMutating({
-            mutationKey: agentThreadKeys.cancel(threadId),
-          })
-        )
-          return
-        await new Promise<void>((resolve) => {
-          let unsubscribe = () => {}
-          const finishIfCancelled = () => {
-            if (
-              queryClient.isMutating({
-                mutationKey: agentThreadKeys.cancel(threadId),
-              })
-            )
-              return
-            unsubscribe()
-            resolve()
-          }
-          unsubscribe = queryClient
-            .getMutationCache()
-            .subscribe(finishIfCancelled)
-          finishIfCancelled()
-        })
+      await waitForCancellation(queryClient, threadId)
+      const createdAt = Date.now()
+      const id = vars.client_message_id ?? crypto.randomUUID()
+      const queuedMessage = {
+        id,
+        content: vars.content.trim(),
+        images: vars.images,
+        createdAt,
       }
-      await waitForCancellation()
-      const queue = async (optimistic: boolean) => {
-        const queuedAt = Date.now()
-        const queuedId = `queued-${queuedAt}-${Math.random().toString(36).slice(2)}`
-        const showQueued = () =>
-          queryClient.setQueryData<AgentThread>(
-            agentThreadKeys.detail(threadId),
-            (prev) =>
-              prev ? appendQueuedMessage(prev, vars, queuedId, queuedAt) : prev
-          )
-        if (optimistic) showQueued()
-        try {
-          const queuedThread = await agentsApi.queueMessage(threadId, {
-            content: vars.content,
-            images: vars.images,
-            model_id: vars.model_id,
-            effort: vars.effort,
-            plan_mode: vars.plan_mode,
-            expect_active: optimistic,
-          })
-          if (queuedThread?.queuedMessages?.length) {
-            queryClient.setQueryData(
-              agentThreadKeys.detail(threadId),
-              queuedThread
-            )
-          }
-        } catch (error) {
-          if (optimistic) {
-            queryClient.setQueryData<AgentThread>(
-              agentThreadKeys.detail(threadId),
-              (prev) => (prev ? removeQueuedMessage(prev, queuedId) : prev)
-            )
-          }
-          throw error
-        }
+      const pendingMessage = {
+        ...queuedMessage,
+        status: "sending" as const,
+      }
+      const updateThread = (update: (thread: AgentThread) => AgentThread) =>
+        queryClient.setQueryData<AgentThread>(
+          agentThreadKeys.detail(threadId),
+          (prev) => (prev ? update(prev) : prev)
+        )
+      const knownRunning =
+        stream.isLoading ||
+        queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))
+          ?.status === "running"
+      const queue = async () => {
+        await agentsApi.queueMessage(threadId, {
+          content: vars.content,
+          images: vars.images,
+          model_id: vars.model_id,
+          effort: vars.effort,
+          plan_mode: vars.plan_mode,
+          client_message_id: id,
+          expect_active: knownRunning,
+        })
+        updateThread((thread) => setQueuedMessage(thread, queuedMessage))
       }
 
-      const thread = queryClient.getQueryData<AgentThread>(
-        agentThreadKeys.detail(threadId)
-      )
-      const optimistic = stream.isLoading || thread?.status === "running"
+      if (knownRunning) {
+        updateThread((thread) => setQueuedMessage(thread, queuedMessage))
+        try {
+          await queue()
+        } catch (error) {
+          updateThread((thread) =>
+            setPendingMessage(removeQueuedMessage(thread, id), {
+              ...pendingMessage,
+              status: "failed",
+            })
+          )
+          throw error
+        }
+        return
+      }
+
+      updateThread((thread) => setPendingMessage(thread, pendingMessage))
       try {
-        await queue(optimistic)
+        await queue()
         return
       } catch (error) {
         if (!(error instanceof AgentsApiError) || error.status !== 409) {
+          updateThread((thread) =>
+            setPendingMessage(thread, { ...pendingMessage, status: "failed" })
+          )
           throw error
         }
       }
 
-      const configurable: Record<string, unknown> = {}
-      if (vars.model_id && vars.effort) {
-        configurable.agent_model_id = vars.model_id
-        configurable.agent_effort = vars.effort
-      }
+      const configurable: Record<string, unknown> = modelConfigurable({
+        modelId: vars.model_id,
+        effort: vars.effort,
+      })
       if (vars.plan_mode) configurable.plan_mode = true
       const config =
         Object.keys(configurable).length > 0 ? { configurable } : undefined
 
+      const message = promptMessage(vars.content, vars.images)
       void stream
-        .submit(
-          { messages: [{ type: "human", content: messageContent(vars) }] },
-          { config }
-        )
+        .submit({ messages: [{ ...message, id }] }, { config })
         .catch(() => {
+          updateThread((thread) =>
+            setPendingMessage(thread, { ...pendingMessage, status: "failed" })
+          )
           setAgentThreadStatus(queryClient, threadId, "error")
         })
     },

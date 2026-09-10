@@ -55,10 +55,12 @@ from agent.middleware import (
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
+from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
+    bindable_config,
     graph_loaded_for_execution,
 )
 from agent.tools import (
@@ -71,7 +73,6 @@ from agent.tools import (
 from agent.utils import ttl_cache
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from agent.utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)
 
@@ -103,33 +104,7 @@ def _chat_general_purpose_subagent() -> SubAgent:
     }
 
 
-CHAT_PROMPT = """You are a code-review chat assistant. You help the author and reviewers \
-understand one GitHub pull request: `{repo_owner}/{repo_name}` #{pr_number}.
-
-You have NO sandbox and cannot run code, execute tests, commit, or open PRs. You \
-reason from the PR's diff, the published review findings, and read-only access to \
-the repository.
-
-Context already loaded as virtual files (use `read_file`, `ls`, `grep`):
-- `/pr/overview.md` — title, description, author, branches, head commit, change stats.
-- `/pr/diff.patch` — the unified diff under review.
-- `/pr/findings.md` — the reviewer's published findings, rendered for reading.
-
-Tools:
-- `read_repo_file(path, ref)` — read any repo file/dir at a commit (defaults to the \
-PR head). Use it to inspect callers, definitions, and neighboring code beyond the diff.
-- `search_repo_code(query)` — find a symbol or phrase across the repository.
-- `list_review_findings(status_filter)` — the live findings (open/resolved/dismissed) \
-with severity, confidence, and resolution notes.
-- `web_search`, `fetch_url` — for external docs or standards.
-
-Guidance:
-- Be concrete and cite specific files and line numbers from the diff.
-- Ground claims about the review in the actual findings; don't invent issues.
-- If repository access fails, disclose it and qualify claims that require unread source.
-- When you propose a change, describe it precisely — you cannot apply it yourself.
-- Keep answers focused and skimmable. Match the depth of the question.
-"""
+CHAT_PROMPT = load_prompt("chat/main.md")
 
 
 async def _cached_gateway_enabled() -> bool:
@@ -163,7 +138,7 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> object:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "repo_owner": cfg.chat_repo_owner,
             "repo_name": cfg.chat_repo_name,
             "pr_number": cfg.chat_pr_number,
@@ -179,7 +154,8 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         if isinstance(token, str) and token:
             configurable["chat_github_token"] = token
         return {
-            "rendered_system_prompt": CHAT_PROMPT.format(
+            "rendered_system_prompt": render_prompt(
+                "chat/main.md",
                 repo_owner=cfg.chat_repo_owner or "<owner>",
                 repo_name=repo_name or "<repo>",
                 pr_number=cfg.chat_pr_number if cfg.chat_pr_number is not None else "?",
@@ -213,7 +189,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     cfg = RunConfig.parse(configurable)
 
     if cfg.thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
     model_id, effort = await _resolve_chat_model(cfg)
     model_id, effort = gate_fable_model(
@@ -230,13 +206,15 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt="",
-        tools=[
-            read_repo_file,
-            search_repo_code,
-            list_review_findings,
-            web_search,
-            fetch_url,
-        ],
+        tools=apply_tool_descriptions(
+            [
+                read_repo_file,
+                search_repo_code,
+                list_review_findings,
+                web_search,
+                fetch_url,
+            ]
+        ),
         subagents=[_chat_general_purpose_subagent()],
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
@@ -252,7 +230,8 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 ModelCallTimeoutMiddleware(),
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
-traced_chat_agent = traced_graph_factory(get_chat_agent, AGENT_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_chat_agent = get_chat_agent

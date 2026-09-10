@@ -2,7 +2,7 @@
 
 from typing import Any
 
-import httpx
+import httpx2
 
 from agent.github.checks import github_headers
 from agent.run_config import RunConfig
@@ -16,21 +16,7 @@ def _chat_repo_context() -> tuple[str, str, str | None]:
 
 
 async def search_repo_code(query: str, max_results: int = 20) -> dict[str, Any]:
-    """Search code in the PR's repository for a keyword, symbol, or phrase.
-
-    Backed by GitHub code search, which indexes the repository's default branch
-    (not arbitrary refs). Use it to locate where a symbol is defined or used,
-    then ``read_repo_file`` for the surrounding context. For matches within the
-    changed lines, search the virtual file ``/pr/diff.patch`` instead.
-
-    Args:
-        query: Search terms. Repo scoping is added automatically.
-        max_results: Max matches to return (capped at 50).
-
-    Returns:
-        ``{success, total_count, results}`` where each result is
-        ``{path, fragments}``; ``{success: False, error}`` on failure.
-    """
+    """Implement the `search_repo_code` tool."""
     owner, repo, token = _chat_repo_context()
     if not owner or not repo:
         return {"success": False, "error": "repository context unavailable"}
@@ -45,11 +31,11 @@ async def search_repo_code(query: str, max_results: int = 20) -> dict[str, Any]:
     headers["Accept"] = "application/vnd.github.text-match+json"
     params = {"q": f"{query} repo:{owner}/{repo}", "per_page": capped}
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx2.AsyncClient(timeout=30) as client:
             response = await client.get(
                 f"{_GITHUB_API}/search/code", headers=headers, params=params
             )
-    except httpx.HTTPError as exc:
+    except httpx2.HTTPError as exc:
         return {"success": False, "error": f"GitHub request failed: {exc!s}"}
 
     if response.status_code == 422:

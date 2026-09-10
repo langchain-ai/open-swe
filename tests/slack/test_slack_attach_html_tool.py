@@ -42,7 +42,7 @@ def _setup(
 ) -> AsyncMock:
     monkeypatch.setattr(
         attach_tool,
-        "_resolve_sandbox_file",
+        "resolve_sandbox_file",
         AsyncMock(return_value=(backend, "/workspace/test.html", "/workspace")),
     )
     monkeypatch.setattr(attach_tool, "get_config", _config)
@@ -90,7 +90,7 @@ async def test_slack_attach_html_rejects_non_html_file(monkeypatch: pytest.Monke
     backend = _backend()
     monkeypatch.setattr(
         attach_tool,
-        "_resolve_sandbox_file",
+        "resolve_sandbox_file",
         AsyncMock(return_value=(backend, "/workspace/test.txt", "/workspace")),
     )
 
@@ -105,7 +105,7 @@ async def test_slack_attach_html_rejects_large_file(monkeypatch: pytest.MonkeyPa
     backend = _backend(prepare_output=str(attach_tool._MAX_SLACK_ATTACHMENT_BYTES + 1))
     monkeypatch.setattr(
         attach_tool,
-        "_resolve_sandbox_file",
+        "resolve_sandbox_file",
         AsyncMock(return_value=(backend, "/workspace/big.html", "/workspace")),
     )
 

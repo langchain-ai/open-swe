@@ -1,23 +1,23 @@
 """GitHub App installation token generation."""
 
 import logging
-import os
 import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2
 import jwt
 
+from agent.config import ENV
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID", "")
-GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
-GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
+GITHUB_APP_ID = ENV.GITHUB_APP_ID.get()
+GITHUB_APP_PRIVATE_KEY = ENV.GITHUB_APP_PRIVATE_KEY.get()
+GITHUB_APP_INSTALLATION_ID = ENV.GITHUB_APP_INSTALLATION_ID.get()
 
 # Installation tokens are valid for 1 hour. Reuse a minted token until it is
 # within this window of expiring so chat/review requests don't pay a fresh
@@ -101,7 +101,7 @@ async def get_github_app_installation_id_for_org(org: str) -> int | None:
     if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not org.strip():
         return None
     try:
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.get(
                 f"https://api.github.com/orgs/{quote(org.strip(), safe='')}/installation",
                 headers={
@@ -127,7 +127,7 @@ async def get_github_app_installation_id_for_repo(owner: str, repo: str) -> int 
         f"{quote(owner.strip(), safe='')}/{quote(repo.strip(), safe='')}/installation"
     )
     try:
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.get(
                 url,
                 headers={
@@ -203,7 +203,7 @@ async def get_github_app_installation_token_with_expiry(
 
     try:
         app_jwt = _generate_app_jwt()
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.post(
                 f"https://api.github.com/app/installations/{resolved_installation_id}/access_tokens",
                 headers={

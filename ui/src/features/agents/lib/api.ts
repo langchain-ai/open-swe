@@ -33,6 +33,7 @@ export interface ThreadMessageRequest {
   effort?: string | null
   plan_mode?: boolean
   expect_active?: boolean
+  client_message_id?: string
 }
 
 export interface ScheduleCreateRequest {
@@ -262,8 +263,33 @@ export interface PullRequestSnapshot {
   state: PullRequestLiveState | null
 }
 
+export type ThreadFeedbackRating = "bad" | "good"
+
+export type ThreadFeedbackSubmission =
+  | { action?: "submit"; rating: ThreadFeedbackRating; comment?: string }
+  | { action: "comment"; comment: string }
+  | { action: "dismiss" }
+
+export interface ThreadFeedback {
+  status: "unavailable" | "ready" | "completed" | "dismissed"
+  rating: ThreadFeedbackRating | "other" | null
+  comment: string
+}
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
+  getThreadFeedback: (threadId: string) =>
+    agentsRequest<ThreadFeedback>(
+      `/threads/${encodeURIComponent(threadId)}/feedback`
+    ),
+  submitThreadFeedback: (threadId: string, body: ThreadFeedbackSubmission) =>
+    agentsRequest<ThreadFeedback>(
+      `/threads/${encodeURIComponent(threadId)}/feedback`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    ),
   listThreadProjects: (
     params: {
       includeResolved?: boolean
@@ -276,6 +302,11 @@ export const agentsApi = {
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  renameThread: (threadId: string, title: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
   resolveThread: (threadId: string, resolved: boolean) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/resolve`,
@@ -398,8 +429,6 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
     ),
-  streamUrl: (threadId: string) =>
-    `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
 }
 
 export type ThreadGroup = "today" | "last7" | "last30" | "older"

@@ -1,6 +1,8 @@
 from typing import Any
 
-from agent.dashboard import thread_api
+from agent.dashboard.threads import api as thread_api
+from agent.dashboard.threads import listing as thread_listing
+from tests.conftest import patch_thread_module
 
 
 class FakeThreads:
@@ -37,13 +39,13 @@ class FakeRuns:
 
 
 class FakeStore:
-    def __init__(self, messages: list[dict[str, Any]] | None = None) -> None:
-        self.messages = messages
+    def __init__(self, queued: object = None) -> None:
+        self.queued = queued
 
-    async def get_item(self, namespace: tuple[str, str], key: str) -> dict[str, Any] | None:
+    async def get_item(self, namespace: tuple[str, str], key: str) -> object:
         assert namespace == ("queue", "tid")
         assert key == "pending_messages"
-        return {"value": {"messages": self.messages}} if self.messages is not None else None
+        return self.queued
 
 
 class FakeClient:
@@ -53,11 +55,11 @@ class FakeClient:
         run_status: str,
         *,
         thread_status: str = "idle",
-        queued_messages: list[dict[str, Any]] | None = None,
+        queued: object = None,
     ) -> None:
         self.threads = FakeThreads(metadata, status=thread_status)
         self.runs = FakeRuns(run_status)
-        self.store = FakeStore(queued_messages)
+        self.store = FakeStore(queued)
 
 
 async def test_list_dashboard_threads_refreshes_finished_run_status(monkeypatch) -> None:
@@ -70,9 +72,9 @@ async def test_list_dashboard_threads_refreshes_finished_run_status(monkeypatch)
         },
         "success",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
-    results = await thread_api.list_dashboard_threads("octocat")
+    results = await thread_listing.list_dashboard_threads("octocat")
 
     assert results[0]["status"] == "finished"
     assert results[0]["viewed"] is False
@@ -89,7 +91,7 @@ async def test_get_dashboard_thread_marks_finished_thread_viewed(monkeypatch) ->
         },
         "success",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat")
 
@@ -108,7 +110,7 @@ async def test_get_dashboard_thread_marks_viewed_for_any_authenticated_user(monk
         },
         "success",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "someone-else")
 
@@ -126,7 +128,7 @@ async def test_get_dashboard_thread_skips_mark_viewed_when_disabled(monkeypatch)
         },
         "success",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat", mark_viewed=False)
 
@@ -146,7 +148,7 @@ async def test_get_dashboard_thread_does_not_mark_running_thread_viewed(monkeypa
         "running",
         thread_status="busy",
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat")
 
@@ -156,7 +158,7 @@ async def test_get_dashboard_thread_does_not_mark_running_thread_viewed(monkeypa
     assert "last_viewed_run_id" not in client.threads.thread["metadata"]
 
 
-async def test_get_dashboard_thread_exposes_sanitized_queued_messages(monkeypatch) -> None:
+async def test_get_dashboard_thread_hydrates_queued_dashboard_messages(monkeypatch) -> None:
     client = FakeClient(
         {
             "source": "dashboard",
@@ -166,22 +168,47 @@ async def test_get_dashboard_thread_exposes_sanitized_queued_messages(monkeypatc
         },
         "running",
         thread_status="busy",
-        queued_messages=[
-            {
-                "content": {
-                    "id": "queued-1",
-                    "created_at_ms": 1234,
-                    "text": "follow up",
-                    "source": "dashboard",
-                    "github_token": "secret",
-                }
+        queued={
+            "value": {
+                "messages": [
+                    {
+                        "content": {
+                            "source": "dashboard",
+                            "text": "queued follow-up",
+                            "queue_id": "queued-server-id",
+                            "created_at_ms": 1700000000123,
+                            "images": [
+                                {
+                                    "type": "image",
+                                    "base64": "image-data",
+                                    "mime_type": "image/png",
+                                    "file_name": "proof.png",
+                                }
+                            ],
+                        }
+                    },
+                    {"content": {"source": "slack", "text": "hidden"}},
+                    {"content": {"source": "dashboard", "text": "incomplete"}},
+                ]
             }
-        ],
+        },
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat")
 
     assert result["queuedMessages"] == [
-        {"id": "queued-1", "content": "follow up", "createdAt": 1234}
+        {
+            "id": "queued-server-id",
+            "content": "queued follow-up",
+            "createdAt": 1700000000123,
+            "images": [
+                {
+                    "kind": "image",
+                    "base64": "image-data",
+                    "mimeType": "image/png",
+                    "fileName": "proof.png",
+                }
+            ],
+        }
     ]

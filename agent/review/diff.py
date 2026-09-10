@@ -224,7 +224,7 @@ async def fetch_pr_diff(
     The full diff is returned uncapped: the reviewer model has a large context
     window and reviews the complete diff.
     """
-    import httpx
+    import httpx2
 
     from agent.github.http import github_client, github_request
 
@@ -239,7 +239,7 @@ async def fetch_pr_diff(
                 timeout=timeout,
             )
             response.raise_for_status()
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.exception("Failed to fetch PR diff for %s/%s#%s", owner, repo, pr_number)
         return None
     return response.text
@@ -260,7 +260,7 @@ async def fetch_pr_metadata(
     reflected on every re-review. ``body`` is normalized to ``""`` when the
     PR has no description.
     """
-    import httpx
+    import httpx2
 
     from agent.github.http import github_client, github_request
 
@@ -270,7 +270,7 @@ async def fetch_pr_metadata(
             response = await github_request(client, "GET", url, timeout=timeout)
             response.raise_for_status()
             payload = response.json()
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.exception("Failed to fetch PR metadata for %s/%s#%s", owner, repo, pr_number)
         return None
     except ValueError:
@@ -303,7 +303,7 @@ def review_diff_path(work_dir: str, base_ref: str, head_ref: str, merge_base: bo
 
 
 async def materialize_review_diff(
-    sandbox_backend: "SandboxBackendProtocol",
+    sandbox_backend: SandboxBackendProtocol,
     *,
     work_dir: str,
     base_ref: str,
@@ -378,7 +378,7 @@ def _download_content(response: object) -> str | None:
 
 
 async def compute_diff_in_sandbox(
-    sandbox_backend: "SandboxBackendProtocol",
+    sandbox_backend: SandboxBackendProtocol,
     work_dir: str,
     base_ref: str,
     head_ref: str,

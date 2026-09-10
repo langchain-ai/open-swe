@@ -11,7 +11,7 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     upload_slack_thread_file,
 )
-from agent.tools.create_sandbox_file_download_url import _resolve_sandbox_file
+from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.thread_ops import langgraph_client
 
 _MAX_SLACK_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -23,13 +23,8 @@ async def slack_attach_html(
     title: str | None = None,
     initial_comment: str | None = None,
 ) -> dict[str, Any]:
-    """Attach a sandbox HTML preview to the current Slack thread.
-
-    Use this when the user asks to receive or preview generated HTML directly in Slack. The file must
-    be a regular `.html` file inside the active sandbox work directory and no larger than 10 MB. Do
-    not attach secrets, credentials, private keys, environment files, or other sensitive data.
-    """
-    backend, path, work_dir = await _resolve_sandbox_file(file_path)
+    """Implement the `slack_attach_html` tool."""
+    backend, path, work_dir = await resolve_sandbox_file(file_path)
     if not path.lower().endswith(".html"):
         return {"success": False, "error": "file_path must identify an HTML file"}
     staged_path = posixpath.join(work_dir, f".open-swe-slack-upload-{uuid.uuid4().hex}")
@@ -39,7 +34,7 @@ async def slack_attach_html(
         return {"success": False, "error": _prepare_error(prepare.output)}
     try:
         size = int(prepare.output.strip())
-    except (AttributeError, ValueError):
+    except AttributeError, ValueError:
         await _remove_staged_file(backend, staged_path)
         return {"success": False, "error": "failed to determine file size"}
     if size < 1:
