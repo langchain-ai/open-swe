@@ -28,7 +28,7 @@ The Pydantic envelope rejects unknown fields and validates a specific payload sc
 
 Events contain only opaque workspace-scoped person and subject UUIDs. Prompts, responses, feedback comments, source code, diffs, branch names, raw paths, emails, and display names are prohibited from the event schema. Names live in `identity_directory`, a separately protected join table. Named leaderboard rows are visible only to the person or workspace administrators. Aggregate model cohorts smaller than five are suppressed for non-admins. Repository names live in a protected directory so unauthorized callers can receive redacted dimensions. Named exports must write `named_export_audit` before returning data.
 
-Team-manager authorization is schema-ready through `team_id`, but Open SWE does not currently have an authoritative manager-membership signal. No manager access is granted until such a directory is connected. Effective model is currently captured as configured attribution where provider execution does not return an authoritative effective model.
+Team-manager authorization is schema-ready through `team_id`, but Open SWE does not currently have an authoritative manager-membership signal. No manager access is granted until such a directory is connected. `effective_model_id` stays unknown until an authoritative provider observation exists; run and PR-origin attribution is explicitly labeled `configured`, and configured labels never impersonate observed execution. A thread may change models between invocations, and adaptive routing, provider fallback, and subagents may use other models within one invocation.
 
 ## Metrics and summaries
 

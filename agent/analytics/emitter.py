@@ -110,7 +110,10 @@ async def run_started(
         f"run:{run_key}:started",
         RunStartedPayload(
             configured_model_id=model_id,
-            effective_model_id=model_id,
+            # Configuration alone is not an observation; routing, fallback, and
+            # subagents may execute other models. Effective attribution waits
+            # for an authoritative provider signal and stays unknown here.
+            effective_model_id=None,
             model_attribution_quality="configured" if model_id else "unavailable",
         ),
         occurred_at=occurred_at,
