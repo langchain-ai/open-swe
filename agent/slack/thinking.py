@@ -330,4 +330,15 @@ async def show_slack_thinking_status(
         logger.warning("Slack thinking status observer failed for run %s", run_id, exc_info=True)
     finally:
         refresher.cancel()
-        await asyncio.shield(set_slack_thread_status(channel_id, thread_ts, ""))
+        if not await asyncio.shield(_thread_has_active_runs(client, thread_id)):
+            await asyncio.shield(set_slack_thread_status(channel_id, thread_ts, ""))
+
+
+async def _thread_has_active_runs(client: LangGraphClient, thread_id: str) -> bool:
+    try:
+        for status in ("pending", "running"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                return True
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not list runs for thread %s", thread_id, exc_info=True)
+    return False
