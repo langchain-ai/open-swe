@@ -32,7 +32,11 @@ logger = logging.getLogger(__name__)
 _FEEDBACK_ACTION = "open_swe_feedback"
 _NOTE_ACTION = "open_swe_feedback_note"
 _DISMISS_ACTION = "open_swe_feedback_dismiss"
+_LEGACY_SELECT_PREFIX = "open_swe_feedback_select_"
+_LEGACY_SUBMIT_ACTION = "open_swe_feedback_submit"
+_LEGACY_RATING_ACTION = "open_swe_feedback_rating"
 _COMMENT_BLOCK = "feedback_comment"
+_LEGACY_RATING_BLOCK = "feedback_rating"
 
 
 class ThreadFeedback(BaseModel):
@@ -220,7 +224,16 @@ def _action(payload: dict[str, Any]) -> dict[str, Any]:
         for value in actions:
             action = _object(value)
             action_id = action.get("action_id")
-            if isinstance(action_id, str) and action_id in {_FEEDBACK_ACTION, _DISMISS_ACTION}:
+            if isinstance(action_id, str) and (
+                action_id.startswith(_LEGACY_SELECT_PREFIX)
+                or action_id
+                in {
+                    _FEEDBACK_ACTION,
+                    _DISMISS_ACTION,
+                    _LEGACY_SUBMIT_ACTION,
+                    _LEGACY_RATING_ACTION,
+                }
+            ):
                 return action
     return {}
 
@@ -376,6 +389,47 @@ def _comment_error(text: str) -> FeedbackResponse:
     return {"response_action": "errors", "errors": {_COMMENT_BLOCK: text}}
 
 
+def _legacy_submission(payload: dict[str, Any]) -> tuple[str, str] | None:
+    action = _action(payload)
+    action_id = str(action.get("action_id") or "")
+    if action_id.startswith(_LEGACY_SELECT_PREFIX):
+        choice = action_id.removeprefix(_LEGACY_SELECT_PREFIX)
+        return (str(action.get("value") or ""), choice) if choice in {"good", "bad"} else None
+    if action_id != _LEGACY_SUBMIT_ACTION:
+        return None
+    run_id = str(action.get("value") or "")
+    choice = ""
+    if run_id.startswith("{"):
+        selection = _object(json.loads(run_id))
+        run_id = str(selection.get("run_id") or "")
+        choice = str(selection.get("choice") or "")
+        rating = selection.get("rating")
+        if not choice and rating in {1, 5}:
+            choice = "good" if rating == 5 else "bad"
+    if not choice:
+        selected = _object(
+            _object(
+                _object(_object(payload.get("state")).get("values")).get(_LEGACY_RATING_BLOCK)
+            ).get(_LEGACY_RATING_ACTION)
+        ).get("selected_option")
+        value = str(_object(selected).get("value") or "")
+        choice = value if value in {"good", "bad"} else {"1": "bad", "5": "good"}.get(value, "")
+    return (run_id, choice) if run_id and choice else None
+
+
+def _native_rating_payload(payload: dict[str, Any], run_id: str, choice: str) -> dict[str, Any]:
+    return {
+        **payload,
+        "actions": [
+            {
+                **_action(payload),
+                "action_id": _FEEDBACK_ACTION,
+                "value": json.dumps({"run_id": run_id, "choice": choice}),
+            }
+        ],
+    }
+
+
 async def _record_rating(payload: dict[str, Any], background_tasks: BackgroundTasks) -> None:
     try:
         async with asyncio.timeout(2.5):
@@ -450,4 +504,13 @@ async def handle_slack_feedback_interaction(
     if action_id == _DISMISS_ACTION:
         background_tasks.add_task(_dismiss_feedback, payload)
         return {}
+    if action_id == _LEGACY_RATING_ACTION:
+        return {}
+    try:
+        legacy = _legacy_submission(payload)
+    except Exception:
+        logger.warning("Could not parse legacy Slack feedback rating", exc_info=True)
+        return {}
+    if legacy is not None:
+        await _record_rating(_native_rating_payload(payload, *legacy), background_tasks)
     return {}

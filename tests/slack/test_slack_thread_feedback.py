@@ -117,6 +117,24 @@ def _rating(choice: str = "good", run_id: str = "run-1") -> dict[str, Any]:
     return _action("open_swe_feedback", json.dumps({"run_id": run_id, "choice": choice}))
 
 
+def _legacy_submission(choice: str = "good", *, inline_state: bool = False) -> dict[str, Any]:
+    payload = _action(
+        "open_swe_feedback_submit",
+        "run-1"
+        if inline_state
+        else json.dumps({"run_id": "run-1", "choice": choice, "selection_ts": "3.0"}),
+    )
+    if inline_state:
+        payload["state"] = {
+            "values": {
+                "feedback_rating": {
+                    "open_swe_feedback_rating": {"selected_option": {"value": choice}}
+                }
+            }
+        }
+    return payload
+
+
 async def _submit_rating(choice: str = "good") -> None:
     tasks = BackgroundTasks()
     assert await routes.slack_interactivity(_request(_rating(choice)), tasks) == {}
@@ -159,6 +177,27 @@ def test_feedback_http_response_preserves_modal_errors_and_empty_ack(
     else:
         assert response.json()["response_action"] == "errors"
         assert response.json()["errors"]["feedback_comment"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("choice", ["good", "bad"])
+@pytest.mark.parametrize("mode", ["selection", "submit", "inline"])
+async def test_legacy_feedback_prompt_submits_after_deploy(
+    context: Any, fake_store: Any, choice: str, mode: str
+) -> None:
+    payload = (
+        _action(f"open_swe_feedback_select_{choice}")
+        if mode == "selection"
+        else _legacy_submission(choice, inline_state=mode == "inline")
+    )
+    tasks = BackgroundTasks()
+    assert await routes.slack_interactivity(_request(payload), tasks) == {}
+    await tasks()
+    saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
+    assert saved["completed"] and saved["choice"] == choice
+    feedback.respond_to_slack_interaction.assert_awaited_once_with(
+        _RESPONSE_URL, {"delete_original": True}
+    )
 
 
 @pytest.mark.asyncio
