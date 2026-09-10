@@ -789,13 +789,17 @@ async def stop_slack_stream(
             raise
 
 
-async def delete_slack_stream(channel_id: str, message_ts: str) -> None:
-    """Delete a stopped Slack stream message."""
+async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) -> bool:
+    """Set (or clear, with "") the animated assistant status shown under a thread."""
     try:
-        await _slack_stream_call("chat.delete", {"channel": channel_id, "ts": message_ts})
+        await _slack_stream_call(
+            "assistant.threads.setStatus",
+            {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
+        )
     except SlackStreamError as exc:
-        if exc.code not in {"message_not_found", "cant_delete_message"}:
-            raise
+        logger.info("Slack thread status unavailable: %s", exc.code)
+        return False
+    return True
 
 
 async def update_slack_message(
