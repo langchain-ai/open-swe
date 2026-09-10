@@ -442,15 +442,16 @@ class _HeadChecks(NamedTuple):
     def required_pass(self) -> bool:
         if self.truncated:
             return False
-        reported: dict[str, bool] = {}
-        for context in self.contexts:
-            name = context.name or context.context
-            reported[name] = reported.get(name, True) and _context_passed(context)
-        # A protected name with no context yet is not a pass; the workflow may
-        # simply not have created its check run.
-        if not all(reported.get(name, False) for name in self.required_names):
+        if not all(self._name_passes(name) for name in self.required_names):
             return False
         return all(_context_passed(context) for context in self.contexts if context.is_required)
+
+    def _name_passes(self, name: str) -> bool:
+        # Same-name contexts from different apps are distinct; when GitHub flags
+        # which one is required, only that one counts. No context yet is not a pass.
+        same_name = [c for c in self.contexts if (c.name or c.context) == name]
+        pool = [c for c in same_name if c.is_required] or same_name
+        return bool(pool) and all(_context_passed(c) for c in pool)
 
     def optional_failures(self) -> int:
         return sum(

@@ -778,6 +778,24 @@ async def test_required_mode_honours_branch_protection_contexts(
                             required_contexts=["legacy"],
                             contexts=[_status("legacy", "SUCCESS", required=False)],
                         ),
+                        _pull(
+                            "acme/alpha",
+                            6,
+                            required_contexts=["ci"],
+                            contexts=[
+                                _check("ci", "SUCCESS", required=True),
+                                _check("ci", "FAILURE", required=False),
+                            ],
+                        ),
+                        _pull(
+                            "acme/alpha",
+                            7,
+                            required_contexts=["ci"],
+                            contexts=[
+                                _check("ci", "SUCCESS", required=False),
+                                _check("ci", "FAILURE", required=False),
+                            ],
+                        ),
                     ]
                 }
             }
@@ -787,7 +805,7 @@ async def test_required_mode_honours_branch_protection_contexts(
 
     payload = await get_review_queue("octocat")
 
-    assert [item.number for item in payload.items] == [2, 3, 5]
+    assert [item.number for item in payload.items] == [2, 3, 5, 6]
 
 
 async def test_all_mode_filters_on_the_rollup_without_a_details_query(
