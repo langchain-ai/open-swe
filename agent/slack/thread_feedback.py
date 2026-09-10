@@ -58,6 +58,7 @@ class ThreadFeedback(BaseModel):
     choice: _Choice | None = None
     comment: str = Field(default="", max_length=3000)
     completed: bool = False
+    acknowledged: bool = False
     draft_rating: int | None = Field(default=None, ge=1, le=5)
     draft_choice: _Choice | None = None
     last_selection_ts: Decimal = Decimal(0)
@@ -424,19 +425,25 @@ async def _acknowledge(record: ThreadFeedback, *, response_url: str) -> None:
         async with _locked_feedback(record, purpose="feedback_response") as current:
             if current is None or current.dismissed or not current.completed or not response_url:
                 return
-            text = "✅ Feedback completed. Thanks!"
             async with asyncio.timeout(8):
-                await respond_to_slack_interaction(
+                removed = await respond_to_slack_interaction(
                     response_url,
-                    {
-                        "replace_original": True,
-                        "response_type": "ephemeral",
-                        "text": text,
-                        "blocks": [
-                            {"type": "section", "text": {"type": "plain_text", "text": text}}
-                        ],
-                    },
+                    {"delete_original": True},
                 )
+                if not removed or current.acknowledged:
+                    return
+                # Ephemeral response_url updates can also appear at the channel root.
+                posted = await post_slack_ephemeral_message(
+                    current.channel_id,
+                    current.user_id,
+                    "✅ Feedback completed. Thanks!",
+                    thread_ts=current.thread_ts if current.thread_ts != "0" else None,
+                )
+            if posted:
+                async with _locked_feedback(current) as latest:
+                    if latest is not None:
+                        latest.acknowledged = True
+                        await _store(latest.channel_id).put(latest.run_id, latest)
     except Exception:
         logger.warning("Could not acknowledge saved Slack feedback")
 
