@@ -2,8 +2,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
 
-from langgraph.config import get_config
-
+from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
@@ -37,7 +36,7 @@ from agent.slack.code_channels import (
     store_block_suggestions,
 )
 from agent.source_context import SourceContext
-from agent.tools.create_sandbox_file_download_url import _resolve_sandbox_file
+from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client
 
@@ -82,31 +81,15 @@ async def manage_code_channel(
     csp: dict[str, list[str]] | None = None,
     include_resolved: bool = False,
 ) -> dict[str, Any]:
-    """Manage the complete Slack code-channel surface for this session.
-
-    Use `create` to promote the current Slack thread using its generated title. Use
-    `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
-    upserts an `html`, `diff`, `block_kit`, or `canvas` tab; HTML and diff content
-    can be passed directly or read from `file_path`, while Block Kit uses `blocks`
-    plus optional external-select `suggestions`, and canvas uses `canvas_id`. Use
-    `list_views` and `remove_view` to reconcile
-    tabs. Use `get_canvas` to read markdown and comments and `set_canvas` to
-    replace its markdown while preserving comment anchors. Post a closing summary
-    before `archive` and pass its timestamp as `summary_message_ts`.
-
-    Files must be inside the active sandbox work directory, valid UTF-8, and at
-    most 1 MB. Never publish secrets or credentials in a view.
-    """
-    config = get_config()
-    configurable = config.get("configurable", {})
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
+    """Implement the `manage_code_channel` tool."""
+    cfg = RunConfig.from_runtime()
+    thread_id = cfg.thread_id
+    if not thread_id:
         return {"success": False, "error": "Missing thread_id in config"}
 
     client = langgraph_client()
-    configured_slack = configurable.get("slack_thread")
     active = await get_active_slack_thread(
-        client, thread_id, configured_slack if isinstance(configured_slack, dict) else None
+        client, thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
     )
     if not active:
         return {"success": False, "error": "Current Slack location is unavailable"}
@@ -116,13 +99,12 @@ async def manage_code_channel(
     if action == "create":
         if is_code_channel_session(thread_ts):
             return {"success": False, "error": "This session is already a code channel"}
-        repo = configurable.get("repo")
         return await _create(
             client,
             thread_id,
             active,
             await _code_channel_title(client, thread_id, title),
-            repo if isinstance(repo, dict) else None,
+            cfg.repo.model_dump() if cfg.repo else None,
             team_id=team_id,
             is_private=is_private,
         )
@@ -263,7 +245,7 @@ async def _resolve_content(content: str, file_path: str) -> tuple[str, str | Non
     if not file_path:
         return content, None
     try:
-        backend, path, _ = await _resolve_sandbox_file(file_path)
+        backend, path, _ = await resolve_sandbox_file(file_path)
         downloads = await backend.adownload_files([path])
     except Exception as exc:  # noqa: BLE001
         return "", f"Could not read file_path: {exc}"

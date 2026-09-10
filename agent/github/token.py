@@ -2,17 +2,16 @@
 
 import asyncio
 import logging
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-import httpx
+import httpx2
 import jwt
-from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
+from agent.config import ENV
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import (
     cache_github_token_for_thread,
@@ -20,6 +19,7 @@ from agent.github.thread_token import (
     github_token_principal,
 )
 from agent.linear.client import comment_on_linear_issue
+from agent.run_config import RunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
@@ -48,15 +48,15 @@ class GitHubUserAuthRequired(RuntimeError):
         super().__init__(f"GitHub authentication required for {source} user '{github_login}'")
 
 
-LANGSMITH_API_KEY = os.environ.get("LANGSMITH_API_KEY_PROD", "")
-LANGSMITH_API_URL = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-LANGSMITH_HOST_API_URL = os.environ.get("LANGSMITH_HOST_API_URL", "https://api.host.langchain.com")
-GITHUB_OAUTH_PROVIDER_ID = os.environ.get("GITHUB_OAUTH_PROVIDER_ID", "")
-X_SERVICE_AUTH_JWT_SECRET = os.environ.get("X_SERVICE_AUTH_JWT_SECRET", "")
-USER_ID_API_KEY_MAP = os.environ.get("USER_ID_API_KEY_MAP", "")
+LANGSMITH_API_KEY = ENV.LANGSMITH_API_KEY.get()
+LANGSMITH_API_URL = ENV.LANGSMITH_ENDPOINT.get()
+LANGSMITH_HOST_API_URL = ENV.LANGSMITH_HOST_API_URL.get()
+GITHUB_OAUTH_PROVIDER_ID = ENV.GITHUB_OAUTH_PROVIDER_ID.get()
+X_SERVICE_AUTH_JWT_SECRET = ENV.X_SERVICE_AUTH_JWT_SECRET.get()
+USER_ID_API_KEY_MAP = ENV.USER_ID_API_KEY_MAP.get()
 
 logger.debug(
-    "Auth env snapshot: LANGSMITH_API_KEY_PROD=%s LANGSMITH_ENDPOINT=%s "
+    "Auth env snapshot: LANGSMITH_API_KEY=%s LANGSMITH_ENDPOINT=%s "
     "LANGSMITH_HOST_API_URL=%s GITHUB_OAUTH_PROVIDER_ID=%s",
     "set" if LANGSMITH_API_KEY else "missing",
     "set" if LANGSMITH_API_URL else "missing",
@@ -68,7 +68,7 @@ logger.debug(
 def is_bot_token_only_mode() -> bool:
     """Check if we're in bot-token-only mode.
 
-    This is the case when LANGSMITH_API_KEY_PROD is set (deployed) but neither
+    This is the case when LANGSMITH_API_KEY is set (deployed) but neither
     X_SERVICE_AUTH_JWT_SECRET nor USER_ID_API_KEY_MAP is configured, meaning we
     can't resolve per-user GitHub OAuth tokens. In this mode the GitHub App
     installation token is used for all git operations instead.
@@ -125,7 +125,7 @@ async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
 
     url = f"{LANGSMITH_API_URL}/api/v1/workspaces/current/members/active"
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.get(
                 url,
@@ -183,7 +183,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
             "ls_user_id": ls_user_id,
         }
 
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.post(
                 f"{LANGSMITH_HOST_API_URL}/v2/auth/authenticate",
                 json=payload,
@@ -205,7 +205,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
                 return {"auth_url": auth_url}
             return {"error": f"Unexpected auth result: {response_data}"}
 
-    except httpx.HTTPStatusError as e:
+    except httpx2.HTTPStatusError as e:
         logger.error("GitHub auth API HTTP error: %s - %s", e.response.status_code, e.response.text)
         return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
     except Exception as e:  # noqa: BLE001
@@ -246,12 +246,10 @@ async def leave_failure_comment(
     message: str,
 ) -> None:
     """Leave an auth failure comment for the appropriate source."""
-    config = get_config()
-    configurable = config.get("configurable", {})
+    cfg = RunConfig.from_runtime()
 
     if source == "linear":
-        linear_issue = configurable.get("linear_issue", {})
-        issue_id = linear_issue.get("id") if isinstance(linear_issue, dict) else None
+        issue_id = cfg.linear_issue.id if cfg.linear_issue else None
         if issue_id:
             logger.info(
                 "Posting auth failure comment to Linear issue %s (source=%s)",
@@ -261,12 +259,10 @@ async def leave_failure_comment(
             await comment_on_linear_issue(issue_id, message)
         return
     if source == "slack":
-        slack_thread = configurable.get("slack_thread", {})
-        thread_id = configurable.get("thread_id")
         active = await get_active_slack_thread(
             get_client(url=LANGGRAPH_URL),
-            thread_id if isinstance(thread_id, str) else None,
-            slack_thread if isinstance(slack_thread, dict) else None,
+            cfg.thread_id,
+            cfg.slack_thread.dump() if cfg.slack_thread else None,
         )
         channel_id = active.get("channel_id") if active else None
         thread_ts = active.get("thread_ts") if active else None
@@ -295,7 +291,7 @@ async def leave_failure_comment(
                     "Open SWE couldn't resolve your GitHub account for this run. Sign in "
                     f"with GitHub and connect your Slack account in {link}, then mention it again."
                 ),
-                agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+                agent_thread_id=cfg.thread_id,
             )
         return
     if source in ("github", "github_push"):
@@ -355,9 +351,8 @@ async def resolve_token_from_email(
     source: str,
 ) -> tuple[str, str | None]:
     """Resolve and cache a GitHub token based on user email."""
-    config = get_config()
-    configurable = config.get("configurable", {})
-    thread_id = configurable.get("thread_id")
+    cfg = RunConfig.from_runtime()
+    thread_id = cfg.thread_id
     if not thread_id:
         raise ValueError("GitHub auth failed: missing thread_id")
     if not email:
@@ -412,8 +407,8 @@ async def resolve_token_from_email(
         await leave_failure_comment(source, message)
         raise ValueError(f"No token found: {error}")
 
-    github_login = configurable.get("github_login")
-    if isinstance(github_login, str) and github_login.strip():
+    github_login = cfg.github_login
+    if github_login and github_login.strip():
         _schedule_legacy_auth_migration_impact(source, github_login.strip())
     else:
         logger.info(
@@ -428,7 +423,7 @@ async def resolve_token_from_email(
         token,
         expires_at=expires_at if isinstance(expires_at, str) else None,
         principal=github_token_principal(
-            login=configurable.get("github_login"),
+            login=cfg.github_login,
             email=email,
         ),
     )
@@ -462,7 +457,7 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
     bot_token, expires_at = await get_github_app_installation_token_with_expiry()
     if not bot_token:
         raise RuntimeError(
-            "Bot-token-only mode is active (LANGSMITH_API_KEY_PROD set without "
+            "Bot-token-only mode is active (LANGSMITH_API_KEY set without "
             "X_SERVICE_AUTH_JWT_SECRET) but the GitHub App is not configured. "
             "Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATION_ID."
         )
@@ -484,29 +479,27 @@ async def resolve_github_token(
     per-user OAuth token from the dashboard store; GitHub runs are login-based;
     otherwise resolution falls back to email-based auth.
 
-    In bot-token-only mode (LANGSMITH_API_KEY_PROD set without
+    In bot-token-only mode (LANGSMITH_API_KEY set without
     X_SERVICE_AUTH_JWT_SECRET), the GitHub App installation token is used
     for all operations instead of per-user OAuth tokens.
 
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
-    configurable = config.get("configurable")
-    if not isinstance(configurable, Mapping):
-        raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing configurable state")
-    source = configurable.get("source")
+    cfg = RunConfig.from_config(config)
+    source = cfg.source
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
         raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")
 
-    github_login = configurable.get("github_login")
+    github_login = cfg.github_login
 
     # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
     # for sources that carry a mapped GitHub login (Slack, Linear, dashboard).
     # This is what lets the agent open PRs as the triggering user.
     if (
         source in ("slack", "linear", "dashboard", "schedule")
-        and isinstance(github_login, str)
+        and github_login
         and github_login.strip()
     ):
         try:
@@ -538,7 +531,7 @@ async def resolve_github_token(
             if not email:
                 raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
             return await resolve_token_from_email(email, source)
-        return await resolve_token_from_email(configurable.get("user_email"), source)
+        return await resolve_token_from_email(cfg.user_email, source)
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
         raise RuntimeError(str(exc)) from exc

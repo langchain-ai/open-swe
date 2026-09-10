@@ -12,12 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 def _identity() -> tuple[str, str | None] | None:
-    values = configurable()
-    login = values.get("github_login")
-    email = values.get("user_email")
-    if not isinstance(login, str) or not login:
+    cfg = configurable()
+    if not cfg.github_login:
         return None
-    return login, email if isinstance(email, str) and email else None
+    return cfg.github_login, cfg.user_email or None
 
 
 def _error(exc: Exception) -> dict[str, Any]:
@@ -28,7 +26,7 @@ def _error(exc: Exception) -> dict[str, Any]:
 
 
 async def list_automations() -> dict[str, Any]:
-    """List every workspace automation and its current run state."""
+    """Implement the `list_automations` tool."""
     if error := require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     return {"ok": True, "automations": await schedules.list_agent_schedules()}
@@ -45,19 +43,7 @@ async def create_automation(
     slack_notification_mode: schedules.SlackNotificationMode = "always",
     admin_thread: bool = False,
 ) -> dict[str, Any]:
-    """Create a workspace automation.
-
-    Args:
-        prompt: Complete instructions for every run.
-        schedule: Five-field UTC cron expression.
-        name: Short display name.
-        repo: Optional ``owner/repo`` the configuring admin can access.
-        model_id: Optional supported model ID.
-        effort: Optional reasoning effort for the model.
-        slack_channel_id: Optional Slack channel ID starting with C or G.
-        slack_notification_mode: Post every run or only when the run takes action.
-        admin_thread: Give runs workspace-admin capabilities while the creator remains an admin.
-    """
+    """Implement the `create_automation` tool."""
     if error := require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     identity = _identity()
@@ -101,10 +87,7 @@ async def update_automation(
     slack_notification_mode: schedules.SlackNotificationMode | None = None,
     admin_thread: bool | None = None,
 ) -> dict[str, Any]:
-    """Update a workspace automation, preserving omitted fields.
-
-    Use ``clear_repo`` or ``clear_slack_channel`` to remove those destinations.
-    """
+    """Implement the `update_automation` tool."""
     if error := require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     identity = _identity()
@@ -146,7 +129,7 @@ async def update_automation(
 
 
 async def trigger_automation(automation_id: str) -> dict[str, Any]:
-    """Start a test run for a workspace automation, including a paused one."""
+    """Implement the `trigger_automation` tool."""
     if error := require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     try:
@@ -157,7 +140,7 @@ async def trigger_automation(automation_id: str) -> dict[str, Any]:
 
 
 async def delete_automation(automation_id: str) -> dict[str, Any]:
-    """Permanently delete a workspace automation after the user confirms."""
+    """Implement the `delete_automation` tool."""
     if error := require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     try:

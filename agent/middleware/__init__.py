@@ -8,12 +8,15 @@ _MIDDLEWARE_MODULES = {
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
+    "ModelErrorMiddleware": ".model_errors",
     "ModelFallbackMiddleware": ".model_fallback",
+    "ModelSelectionMiddleware": ".model_selection",
     "notify_step_limit_reached": ".notify_step_limit",
     "PlanModeMiddleware": ".plan_mode",
     "PrepareRunState": ".prepare_run",
     "BasePrepareRunMiddleware": ".prepare_run",
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
+    "record_run_usage": ".record_run_usage",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
@@ -35,7 +38,9 @@ __all__ = [
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
     "ModelCallTimeoutMiddleware",
+    "ModelErrorMiddleware",
     "ModelFallbackMiddleware",
+    "ModelSelectionMiddleware",
     "BasePrepareRunMiddleware",
     "PlanModeMiddleware",
     "PrepareRunState",
@@ -52,6 +57,7 @@ __all__ = [
     "WorkflowPushGuardMiddleware",
     "check_message_queue_before_model",
     "notify_step_limit_reached",
+    "record_run_usage",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
     "task_on_failure",
@@ -63,11 +69,14 @@ if TYPE_CHECKING:
     from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from agent.middleware.exclude_tools import ExcludeToolsMiddleware
     from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
+    from agent.middleware.model_errors import ModelErrorMiddleware
     from agent.middleware.model_fallback import ModelFallbackMiddleware
+    from agent.middleware.model_selection import ModelSelectionMiddleware
     from agent.middleware.notify_step_limit import notify_step_limit_reached
     from agent.middleware.plan_mode import PlanModeMiddleware
     from agent.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
     from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
+    from agent.middleware.record_run_usage import record_run_usage
     from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
     from agent.middleware.repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
     from agent.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware

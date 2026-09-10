@@ -3,13 +3,13 @@
 import base64
 import json
 import logging
-import os
 import shlex
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.config import get_config
 
+from agent.config import ENV
+from agent.run_config import RunConfig
 from agent.sandboxes.state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -20,33 +20,31 @@ _SOCKET = "/tmp/open-swe-stagehand.sock"
 
 
 def _model_name() -> str:
-    return os.getenv("STAGEHAND_MODEL", _DEFAULT_MODEL)
+    return ENV.STAGEHAND_MODEL.get(_DEFAULT_MODEL)
 
 
 def _model_api_key() -> str | None:
     return (
-        os.getenv("STAGEHAND_MODEL_API_KEY")
-        or os.getenv("MODEL_API_KEY")
-        or os.getenv("ANTHROPIC_API_KEY")
+        ENV.STAGEHAND_MODEL_API_KEY.optional()
+        or ENV.MODEL_API_KEY.optional()
+        or ENV.ANTHROPIC_API_KEY.optional()
     )
 
 
 def _headless() -> bool:
-    return os.getenv("STAGEHAND_HEADLESS", "true").strip().lower() not in ("0", "false", "no")
+    return ENV.STAGEHAND_HEADLESS.get().strip().lower() not in ("0", "false", "no")
 
 
 def browser_tools_enabled() -> bool:
     """Whether sandbox-local browser automation is configured."""
     provider = _model_name().split("/", 1)[0].split(":", 1)[0]
-    return os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith" and bool(
+    return ENV.SANDBOX_TYPE.get() == "langsmith" and bool(
         _model_api_key() and provider in {"anthropic", "openai"}
     )
 
 
 def _thread_id() -> str:
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("no thread_id in run config")
     return thread_id

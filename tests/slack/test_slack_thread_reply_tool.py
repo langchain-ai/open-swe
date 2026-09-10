@@ -2,10 +2,13 @@ import importlib
 import json
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+
+from agent.slack.payloads import SlackBlockAction
 
 slack_reply_tool = importlib.import_module("agent.slack.tools.thread_reply")
 
@@ -28,6 +31,42 @@ def _config() -> dict[str, Any]:
             }
         }
     }
+
+
+@pytest.mark.parametrize(
+    "should_ask_for_feedback,options,expected",
+    [
+        (True, None, True),
+        (False, None, False),
+        (True, ["Yes", "No"], False),
+    ],
+)
+async def test_reply_records_answer_completion_only_without_pending_choices(
+    monkeypatch: pytest.MonkeyPatch,
+    should_ask_for_feedback: bool,
+    options: list[str] | None,
+    expected: bool,
+) -> None:
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_active_slack_thread",
+        AsyncMock(
+            return_value={
+                "channel_id": "C1",
+                "thread_ts": "1.0",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        slack_reply_tool, "post_slack_thread_reply_with_ts", AsyncMock(return_value=("2.0", None))
+    )
+    mapping = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", mapping)
+    assert await slack_reply_tool.slack_thread_reply(
+        "The answer", should_ask_for_feedback=should_ask_for_feedback, options=options
+    ) == {"success": True}
+    assert mapping.await_args.kwargs["should_ask_for_feedback"] is expected
 
 
 async def test_slack_thread_reply_holds_mutation_lock_while_posting(
@@ -317,10 +356,11 @@ def test_slack_action_ids_are_unique_and_recognized() -> None:
     actions = blocks[1]["elements"]
 
     assert len({action["action_id"] for action in actions}) == len(actions)
-    assert slack_routes._first_open_swe_option_action(actions) is actions[0]
-    legacy = {"action_id": "open_swe_option_select"}
-    assert slack_routes._first_open_swe_option_action([legacy]) is legacy
-    assert slack_routes._first_open_swe_option_action([{"action_id": "unrelated"}]) is None
+    parsed = [SlackBlockAction.model_validate(action) for action in actions]
+    assert slack_routes._first_option_action(parsed) is parsed[0]
+    legacy = SlackBlockAction(action_id="open_swe_option_select")
+    assert slack_routes._first_option_action([legacy]) is legacy
+    assert slack_routes._first_option_action([SlackBlockAction(action_id="unrelated")]) is None
 
 
 async def test_slack_thread_reply_passes_live_run_id(
@@ -379,4 +419,4 @@ async def test_slack_thread_reply_passes_model_reported_usage(
     assert result == {"success": True}
     usage = captured["usage"]
     assert usage.models == ("model-a",)
-    assert usage.main_agent_tokens == 110
+    assert usage.total_tokens == 110

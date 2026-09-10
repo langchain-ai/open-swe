@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from agent.run_config import RunConfig
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     get_active_slack_thread,
@@ -21,43 +22,18 @@ async def slack_thread_reply(
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
+    should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
-    """Post a message to the current Slack thread and the Web UI.
-
-    Use this for clarifying questions, essential progress updates, and the final
-    answer or outcome. For Slack-triggered information-only requests, put the
-    complete answer in `message`, not merely a summary, and do not repeat it in
-    the final assistant response. Make `message` as concise as possible: default
-    to one sentence with only the outcome/status and link, or one blocking
-    question. Omit greetings, preambles, headings, recaps, implementation
-    details, and redundant context; use bullets only when multiple items are
-    essential. End the run by posting a concise final outcome here.
-
-    Format messages using Slack's mrkdwn format, NOT standard Markdown.
-    Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
-    bullet lists with "• ", ```code blocks```, > blockquotes.
-    Do NOT use **bold**, [link](url), or other standard Markdown syntax.
-
-    To ask a user to choose from predefined options, pass `options`. Slack will
-    render interactive buttons and the web UI will render the same choices.
-    The user can still reply manually in the Slack thread.
-
-    When a plan is ready, post a concise summary with the dashboard review link and
-    pass `options=["Approve & implement", "Request changes"]`. The user can still
-    reply manually with feedback.
-
-    To mention/tag a user, use Slack's mention format: <@USER_ID>.
-    You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
-    Example: <@U06KD8BFY95> will tag that user in the message."""
+    """Implement the `slack_thread_reply` tool."""
     config = get_config()
-    configurable = config.get("configurable", {})
+    cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)
-    slack_thread = configurable.get("slack_thread", {})
-    thread_id = configurable.get("thread_id")
+    slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
+    thread_id = cfg.thread_id
     client = get_langgraph_client()
     active = await get_active_slack_thread(
         client,
-        thread_id if isinstance(thread_id, str) else None,
+        thread_id,
         slack_thread if isinstance(slack_thread, dict) else None,
     )
     active = active or {}
@@ -105,7 +81,8 @@ async def slack_thread_reply(
             ),
             langgraph_client=client,
             run_id=run_id,
-            triggering_user_id=_triggering_user_id(configurable),
+            triggering_user_id=_triggering_user_id(cfg),
+            should_ask_for_feedback=should_ask_for_feedback and not options,
         )
     if message_ts is None:
         return {
@@ -119,21 +96,12 @@ async def slack_thread_reply(
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:
-    candidates = [config.get("run_id")]
-    configurable = config.get("configurable")
-    if isinstance(configurable, dict):
-        candidates.append(configurable.get("run_id"))
+    candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
     return next((str(candidate) for candidate in candidates if candidate), None)
 
 
-def _triggering_user_id(configurable: object) -> str | None:
-    if not isinstance(configurable, dict):
-        return None
-    slack_thread = configurable.get("slack_thread")
-    if not isinstance(slack_thread, dict):
-        return None
-    user_id = slack_thread.get("triggering_user_id")
-    return user_id if isinstance(user_id, str) and user_id else None
+def _triggering_user_id(cfg: RunConfig) -> str | None:
+    return (cfg.slack_thread.triggering_user_id or None) if cfg.slack_thread else None
 
 
 def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]] | None:
@@ -174,7 +142,11 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Approve workflow push", "emoji": True},
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Approve & continue push",
+                        "emoji": True,
+                    },
                     "style": "primary",
                     "value": json.dumps(
                         {
@@ -187,7 +159,7 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
                 },
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Reject", "emoji": True},
+                    "text": {"type": "plain_text", "text": "Cancel push", "emoji": True},
                     "style": "danger",
                     "value": json.dumps(
                         {
@@ -232,6 +204,7 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
+    should_ask_for_feedback: bool = False,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -250,5 +223,6 @@ async def _post_and_store_mapping(
             message_ts,
             run_id=run_id,
             triggering_user_id=triggering_user_id,
+            should_ask_for_feedback=should_ask_for_feedback,
         )
     return message_ts, slack_error

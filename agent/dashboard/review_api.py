@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 
-import httpx
+import httpx2
 from fastapi import HTTPException, Response
 
 from agent.github.app import get_github_app_installation_token
@@ -30,12 +30,11 @@ from agent.review.findings import (
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
 from agent.utils.thread_ops import langgraph_client
-from agent.webhooks.common import fetch_github_pr_metadata
 
 logger = logging.getLogger(__name__)
 
 _GITHUB_API = "https://api.github.com"
-_GITHUB_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+_GITHUB_TIMEOUT = httpx2.Timeout(15.0, connect=5.0)
 
 
 async def _require_app_token() -> str:
@@ -51,7 +50,7 @@ async def _github_get(
     headers = github_headers(token)
     if accept:
         headers["Accept"] = accept
-    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
         response = await client.get(f"{_GITHUB_API}{path}", headers=headers, params=params)
     if response.status_code == 404:
         raise HTTPException(404, "not found on GitHub")
@@ -63,7 +62,7 @@ async def _github_get(
     return response.json()
 
 
-def _github_error_message(response: httpx.Response) -> str:
+def _github_error_message(response: httpx2.Response) -> str:
     """Best-effort extraction of GitHub's error message for surfacing to the UI."""
     fallback = f"GitHub request failed ({response.status_code})"
     try:
@@ -89,7 +88,7 @@ def _github_error_message(response: httpx.Response) -> str:
 async def _github_write(
     method: Literal["POST", "PATCH"], path: str, token: str, *, json: dict[str, Any]
 ) -> Any:
-    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
         response = await client.request(
             method, f"{_GITHUB_API}{path}", headers=github_headers(token), json=json
         )
@@ -594,7 +593,7 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
     is viewing the review. The client renders these with pierre's MultiFileDiff.
     """
     token = await _require_app_token()
-    async with httpx.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
+    async with httpx2.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
         diff = await build_pr_diff_files(client, f"{owner}/{repo}", pr_number)
     files = diff["files"]
     return {
@@ -687,7 +686,7 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
     headers = {"Authorization": f"Bearer {token}", "Accept": "image/*"}
 
     current_url = url
-    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
         for _ in range(_MAX_IMAGE_REDIRECTS + 1):
             async with client.stream("GET", current_url, headers=headers) as response:
                 if response.is_redirect:
@@ -741,37 +740,3 @@ async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -
     if not result.get("success"):
         raise HTTPException(502, str(result.get("error") or "could not trigger review"))
     return result
-
-
-async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
-    """Resolve a PR to its author coding-agent thread without running a review."""
-    from dataclasses import asdict
-
-    from agent.github.app import get_github_app_installation_token_with_expiry
-    from agent.review.trace_context import resolve_pr_trace
-    from agent.slack.client import GitHubPrRef
-
-    pr_ref = GitHubPrRef(
-        owner=owner,
-        repo=repo,
-        number=pr_number,
-        url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
-    )
-    token, _ = await get_github_app_installation_token_with_expiry()
-    if not token:
-        raise HTTPException(502, "No GitHub App token available")
-    pr_metadata = await fetch_github_pr_metadata(pr_ref, token=token)
-    if not pr_metadata:
-        raise HTTPException(502, "Could not fetch pull request metadata")
-
-    head = pr_metadata.get("head") or {}
-    base = pr_metadata.get("base") or {}
-    configurable = {
-        "repo": {"owner": owner, "name": repo},
-        "pr_number": pr_number,
-        "pr_url": pr_metadata.get("html_url") or pr_ref.url,
-        "branch_name": head.get("ref", ""),
-        "head_sha": head.get("sha", ""),
-        "base_sha": base.get("sha", ""),
-    }
-    return asdict(await resolve_pr_trace(configurable=configurable))

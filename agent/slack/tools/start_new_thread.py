@@ -4,10 +4,11 @@ import uuid
 from typing import Any
 
 from fastapi import HTTPException
-from langgraph.config import get_config
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
+from agent.prompts import render_prompt
+from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
@@ -19,7 +20,7 @@ from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
-from agent.webhooks.common import _is_repo_allowed
+from agent.webhooks.common import is_repo_allowed
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
@@ -71,7 +72,7 @@ def _validate_text(value: str, *, field: str, max_chars: int) -> str | dict[str,
     return text
 
 
-def _resolve_repo(configurable: dict[str, Any], default_repo: str | None) -> dict[str, str] | None:
+def _resolve_repo(cfg: RunConfig, default_repo: str | None) -> dict[str, str] | None:
     if default_repo and default_repo.strip():
         candidate = default_repo.strip()
         if not _REPO_RE.fullmatch(candidate):
@@ -79,12 +80,8 @@ def _resolve_repo(configurable: dict[str, Any], default_repo: str | None) -> dic
         owner, name = candidate.split("/", 1)
         return {"owner": owner, "name": name}
 
-    repo = configurable.get("repo")
-    if isinstance(repo, dict):
-        owner = repo.get("owner")
-        name = repo.get("name")
-        if isinstance(owner, str) and owner.strip() and isinstance(name, str) and name.strip():
-            return {"owner": owner.strip(), "name": name.strip()}
+    if cfg.repo and cfg.repo.owner.strip() and cfg.repo.name.strip():
+        return {"owner": cfg.repo.owner.strip(), "name": cfg.repo.name.strip()}
     return None
 
 
@@ -128,18 +125,14 @@ async def _run_prompt(
     repo_text = f"{repo['owner']}/{repo['name']}" if repo else "(no repository specified)"
     channel_id = original_slack_thread.get("channel_id", "")
     thread_ts = original_slack_thread.get("thread_ts", "")
-    return (
-        "You were started from another Open SWE Slack thread as a breakout task.\n\n"
-        f"## Breakout Title\n{title}\n\n"
-        f"## Default Repository Hint\n{repo_text}\n"
-        "Use this repository unless the instructions below clearly identify a different repository.\n\n"
-        "## Source Slack Thread\n"
-        f"- Channel: {channel_id}\n"
-        f"- Thread TS: {thread_ts}\n"
-        "- Thread version: 0\n\n"
-        f"{await _run_links_section(thread_id)}\n\n"
-        "## Breakout Instructions\n"
-        f"{instructions}"
+    return render_prompt(
+        "runs/slack-breakout.md",
+        title=title,
+        repo=repo_text,
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+        run_links=await _run_links_section(thread_id),
+        instructions=instructions,
     )
 
 
@@ -164,18 +157,15 @@ async def slack_start_new_thread(
     instructions: str,
     default_repo: str | None = None,
 ) -> dict[str, Any]:
-    """Start a Slack thread with a headline root and instructions as the first reply."""
-    config = get_config()
-    configurable = config.get("configurable", {})
-    configured_slack_thread = configurable.get("slack_thread")
-    if not isinstance(configured_slack_thread, dict):
+    """Implement the `slack_start_new_thread` tool."""
+    cfg = RunConfig.from_runtime()
+    if cfg.slack_thread is None:
         return {"success": False, "error": "Missing slack_thread config"}
     client = langgraph_client()
-    thread_id_value = configurable.get("thread_id")
     current_slack_thread = await get_active_slack_thread(
         client,
-        thread_id_value if isinstance(thread_id_value, str) else None,
-        configured_slack_thread,
+        cfg.thread_id,
+        cfg.slack_thread.dump(),
     )
     if not current_slack_thread:
         return {"success": False, "error": "Current Slack location is unavailable"}
@@ -194,7 +184,7 @@ async def slack_start_new_thread(
     if isinstance(clean_instructions, dict):
         return clean_instructions
 
-    repo = _resolve_repo(configurable, default_repo)
+    repo = _resolve_repo(cfg, default_repo)
     if default_repo and default_repo.strip() and repo is None:
         return {
             "success": False,
@@ -202,15 +192,15 @@ async def slack_start_new_thread(
         }
 
     if default_repo and default_repo.strip() and repo is not None:
-        if not _is_repo_allowed(repo):
+        if not is_repo_allowed(repo):
             return {
                 "success": False,
                 "error": (
                     f"Repository {repo['owner']}/{repo['name']} is not on the deployment allowlist"
                 ),
             }
-        github_login = configurable.get("github_login")
-        if not isinstance(github_login, str) or not github_login.strip():
+        github_login = cfg.github_login
+        if not github_login or not github_login.strip():
             return {
                 "success": False,
                 "error": (
@@ -304,12 +294,10 @@ async def slack_start_new_thread(
                 "repo_name": repo["name"],
             }
         )
-    github_login = configurable.get("github_login")
-    if isinstance(github_login, str) and github_login:
-        metadata["github_login"] = github_login
-    user_email = configurable.get("user_email")
-    if isinstance(user_email, str) and user_email:
-        metadata["triggering_user_email"] = user_email.strip().lower()
+    if cfg.github_login:
+        metadata["github_login"] = cfg.github_login
+    if cfg.user_email:
+        metadata["triggering_user_email"] = cfg.user_email.strip().lower()
 
     new_configurable: dict[str, Any] = {
         "slack_thread": new_slack_thread,
@@ -318,7 +306,7 @@ async def slack_start_new_thread(
     if repo:
         new_configurable["repo"] = repo
     for key in ("user_email", "github_login", "agent_model_id", "agent_effort"):
-        value = configurable.get(key)
+        value = cfg.get(key)
         if value:
             new_configurable[key] = value
 

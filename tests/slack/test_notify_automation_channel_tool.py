@@ -76,8 +76,7 @@ async def test_notify_automation_channel_rejects_unauthorized_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        notification_tool,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {"configurable": {"source": "slack", "thread_id": "thread_1"}},
     )
 
@@ -93,8 +92,7 @@ async def test_notify_automation_channel_rejects_nonconditional_schedule(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        notification_tool,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {"configurable": {"source": "schedule", "thread_id": "thread_1"}},
     )
 
@@ -109,7 +107,7 @@ async def test_notify_automation_channel_rejects_nonconditional_schedule(
 async def test_notify_automation_channel_validates_message(
     fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(notification_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
 
     empty = await notification_tool.notify_automation_channel("   ")
     oversized = await notification_tool.notify_automation_channel("x" * 3_001)
@@ -131,7 +129,7 @@ async def test_notify_automation_channel_posts_to_trusted_destination(
         posted.append({"channel_id": channel_id, "text": text, "kwargs": kwargs})
         return "1786504009.596419", None
 
-    monkeypatch.setattr(notification_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
 
     result = await notification_tool.notify_automation_channel(
@@ -164,7 +162,7 @@ async def test_notify_automation_channel_suppresses_duplicate_posts(
         post_count += 1
         return "1786504009.596419", None
 
-    monkeypatch.setattr(notification_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
 
     first = await notification_tool.notify_automation_channel("Opened a pull request")
@@ -190,7 +188,7 @@ async def test_notify_automation_channel_allows_retry_after_slack_failure(
     async def fake_post(*args: Any, **kwargs: Any) -> tuple[str | None, str | None]:
         return responses.pop(0)
 
-    monkeypatch.setattr(notification_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
 
     first = await notification_tool.notify_automation_channel("Opened a pull request")

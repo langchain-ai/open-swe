@@ -59,10 +59,10 @@ from agent.review.publish import (
     settle_review_check_run,
 )
 from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply
 from agent.utils.dashboard_links import dashboard_review_url
 from agent.utils.langsmith import get_langsmith_trace_url
-from agent.utils.tracing import REVIEW_TRACING_PROJECT
 
 logger = logging.getLogger(__name__)
 
@@ -75,83 +75,36 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
 
 
 async def publish_review(
-    severity_threshold: str = "medium",
+    severity_threshold: Severity = "medium",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Post all current findings to the PR as a GitHub Review.
-
-    Call this once at the end of a review run, after you have finished adding
-    findings (and, on a re-review, after marking resolved findings via
-    ``update_finding``). The tool posts one GitHub PR Review for eligible
-    inline findings, records the GitHub comment/thread IDs for future
-    re-reviews, resolves GitHub threads for findings now marked resolved, and
-    advances the reviewer thread's ``last_reviewed_sha``.
-
-    On a re-review with no new findings to surface, it skips posting a new
-    GitHub Review but still resolves fixed threads and updates reviewer state.
-
-    Args:
-        severity_threshold: Lowest severity to surface as inline GitHub comments
-            (default ``medium``). Lower-severity findings stay in state and are
-            mentioned in the review summary with a link to the web app, but are
-            not posted as inline PR comments.
-    Returns:
-        Dictionary with ``success``, ``review_id``, ``surfaced_count``,
-        ``hidden_count``, ``resolved_thread_count``, and sometimes
-        ``unresolvable_findings``, plus the flags below.
-
-        ``success: true`` alone does NOT mean a GitHub Review was posted —
-        check the flags:
-
-        - ``skipped_empty_re_review: true`` (with ``review_id: null``): an
-          empty re-review was deliberately skipped. No GitHub Review was
-          created; the call was a valid no-op. Do not describe the review as
-          published/posted/submitted.
-        - ``dry_run: true`` (with ``review_id: null``): eval/benchmark mode —
-          the publish was simulated and nothing was posted to GitHub. Do not
-          claim publication.
-
-        Only a numeric ``review_id`` (with neither flag set) confirms a real
-        GitHub Review was created.
-    """
+    """Implement the `publish_review` tool."""
     if severity_threshold not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
 
     config = get_config()
-    raw_configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    configurable = raw_configurable if isinstance(raw_configurable, dict) else {}
-    repo_config = configurable.get("repo")
-    pr_number = configurable.get("pr_number")
-    head_sha = configurable.get("head_sha")
-    is_re_review = bool(configurable.get("re_review"))
+    cfg = RunConfig.from_config(config)
+    pr_number = cfg.pr_number
+    head_sha = cfg.head_sha
+    is_re_review = bool(cfg.re_review)
 
-    if (
-        not isinstance(repo_config, dict)
-        or not repo_config.get("owner")
-        or not repo_config.get("name")
-    ):
+    if not cfg.repo:
         return {"success": False, "error": "Missing repo info in run config"}
-    if not isinstance(pr_number, int):
+    if pr_number is None:
         return {"success": False, "error": "Missing pr_number in run config"}
-    if not isinstance(head_sha, str) or not head_sha:
+    if not head_sha:
         return {"success": False, "error": "Missing head_sha in run config"}
 
-    if _is_reviewer_eval_mode(configurable):
-        eval_threshold = configurable.get("reviewer_eval_severity_threshold")
-        if isinstance(eval_threshold, str) and eval_threshold in {
-            "low",
-            "medium",
-            "high",
-            "critical",
-        }:
-            severity_threshold = eval_threshold
-        eval_cap = configurable.get("reviewer_eval_cap")
-        if not isinstance(eval_cap, int) or isinstance(eval_cap, bool) or eval_cap < 0:
+    if cfg.is_eval:
+        if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
+            severity_threshold = cfg.reviewer_eval_severity_threshold
+        eval_cap = cfg.reviewer_eval_cap
+        if eval_cap is None or eval_cap < 0:
             eval_cap = REVIEW_FINDING_CAP
         try:
             return await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
-                severity_threshold=_cast_severity(severity_threshold),
+                severity_threshold=severity_threshold,
                 cap=eval_cap,
             )
         except ReviewerThreadMissingError as exc:
@@ -163,16 +116,16 @@ async def publish_review(
 
     try:
         return await _publish_review_async(
-            owner=str(repo_config["owner"]),
-            repo=str(repo_config["name"]),
+            owner=cfg.repo.owner,
+            repo=cfg.repo.name,
             pr_number=pr_number,
             head_sha=head_sha,
             token=token,
-            severity_threshold=_cast_severity(severity_threshold),
-            cap=REVIEW_FINDING_CAP,
+            severity_threshold=severity_threshold,
+            cap=None,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
-            trace_link_config_override=configurable.get("review_trace_link_enabled"),
+            trace_link_config_override=cfg.review_trace_link_enabled,
             state=state,
         )
     except ReviewerThreadMissingError as exc:
@@ -191,22 +144,14 @@ async def publish_review(
         }
 
 
-def _cast_severity(value: str) -> Severity:
-    return value  # type: ignore[return-value]
-
-
-async def _resolve_review_trace_url(thread_id: str, config_override: object) -> str | None:
+async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:
     if config_override is False:
         return None
     if not await get_team_review_trace_links_enabled():
         return None
     if not thread_id:
         return None
-    return await get_langsmith_trace_url(thread_id, project_name=REVIEW_TRACING_PROJECT)
-
-
-def _is_reviewer_eval_mode(configurable: dict[str, Any]) -> bool:
-    return configurable.get("reviewer_eval") is True or configurable.get("eval") is True
+    return await get_langsmith_trace_url(thread_id)
 
 
 async def _publish_review_eval_dry_run_async(
@@ -267,10 +212,10 @@ async def _publish_review_async(
     head_sha: str,
     token: str,
     severity_threshold: Severity,
-    cap: int,
+    cap: int | None,
     is_re_review: bool,
     langgraph_run_id: str | None = None,
-    trace_link_config_override: object = None,
+    trace_link_config_override: bool | None = None,
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
@@ -278,7 +223,7 @@ async def _publish_review_async(
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
-    head_sha = await resolve_review_head_sha(thread_id, {"head_sha": head_sha})
+    head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
@@ -790,10 +735,8 @@ async def _resolve_diff_line_set(
         state_cached = state.get("diff_line_set")
         if isinstance(state_cached, dict):
             return state_cached
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    cached = configurable.get("diff_line_set") if isinstance(configurable, dict) else None
-    if isinstance(cached, dict):
+    cached = RunConfig.from_runtime().diff_line_set
+    if cached is not None:
         return cached
 
     diff_text = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token)
@@ -1030,10 +973,7 @@ async def _resolve_threads_for_resolved_findings(
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:
-    candidates = [config.get("run_id")]
-    configurable = config.get("configurable")
-    if isinstance(configurable, dict):
-        candidates.append(configurable.get("run_id"))
+    candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
     for candidate in candidates:
         if isinstance(candidate, str) and candidate:
             return candidate
