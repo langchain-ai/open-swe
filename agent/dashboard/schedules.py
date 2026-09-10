@@ -711,7 +711,9 @@ async def _launch_agent_schedule_record_unlocked(
     slack_thread: dict[str, Any] | None = None
     existing_context = SourceContext.from_metadata(existing_metadata)
     existing_slack_thread = (
-        existing_context.dump()["slack_thread"] if existing_context.slack_thread is not None else None
+        existing_context.dump()["slack_thread"]
+        if existing_context.slack_thread is not None
+        else None
     )
     slack_channel_id = record.get("slack_channel_id")
     if (
