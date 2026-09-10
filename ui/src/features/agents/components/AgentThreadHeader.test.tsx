@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import type { AgentThread } from "@/features/agents/lib/types"
 import { AgentThreadHeader } from "./AgentThreadHeader"
 
 vi.mock("@/lib/session", () => ({ useSession: () => ({ data: null }) }))
@@ -85,5 +86,27 @@ describe("AgentThreadHeader", () => {
     expect(onRename).not.toHaveBeenCalled()
     expect(screen.queryByRole("textbox")).toBeNull()
     expect(screen.getByText(title)).toBeTruthy()
+  })
+
+  it("links automation threads to their management page", () => {
+    render(
+      <AgentThreadHeader
+        title={title}
+        target="Cloud"
+        panelCollapsed={false}
+        thread={
+          {
+            id: "thread-id",
+            repoFullName: "",
+            automationId: "automation/id",
+          } as AgentThread
+        }
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Thread actions" }))
+    const link = screen.getByRole("menuitem", { name: "Manage automation" })
+    expect(link.getAttribute("href")).toBe(
+      "/agents/automations/automation%2Fid"
+    )
   })
 })
