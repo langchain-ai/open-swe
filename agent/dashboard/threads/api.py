@@ -4,7 +4,7 @@ import logging
 import posixpath
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -12,6 +12,7 @@ from agent.dashboard.options import normalize_model_choice
 from agent.dashboard.threads.access import (
     _authorized_thread,
     _github_token_for_login,
+    _readable_thread,
     _readable_thread_metadata,
 )
 from agent.dashboard.threads.runs import (
@@ -24,6 +25,7 @@ from agent.dashboard.threads.summary import (
     _DASHBOARD_SOURCE,
     _SANDBOX_CREATING_SENTINEL,
     _assert_thread_postable,
+    _assert_thread_promptable,
     _assert_thread_readable,
     _is_thread_resolved,
     _metadata_model_id,
@@ -33,7 +35,6 @@ from agent.dashboard.threads.summary import (
     _thread_is_busy,
     _thread_run_id,
     _thread_summary,
-    thread_is_owner,
 )
 from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
@@ -52,6 +53,7 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from agent.utils.thread_settings import THREAD_SETTINGS_KEY
 from agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
@@ -86,7 +88,9 @@ async def get_dashboard_terminal_sandbox(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login)
+    # A shell is a live capability into the owner's sandbox, so admins who may
+    # view a private thread still cannot open one.
+    _assert_thread_promptable(metadata, login)
     sandbox_id = metadata.get("sandbox_id")
     if (
         not isinstance(sandbox_id, str)
@@ -172,7 +176,7 @@ async def get_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login)
+    _assert_thread_readable(metadata, login, email)
 
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
     # `GET …/state` → `stream.messages`), so the detail endpoint returns
@@ -416,36 +420,11 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
 
 
 async def rename_dashboard_thread(
-    thread_id: str,
-    login: str,
-    *,
-    title: str | None = None,
-    visibility: Literal["public", "private"] | None = None,
-    email: str | None = None,
+    thread_id: str, login: str, *, title: str, email: str | None = None
 ) -> dict[str, Any]:
     client = langgraph_client()
     thread = await _authorized_thread(thread_id, login, email=email)
-    metadata = thread_metadata(thread)
-    metadata_update: dict[str, Any] = {}
-    if visibility is not None:
-        if not thread_is_owner(metadata, login):
-            raise HTTPException(403, "only the thread owner can change visibility")
-        if metadata.get("visibility", "public") != visibility:
-            if visibility == "public":
-                raise HTTPException(409, "private threads cannot be made public")
-            if _thread_is_busy(thread) or metadata.get("latest_run_status") in {
-                "pending",
-                "running",
-            }:
-                raise HTTPException(409, "stop the thread before making it private")
-            if any(
-                metadata.get(key)
-                for key in ("slack_thread", "linear_issue", "github_issue", "schedule_id")
-            ):
-                raise HTTPException(409, "externally linked threads cannot be made private")
-        metadata_update["visibility"] = visibility
-    if title is not None:
-        metadata_update.update(title=title, title_seed=None)
+    metadata_update = {"title": title, "title_seed": None}
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:  # noqa: BLE001
@@ -456,6 +435,96 @@ async def rename_dashboard_thread(
         "metadata": {**thread_metadata(thread), **metadata_update},
     }
     return await _thread_summary(thread)
+
+
+_CONTINUED_ORIGIN_KEY = "collaborative_origin_thread_id"
+# Thread settings that carry over into a private continuation. Source linkage
+# (Slack, Linear, GitHub, schedules), participants, sandbox, and run state do not.
+_CONTINUED_METADATA_KEYS = (
+    "title",
+    "base_branch",
+    "branch_prefix",
+    "model",
+    "effort",
+    "resolved_model",
+    "resolved_effort",
+    "plan_mode",
+    "environment",
+    "repo_owner",
+    "repo_name",
+    "repo_explicitly_none",
+    THREAD_SETTINGS_KEY,
+)
+
+
+async def continue_thread_privately(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
+    """Copy a collaborative thread's transcript into a new private thread owned by the caller.
+
+    Visibility never changes in place: the source thread keeps its participants
+    and any Slack or issue linkage, and the copy starts no run until the owner
+    posts, so personal credentials only ever act on the owner's own prompt.
+    """
+    client = langgraph_client()
+    thread = await _readable_thread(thread_id, login=login, email=email)
+    metadata = thread_metadata(thread)
+    if metadata.get("visibility", "public") != "public":
+        raise HTTPException(409, "thread is already private")
+    state = as_json_object(await client.threads.get_state(thread_id))
+    values = state.get("values")
+    messages = values.get("messages") if isinstance(values, Mapping) else None
+    copied: list[dict[str, Any]] = []
+    for message in messages if isinstance(messages, list) else []:
+        if not isinstance(message, dict):
+            continue
+        extra = message.get("additional_kwargs")
+        copied.append(
+            {
+                **message,
+                "additional_kwargs": {
+                    **(extra if isinstance(extra, dict) else {}),
+                    _CONTINUED_ORIGIN_KEY: thread_id,
+                },
+            }
+        )
+
+    now_ms = _now_ms()
+    new_metadata: dict[str, Any] = {
+        key: metadata[key] for key in _CONTINUED_METADATA_KEYS if metadata.get(key) is not None
+    }
+    new_metadata.update(
+        {
+            "source": _DASHBOARD_SOURCE,
+            "origin": _DASHBOARD_SOURCE,
+            "owner_login": login.strip().lower(),
+            "visibility": "private",
+            "continued_from_thread_id": thread_id,
+            "thread_category": "interactive",
+            "trigger_kind": "user",
+            PARTICIPANT_LOGINS_KEY: merge_participants(None, login),
+            PARTICIPANT_EMAILS_KEY: merge_participants(None, email),
+            "title": new_metadata.get("title") or "Private continuation",
+            "created_at_ms": now_ms,
+            "updated_at_ms": now_ms,
+        }
+    )
+    new_thread_id = str(uuid.uuid4())
+    await client.threads.create(thread_id=new_thread_id, metadata=new_metadata, if_exists="raise")
+    if copied:
+        try:
+            await client.threads.update_state(new_thread_id, values={"messages": copied})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Could not copy transcript into private continuation",
+                extra={"source_thread_id": thread_id, "thread_id": new_thread_id},
+                exc_info=True,
+            )
+            try:
+                await client.threads.delete(new_thread_id)
+            finally:
+                raise HTTPException(502, "failed to copy the thread transcript") from exc
+    return await _thread_summary(await client.threads.get(new_thread_id))
 
 
 async def resolve_dashboard_thread(
@@ -567,7 +636,7 @@ async def get_dashboard_thread_state(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login)
+    _assert_thread_readable(metadata, login, email)
     thread, latest_run_status, _ = await _refresh_latest_run_metadata(
         client, thread, timings=record
     )

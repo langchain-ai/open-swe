@@ -258,6 +258,7 @@ async def _collect_thread_candidates(
     ownerless: bool = False,
     admin_threads: bool | None = None,
     viewer_login: str | None = None,
+    viewer_email: str | None = None,
     include_private: bool = True,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
@@ -287,7 +288,8 @@ async def _collect_thread_candidates(
             for thread in batch:
                 metadata = _thread_metadata(thread)
                 if metadata.get("visibility", "public") != "public" and (
-                    not include_private or not thread_is_readable(metadata, viewer_login)
+                    not include_private
+                    or not thread_is_readable(metadata, viewer_login, viewer_email)
                 ):
                     continue
                 if surfaced_only and thread_source(metadata) not in _SURFACED_SOURCES:
@@ -344,7 +346,7 @@ async def _pinned_thread_summaries(
             logger.debug("Could not fetch pinned sidebar thread %s", thread_id, exc_info=True)
             return None
         if not isinstance(thread, Mapping) or not thread_is_readable(
-            _thread_metadata(thread), login
+            _thread_metadata(thread), login, email
         ):
             return None
         return await _summarize_thread(client, thread)
@@ -375,6 +377,7 @@ async def list_dashboard_thread_projects(
         langgraph_client(),
         _participant_search_filters(login, email=email, include_all=include_all),
         viewer_login=login,
+        viewer_email=email,
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
     )
@@ -458,6 +461,7 @@ async def list_dashboard_threads_page(
         ownerless=ownerless,
         admin_threads=admin_threads,
         viewer_login=login,
+        viewer_email=email,
         include_private=include_private,
         target_per_search=target,
         surfaced_only=surfaced_only,

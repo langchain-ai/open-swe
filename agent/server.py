@@ -794,6 +794,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
+                continued_from_collaborative=bool(cfg.continued_from_thread_id),
             ),
         }
 

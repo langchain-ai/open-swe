@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
 import type {
@@ -46,6 +46,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
+import { api } from "@/lib/api"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -83,10 +84,21 @@ export function AgentsHome({
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }
-  const [visibility, setVisibility] = useState<"public" | "private">("public")
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
   const cloudEnabled = Boolean(session.data)
+  const preferences = useQuery({
+    queryKey: ["myPreferences"],
+    queryFn: api.getMyPreferences,
+    enabled: cloudEnabled,
+  })
+  // Visibility is fixed once a thread exists, so the only choice is made here,
+  // seeded from the user's default and overridable per thread.
+  const [visibilityOverride, setVisibilityOverride] = useState<
+    "public" | "private" | null
+  >(null)
+  const visibility =
+    visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const environmentOptions = useEnvironmentOptions(cloudEnabled)
   const environments = environmentOptions.data?.environments ?? []
   // undefined = untouched, so the run falls back to the default environment.
@@ -515,17 +527,20 @@ export function AgentsHome({
                 id="thread-visibility"
                 value={visibility}
                 onChange={(event) =>
-                  setVisibility(event.target.value as "public" | "private")
+                  setVisibilityOverride(
+                    event.target.value as "public" | "private"
+                  )
                 }
                 className="rounded-md border border-border bg-background px-2 py-1 text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <option value="public">Public</option>
                 <option value="private">Private · only you</option>
+                <option value="public">Workspace</option>
               </select>
               <span>
                 {visibility === "private"
-                  ? "Private threads cannot be made public."
-                  : "Visible to workspace members."}
+                  ? "Only you can view or prompt it; your personal integrations are available."
+                  : "Anyone in the workspace can view and prompt it; personal integrations stay off."}{" "}
+                Visibility cannot change later.
               </span>
             </div>
           )}

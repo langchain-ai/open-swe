@@ -353,6 +353,13 @@ export interface UserInstructions {
   updated_by?: string
 }
 
+export type ThreadVisibility = "public" | "private"
+
+export interface UserPreferences {
+  login?: string
+  default_visibility: ThreadVisibility
+}
+
 export interface Skill {
   name: string
   description: string
@@ -678,6 +685,12 @@ export const api = {
     }),
   deleteMyInstructions: () =>
     request<void>("/me/instructions", { method: "DELETE" }),
+  getMyPreferences: () => request<UserPreferences>("/me/preferences"),
+  saveMyPreferences: (preferences: UserPreferences) =>
+    request<UserPreferences>("/me/preferences", {
+      method: "PUT",
+      body: JSON.stringify(preferences),
+    }),
   listSkills: (offset = 0) =>
     request<SkillsPage>(`/skills?limit=100&offset=${offset}`),
   createSkill: (name: string, body: SkillInput) =>

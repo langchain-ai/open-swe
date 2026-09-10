@@ -880,6 +880,21 @@ export function useDeleteAgentThread() {
   })
 }
 
+export function useContinueThreadPrivately() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+
+  return useMutation({
+    mutationFn: (threadId: string) =>
+      agentsApi.continueThreadPrivately(threadId),
+    onSuccess: (thread) => {
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+      invalidateAgentThreadLists(queryClient)
+      navigate({ to: "/agents/$threadId", params: { threadId: thread.id } })
+    },
+  })
+}
+
 export function usePinAgentThread() {
   const queryClient = useQueryClient()
 

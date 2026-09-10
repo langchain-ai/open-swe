@@ -1,7 +1,5 @@
 """Fetching a dashboard thread and asserting the caller may read or act on it."""
 
-import asyncio
-from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import HTTPException
@@ -12,32 +10,6 @@ from agent.dashboard.threads.summary import _assert_thread_readable
 from agent.dashboard.user_mappings import email_for_login
 from agent.utils.json_types import ThreadLike, thread_metadata
 from agent.utils.thread_ops import langgraph_client
-
-_ACCESS_RECHECK_SECONDS = 1.0
-
-
-async def authorized_thread_stream[T](
-    stream: AsyncIterator[T], thread_id: str, login: str, *, email: str | None = None
-) -> AsyncIterator[T]:
-    """Reauthorize each item and revoke idle streams without cancelling pending reads."""
-    pending = None
-    try:
-        while True:
-            if pending is None:
-                pending = asyncio.ensure_future(anext(stream))
-            done, _ = await asyncio.wait({pending}, timeout=_ACCESS_RECHECK_SECONDS)
-            await _readable_thread_metadata(thread_id, login=login, email=email)
-            if done:
-                try:
-                    item = pending.result()
-                except StopAsyncIteration:
-                    return
-                pending = None
-                yield item
-    finally:
-        if pending is not None:
-            pending.cancel()
-            await asyncio.gather(pending, return_exceptions=True)
 
 
 def agent_version_metadata() -> dict[str, str]:
@@ -77,7 +49,7 @@ async def _authorized_thread(thread_id: str, login: str, *, email: str | None = 
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login)
+    _assert_thread_readable(metadata, login, email)
     return thread
 
 
@@ -98,7 +70,7 @@ async def _readable_thread(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login)
+    _assert_thread_readable(metadata, login, email)
     return thread
 
 

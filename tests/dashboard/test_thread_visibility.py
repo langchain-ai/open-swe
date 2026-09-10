@@ -1,4 +1,3 @@
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -8,6 +7,8 @@ from fastapi import HTTPException
 from agent.dashboard import plan_api, workflow_approval_api
 from agent.dashboard.threads import access, api, listing, proxy, summary
 from agent.tools import threads as tools
+
+_ADMINS = {"admin", "admin@example.com"}
 
 
 @pytest.fixture
@@ -23,38 +24,56 @@ def private_thread(monkeypatch):
         },
     }
     client = SimpleNamespace(
-        threads=SimpleNamespace(get=AsyncMock(return_value=thread), update=AsyncMock()),
+        threads=SimpleNamespace(
+            get=AsyncMock(return_value=thread),
+            update=AsyncMock(),
+            create=AsyncMock(),
+            get_state=AsyncMock(return_value={"values": {}}),
+            update_state=AsyncMock(),
+        ),
         runs=SimpleNamespace(cancel_many=AsyncMock()),
     )
     for module in (access, api, listing, proxy, tools):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
-    monkeypatch.setattr(api, "_thread_summary", AsyncMock(side_effect=lambda t: t["metadata"]))
-    monkeypatch.setattr(summary, "is_admin", lambda *args, **kwargs: True)
+    monkeypatch.setattr(api, "_thread_summary", AsyncMock(side_effect=lambda t, **_: t["metadata"]))
+    monkeypatch.setattr(
+        summary,
+        "is_admin",
+        lambda email, login=None: bool({email, login} & _ADMINS),
+    )
     return thread, client
 
 
-@pytest.mark.parametrize("login", [None, "bob", "admin"])
-def test_private_access_ignores_participation_and_admin(private_thread, login):
+def test_private_readable_by_owner_and_admin_only(private_thread):
     thread, _ = private_thread
-    assert not summary.thread_is_readable(thread["metadata"], login)
-    assert summary.thread_is_readable(thread["metadata"], "ALICE")
-    assert summary.thread_is_readable({"source": "dashboard"}, login)
-    assert not summary.thread_is_readable({"source": "dashboard", "visibility": "private"}, "alice")
+    metadata = thread["metadata"]
+    assert summary.thread_is_readable(metadata, "ALICE")
+    assert summary.thread_is_readable(metadata, "admin")
+    assert summary.thread_is_readable(metadata, "someone", "admin@example.com")
+    assert not summary.thread_is_readable(metadata, "bob")
+    assert not summary.thread_is_readable(metadata, None)
+    assert summary.thread_is_readable({"source": "dashboard"}, "bob")
+
+
+def test_private_promptable_by_owner_only(private_thread):
+    thread, _ = private_thread
+    metadata = thread["metadata"]
+    assert summary.thread_is_promptable(metadata, "alice")
+    assert not summary.thread_is_promptable(metadata, "admin")
+    assert not summary.thread_is_promptable(metadata, "bob")
+    assert summary.thread_is_promptable({"source": "dashboard"}, "bob")
 
 
 @pytest.mark.parametrize(
     "operation",
     [
-        access._authorized_thread,
-        api.get_dashboard_thread,
         api.get_dashboard_thread_state,
         api.get_dashboard_terminal_sandbox,
         api.delete_dashboard_thread,
         api.cancel_dashboard_thread,
-        api.admin_cancel_dashboard_thread,
     ],
 )
-async def test_private_routes_deny_before_side_effects(private_thread, operation):
+async def test_private_routes_deny_nonowner_before_side_effects(private_thread, operation):
     _, client = private_thread
     with pytest.raises(HTTPException) as exc:
         await operation("private-thread", "bob")
@@ -63,39 +82,48 @@ async def test_private_routes_deny_before_side_effects(private_thread, operation
     client.runs.cancel_many.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "operation",
-    [
-        plan_api.get_plan,
-        plan_api.get_plan_comments,
-        workflow_approval_api.list_workflow_push_approvals,
-    ],
-)
-async def test_private_artifacts_deny_nonowner(private_thread, monkeypatch, operation):
+async def test_admin_can_view_but_not_open_terminal(private_thread):
+    thread, _ = private_thread
+    thread["metadata"]["sandbox_id"] = "sbx"
+    assert await access._readable_thread_metadata("private-thread", login="admin") is not None
+    with pytest.raises(HTTPException) as exc:
+        await api.get_dashboard_terminal_sandbox("private-thread", "admin")
+    assert exc.value.status_code == 404
+    assert await api.get_dashboard_terminal_sandbox("private-thread", "alice") == ("sbx", None)
+
+
+async def test_admin_can_read_plan_but_not_approve(private_thread, monkeypatch):
     thread, _ = private_thread
     for module in (plan_api, workflow_approval_api):
         monkeypatch.setattr(
             module, "fetch_thread_metadata", AsyncMock(return_value=thread["metadata"])
         )
+    monkeypatch.setattr(plan_api, "get_plan_content", AsyncMock(return_value={}))
+    monkeypatch.setattr(plan_api, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        workflow_approval_api, "get_workflow_push_approvals", AsyncMock(return_value={})
+    )
+    admin = {"sub": "admin"}
+    assert await plan_api.get_plan_comments("private-thread", admin) == {"comments": []}
+    await workflow_approval_api.list_workflow_push_approvals("private-thread", admin)
     with pytest.raises(HTTPException) as exc:
-        await operation("private-thread", {"sub": "bob"})
+        await plan_api.approve_plan("private-thread", admin)
+    assert exc.value.status_code == 404
+    with pytest.raises(HTTPException) as exc:
+        await plan_api.reject_plan("private-thread", None, admin)
+    assert exc.value.status_code == 404
+    with pytest.raises(HTTPException) as exc:
+        await workflow_approval_api.approve_workflow_push("private-thread", "fp", admin)
     assert exc.value.status_code == 404
 
 
-async def test_visibility_is_owner_only_and_irreversible(private_thread):
+async def test_visibility_is_not_editable_after_creation(private_thread):
     thread, client = private_thread
-    thread["metadata"]["visibility"] = "public"
-    with pytest.raises(HTTPException) as exc:
-        await api.rename_dashboard_thread("private-thread", "bob", visibility="private")
-    assert exc.value.status_code == 403
-    result = await api.rename_dashboard_thread("private-thread", "alice", visibility="private")
+    result = await api.rename_dashboard_thread("private-thread", "alice", title="Renamed")
     assert result["visibility"] == "private"
-    thread["metadata"]["visibility"] = "private"
-    client.threads.update.reset_mock()
-    with pytest.raises(HTTPException) as exc:
-        await api.rename_dashboard_thread("private-thread", "alice", visibility="public")
-    assert exc.value.status_code == 409
-    client.threads.update.assert_not_awaited()
+    (call,) = client.threads.update.await_args_list
+    assert "visibility" not in call.kwargs["metadata"]
+    assert "owner_login" not in call.kwargs["metadata"]
 
 
 async def test_private_candidates_filtered_before_pagination(private_thread, monkeypatch):
@@ -106,20 +134,91 @@ async def test_private_candidates_filtered_before_pagination(private_thread, mon
         client, [{}], viewer_login="bob", target_per_search=1
     )
     assert [item["thread_id"] for item in result] == ["public-thread"]
-    result = await listing._collect_thread_candidates(client, [{}], viewer_login="alice")
-    assert len(result) == 2
+    for viewer in ("alice", "admin"):
+        result = await listing._collect_thread_candidates(client, [{}], viewer_login=viewer)
+        assert len(result) == 2
     result = await listing._collect_thread_candidates(
         client, [{}], viewer_login="alice", include_private=False
     )
     assert [item["thread_id"] for item in result] == ["public-thread"]
 
 
-async def test_private_fork_is_rejected_even_for_owner(private_thread):
+async def test_continue_privately_copies_transcript_and_drops_linkage(private_thread):
+    thread, client = private_thread
+    thread["metadata"] = {
+        "source": "slack",
+        "origin": "slack",
+        "title": "Fix the flaky build",
+        "model": "gpt",
+        "sandbox_id": "sbx",
+        "latest_run_id": "run-1",
+        "latest_run_status": "success",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+        "participant_logins": {"alice": True, "bob": True},
+        "repo_owner": "acme",
+        "repo_name": "app",
+    }
+    client.threads.get_state.return_value = {
+        "values": {
+            "messages": [
+                {"type": "human", "content": "hi", "additional_kwargs": {"x": 1}},
+                {"type": "ai", "content": "hello"},
+            ]
+        }
+    }
+    created: dict = {}
+
+    async def create(*, thread_id, metadata, if_exists):
+        created["thread_id"], created["metadata"] = thread_id, metadata
+
+    client.threads.create.side_effect = create
+    client.threads.get.side_effect = lambda thread_id: (
+        thread
+        if thread_id == "private-thread"
+        else {"thread_id": thread_id, "metadata": created["metadata"]}
+    )
+
+    result = await api.continue_thread_privately("private-thread", "Bob", email="bob@x")
+
+    metadata = created["metadata"]
+    assert result is metadata
+    assert metadata["visibility"] == "private"
+    assert metadata["owner_login"] == "bob"
+    assert metadata["source"] == metadata["origin"] == "dashboard"
+    assert metadata["continued_from_thread_id"] == "private-thread"
+    assert metadata["title"] == "Fix the flaky build"
+    assert metadata["repo_owner"] == "acme"
+    assert metadata["participant_logins"] == {"bob": True}
+    for key in ("source_context", "sandbox_id", "latest_run_id", "latest_run_status"):
+        assert key not in metadata
+    (state_call,) = client.threads.update_state.await_args_list
+    assert state_call.args[0] == created["thread_id"]
+    copied = state_call.kwargs["values"]["messages"]
+    assert [m["content"] for m in copied] == ["hi", "hello"]
+    assert all(
+        m["additional_kwargs"]["collaborative_origin_thread_id"] == "private-thread" for m in copied
+    )
+    assert copied[0]["additional_kwargs"]["x"] == 1
+
+
+async def test_continue_privately_rejects_private_source(private_thread):
+    _, client = private_thread
     with pytest.raises(HTTPException) as exc:
-        await proxy.proxy_dashboard_thread_commands(
-            "private-thread", "alice", json.dumps({"method": "state.fork"}).encode()
-        )
-    assert exc.value.status_code == 403
+        await api.continue_thread_privately("private-thread", "alice")
+    assert exc.value.status_code == 409
+    client.threads.create.assert_not_awaited()
+
+
+async def test_continue_privately_rolls_back_when_copy_fails(private_thread):
+    thread, client = private_thread
+    thread["metadata"]["visibility"] = "public"
+    client.threads.get_state.return_value = {"values": {"messages": [{"type": "human"}]}}
+    client.threads.update_state.side_effect = RuntimeError("boom")
+    client.threads.delete = AsyncMock()
+    with pytest.raises(HTTPException) as exc:
+        await api.continue_thread_privately("private-thread", "bob")
+    assert exc.value.status_code == 502
+    client.threads.delete.assert_awaited_once()
 
 
 async def test_tools_do_not_export_private_content_into_public_thread(private_thread, monkeypatch):

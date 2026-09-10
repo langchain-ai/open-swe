@@ -159,10 +159,10 @@ from agent.dashboard.team_settings import (
     update_team_transcription_model,
     upsert_team_settings,
 )
-from agent.dashboard.threads.access import authorized_thread_stream
 from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
+    continue_thread_privately,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
@@ -214,6 +214,11 @@ from agent.dashboard.user_mappings import (
     get_mapping,
     list_mappings,
     upsert_mapping,
+)
+from agent.dashboard.user_preferences import (
+    UserPreferencesUpdate,
+    get_user_preferences,
+    set_user_preferences,
 )
 from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
@@ -611,6 +616,21 @@ async def api_delete_my_instructions(
 ) -> Response:
     await delete_user_instructions(session["sub"])
     return Response(status_code=204)
+
+
+@router.get("/me/preferences")
+async def api_get_my_preferences(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_user_preferences(session["sub"])
+
+
+@router.put("/me/preferences")
+async def api_put_my_preferences(
+    body: UserPreferencesUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await set_user_preferences(session["sub"], body)
 
 
 @router.get("/options")
@@ -2125,23 +2145,15 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
 
         async def output() -> None:
             assert handle is not None
-            async for chunk in authorized_thread_stream(
-                aiter(handle), thread_id, session["sub"], email=session.get("email")
-            ):
+            async for chunk in handle:
                 await websocket.send_text(json.dumps({"type": "output", "data": chunk.data}))
             result = await handle.result
-            await get_dashboard_terminal_sandbox(
-                thread_id, session["sub"], email=session.get("email")
-            )
             await websocket.send_text(json.dumps({"type": "exit", "exitCode": result.exit_code}))
 
         async def input_() -> None:
             assert handle is not None
             while True:
                 message = await websocket.receive_json()
-                await get_dashboard_terminal_sandbox(
-                    thread_id, session["sub"], email=session.get("email")
-                )
                 if not isinstance(message, dict):
                     continue
                 if message.get("type") == "input" and isinstance(message.get("data"), str):
@@ -2163,17 +2175,14 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
 
         output_task = asyncio.create_task(output())
         input_task = asyncio.create_task(input_())
-        tasks = {output_task, input_task}
-        try:
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                task.result()
-        finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-    except HTTPException:
-        await websocket.close(code=1008, reason="Thread access revoked")
+        done, pending = await asyncio.wait(
+            {output_task, input_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            task.result()
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # noqa: BLE001
@@ -2185,15 +2194,11 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         except Exception:  # noqa: BLE001
             pass
     finally:
-        try:
-            if handle is not None:
-                await handle.kill()
-        finally:
-            try:
-                if client is not None:
-                    await client.aclose()
-            finally:
-                _CLOUD_TERMINAL_SLOTS.release()
+        if handle is not None:
+            await handle.kill()
+        if client is not None:
+            await client.aclose()
+        _CLOUD_TERMINAL_SLOTS.release()
 
 
 @router.websocket("/threads/{thread_id}/terminal")
@@ -2284,9 +2289,16 @@ async def api_rename_thread(
         thread_id,
         session["sub"],
         title=body.title,
-        visibility=body.visibility,
         email=session.get("email"),
     )
+
+
+@router.post("/threads/{thread_id}/continue-private")
+async def api_continue_thread_privately(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await continue_thread_privately(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/resolve")

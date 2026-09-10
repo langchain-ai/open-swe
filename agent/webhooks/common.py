@@ -700,12 +700,15 @@ async def upsert_agent_thread_metadata(
     title: str = "",
     source_context: SourceContext | None = None,
     environment: str | None = None,
+    visibility: str = "public",
+    owner_login: str = "",
 ) -> None:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
     Webhook-triggered runs only pass ``source``/``github_login`` through the run
     config; the Agents UI lists threads by thread *metadata*, so we mirror the
-    sender onto the thread's participants here.
+    sender onto the thread's participants here. ``visibility`` and ``owner_login``
+    are stamped once, when the thread is created, and never changed afterwards.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
     category = "interactive"
@@ -769,6 +772,9 @@ async def upsert_agent_thread_metadata(
 
     try:
         if existing is None:
+            metadata["visibility"] = visibility
+            if owner_login.strip():
+                metadata["owner_login"] = owner_login.strip().lower()
             await langgraph_client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )

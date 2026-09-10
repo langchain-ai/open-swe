@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import normalize_profile_overrides
@@ -37,6 +37,7 @@ from agent.dashboard.threads.summary import (
     repo_config_from_metadata,
     thread_source,
 )
+from agent.dashboard.user_preferences import default_thread_visibility
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -97,14 +98,7 @@ class ThreadMessageBody(BaseModel):
 class ThreadRenameBody(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    title: str | None = Field(default=None, min_length=1, max_length=80)
-    visibility: Literal["public", "private"] | None = None
-
-    @model_validator(mode="after")
-    def require_update(self) -> ThreadRenameBody:
-        if self.title is None and self.visibility is None:
-            raise ValueError("title or visibility is required")
-        return self
+    title: str = Field(min_length=1, max_length=80)
 
 
 class ThreadResolveBody(BaseModel):
@@ -225,7 +219,7 @@ async def _create_dashboard_thread_record(
     visibility: Literal["public", "private"] = "public",
     environment: str | None = None,
 ) -> dict[str, Any]:
-    """Create a dashboard thread with immutable ownership before starting a run."""
+    """Create a dashboard thread with immutable ownership and visibility."""
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
@@ -311,6 +305,9 @@ async def _build_dashboard_configurable(
     # hands out the environment tools, so this only marks intent.
     if metadata.get("admin_thread") is True:
         configurable["admin_thread"] = True
+    continued_from = metadata.get("continued_from_thread_id")
+    if isinstance(continued_from, str) and continued_from:
+        configurable["continued_from_thread_id"] = continued_from
     environment = metadata.get("environment")
     if isinstance(environment, str) and environment:
         configurable["environment"] = environment
@@ -460,7 +457,7 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
-        visibility = client_configurable.get("visibility", "public")
+        visibility = client_configurable.get("visibility") or await default_thread_visibility(login)
         if visibility not in ("public", "private"):
             raise HTTPException(422, "visibility must be public or private")
         thread = await _create_dashboard_thread_record(

@@ -2,19 +2,20 @@ import { expect, test } from "@playwright/test";
 
 const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 
-test("Alice creates and transitions private threads; Bob is denied", async ({
+test("private threads are owner-only and visibility is fixed at creation", async ({
   page,
   playwright,
 }) => {
   const api = await playwright.request.newContext({ baseURL: harness });
-  const id = crypto.randomUUID();
+  const sharedId = crypto.randomUUID();
   let createdId: string | undefined;
+  let continuedId: string | undefined;
   try {
     const seed = await api.post("/threads", {
       data: {
-        thread_id: id,
+        thread_id: sharedId,
         metadata: {
-          title: "Private project planning",
+          title: "Shared project planning",
           source: "dashboard",
           owner_login: "alice",
           visibility: "public",
@@ -22,18 +23,13 @@ test("Alice creates and transitions private threads; Bob is denied", async ({
       },
     });
     expect(seed.ok()).toBeTruthy();
-    await page.request.post("/control/login", { data: { login: "bob" } });
-    await page.goto(`/agents/${id}`);
-    await expect(
-      page.getByText("Private project planning", { exact: true }).first(),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Make private", exact: true }),
-    ).toHaveCount(0);
+
+    // Alice starts a new thread; the composer defaults to private and the
+    // server records an immutable owner.
     await page.request.post("/control/login", { data: { login: "alice" } });
     await page.goto("/agents");
     await page.getByRole("button", { name: "Maybe later" }).click();
-    await page.getByLabel("Visibility").selectOption("private");
+    await expect(page.getByLabel("Visibility")).toHaveValue("private");
     const editor = page.getByTestId("composer-editor");
     await editor.fill("Private planning notes");
     await editor.press("Enter");
@@ -47,31 +43,47 @@ test("Alice creates and transitions private threads; Bob is denied", async ({
         return response.ok() ? (await response.json()).visibility : null;
       })
       .toBe("private");
-    await page.goto(`/agents/${id}`);
-    await page
-      .getByRole("button", { name: "Make private", exact: true })
-      .click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toContainText(
-      "Previously shared copies cannot be retracted.",
-    );
-    await dialog
-      .getByRole("button", { name: "Make private", exact: true })
-      .click();
-    await expect(dialog).toHaveCount(0);
     await expect(page.getByText("Private", { exact: true })).toBeVisible();
+
+    // Visibility cannot be changed in place; the PATCH only knows titles.
+    const flip = await page.request.patch(
+      `/dashboard/api/threads/${createdId}`,
+      { data: { visibility: "public" } },
+    );
+    expect(flip.status()).toBe(422);
+
+    // A shared thread continues privately as a new thread; the source is untouched.
+    await page.goto(`/agents/${sharedId}`);
+    await page.getByRole("button", { name: "Thread actions" }).click();
+    await page.getByRole("menuitem", { name: "Continue privately" }).click();
+    await expect(page).toHaveURL(new RegExp(`/agents/(?!${sharedId})[^/]+$`));
+    continuedId = new URL(page.url()).pathname.split("/").pop()!;
+    const continued = await (
+      await page.request.get(`/dashboard/api/threads/${continuedId}`)
+    ).json();
+    expect(continued.visibility).toBe("private");
+    expect(continued.continuedFromThreadId).toBe(sharedId);
+    const source = await (
+      await page.request.get(`/dashboard/api/threads/${sharedId}`)
+    ).json();
+    expect(source.visibility).toBe("public");
+
+    // Bob can still read the shared thread but neither private one.
     await page.request.post("/control/login", { data: { login: "bob" } });
-    await page.goto(`/agents/${id}`);
-    await expect(page.getByText("Private", { exact: true })).toHaveCount(0);
-    for (const threadId of [id, createdId]) {
+    await page.goto(`/agents/${sharedId}`);
+    await expect(
+      page.getByText("Shared project planning", { exact: true }).first(),
+    ).toBeVisible();
+    for (const threadId of [createdId, continuedId]) {
       const denied = await page.request.get(
         `/dashboard/api/threads/${threadId}`,
       );
       expect(denied.status()).toBe(404);
     }
   } finally {
-    if (createdId) await api.delete(`/threads/${createdId}`);
-    await api.delete(`/threads/${id}`);
+    for (const threadId of [createdId, continuedId, sharedId]) {
+      if (threadId) await api.delete(`/threads/${threadId}`);
+    }
     await api.dispose();
   }
 });

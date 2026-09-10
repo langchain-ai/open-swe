@@ -3,8 +3,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import aclosing
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx2
@@ -14,7 +13,6 @@ from agent.config import ENV
 from agent.dashboard.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
-    authorized_thread_stream,
 )
 from agent.dashboard.threads.runs import (
     _ASSISTANT_ID,
@@ -74,25 +72,14 @@ async def proxy_dashboard_thread_stream_events(
     # surface as real HTTP errors before the SSE response starts streaming.
     require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
-
-    async def stream() -> AsyncIterator[bytes]:
-        async with aclosing(stream_thread_events(thread_id, body, content_type)) as upstream:
-            try:
-                async for chunk in authorized_thread_stream(
-                    upstream, thread_id, login, email=email
-                ):
-                    yield chunk
-            except HTTPException:
-                return
-
-    return stream()
+    return stream_thread_events(thread_id, body, content_type)
 
 
 async def stream_thread_events(
     thread_id: str,
     body: bytes,
     content_type: str,
-) -> AsyncGenerator[bytes]:
+) -> AsyncIterator[bytes]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
     headers = langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
@@ -195,11 +182,9 @@ async def proxy_dashboard_thread_commands(
         if post_command:
             _assert_thread_postable(metadata, login, email)
         else:
-            _assert_thread_readable(metadata, login)
+            _assert_thread_readable(metadata, login, email)
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            _assert_thread_readable(metadata, login)
-        if method == "state.fork" and metadata.get("visibility") == "private":
-            raise HTTPException(403, "private threads cannot be forked")
+            _assert_thread_readable(metadata, login, email)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 

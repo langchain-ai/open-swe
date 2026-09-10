@@ -476,6 +476,13 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
+def _slack_thread_visibility(channel_context: dict[str, Any] | None) -> str:
+    """Bot DMs are private to the person; anything in a channel is collaborative."""
+    if isinstance(channel_context, dict) and channel_context.get("is_im") is True:
+        return "private"
+    return "public"
+
+
 async def _mark_slack_thread_errored(
     thread_id: str, request: SlackRequest, repo: Repo | None
 ) -> None:
@@ -499,6 +506,7 @@ async def _mark_slack_thread_errored(
                     triggering_event_ts=request.event_ts,
                 )
             ),
+            visibility=_slack_thread_visibility(request.channel_context),
         )
     except Exception:  # noqa: BLE001
         common.logger.warning(
@@ -821,6 +829,8 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         title=clean_text if is_first_mention else "",
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         environment=environment_slug,
+        visibility=_slack_thread_visibility(channel_context),
+        owner_login=mapped_login or "",
     )
 
     # An edit corrects a request the agent already has, so it belongs in the

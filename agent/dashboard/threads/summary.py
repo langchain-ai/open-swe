@@ -91,22 +91,44 @@ def thread_is_owner(metadata: Mapping[str, Any], login: str | None) -> bool:
     )
 
 
-def thread_is_readable(metadata: Mapping[str, Any], login: str | None = None) -> bool:
-    """Private threads require their immutable owner, without an admin bypass."""
+def thread_is_private(metadata: Mapping[str, Any]) -> bool:
+    return metadata.get("visibility", "public") != "public"
+
+
+def thread_is_readable(
+    metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
+) -> bool:
+    """Private threads are visible to their immutable owner and to workspace admins."""
     return thread_source(metadata) in _SURFACED_SOURCES and (
-        metadata.get("visibility", "public") == "public" or thread_is_owner(metadata, login)
+        not thread_is_private(metadata)
+        or thread_is_owner(metadata, login)
+        or is_admin(email, login=login)
     )
 
 
-def _assert_thread_readable(metadata: Mapping[str, Any], login: str | None = None) -> None:
-    if not thread_is_readable(metadata, login):
+def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool:
+    """Only the owner may prompt, approve, or open a shell into a private thread."""
+    return thread_is_readable(metadata, login) and (
+        not thread_is_private(metadata) or thread_is_owner(metadata, login)
+    )
+
+
+def _assert_thread_readable(
+    metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
+) -> None:
+    if not thread_is_readable(metadata, login, email):
+        raise HTTPException(404, "thread not found")
+
+
+def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) -> None:
+    if not thread_is_promptable(metadata, login):
         raise HTTPException(404, "thread not found")
 
 
 def _assert_thread_postable(
     metadata: Mapping[str, Any], login: str, email: str | None = None
 ) -> None:
-    _assert_thread_readable(metadata, login)
+    _assert_thread_promptable(metadata, login)
     if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
         email, login=login
     ):
@@ -355,6 +377,7 @@ async def _thread_summary(
         "adminThread": metadata.get("admin_thread") is True,
         "visibility": metadata.get("visibility", "public"),
         "ownerLogin": metadata.get("owner_login"),
+        "continuedFromThreadId": metadata.get("continued_from_thread_id"),
         "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": thread_source(metadata),
