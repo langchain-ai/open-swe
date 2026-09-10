@@ -301,6 +301,11 @@ export const agentsApi = {
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  continueThreadPrivately: (threadId: string) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/continue-private`,
+      { method: "POST" }
+    ),
   renameThread: (threadId: string, title: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`, {
       method: "PATCH",
