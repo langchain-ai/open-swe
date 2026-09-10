@@ -1358,3 +1358,20 @@ async def test_native_modal_failure_keeps_saved_bad_rating(context, fake_store):
     await tasks()
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["completed"]
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 0.0
+
+
+async def test_native_rating_retry_replaces_controls_without_reopening_modal(context, fake_store):
+    feedback.respond_to_slack_interaction.side_effect = [False, True]
+    for choice in ("bad", "good"):
+        tasks = BackgroundTasks()
+        payload = _action("open_swe_feedback", json.dumps({"run_id": "run-1", "choice": choice}))
+        await routes.slack_interactivity(_request(payload), tasks)
+        await tasks()
+    assert feedback.respond_to_slack_interaction.await_count == 2
+    assert all(
+        block["type"] == "section"
+        for block in feedback.respond_to_slack_interaction.await_args.args[1]["blocks"]
+    )
+    feedback.open_slack_modal.assert_awaited_once()
+    assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["choice"] == "bad"
+    assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 0.0

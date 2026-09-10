@@ -731,19 +731,21 @@ async def _record_rating(payload: dict[str, Any], background_tasks: BackgroundTa
             if record is None:
                 return
             async with _locked_feedback(record) as current:
-                if current is None or current.completed or current.dismissed:
+                if current is None or current.dismissed:
                     return
-                current.choice = choice
-                current.rating = 5 if choice == "good" else 1
-                current.completed = True
-                await _store(current.channel_id).put(current.run_id, current)
+                newly_saved = not current.completed
+                if newly_saved:
+                    current.choice = choice
+                    current.rating = 5 if choice == "good" else 1
+                    current.completed = True
+                    await _store(current.channel_id).put(current.run_id, current)
                 record = current
             response_url = str(payload.get("response_url") or "")
             background_tasks.add_task(complete_feedback_prompt, record.agent_thread_id, "completed")
             background_tasks.add_task(_acknowledge, record, response_url=response_url)
             background_tasks.add_task(_export_feedback, record)
             trigger_id = payload.get("trigger_id")
-            if choice == "bad" and isinstance(trigger_id, str) and trigger_id:
+            if newly_saved and choice == "bad" and isinstance(trigger_id, str) and trigger_id:
                 await open_slack_modal(
                     trigger_id, comment_modal(record, response_url, comment_only=True)
                 )
