@@ -163,7 +163,9 @@ function UsageTable({
             <th className="px-2 py-3 text-right font-normal">Invocations</th>
             <th className="px-2 py-3 text-right font-normal">Tokens</th>
             <th className="px-2 py-3 text-right font-normal">Cost</th>
-            <th className="px-2 py-3 text-right font-normal">Avg Invocation Duration</th>
+            <th className="px-2 py-3 text-right font-normal">
+              Avg Invocation Duration
+            </th>
             <th className="px-2 py-3 text-right font-normal">PRs Opened</th>
             <th className="px-2 py-3 text-right font-normal">Merged PRs</th>
             <th className="px-4 py-3 text-right font-normal">Agent LOC</th>
