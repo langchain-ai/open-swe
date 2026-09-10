@@ -167,6 +167,56 @@ export function shouldIgnoreHotkey(
 }
 
 /**
+ * Tracks presses of one key, reporting true on the press that completes
+ * `count` of them inside `windowMs`. Completing resets the run, so six
+ * presses fire twice rather than four times.
+ */
+export function createRapidKeyRun({
+  count,
+  windowMs,
+}: {
+  count: number
+  windowMs: number
+}): (at: number) => boolean {
+  let presses: Array<number> = []
+  return (at: number) => {
+    presses = presses.filter((previous) => at - previous < windowMs)
+    presses.push(at)
+    if (presses.length < count) return false
+    presses = []
+    return true
+  }
+}
+
+/**
+ * Fire when a bare key is pressed several times in quick succession. Listens
+ * in the capture phase and never prevents the default, so the key keeps its
+ * normal job (Escape still closes dialogs) and the run is still counted while
+ * a text field has focus.
+ */
+export function useRapidKeyRun(
+  key: string,
+  handler: () => void,
+  { count = 3, windowMs = 750 }: { count?: number; windowMs?: number } = {}
+) {
+  const handlerRef = useRef(handler)
+  useEffect(() => {
+    handlerRef.current = handler
+  }, [handler])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const completesRun = createRapidKeyRun({ count, windowMs })
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== key || event.repeat || event.isComposing) return
+      if (completesRun(Date.now())) handlerRef.current()
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [key, count, windowMs])
+}
+
+/**
  * Register a global keyboard shortcut. Use "mod" for the platform meta key
  * (Cmd on macOS, Ctrl elsewhere). Accepts one combo or several aliases.
  */
