@@ -25,6 +25,11 @@ export type RenderItem =
       key: string
       chunks: Array<ToolExecutionChunk>
     }
+  | {
+      type: "read-group"
+      key: string
+      chunks: Array<ToolExecutionChunk>
+    }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
@@ -77,7 +82,7 @@ function attentionItems(
   item: RenderItem,
   includeUnfinished: boolean
 ): Array<RenderItem> {
-  if (item.type === "edit-group") {
+  if (item.type === "edit-group" || item.type === "read-group") {
     return item.chunks.some((chunk) =>
       toolNeedsAttention(chunk, includeUnfinished)
     )
@@ -127,7 +132,9 @@ export function countWorkActions(items: Array<RenderItem>): number {
     if (item.type === "explored-group" || item.type === "subagent-group") {
       return count + item.chunks.length
     }
-    if (item.type === "edit-group") return count + item.chunks.length
+    if (item.type === "edit-group" || item.type === "read-group") {
+      return count + item.chunks.length
+    }
     if (
       item.type === "edit-item" ||
       item.type === "shell-item" ||
@@ -193,7 +200,7 @@ function isSubagentTool(chunk: ToolExecutionChunk): boolean {
   return chunk.toolKind === "task"
 }
 
-function editFilePath(chunk: ToolExecutionChunk): string | null {
+function toolFilePath(chunk: ToolExecutionChunk): string | null {
   const diff = chunk.diffs?.length
     ? chunk.diffs[chunk.diffs.length - 1]
     : chunk.diffData
@@ -207,7 +214,7 @@ function collapseRepeatedEdits(items: Array<RenderItem>): Array<RenderItem> {
   const groups = new Map<string, Array<ToolExecutionChunk>>()
   for (const item of items) {
     if (item.type !== "edit-item") continue
-    const path = editFilePath(item.chunk)
+    const path = toolFilePath(item.chunk)
     if (!path) continue
     const group = groups.get(path) ?? []
     group.push(item.chunk)
@@ -217,7 +224,7 @@ function collapseRepeatedEdits(items: Array<RenderItem>): Array<RenderItem> {
   const renderedGroups = new Set<string>()
   return items.flatMap<RenderItem>((item) => {
     if (item.type !== "edit-item") return [item]
-    const path = editFilePath(item.chunk)
+    const path = toolFilePath(item.chunk)
     const chunks = path ? groups.get(path) : undefined
     if (!path || !chunks || chunks.length === 1) return [item]
     if (renderedGroups.has(path)) return []
@@ -229,6 +236,58 @@ function collapseRepeatedEdits(items: Array<RenderItem>): Array<RenderItem> {
         chunks,
       },
     ]
+  })
+}
+
+function collapseRepeatedReads(items: Array<RenderItem>): Array<RenderItem> {
+  const groups = new Map<string, Array<ToolExecutionChunk>>()
+  for (const item of items) {
+    if (item.type !== "explored-group") continue
+    for (const chunk of item.chunks) {
+      if (chunk.toolKind !== "read") continue
+      const path = toolFilePath(chunk)
+      if (!path) continue
+      const group = groups.get(path) ?? []
+      group.push(chunk)
+      groups.set(path, group)
+    }
+  }
+
+  const renderedGroups = new Set<string>()
+  return items.flatMap<RenderItem>((item) => {
+    if (item.type !== "explored-group") return [item]
+    const replacement: Array<RenderItem> = []
+    let remaining: Array<ToolExecutionChunk> = []
+    const flushRemaining = () => {
+      if (remaining.length === 0) return
+      const first = remaining[0]
+      replacement.push({
+        type: "explored-group",
+        key: `${item.key}-${first?.toolCallId ?? replacement.length}`,
+        id: `${item.id}-${first?.toolCallId ?? replacement.length}`,
+        chunks: remaining,
+      })
+      remaining = []
+    }
+
+    for (const chunk of item.chunks) {
+      const path = chunk.toolKind === "read" ? toolFilePath(chunk) : null
+      const chunks = path ? groups.get(path) : undefined
+      if (!path || !chunks || chunks.length === 1) {
+        remaining.push(chunk)
+        continue
+      }
+      if (renderedGroups.has(path)) continue
+      flushRemaining()
+      renderedGroups.add(path)
+      replacement.push({
+        type: "read-group",
+        key: `read-group-${chunk.toolCallId}`,
+        chunks,
+      })
+    }
+    flushRemaining()
+    return replacement
   })
 }
 
@@ -359,7 +418,7 @@ export function buildRenderItems(
   }
 
   flushGroups()
-  return collapseRepeatedEdits(items)
+  return collapseRepeatedReads(collapseRepeatedEdits(items))
 }
 
 export function summarizeExploration(

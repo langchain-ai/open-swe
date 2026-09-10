@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   combinedEditDiff,
   describeEditGroup,
+  describeReadGroup,
   describeWorkEntry,
   liveActivityLabel,
 } from "./workEntry"
@@ -54,6 +55,25 @@ describe("describeWorkEntry", () => {
     expect(entry.icon).toBe("eye")
   })
 
+  it("labels repeated reads with their call count", () => {
+    const reads = [
+      chunk({
+        toolCallId: "read-1",
+        input: { file_path: `${projectPath}/ui/src/AGENTS.md` },
+      }),
+      chunk({
+        toolCallId: "read-2",
+        input: { file_path: `${projectPath}/ui/src/AGENTS.md` },
+      }),
+    ]
+
+    expect(describeReadGroup(reads, projectPath)).toMatchObject({
+      heading: "Read (x2)",
+      preview: "AGENTS.md",
+      status: "completed",
+    })
+  })
+
   it("describes a completed edit from its diff rather than the raw tool title", () => {
     const entry = describeWorkEntry(
       chunk({ title: "edit_file", toolKind: "edit", diffData: diff() }),
@@ -88,7 +108,7 @@ describe("describeWorkEntry", () => {
       newContent: "c\nd\n",
     })
     expect(describeEditGroup(chunks, projectPath)).toMatchObject({
-      heading: "Edited",
+      heading: "Edited (x2)",
       preview: "app.tsx",
       diffStats: { additions: 2, deletions: 1 },
       status: "completed",

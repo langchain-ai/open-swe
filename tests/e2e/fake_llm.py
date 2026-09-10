@@ -830,6 +830,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-setup",
         ),
         _tool_step(
+            "Reading the greeting helpers.",
+            "read_file",
+            {"file_path": f"/repo/{FEATURE_FILE}"},
+            "call-read-first",
+        ),
+        _tool_step(
             "Preparing the display helper.",
             "edit_file",
             {
@@ -870,6 +876,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-edit-polish",
         ),
         _tool_step(
+            "Checking the greeting helpers again.",
+            "read_file",
+            {"file_path": f"/repo/{FEATURE_FILE}"},
+            "call-read-second",
+        ),
+        _tool_step(
             "Making the farewell consistent.",
             "edit_file",
             {
@@ -898,6 +910,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 "new_string": 'return f"Thanks, {name.strip().title()}!"',
             },
             "call-edit-thank",
+        ),
+        _tool_step(
+            "Verifying the greeting helpers.",
+            "read_file",
+            {"file_path": f"/repo/{FEATURE_FILE}"},
+            "call-read-third",
         ),
         _tool_step(
             "Making the invitation consistent.",

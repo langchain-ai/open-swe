@@ -15,6 +15,7 @@ import { WorkEntryRow } from "./WorkEntryRow"
 import {
   combinedEditDiff,
   describeEditGroup,
+  describeReadGroup,
   describeWorkEntry,
   latestDiff,
 } from "./workEntry"
@@ -69,6 +70,22 @@ function EditWorkGroup({
       timestamp={latestChunk?.timestamp}
       body={diff ? <DiffView diffData={diff} snippet /> : undefined}
       defaultExpanded={chunks.some((chunk) => chunk.status === "pending")}
+    />
+  )
+}
+
+function ReadWorkGroup({
+  chunks,
+  projectPath,
+}: {
+  chunks: Array<ToolExecutionChunk>
+  projectPath?: string
+}) {
+  const latestChunk = chunks[chunks.length - 1]
+  return (
+    <WorkEntryRow
+      entry={describeReadGroup(chunks, projectPath)}
+      timestamp={latestChunk?.timestamp}
     />
   )
 }
@@ -246,6 +263,15 @@ export function AgentTurn({
       case "edit-group":
         return (
           <EditWorkGroup
+            key={item.key}
+            chunks={item.chunks}
+            projectPath={projectPath}
+          />
+        )
+
+      case "read-group":
+        return (
+          <ReadWorkGroup
             key={item.key}
             chunks={item.chunks}
             projectPath={projectPath}

@@ -94,6 +94,43 @@ describe("buildRenderItems", () => {
     ])
   })
 
+  it("groups repeated reads to the same file while preserving other exploration", () => {
+    const first: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "read-1",
+      title: "read_file",
+      toolKind: "read",
+      input: { file_path: "/workspace/app.ts" },
+      status: "completed",
+    }
+    const search: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "search-1",
+      title: "search",
+      toolKind: "search",
+      input: { pattern: "render" },
+      status: "completed",
+    }
+    const second: ToolExecutionChunk = {
+      ...first,
+      toolCallId: "read-2",
+    }
+
+    expect(buildRenderItems([first, search, second])).toEqual([
+      {
+        type: "read-group",
+        key: "read-group-read-1",
+        chunks: [first, second],
+      },
+      {
+        type: "explored-group",
+        key: "explored-read-1-search-1",
+        id: "explored-read-1-search-1",
+        chunks: [search],
+      },
+    ])
+  })
+
   it("keeps sent replies visible when later work runs", () => {
     const sentReply: ToolExecutionChunk = {
       kind: "tool-execution",

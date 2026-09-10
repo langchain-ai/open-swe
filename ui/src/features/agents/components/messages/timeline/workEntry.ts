@@ -195,16 +195,48 @@ export function describeEditGroup(
       { ...latestChunk, diffData: diff, diffs: undefined },
       projectPath
     ),
-    heading: chunks.some((chunk) => chunk.status === "error")
-      ? "Failed to edit"
-      : chunks.some(
-            (chunk) =>
-              chunk.status === "pending" || chunk.status === "in_progress"
-          )
-        ? "Editing"
-        : diff.isNewFile
-          ? "Created"
-          : "Edited",
+    heading: `${
+      chunks.some((chunk) => chunk.status === "error")
+        ? "Failed to edit"
+        : chunks.some(
+              (chunk) =>
+                chunk.status === "pending" || chunk.status === "in_progress"
+            )
+          ? "Editing"
+          : diff.isNewFile
+            ? "Created"
+            : "Edited"
+    } (x${chunks.length})`,
+    status: chunks.some((chunk) => chunk.status === "error")
+      ? "error"
+      : chunks.some((chunk) => chunk.status === "pending")
+        ? "pending"
+        : chunks.some((chunk) => chunk.status === "in_progress")
+          ? "in_progress"
+          : "completed",
+    tone: chunks.some((chunk) => chunk.status === "error") ? "error" : "tool",
+  }
+}
+
+export function describeReadGroup(
+  chunks: Array<ToolExecutionChunk>,
+  projectPath?: string
+): WorkEntryView {
+  const latestChunk = chunks[chunks.length - 1]
+  if (!latestChunk) {
+    return {
+      icon: "eye",
+      heading: "Read",
+      preview: null,
+      tone: "tool",
+      status: "completed",
+      expandedText: null,
+    }
+  }
+  const entry = describeWorkEntry(latestChunk, projectPath)
+  return {
+    ...entry,
+    heading: `${entry.heading} (x${chunks.length})`,
     status: chunks.some((chunk) => chunk.status === "error")
       ? "error"
       : chunks.some((chunk) => chunk.status === "pending")

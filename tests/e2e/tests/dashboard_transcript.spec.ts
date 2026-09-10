@@ -59,7 +59,8 @@ test.describe("finished transcript (shared fixture thread)", () => {
     });
     const acknowledgement = page.getByText("On it!", { exact: true });
     const helperEdit = page.getByRole("button", { name: "Edited helpers.py" });
-    const edit = page.getByRole("button", { name: "Edited greet.py" });
+    const read = page.getByText("Read (x3)", { exact: true });
+    const edit = page.getByRole("button", { name: "Edited (x7) greet.py" });
     const notesEdit = page.getByRole("button", { name: "Edited notes.md" });
 
     // Folded: the acknowledgement shows, the individual tool calls do not.
@@ -69,6 +70,7 @@ test.describe("finished transcript (shared fixture thread)", () => {
 
     await worked.click();
     await expect(helperEdit).toHaveCount(1);
+    await expect(read).toHaveCount(1);
     await expect(edit).toHaveCount(1);
     await expect(notesEdit).toHaveCount(1);
     await expect(acknowledgement).toBeVisible();
