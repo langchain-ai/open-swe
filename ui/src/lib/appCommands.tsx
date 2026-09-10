@@ -13,7 +13,12 @@ import type { DesktopCommandId } from "@/desktop"
 import { AppCommandPalette } from "@/components/AppCommandPalette"
 import { AppShortcutReference } from "@/components/AppShortcutReference"
 import { useSession } from "@/lib/session"
-import { eventMatchesShortcut, shouldIgnoreHotkey } from "@/lib/hotkeys"
+import {
+  eventMatchesShortcut,
+  isTypingContext,
+  isTypingSafeShortcut,
+  shouldIgnoreHotkey,
+} from "@/lib/hotkeys"
 import { useTheme } from "@/lib/theme"
 
 export interface AppCommand {
@@ -197,15 +202,7 @@ export function AppCommandProvider({
   useEffect(() => {
     if (!enabled || paletteOpen || shortcutReferenceOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        shouldIgnoreHotkey(
-          event,
-          false,
-          true,
-          event.metaKey || event.ctrlKey || event.altKey
-        )
-      )
-        return
+      if (shouldIgnoreHotkey(event)) return
       const desktop = Boolean(window.openSweDesktop)
       const command = commandsRef.current.find(
         (candidate) =>
@@ -217,6 +214,11 @@ export function AppCommandProvider({
           )
       )
       if (!command?.run) return
+      if (
+        !command.shortcuts?.some(isTypingSafeShortcut) &&
+        isTypingContext(event.target)
+      )
+        return
       event.preventDefault()
       void command.run()
     }

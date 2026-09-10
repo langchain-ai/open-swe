@@ -152,8 +152,11 @@ export function isHotkeySuppressed(target: EventTarget | null): boolean {
   return Boolean(closestElement(target)?.closest('[data-hotkeys="ignore"]'))
 }
 
-/** Modifier combos (e.g. Cmd/Ctrl+N) stay active while typing; bare keys do not. */
-export function isModifierShortcut(shortcut: string): boolean {
+/**
+ * Whether a shortcut should stay active while the user is typing. Modifier
+ * combos (e.g. Cmd/Ctrl+N) qualify; bare keys like `c` do not.
+ */
+export function isTypingSafeShortcut(shortcut: string): boolean {
   const combo = parseCombo(shortcut)
   return combo.mod || combo.meta || combo.ctrl || combo.alt
 }
@@ -161,15 +164,14 @@ export function isModifierShortcut(shortcut: string): boolean {
 export function shouldIgnoreHotkey(
   event: KeyboardEvent,
   enableInFormFields = false,
-  ignoreRepeat = true,
-  modifierShortcut = false
+  ignoreRepeat = true
 ): boolean {
   return (
     event.defaultPrevented ||
     event.isComposing ||
     (ignoreRepeat && event.repeat) ||
     isHotkeySuppressed(event.target) ||
-    (!enableInFormFields && !modifierShortcut && isTypingContext(event.target))
+    (!enableInFormFields && isTypingContext(event.target))
   )
 }
 
@@ -199,14 +201,13 @@ export function useHotkey(
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return
     const combos = comboKey.split("\u0000")
-    const modifierShortcut = combos.some(isModifierShortcut)
+    const typingSafe = combos.some(isTypingSafeShortcut)
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         shouldIgnoreHotkey(
           event,
-          enableInFormFields,
-          ignoreRepeat,
-          modifierShortcut
+          enableInFormFields || typingSafe,
+          ignoreRepeat
         )
       )
         return

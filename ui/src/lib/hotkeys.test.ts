@@ -6,8 +6,8 @@ import {
   eventMatchesShortcut,
   formatShortcut,
   isHotkeySuppressed,
-  isModifierShortcut,
   isTypingContext,
+  isTypingSafeShortcut,
   shouldIgnoreHotkey,
 } from "./hotkeys"
 
@@ -108,22 +108,10 @@ describe("keyboard shortcut utilities", () => {
     expect(shouldIgnoreHotkey(prevented)).toBe(true)
   })
 
-  it("lets modifier shortcuts fire inside typing contexts but not bare keys", () => {
-    const input = document.createElement("input")
-    const typing = eventWithTarget(input, { metaKey: true, key: "n" })
-    expect(shouldIgnoreHotkey(typing)).toBe(true)
-    expect(shouldIgnoreHotkey(typing, false, true, true)).toBe(false)
-    expect(
-      shouldIgnoreHotkey(
-        eventWithTarget(input, { key: "c" }),
-        false,
-        true,
-        false
-      )
-    ).toBe(true)
-    expect(isModifierShortcut("mod+n")).toBe(true)
-    expect(isModifierShortcut("ctrl+shift+p")).toBe(true)
-    expect(isModifierShortcut("c")).toBe(false)
-    expect(isModifierShortcut("?")).toBe(false)
+  it("classifies modifier combos as typing-safe for hotkey exemption", () => {
+    expect(isTypingSafeShortcut("mod+n")).toBe(true)
+    expect(isTypingSafeShortcut("ctrl+shift+p")).toBe(true)
+    expect(isTypingSafeShortcut("c")).toBe(false)
+    expect(isTypingSafeShortcut("?")).toBe(false)
   })
 })
