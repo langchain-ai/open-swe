@@ -33,6 +33,7 @@ from agent.dashboard.threads.summary import (
     thread_source,
 )
 from agent.dispatch import dispatch_agent_run
+from agent.input_messages import build_system_run_input
 from agent.slack.client import post_slack_thread_reply
 from agent.source_context import SourceContext
 
@@ -402,7 +403,11 @@ async def dispatch_followup(
 
     return await dispatch_agent_run(
         thread_id,
-        text,
         configurable,
         source=configurable["source"],
+        input=build_system_run_input(
+            text,
+            sender_id="system:plan-review",
+            display_name="Plan review",
+        ),
     )

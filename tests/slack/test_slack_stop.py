@@ -122,17 +122,17 @@ def _patch_handler(
 
     async def fake_dispatch(
         thread_id: str,
-        content: str,
         configurable: dict[str, Any],
         *,
         source: str,
+        input: dict[str, Any],
         metadata: dict[str, Any],
         client: FakeClient,
     ) -> dict[str, str]:
         dispatched.append(
             {
                 "thread_id": thread_id,
-                "content": content,
+                "content": input["messages"][-1]["content"],
                 "configurable": configurable,
                 "source": source,
                 "metadata": metadata,

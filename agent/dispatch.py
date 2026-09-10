@@ -33,21 +33,11 @@ from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
 from agent.config import ENV
-from agent.input_messages import (
-    ChannelIdentity,
-    InputMessageContext,
-    PersonIdentity,
-    RunInput,
-    Surface,
-    SystemIdentity,
-    build_run_input,
-)
+from agent.input_messages import RunInput
 from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
-from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
-ContentBlocks = str | list[dict[str, Any]]
 LangGraphRunConfig = dict[str, Any]
 
 # The server's legacy-named compatibility marker selects the v3 stream path.
@@ -62,86 +52,6 @@ V3_RUN_STREAM_MODES: tuple[str, ...] = (
     "tasks",
     "checkpoints",
 )
-
-
-def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str, Any]) -> RunInput:
-    surface: Surface = (
-        source
-        if source in {"slack", "linear", "github", "web", "desktop", "eval"}
-        else "automation"
-    )  # type: ignore[assignment]
-    people: list[PersonIdentity] = []
-    channels: list[ChannelIdentity] = []
-    systems: list[SystemIdentity] = []
-    cfg = RunConfig.parse(configurable)
-    login = cfg.github_login
-    email = cfg.user_email
-    slack_thread = cfg.slack_thread
-    sender_id = ""
-    channel_id: str | None = None
-    if surface == "slack" and slack_thread is not None:
-        if slack_thread.triggering_user_id:
-            sender_id = f"slack:{slack_thread.triggering_user_id}"
-            person: PersonIdentity = {"id": sender_id, "platform": "slack"}
-            if slack_thread.triggering_user_name:
-                person["display_name"] = slack_thread.triggering_user_name
-            if slack_thread.triggering_user_timezone:
-                person["timezone"] = slack_thread.triggering_user_timezone
-            if login:
-                person["github_login"] = login
-            if email:
-                person["email"] = email
-            people.append(person)
-        if slack_thread.channel_id:
-            channel_id = f"slack:{slack_thread.channel_id}"
-            channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
-            channel_context = slack_thread.channel_context
-            if isinstance(channel_context, dict):
-                name = channel_context.get("name") or channel_context.get("name_normalized")
-                topic = channel_context.get("topic")
-                purpose = channel_context.get("purpose")
-                if isinstance(name, str) and name:
-                    channel["name"] = name
-                if isinstance(topic, str) and topic:
-                    channel["topic"] = topic
-                if isinstance(purpose, str) and purpose:
-                    channel["purpose"] = purpose
-            if slack_thread.thread_ts:
-                channel["thread_id"] = slack_thread.thread_ts
-            channels.append(channel)
-    if not sender_id and login:
-        sender_id = f"github:{login}"
-        person = {"id": sender_id, "platform": "github", "github_login": login}
-        if email:
-            person["email"] = email
-        people.append(person)
-    if not sender_id and surface == "linear" and email:
-        sender_id = f"linear:{email.lower()}"
-        people.append({"id": sender_id, "platform": "linear", "email": email})
-    kind = "human" if sender_id else "system"
-    if not sender_id:
-        sender_id = f"system:{source.replace('_', '-')}"
-        systems.append(
-            {
-                "id": sender_id,
-                "display_name": source.replace("-", " ").title(),
-                "platform": "open-swe",
-            }
-        )
-    context: InputMessageContext = {
-        "sender_id": sender_id,
-        "surface": surface,
-        "kind": kind,
-    }
-    if channel_id:
-        context["channel_id"] = channel_id
-    return build_run_input(
-        content,
-        context,
-        people=people,
-        channels=channels,
-        systems=systems,
-    )
 
 
 # FastAPI route the platform POSTs run completion/failure to. The platform
@@ -267,44 +177,16 @@ async def create_durable_run(
 
 async def dispatch_agent_run(
     thread_id: str,
-    content: ContentBlocks | None,
     configurable: dict[str, Any],
     *,
     source: str,
-    input: RunInput | None = None,
-    context: InputMessageContext | None = None,
-    people: list[PersonIdentity] | None = None,
-    channels: list[ChannelIdentity] | None = None,
-    systems: list[SystemIdentity] | None = None,
+    input: RunInput,
     assistant_id: str = "agent",
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
 ) -> Run:
-    """Create a durable run for ``thread_id`` using the requested multitask strategy.
-
-    Routes every Slack / Linear / GitHub / dashboard trigger through one
-    contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
-    the graph (``"agent"`` or ``"reviewer"``).
-    """
-    if input is not None and any(
-        value is not None for value in (content, context, people, channels, systems)
-    ):
-        raise ValueError("prebuilt input cannot be combined with content or source identities")
-    if input is None:
-        if content is None:
-            raise ValueError("content is required when input is not provided")
-        input = (
-            build_run_input(
-                content,
-                context,
-                people=people,
-                channels=channels,
-                systems=systems,
-            )
-            if context is not None
-            else _dispatch_input(content, source, configurable)
-        )
+    """Dispatch a durable run with caller-constructed, provenance-explicit input."""
     client = client or dispatch_client()
     if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:
         from agent.thread_feedback import note_feedback_activity

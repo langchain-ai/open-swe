@@ -23,6 +23,7 @@ from agent.github.ci import (
     list_commit_statuses,
 )
 from agent.github.comments import post_github_comment
+from agent.input_messages import build_system_run_input
 from agent.linear.client import comment_on_linear_issue
 from agent.prompts import render_prompt
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
@@ -315,9 +316,13 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
             configurable = watch.dispatch_config()
             await dispatch_agent_run(
                 watch.thread_id,
-                f"/baby-sit --terminal {watch.pr_url}\n\n{message}",
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
+                input=build_system_run_input(
+                    f"/baby-sit --terminal {watch.pr_url}\n\n{message}",
+                    sender_id="system:baby-sit",
+                    display_name="PR babysitter",
+                ),
                 metadata={},
                 multitask_strategy="enqueue",
             )
@@ -503,9 +508,13 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            watch.failure_prompt(failures),
             configurable,
             source=str(configurable.get("source") or "github"),
+            input=build_system_run_input(
+                watch.failure_prompt(failures),
+                sender_id="system:baby-sit",
+                display_name="PR babysitter",
+            ),
             metadata={},
             multitask_strategy="enqueue",
         )

@@ -10,6 +10,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.config import ENV
 from agent.dispatch import dispatch_agent_run
+from agent.input_messages import build_system_run_input
 from agent.prompts import render_prompt
 from agent.slack.client import (
     lookup_slack_run_mapping,
@@ -194,9 +195,13 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
     configurable = _summary_configurable(metadata, slack_thread)
     summary_run = await dispatch_agent_run(
         thread_id,
-        _stop_summary_prompt(bool(run_ids)),
         configurable,
         source=str(configurable["source"]),
+        input=build_system_run_input(
+            _stop_summary_prompt(bool(run_ids)),
+            sender_id="system:slack-stop",
+            display_name="Slack stop handler",
+        ),
         metadata=_agent_version_metadata(),
         client=client,
     )

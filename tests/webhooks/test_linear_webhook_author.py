@@ -34,10 +34,8 @@ def _run_process(
 ) -> tuple[dict, dict, str | None, object]:
     captured: dict[str, Any] = {}
 
-    async def fake_dispatch(
-        thread_id, content, configurable, *, source, input=None, metadata=None, client=None
-    ):
-        captured["content"] = input or content
+    async def fake_dispatch(thread_id, configurable, *, source, input, metadata=None, client=None):
+        captured["content"] = input
         captured["configurable"] = configurable
         return {"run_id": "run-1"}
 

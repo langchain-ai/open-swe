@@ -77,6 +77,7 @@ from agent.github.token import (
     is_bot_token_only_mode,
     resolve_github_token_from_email,
 )
+from agent.input_messages import RunInput, build_system_run_input
 from agent.linear.client import post_linear_trace_comment  # noqa: F401
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.linear.team_repo_map import LINEAR_TEAM_TO_REPO
@@ -1118,9 +1119,15 @@ async def trigger_or_queue_run(
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
     )
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
+    run_input: RunInput = input or build_system_run_input(
+        prompt,
+        sender_id="system:github-webhook",
+        display_name="GitHub webhook",
+        surface="github",
+        platform="github",
+    )
     await dispatch_agent_run(
         thread_id,
-        None if input is not None else prompt,
         {
             "source": "github",
             "github_login": github_login,
@@ -1129,7 +1136,7 @@ async def trigger_or_queue_run(
             "pr_number": pr_number,
         },
         source="github",
-        input=input,
+        input=run_input,
         metadata=AGENT_VERSION_METADATA,
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)

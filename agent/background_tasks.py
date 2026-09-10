@@ -7,7 +7,7 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
-from agent.input_messages import InputMessageContext, SystemIdentity
+from agent.input_messages import build_system_run_input
 from agent.prompts import render_prompt
 from agent.sandboxes.providers.registry import create_sandbox
 from agent.source_context import SourceContext
@@ -20,16 +20,8 @@ CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
 MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
-_BACKGROUND_TASK_SENDER: SystemIdentity = {
-    "id": "system:background-task",
-    "display_name": "Background task",
-    "platform": "open-swe",
-}
-_BACKGROUND_TASK_CONTEXT: InputMessageContext = {
-    "sender_id": _BACKGROUND_TASK_SENDER["id"],
-    "surface": "automation",
-    "kind": "system",
-}
+_BACKGROUND_TASK_SENDER_ID = "system:background-task"
+_BACKGROUND_TASK_DISPLAY_NAME = "Background task"
 
 
 def _client():
@@ -161,11 +153,13 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
             configurable["background_task_completion"] = True
             await dispatch_agent_run(
                 thread_id,
-                message,
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
-                context=_BACKGROUND_TASK_CONTEXT,
-                systems=[_BACKGROUND_TASK_SENDER],
+                input=build_system_run_input(
+                    message,
+                    sender_id=_BACKGROUND_TASK_SENDER_ID,
+                    display_name=_BACKGROUND_TASK_DISPLAY_NAME,
+                ),
                 metadata={},
                 multitask_strategy="enqueue",
             )

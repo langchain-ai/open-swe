@@ -96,16 +96,16 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
 
     async def fake_dispatch_agent_run(
         thread_id: str,
-        content: str,
         configurable: dict[str, Any],
         *,
         source: str,
+        input: dict[str, Any],
         client: Any,
         **kwargs: Any,
     ) -> dict[str, str]:
         captured["dispatch"] = {
             "thread_id": thread_id,
-            "content": content,
+            "input": input,
             "configurable": configurable,
             "source": source,
             "client": client,
@@ -216,16 +216,18 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert dispatch["configurable"]["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert dispatch["configurable"]["github_login"] == "alice"
     assert dispatch["configurable"]["agent_model_id"] == "anthropic:claude-sonnet-4-5"
-    assert "Breakout Instructions" in dispatch["content"]
-    assert "## Open SWE Links" in dispatch["content"]
-    assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in dispatch["content"]
-    assert "- Trace: https://smith/x" in dispatch["content"]
-    assert "do not duplicate it manually" in dispatch["content"]
-    assert dispatch["content"].endswith(
-        "## Breakout Instructions\n"
-        "Use the same repo and investigate the follow-up aspect in detail."
+    content = dispatch["input"]["messages"][-1]["content"]
+    assert 'sender="system:slack-breakout" surface="automation" kind="system"' in content
+    assert "Breakout Instructions" in content
+    assert "## Open SWE Links" in content
+    assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in content
+    assert "- Trace: https://smith/x" in content
+    assert "do not duplicate it manually" in content
+    assert (
+        "## Breakout Instructions\nUse the same repo and investigate the follow-up aspect"
+        in content
     )
-    assert "slack_thread_reply" not in dispatch["content"]
+    assert "slack_thread_reply" not in content
     assert "trace" not in captured
     assert [item["message_ts"] for item in captured["stored_mappings"]] == [new_ts]
     assert all(item["triggering_user_id"] == "U1" for item in captured["stored_mappings"])

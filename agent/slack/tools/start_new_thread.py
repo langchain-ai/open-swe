@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
+from agent.input_messages import build_system_run_input
 from agent.prompts import render_prompt
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -315,9 +316,15 @@ async def slack_start_new_thread(
 
     run = await dispatch_agent_run(
         thread_id,
-        await _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
         new_configurable,
         source="slack",
+        input=build_system_run_input(
+            await _run_prompt(
+                clean_title, clean_instructions, repo, current_slack_thread, thread_id
+            ),
+            sender_id="system:slack-breakout",
+            display_name="Slack breakout",
+        ),
         client=client,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else None

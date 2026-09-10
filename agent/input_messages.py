@@ -402,3 +402,29 @@ def build_run_input(
     if files is not None:
         result["files"] = files
     return result
+
+
+def build_system_run_input(
+    content: str | list[dict[str, Any]],
+    *,
+    sender_id: str,
+    display_name: str,
+    surface: Surface = "automation",
+    platform: str = "open-swe",
+    data: dict[str, object] | None = None,
+) -> RunInput:
+    system: SystemIdentity = {
+        "id": sender_id,
+        "display_name": display_name,
+        "platform": platform,
+    }
+    return build_run_input(
+        content,
+        {
+            "sender_id": sender_id,
+            "surface": surface,
+            "kind": "system",
+            "data": data or {},
+        },
+        systems=[system],
+    )
