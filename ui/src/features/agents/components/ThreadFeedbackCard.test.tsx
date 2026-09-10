@@ -48,7 +48,7 @@ afterEach(() => {
 
 it("shows only Good/Bad and saves Good without a comment form", async () => {
   renderCard()
-  const good = await screen.findByRole("button", { name: "👍 Good" })
+  const good = await screen.findByRole("button", { name: "🙂 Good" })
   expect(screen.queryByRole("textbox")).toBeNull()
   expect(screen.queryByRole("button", { name: /Other|Submit/ })).toBeNull()
   fireEvent.click(good)
@@ -61,14 +61,14 @@ it("shows only Good/Bad and saves Good without a comment form", async () => {
 
 it("saves Bad before offering an optional comment and keeps the draft on failure", async () => {
   renderCard()
-  fireEvent.click(await screen.findByRole("button", { name: "👎 Bad" }))
+  fireEvent.click(await screen.findByRole("button", { name: "💩 Bad" }))
   const comment = await screen.findByRole("textbox", {
     name: "Comment (optional)",
   })
   expect(api.submitThreadFeedback).toHaveBeenCalledExactlyOnceWith("thread-1", {
     rating: "bad",
   })
-  expect(screen.queryByRole("button", { name: "👍 Good" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "🙂 Good" })).toBeNull()
   fireEvent.change(comment, { target: { value: " More detail please. " } })
   api.submitThreadFeedback.mockRejectedValueOnce(new Error("Temporary outage"))
   fireEvent.click(screen.getByRole("button", { name: "Submit comment" }))
@@ -85,7 +85,7 @@ it("saves Bad before offering an optional comment and keeps the draft on failure
 
 it("allows skipping the comment without undoing the Bad rating", async () => {
   renderCard()
-  fireEvent.click(await screen.findByRole("button", { name: "👎 Bad" }))
+  fireEvent.click(await screen.findByRole("button", { name: "💩 Bad" }))
   fireEvent.click(await screen.findByRole("button", { name: "Skip" }))
   await screen.findByText("Thanks for your feedback.")
   expect(api.submitThreadFeedback).toHaveBeenCalledExactlyOnceWith("thread-1", {
@@ -97,10 +97,10 @@ it("allows skipping the comment without undoing the Bad rating", async () => {
 it("keeps the rating controls available when saving the rating fails", async () => {
   api.submitThreadFeedback.mockRejectedValueOnce(new Error("Temporary outage"))
   renderCard()
-  fireEvent.click(await screen.findByRole("button", { name: "👎 Bad" }))
+  fireEvent.click(await screen.findByRole("button", { name: "💩 Bad" }))
   await screen.findByRole("alert")
   expect(screen.queryByRole("textbox")).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "👎 Bad" }))
+  fireEvent.click(screen.getByRole("button", { name: "💩 Bad" }))
   await screen.findByRole("textbox")
 })
 
