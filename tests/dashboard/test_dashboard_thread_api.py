@@ -9,12 +9,19 @@ from xml.etree import ElementTree
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import routes, thread_api
+from agent.dashboard import routes
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
+from agent.dashboard.threads import api as thread_api
+from agent.dashboard.threads import diffs as thread_diffs
+from agent.dashboard.threads import listing as thread_listing
+from agent.dashboard.threads import proxy as thread_proxy
+from agent.dashboard.threads import runs as thread_runs
+from agent.dashboard.threads import summary as thread_summary
 from agent.dashboard.ttft import AssistantTextObservation
 from agent.media import MediaRef, media_refs_from_content
 from agent.utils.thread_ops import QueuedMessage
+from tests.conftest import patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -32,7 +39,7 @@ def _empty_thread_pins(monkeypatch) -> None:
     async def empty_pins(login: str) -> list[str]:
         return []
 
-    monkeypatch.setattr(thread_api, "list_thread_pin_ids", empty_pins)
+    patch_thread_module(monkeypatch, "list_thread_pin_ids", empty_pins)
 
 
 async def test_rename_thread_trims_title_and_clears_seed(monkeypatch) -> None:
@@ -40,19 +47,19 @@ async def test_rename_thread_trims_title_and_clears_seed(monkeypatch) -> None:
     thread = {"thread_id": "thread-1", "metadata": metadata}
     authorized = AsyncMock(return_value=thread)
     update = AsyncMock()
-    monkeypatch.setattr(thread_api, "_authorized_thread", authorized)
-    monkeypatch.setattr(
-        thread_api, "_thread_summary", AsyncMock(side_effect=lambda t: t["metadata"])
+    patch_thread_module(monkeypatch, "_authorized_thread", authorized)
+    patch_thread_module(
+        monkeypatch, "_thread_summary", AsyncMock(side_effect=lambda t: t["metadata"])
     )
-    monkeypatch.setattr(
-        thread_api,
+    patch_thread_module(
+        monkeypatch,
         "langgraph_client",
         lambda: SimpleNamespace(threads=SimpleNamespace(update=update)),
     )
 
     result = await routes.api_rename_thread(
         "thread-1",
-        thread_api.ThreadRenameBody(title="  New title  "),
+        thread_runs.ThreadRenameBody(title="  New title  "),
         {"sub": "alice", "email": "alice@example.com"},
     )
 
@@ -63,8 +70,8 @@ async def test_rename_thread_trims_title_and_clears_seed(monkeypatch) -> None:
     assert result == {**metadata, "title": "New title", "title_seed": None}
 
 
-def _image() -> thread_api.DashboardImageBody:
-    return thread_api.DashboardImageBody(
+def _image() -> thread_runs.DashboardImageBody:
+    return thread_runs.DashboardImageBody(
         base64=base64.b64encode(b"image").decode("ascii"),
         mimeType="image/png",
     )
@@ -77,22 +84,22 @@ def test_model_supports_images_marks_text_only_fireworks_models() -> None:
 
 def test_dashboard_media_uploads_rejects_images_for_text_only_model() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        thread_api._dashboard_media_uploads([_image()], model_id=_TEXT_ONLY_MODEL)
+        thread_runs._dashboard_media_uploads([_image()], model_id=_TEXT_ONLY_MODEL)
 
     assert exc_info.value.status_code == 422
     assert "does not support image input" in exc_info.value.detail
 
 
 def test_dashboard_media_uploads_decodes_images_for_vision_model() -> None:
-    uploads = thread_api._dashboard_media_uploads([_image()], model_id=_VISION_MODEL)
+    uploads = thread_runs._dashboard_media_uploads([_image()], model_id=_VISION_MODEL)
 
     assert [(upload.data, upload.mime_type) for upload in uploads] == [(b"image", "image/png")]
 
 
 def test_dashboard_media_uploads_rejects_malformed_images() -> None:
-    bad = thread_api.DashboardImageBody(base64="not base64!", mimeType="image/png")
+    bad = thread_runs.DashboardImageBody(base64="not base64!", mimeType="image/png")
     with pytest.raises(HTTPException) as exc_info:
-        thread_api._dashboard_media_uploads([bad], model_id=_VISION_MODEL)
+        thread_runs._dashboard_media_uploads([bad], model_id=_VISION_MODEL)
 
     assert exc_info.value.status_code == 422
 
@@ -100,7 +107,7 @@ def test_dashboard_media_uploads_rejects_malformed_images() -> None:
 def test_langgraph_proxy_headers_include_api_key(monkeypatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
 
-    headers = thread_api._langgraph_proxy_headers(accept="text/event-stream")
+    headers = thread_proxy.langgraph_proxy_headers(accept="text/event-stream")
 
     assert headers["X-API-Key"] == "ls-key"
     assert headers["Accept"] == "text/event-stream"
@@ -111,9 +118,9 @@ async def test_resolve_agent_model_choice_applies_profile_before_team_default(mo
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
-    monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
+    patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
 
-    model_id, effort = await thread_api._resolve_agent_model_choice(
+    model_id, effort = await thread_runs._resolve_agent_model_choice(
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
         None,
         None,
@@ -127,9 +134,9 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
-    monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
+    patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
 
-    model_id, effort = await thread_api._resolve_agent_model_choice(
+    model_id, effort = await thread_runs._resolve_agent_model_choice(
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
         "anthropic:claude-opus-5",
         "high",
@@ -142,9 +149,9 @@ async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(m
     async def fake_team_default(role: str) -> tuple[str, str]:
         return _VISION_MODEL, "medium"
 
-    monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
+    patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
 
-    model_id, effort = await thread_api._resolve_agent_model_choice(
+    model_id, effort = await thread_runs._resolve_agent_model_choice(
         {"default_model": "anthropic:claude-opus-5", "reasoning_effort": "high"},
         "fireworks:accounts/fireworks/models/glm-5p2",
         "high",
@@ -239,16 +246,16 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     async def fake_resolve_email(login: str, prof: dict[str, object]) -> str:
         return f"{login}@example.com"
 
-    monkeypatch.setattr(thread_api, "get_profile", fake_profile)
-    monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "get_profile", fake_profile)
+    patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
 
 async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatch) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={})
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
 
     command = {
         "method": "run.start",
@@ -264,7 +271,7 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
         },
     }
 
-    enriched = await thread_api._enrich_run_start_command(
+    enriched = await thread_runs._enrich_run_start_command(
         "new-tid",
         "octocat",
         command,
@@ -289,8 +296,9 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
-    assert configurable["prepare_run_id"] == enriched["params"]["metadata"]["prepare_run_id"]
-    assert configurable["prepare_run_id"]
+    assert configurable["invocation_id"] == enriched["params"]["metadata"]["invocation_id"]
+    assert configurable["prepare_run_id"] == configurable["invocation_id"]
+    assert enriched["params"]["metadata"]["prepare_run_id"] == configurable["invocation_id"]
     messages = enriched["params"]["input"]["messages"]
     assert messages[-1]["content"].startswith(
         '<input-message sender="github:octocat" surface="web" kind="human">'
@@ -309,7 +317,7 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
         monkeypatch,
         profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
     )
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: _new_thread_client(created))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
     attached: dict[str, object] = {}
 
     async def fake_attach(thread_id: str, uploads: list, *, environment_slug=None):
@@ -325,7 +333,7 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
             for upload in uploads
         ]
 
-    monkeypatch.setattr(thread_api, "attach_thread_media", fake_attach)
+    patch_thread_module(monkeypatch, "attach_thread_media", fake_attach)
 
     image = _image()
     command = {
@@ -350,7 +358,7 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
         },
     }
 
-    enriched = await thread_api._enrich_run_start_command(
+    enriched = await thread_runs._enrich_run_start_command(
         "new-tid",
         "octocat",
         command,
@@ -382,17 +390,17 @@ def _thread_with_metadata(metadata: dict) -> dict:
 
 
 async def test_thread_summary_exposes_attention_reason() -> None:
-    flagged = await thread_api._thread_summary(
+    flagged = await thread_summary._thread_summary(
         _thread_with_metadata({"title": "Ship it", "attention_reason": "prs_closed"})
     )
-    quiet = await thread_api._thread_summary(_thread_with_metadata({"title": "Ship it"}))
+    quiet = await thread_summary._thread_summary(_thread_with_metadata({"title": "Ship it"}))
 
     assert flagged["attentionReason"] == "prs_closed"
     assert quiet["attentionReason"] is None
 
 
 async def test_thread_summary_includes_pr_and_diff_stats() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_summary._thread_summary(
         _thread_with_metadata(
             {
                 "repo_full_name": "langchain-ai/open-swe",
@@ -421,7 +429,7 @@ async def test_thread_summary_includes_pr_and_diff_stats() -> None:
 
 
 async def test_thread_summary_includes_pull_requests_across_repositories() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_summary._thread_summary(
         _thread_with_metadata(
             {
                 "repo_full_name": "langchain-ai/open-swe",
@@ -477,7 +485,7 @@ async def test_thread_summary_uses_configured_repo_for_display() -> None:
         "working_repo_full_name": "observed/checkout",
     }
 
-    summary = await thread_api._thread_summary(_thread_with_metadata(metadata))
+    summary = await thread_summary._thread_summary(_thread_with_metadata(metadata))
 
     assert summary["repo"] == "default"
     assert summary["repoFullName"] == "trusted/default"
@@ -486,7 +494,7 @@ async def test_thread_summary_uses_configured_repo_for_display() -> None:
 
 
 async def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_summary._thread_summary(
         _thread_with_metadata(
             {
                 "pr_number": 7,
@@ -500,20 +508,22 @@ async def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
 
 
 async def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
-    summary = await thread_api._thread_summary(_thread_with_metadata({"title": "No PR"}))
+    summary = await thread_summary._thread_summary(_thread_with_metadata({"title": "No PR"}))
 
     assert "pr" not in summary
     assert "diffStats" not in summary
 
 
 async def test_thread_summary_exposes_sandbox_id() -> None:
-    summary = await thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "sb-abc123"}))
+    summary = await thread_summary._thread_summary(
+        _thread_with_metadata({"sandbox_id": "sb-abc123"})
+    )
 
     assert summary["sandboxId"] == "sb-abc123"
 
 
 async def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_summary._thread_summary(
         _thread_with_metadata({"sandbox_id": "__creating__"})
     )
 
@@ -534,7 +544,7 @@ async def test_terminal_sandbox_requires_existing_sandbox(monkeypatch) -> None:
     class FakeClient:
         threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     assert await thread_api.get_dashboard_terminal_sandbox("tid", "teammate") == (
         "sandbox-123",
@@ -548,8 +558,8 @@ async def test_terminal_sandbox_requires_existing_sandbox(monkeypatch) -> None:
 
 
 async def test_thread_summary_includes_slack_source_urls_for_private_repo(monkeypatch) -> None:
-    monkeypatch.setattr(thread_api, "SLACK_TEAM_ID", "T workspace")
-    summary = await thread_api._thread_summary(
+    patch_thread_module(monkeypatch, "SLACK_TEAM_ID", "T workspace")
+    summary = await thread_summary._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
@@ -572,8 +582,8 @@ async def test_thread_summary_includes_slack_source_urls_for_private_repo(monkey
 
 
 async def test_thread_summary_includes_slack_source_urls_for_public_repo(monkeypatch) -> None:
-    monkeypatch.setattr(thread_api, "SLACK_TEAM_ID", "T-workspace")
-    summary = await thread_api._thread_summary(
+    patch_thread_module(monkeypatch, "SLACK_TEAM_ID", "T-workspace")
+    summary = await thread_summary._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
@@ -596,8 +606,8 @@ async def test_thread_summary_includes_slack_source_urls_for_public_repo(monkeyp
 
 
 async def test_thread_summary_includes_code_channel_url(monkeypatch) -> None:
-    monkeypatch.setattr(thread_api, "SLACK_TEAM_ID", "T team&workspace")
-    summary = await thread_api._thread_summary(
+    patch_thread_module(monkeypatch, "SLACK_TEAM_ID", "T team&workspace")
+    summary = await thread_summary._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
@@ -614,7 +624,7 @@ async def test_thread_summary_includes_code_channel_url(monkeypatch) -> None:
 
 
 async def test_thread_summary_omits_code_channel_url_without_team() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_summary._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
@@ -627,7 +637,7 @@ async def test_thread_summary_omits_code_channel_url_without_team() -> None:
 
 
 async def test_thread_summary_omits_code_channel_url_for_slack_thread() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_summary._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
@@ -649,10 +659,10 @@ async def test_recovery_patch_reaches_any_authenticated_user(monkeypatch) -> Non
     class FakeClient:
         threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_recovery_patch("tid", "teammate")
+        await thread_diffs.get_dashboard_thread_recovery_patch("tid", "teammate")
 
     assert exc_info.value.status_code == 404
     assert "sandbox" in exc_info.value.detail
@@ -662,10 +672,10 @@ async def test_recovery_patch_requires_sandbox(monkeypatch) -> None:
     async def fake_authorized_thread(thread_id: str, login: str, *, email: str | None = None):
         return {"thread_id": thread_id, "metadata": {"source": "dashboard", "github_login": login}}
 
-    monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
+    patch_thread_module(monkeypatch, "_authorized_thread", fake_authorized_thread)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+        await thread_diffs.get_dashboard_thread_recovery_patch("tid", "octocat")
 
     assert exc_info.value.status_code == 404
     assert "sandbox" in exc_info.value.detail
@@ -688,7 +698,7 @@ async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
     class FakeSandbox:
         async def aexecute(self, command: str, *, timeout: int | None = None):
             assert "repo" in command
-            assert timeout == thread_api._RECOVERY_PATCH_TIMEOUT_SECONDS
+            assert timeout == thread_diffs._RECOVERY_PATCH_TIMEOUT_SECONDS
             return SimpleNamespace(
                 output=json.dumps({"ok": True, "path": "/tmp/open-swe-tid.patch", "size": 11}),
                 exit_code=0,
@@ -698,10 +708,10 @@ async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
             assert paths == ["/tmp/open-swe-tid.patch"]
             return [SimpleNamespace(content=b"patch bytes")]
 
-    monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
+    patch_thread_module(monkeypatch, "_authorized_thread", fake_authorized_thread)
+    patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
 
-    content, filename = await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+    content, filename = await thread_diffs.get_dashboard_thread_recovery_patch("tid", "octocat")
 
     assert content == b"patch bytes"
     assert filename == "open-swe-tid.patch"
@@ -718,11 +728,11 @@ async def test_recovery_patch_rejects_empty_patch(monkeypatch) -> None:
                 exit_code=0,
             )
 
-    monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
+    patch_thread_module(monkeypatch, "_authorized_thread", fake_authorized_thread)
+    patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+        await thread_diffs.get_dashboard_thread_recovery_patch("tid", "octocat")
 
     assert exc_info.value.status_code == 404
     assert "changes" in exc_info.value.detail
@@ -739,29 +749,28 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
                     {
                         "ok": True,
                         "path": "/tmp/open-swe-tid.patch",
-                        "size": thread_api._RECOVERY_PATCH_LIMIT_BYTES + 1,
+                        "size": thread_diffs._RECOVERY_PATCH_LIMIT_BYTES + 1,
                     }
                 ),
                 exit_code=0,
             )
 
-    monkeypatch.setattr(thread_api, "_authorized_thread", fake_authorized_thread)
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
+    patch_thread_module(monkeypatch, "_authorized_thread", fake_authorized_thread)
+    patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+        await thread_diffs.get_dashboard_thread_recovery_patch("tid", "octocat")
 
     assert exc_info.value.status_code == 413
 
 
 def test_recovery_patch_searches_command_cwd_before_workspace_fallback() -> None:
-    command = thread_api._recovery_patch_command(
+    command = thread_diffs._recovery_patch_command(
         {"repo_name": "repo", "base_branch": "main"},
         "tid",
     )
 
-    assert "Path.cwd().resolve()" in command
-    assert "WORKSPACE_FALLBACK = Path('/workspace')" in command
+    assert 'WORKSPACE_FALLBACK = Path("/workspace")' in command
     assert "roots = [Path.cwd().resolve(), WORKSPACE_FALLBACK]" in command
 
 
@@ -775,11 +784,11 @@ async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(
     class MissingClient:
         threads = MissingThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: MissingClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: MissingClient())
 
     # A non-run.start command against a thread that doesn't exist yet is a 404.
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_commands(
+        await thread_proxy.proxy_dashboard_thread_commands(
             "ghost", "octocat", b'{"method": "run.cancel"}'
         )
     assert exc_info.value.status_code == 404
@@ -805,17 +814,17 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         return f"{login}@example.com"
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
         "params": {"input": {"messages": [{"role": "user", "content": "fix the bug"}]}},
     }
 
-    enriched = await thread_api._enrich_run_start_command(
+    enriched = await thread_runs._enrich_run_start_command(
         "tid",
         "teammate",
         command,
@@ -852,10 +861,10 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         return f"{login}@example.com"
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
@@ -866,7 +875,7 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
         },
     }
 
-    enriched = await thread_api._enrich_run_start_command(
+    enriched = await thread_runs._enrich_run_start_command(
         "tid",
         "teammate",
         command,
@@ -906,10 +915,10 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         return f"{login}@example.com"
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
@@ -925,7 +934,7 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
         },
     }
 
-    enriched = await thread_api._enrich_run_start_command(
+    enriched = await thread_runs._enrich_run_start_command(
         "tid",
         "teammate",
         command,
@@ -960,17 +969,17 @@ async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeyp
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         return f"{login}@example.com"
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
         "params": {"input": {"messages": [{"role": "user", "content": "fix the bug"}]}},
     }
 
-    enriched = await thread_api._enrich_run_start_command(
+    enriched = await thread_runs._enrich_run_start_command(
         "tid",
         "owner",
         command,
@@ -1005,10 +1014,10 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         assert login == "octocat"
         return "octocat@example.com"
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
@@ -1026,7 +1035,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         },
     }
 
-    enriched = await thread_api._enrich_run_start_command(
+    enriched = await thread_runs._enrich_run_start_command(
         "tid",
         "octocat",
         command,
@@ -1114,17 +1123,17 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
         }
         return True
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
-    monkeypatch.setattr(thread_api, "_now_ms", lambda: 123_456)
-    monkeypatch.setattr(thread_api.httpx2, "AsyncClient", FakeAsyncClient)
-    monkeypatch.setattr(
-        thread_api, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "_now_ms", lambda: 123_456)
+    monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", FakeAsyncClient)
+    patch_thread_module(
+        monkeypatch, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
     )
 
-    status, body, _ = await thread_api.proxy_dashboard_thread_commands(
+    status, body, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid",
         "octocat",
         b'{"method":"run.start","params":{"input":{"messages":[{"role":"user","content":"continue here"}]}}}',
@@ -1158,85 +1167,141 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
 async def test_run_ttft_observer_records_first_assistant_text(
     monkeypatch,
 ) -> None:
-    def event(
-        method: str,
-        data: dict[str, object],
-        *,
-        namespace: list[str],
-        event_id: str,
-    ) -> bytes:
-        payload = {
+    def event(method: str, data: dict[str, object], event_id: str) -> dict[str, object]:
+        return {
             "type": "event",
             "event_id": event_id,
             "method": method,
-            "params": {"namespace": namespace, "timestamp": 2_250, "data": data},
+            "params": {"namespace": ["agent"], "timestamp": 2_250, "data": data},
         }
-        return f"event: {method}\r\ndata: {json.dumps(payload)}\r\n\r\n".encode()
 
-    stream_bytes = event(
-        "messages",
-        {"event": "message-start", "role": "ai"},
-        namespace=["agent"],
-        event_id="1-0",
-    ) + event(
-        "messages",
+    events = [
         {
-            "event": "content-block-delta",
-            "delta": {"type": "text-delta", "text": "Hello"},
+            "type": "event",
+            "event_id": "synth:historical-run:lc||running",
+            "method": "lifecycle",
+            "params": {"namespace": [], "timestamp": 1_000, "data": {"event": "running"}},
         },
-        namespace=["agent"],
-        event_id="2-0",
-    )
-    chunks = [stream_bytes[:35], stream_bytes[35:]]
+        event("messages", {"event": "message-start", "role": "ai"}, "old-1"),
+        event(
+            "messages",
+            {
+                "event": "content-block-delta",
+                "delta": {"type": "text-delta", "text": "Historical"},
+            },
+            "old-2",
+        ),
+        {
+            "type": "event",
+            "event_id": "synth:run-1:lc||running",
+            "method": "lifecycle",
+            "params": {"namespace": [], "timestamp": 2_000, "data": {"event": "running"}},
+        },
+        event("messages", {"event": "message-start", "role": "ai"}, "1-0"),
+        event(
+            "messages",
+            {
+                "event": "content-block-delta",
+                "delta": {"type": "text-delta", "text": "Hello"},
+            },
+            "2-0",
+        ),
+    ]
 
-    class FakeResponse:
-        status_code = 200
-
-        def raise_for_status(self) -> None:
-            pass
-
-        async def aiter_bytes(self):
-            for chunk in chunks:
-                yield chunk
-
-    class FakeStreamContext:
-        async def __aenter__(self) -> FakeResponse:
-            return FakeResponse()
-
-        async def __aexit__(self, *args: object) -> None:
-            pass
-
-    class FakeAsyncClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> FakeAsyncClient:
+    class FakeThreadStream:
+        async def __aenter__(self):
             return self
 
         async def __aexit__(self, *args: object) -> None:
             pass
 
-        def stream(self, method: str, url: str, **kwargs: object) -> FakeStreamContext:
-            assert method == "GET"
-            assert url.endswith("/threads/thread-1/runs/run-1/stream")
-            headers = kwargs["headers"]
-            assert headers["Content-Type"] == "application/json"
-            assert headers["Accept"] == "text/event-stream"
-            assert headers["Last-Event-ID"] == "-1"
-            assert kwargs["params"] == {"stream_mode": "messages"}
-            return FakeStreamContext()
+        def subscribe(self, channels, **kwargs):
+            assert channels == ["lifecycle", "messages"]
+            assert kwargs == {"namespaces": [[]], "depth": 10}
+
+            async def iterator():
+                for item in events:
+                    yield item
+
+            return iterator()
+
+    class FakeThreads:
+        def stream(self, thread_id: str, *, assistant_id: str) -> FakeThreadStream:
+            assert thread_id == "thread-1"
+            assert assistant_id == "agent"
+            return FakeThreadStream()
+
+    class FakeClient:
+        threads = FakeThreads()
 
     record = AsyncMock()
-    monkeypatch.setattr(thread_api.httpx2, "AsyncClient", FakeAsyncClient)
-    monkeypatch.setattr(thread_api, "record_dashboard_thread_ttft", record)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "record_dashboard_thread_ttft", record)
 
-    await thread_api._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
+    await thread_proxy._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
 
     record.assert_awaited_once_with(
         AssistantTextObservation(run_id="run-1", event_timestamp_ms=2_250),
         thread_id="thread-1",
         started_at_ms=1_000,
     )
+
+
+@pytest.mark.parametrize("phase", ["completed", "failed", "interrupted"])
+async def test_run_ttft_observer_closes_when_target_run_ends_without_text(
+    monkeypatch, phase: str
+) -> None:
+    def lifecycle(run_id: str, phase: str, namespace: list[str]) -> dict[str, object]:
+        return {
+            "method": "lifecycle",
+            "event_id": f"synth:{run_id}:lc||{phase}",
+            "params": {"namespace": namespace, "data": {"event": phase}},
+        }
+
+    target_ended = False
+    closed = False
+    read_after_end = False
+
+    class ThreadStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            nonlocal closed
+            closed = True
+
+        async def subscribe(self, *args, **kwargs):
+            nonlocal target_ended, read_after_end
+            yield lifecycle("historical-run", phase, [])
+            yield lifecycle("run-1", "running", [])
+            yield lifecycle("run-1", phase, ["subagent"])
+            target_ended = True
+            yield lifecycle("run-1", phase, [])
+            read_after_end = True
+            yield lifecycle("run-2", "running", [])
+            for data in [
+                {"event": "message-start", "role": "ai"},
+                {
+                    "event": "content-block-delta",
+                    "delta": {"type": "text-delta", "text": "Later run's text"},
+                },
+            ]:
+                yield {
+                    "method": "messages",
+                    "params": {"namespace": ["agent"], "timestamp": 3_000, "data": data},
+                }
+
+    client = SimpleNamespace(threads=SimpleNamespace(stream=lambda *a, **kw: ThreadStream()))
+    record = AsyncMock()
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "record_dashboard_thread_ttft", record)
+
+    await thread_proxy._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
+
+    assert target_ended
+    assert closed
+    assert not read_after_end
+    record.assert_not_awaited()
 
 
 async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
@@ -1251,10 +1316,10 @@ async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
     class FakeClient:
         threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_commands("tid", "octocat", b"[]")
+        await thread_proxy.proxy_dashboard_thread_commands("tid", "octocat", b"[]")
 
     assert exc_info.value.status_code == 400
 
@@ -1267,10 +1332,10 @@ async def test_proxy_commands_rejects_unsurfaced_thread(monkeypatch) -> None:
     class InternalClient:
         threads = InternalThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: InternalClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: InternalClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_commands(
+        await thread_proxy.proxy_dashboard_thread_commands(
             "tid", "teammate", b'{"method": "input.respond"}'
         )
     assert exc_info.value.status_code == 404
@@ -1292,10 +1357,10 @@ async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> 
         threads = AdminThreads()
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_commands(
+        await thread_proxy.proxy_dashboard_thread_commands(
             "tid", "teammate", b'{"method": "run.start"}'
         )
 
@@ -1340,17 +1405,17 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
             return FakeResponse()
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin,another-admin")
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
-    monkeypatch.setattr(thread_api.httpx2, "AsyncClient", FakeAsyncClient)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
+    monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", FakeAsyncClient)
 
-    status_code, _, _ = await thread_api.proxy_dashboard_thread_commands(
+    status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid", "another-admin", b'{"method": "input.respond"}'
     )
 
     assert status_code == 200
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "another-admin")
-    status_code, _, _ = await thread_api.proxy_dashboard_thread_commands(
+    status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid", "workspace-admin", b'{"method": "agent.getTree"}'
     )
 
@@ -1370,10 +1435,10 @@ async def test_run_cancel_rejects_unsurfaced_thread(monkeypatch) -> None:
     class FakeClient:
         threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_run_cancel("tid", "run-1", "teammate")
+        await thread_proxy.proxy_dashboard_thread_run_cancel("tid", "run-1", "teammate")
     assert exc_info.value.status_code == 404
 
 
@@ -1394,14 +1459,14 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
     class FakeClient:
         threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     # Read endpoints succeed for non-owners (org members).
     state = await thread_api.get_dashboard_thread_state("tid", "teammate")
     assert "values" in state
 
     # stream/events preflight should not raise.
-    await thread_api.proxy_dashboard_thread_stream_events(
+    await thread_proxy.proxy_dashboard_thread_stream_events(
         "tid", "teammate", b"{}", content_type="application/json"
     )
 
@@ -1428,17 +1493,17 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
             return FakeResponse()
 
     posted: list[dict[str, object]] = []
-    monkeypatch.setattr(thread_api.httpx2, "AsyncClient", FakeAsyncClient)
-    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b'{"limit": 20}')
-    await thread_api.proxy_dashboard_thread_history(
+    monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", FakeAsyncClient)
+    await thread_proxy.proxy_dashboard_thread_history("tid", "teammate", b'{"limit": 20}')
+    await thread_proxy.proxy_dashboard_thread_history(
         "tid", "teammate", b'{"limit": 20, "metadata": {"run_id": "run-1"}}'
     )
     assert posted == [
-        {"limit": thread_api._DISCOVERY_HISTORY_LIMIT},
+        {"limit": thread_proxy._DISCOVERY_HISTORY_LIMIT},
         {"limit": 20, "metadata": {"run_id": "run-1"}},
     ]
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"\xff")
+        await thread_proxy.proxy_dashboard_thread_history("tid", "teammate", b"\xff")
     assert exc_info.value.status_code == 400
 
 
@@ -1469,7 +1534,7 @@ async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(mon
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     state = await thread_api.get_dashboard_thread_state("tid", "owner")
 
@@ -1492,7 +1557,7 @@ async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
     class FakeClient:
         threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.get_dashboard_thread_state("tid", "owner")
@@ -1515,14 +1580,14 @@ async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypa
         assert thread_id == "tid"
         return None
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_thread_active_status", unknown_activity)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_thread_active_status", unknown_activity)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
             "tid",
             "octocat",
-            thread_api.ThreadMessageBody(content="hello"),
+            thread_runs.ThreadMessageBody(content="hello"),
         )
 
     assert exc_info.value.status_code == 502
@@ -1547,13 +1612,13 @@ async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypa
         threads = AdminThreads()
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
             "tid",
             "teammate",
-            thread_api.ThreadMessageBody(content="ship it"),
+            thread_runs.ThreadMessageBody(content="ship it"),
         )
 
     assert exc_info.value.status_code == 403
@@ -1563,7 +1628,7 @@ async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypa
 def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
 
-    thread_api._assert_thread_postable(
+    thread_summary._assert_thread_postable(
         {"source": "dashboard", "admin_thread": True},
         "workspace-admin",
     )
@@ -1573,7 +1638,7 @@ def test_assert_thread_postable_restricts_workspace_automation(monkeypatch) -> N
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
 
     with pytest.raises(HTTPException) as exc_info:
-        thread_api._assert_thread_postable(
+        thread_summary._assert_thread_postable(
             {"source": "schedule", "thread_category": "automation"},
             "teammate",
         )
@@ -1605,14 +1670,14 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
         captured["payload"] = payload
         return True
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_thread_active_status", active)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_thread_active_status", active)
+    patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue)
 
     await thread_api.send_dashboard_message(
         "tid",
         "teammate",
-        thread_api.ThreadMessageBody(content="ship it"),
+        thread_runs.ThreadMessageBody(content="ship it"),
     )
 
     payload = cast(QueuedMessage, captured["payload"])
@@ -1644,14 +1709,14 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
         captured["payload"] = payload
         return True
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "get_thread_active_status", active)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_thread_active_status", active)
+    patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue)
 
     await thread_api.send_dashboard_message(
         "tid",
         "owner",
-        thread_api.ThreadMessageBody(content="ship it"),
+        thread_runs.ThreadMessageBody(content="ship it"),
     )
 
     payload = cast(QueuedMessage, captured["payload"])
@@ -1659,7 +1724,7 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
 
 
 async def test_thread_summary_exposes_resolved_state() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_summary._thread_summary(
         {
             "thread_id": "tid",
             "metadata": {
@@ -1676,7 +1741,7 @@ async def test_thread_summary_exposes_resolved_state() -> None:
 
 
 async def test_thread_summary_defaults_to_not_resolved() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_summary._thread_summary(
         {"thread_id": "tid", "metadata": {"source": "dashboard", "github_login": "octocat"}}
     )
 
@@ -1704,8 +1769,8 @@ async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
     class FakeClient:
         threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "agent_thread_pr_state_lock", _unlocked)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
     summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=True)
 
@@ -1739,8 +1804,8 @@ async def test_resolve_dashboard_thread_clears_resolved(monkeypatch) -> None:
     class FakeClient:
         threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "agent_thread_pr_state_lock", _unlocked)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
     summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=False)
 
@@ -1758,8 +1823,8 @@ async def test_resolve_dashboard_thread_rejects_unsurfaced_thread(monkeypatch) -
     class FakeClient:
         threads = FakeThreads()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "agent_thread_pr_state_lock", _unlocked)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.resolve_dashboard_thread("tid", "teammate", resolved=True)
@@ -1790,13 +1855,13 @@ async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
         threads = FakeThreads()
 
     _patch_new_thread_deps(monkeypatch, profile={})
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api, "agent_thread_pr_state_lock", _unlocked)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
     async def fake_build(thread_id, login, metadata, *, overrides):
         return {"github_login": login, "source": "dashboard"}
 
-    monkeypatch.setattr(thread_api, "_build_dashboard_configurable", fake_build)
+    patch_thread_module(monkeypatch, "_build_dashboard_configurable", fake_build)
 
     command = {
         "method": "run.start",
@@ -1806,7 +1871,7 @@ async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
         },
     }
 
-    await thread_api._enrich_run_start_command(
+    await thread_runs._enrich_run_start_command(
         "tid",
         "octocat",
         command,
@@ -1838,19 +1903,19 @@ def test_summary_matches_filters() -> None:
         "pr": {"number": 123, "url": "https://github.com/langchain-ai/open-swe/pull/123"},
     }
 
-    assert thread_api._summary_matches_filters(
+    assert thread_listing._summary_matches_filters(
         summary, resolved=True, viewed=None, source=None, status=None, query=None
     )
-    assert not thread_api._summary_matches_filters(
+    assert not thread_listing._summary_matches_filters(
         summary, resolved=False, viewed=None, source=None, status=None, query=None
     )
-    assert thread_api._summary_matches_filters(
+    assert thread_listing._summary_matches_filters(
         summary, resolved=None, viewed=None, source="github", status=None, query="flaky"
     )
-    assert not thread_api._summary_matches_filters(
+    assert not thread_listing._summary_matches_filters(
         summary, resolved=None, viewed=None, source=None, status=None, query="missing"
     )
-    assert thread_api._summary_matches_filters(
+    assert thread_listing._summary_matches_filters(
         summary, resolved=None, viewed=None, source=None, status=None, query="pull/123"
     )
 
@@ -1877,27 +1942,29 @@ def test_metadata_matches_filters() -> None:
         "title": "Scheduled cleanup",
     }
 
-    assert thread_api._metadata_matches_filters(metadata, resolved=True, source=None, query=None)
-    assert not thread_api._metadata_matches_filters(
+    assert thread_listing._metadata_matches_filters(
+        metadata, resolved=True, source=None, query=None
+    )
+    assert not thread_listing._metadata_matches_filters(
         metadata, resolved=False, source=None, query=None
     )
-    assert thread_api._metadata_matches_filters(
+    assert thread_listing._metadata_matches_filters(
         metadata, resolved=None, source="dashboard", query="login"
     )
-    assert not thread_api._metadata_matches_filters(
+    assert not thread_listing._metadata_matches_filters(
         metadata, resolved=None, source="github", query=None
     )
     for query in ("langchain-ai/open-swe", "fix-login", "pull/123"):
-        assert thread_api._metadata_matches_filters(
+        assert thread_listing._metadata_matches_filters(
             metadata, resolved=None, source=None, query=query
         )
-    assert thread_api._metadata_matches_filters(
+    assert thread_listing._metadata_matches_filters(
         metadata, resolved=None, source=None, query=None, scope="interactive"
     )
-    assert not thread_api._metadata_matches_filters(
+    assert not thread_listing._metadata_matches_filters(
         automation, resolved=None, source=None, query=None, scope="interactive"
     )
-    assert thread_api._metadata_matches_filters(
+    assert thread_listing._metadata_matches_filters(
         automation,
         resolved=None,
         source=None,
@@ -1905,7 +1972,7 @@ def test_metadata_matches_filters() -> None:
         scope="automation",
         automation_id="schedule-1",
     )
-    assert not thread_api._metadata_matches_filters(
+    assert not thread_listing._metadata_matches_filters(
         automation,
         resolved=None,
         source=None,
@@ -1913,6 +1980,28 @@ def test_metadata_matches_filters() -> None:
         scope="automation",
         automation_id="schedule-2",
     )
+    assert not thread_listing._metadata_matches_filters(
+        metadata, resolved=None, source=None, query=None, admin_threads=True
+    )
+    assert thread_listing._metadata_matches_filters(
+        {**metadata, "admin_thread": True},
+        resolved=None,
+        source=None,
+        query=None,
+        admin_threads=True,
+    )
+    assert not thread_listing._metadata_matches_filters(
+        {**metadata, "admin_thread": True},
+        resolved=None,
+        source=None,
+        query=None,
+        admin_threads=False,
+    )
+
+
+def test_search_metadata_filter_includes_admin_threads() -> None:
+    assert thread_listing._search_metadata_filter({}, admin_threads=True) == {"admin_thread": True}
+    assert thread_listing._search_metadata_filter({}, admin_threads=False) == {}
 
 
 def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]]:
@@ -1934,7 +2023,7 @@ def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]
 
 
 async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monkeypatch) -> None:
-    page_size = thread_api._THREADS_SEARCH_PAGE
+    page_size = thread_listing._THREADS_SEARCH_PAGE
     threads = _make_threads(page_size + 50, resolved_before=page_size)
     for thread in threads:
         cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
@@ -1944,7 +2033,7 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     class FakeThreads:
         async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
             offsets.append(offset)
-            assert select == thread_api._THREAD_LIST_SELECT
+            assert select == thread_listing._THREAD_LIST_SELECT
             return threads[offset : offset + limit]
 
         async def update(self, *, thread_id, metadata):
@@ -1960,9 +2049,9 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.list_dashboard_threads_page(
+    result = await thread_listing.list_dashboard_threads_page(
         "octocat", email=None, limit=25, offset=0, resolved=False
     )
 
@@ -2008,12 +2097,12 @@ async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    interactive = await thread_api.list_dashboard_threads_page(
+    interactive = await thread_listing.list_dashboard_threads_page(
         "octocat", email=None, scope="interactive"
     )
-    automation = await thread_api.list_dashboard_threads_page(
+    automation = await thread_listing.list_dashboard_threads_page(
         "octocat", email=None, scope="automation", automation_id="schedule-1"
     )
 
@@ -2063,9 +2152,9 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.list_dashboard_threads_page(
+    result = await thread_listing.list_dashboard_threads_page(
         "admin-user",
         email="admin@example.com",
         filter_participant_login="other-user",
@@ -2100,13 +2189,13 @@ async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch
         async def list(self, thread_id, limit=1):
             return []
 
-    monkeypatch.setattr(
-        thread_api,
+    patch_thread_module(
+        monkeypatch,
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
     )
 
-    result = await thread_api.list_dashboard_threads_page("octocat", email=None, ownerless=True)
+    result = await thread_listing.list_dashboard_threads_page("octocat", email=None, ownerless=True)
 
     assert [item["id"] for item in result["items"]] == ["t2"]
 
@@ -2146,13 +2235,13 @@ async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata
         async def list(self, thread_id, limit=1):
             return []
 
-    monkeypatch.setattr(
-        thread_api,
+    patch_thread_module(
+        monkeypatch,
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
     )
 
-    result = await thread_api.list_dashboard_threads_page(
+    result = await thread_listing.list_dashboard_threads_page(
         "octocat", email=None, repo="langchain-ai/open-swe"
     )
 
@@ -2190,13 +2279,13 @@ async def test_list_dashboard_thread_projects_discovers_metadata_without_summari
         async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
             return threads[offset : offset + limit]
 
-    monkeypatch.setattr(
-        thread_api,
+    patch_thread_module(
+        monkeypatch,
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads()),
     )
 
-    result = await thread_api.list_dashboard_thread_projects("octocat")
+    result = await thread_listing.list_dashboard_thread_projects("octocat")
 
     assert result == [
         {
@@ -2222,8 +2311,8 @@ async def test_pin_dashboard_thread_allows_readable_non_owner(monkeypatch) -> No
                 "metadata": {"source": "slack", "github_login": "other"},
             }
 
-    monkeypatch.setattr(
-        thread_api,
+    patch_thread_module(
+        monkeypatch,
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads()),
     )
@@ -2231,9 +2320,9 @@ async def test_pin_dashboard_thread_allows_readable_non_owner(monkeypatch) -> No
     async def fake_pin(login: str, thread_id: str) -> None:
         pinned.append((login, thread_id))
 
-    monkeypatch.setattr(thread_api, "pin_thread", fake_pin)
+    patch_thread_module(monkeypatch, "pin_thread", fake_pin)
 
-    await thread_api.pin_dashboard_thread("shared-thread", "octocat")
+    await thread_listing.pin_dashboard_thread("shared-thread", "octocat")
 
     assert pinned == [("octocat", "shared-thread")]
 
@@ -2243,14 +2332,14 @@ async def test_pin_dashboard_thread_returns_not_found_for_lookup_failure(monkeyp
         async def get(self, thread_id):
             raise RuntimeError("thread missing")
 
-    monkeypatch.setattr(
-        thread_api,
+    patch_thread_module(
+        monkeypatch,
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads()),
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.pin_dashboard_thread("missing-thread", "octocat")
+        await thread_listing.pin_dashboard_thread("missing-thread", "octocat")
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "thread not found"
@@ -2261,14 +2350,14 @@ async def test_pin_dashboard_thread_rejects_unreadable_thread(monkeypatch) -> No
         async def get(self, thread_id):
             return {"thread_id": thread_id, "metadata": {"source": "internal"}}
 
-    monkeypatch.setattr(
-        thread_api,
+    patch_thread_module(
+        monkeypatch,
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads()),
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.pin_dashboard_thread("private-thread", "octocat")
+        await thread_listing.pin_dashboard_thread("private-thread", "octocat")
 
     assert exc_info.value.status_code == 404
 
@@ -2303,8 +2392,8 @@ async def test_list_dashboard_pinned_threads_returns_only_readable_threads(
         async def list(self, thread_id, limit=1):
             return []
 
-    monkeypatch.setattr(
-        thread_api,
+    patch_thread_module(
+        monkeypatch,
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
     )
@@ -2313,9 +2402,9 @@ async def test_list_dashboard_pinned_threads_returns_only_readable_threads(
         assert login == "octocat"
         return ["shared-thread", "private-thread", "missing-thread"]
 
-    monkeypatch.setattr(thread_api, "list_thread_pin_ids", fake_pin_ids)
+    patch_thread_module(monkeypatch, "list_thread_pin_ids", fake_pin_ids)
 
-    result = await thread_api.list_dashboard_pinned_threads("octocat")
+    result = await thread_listing.list_dashboard_pinned_threads("octocat")
 
     assert [item["id"] for item in result] == ["shared-thread"]
 
@@ -2350,9 +2439,9 @@ async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.list_dashboard_threads_page(
+    result = await thread_listing.list_dashboard_threads_page(
         "octocat", email=None, limit=2, offset=0, sort_by="created_at"
     )
 
@@ -2384,9 +2473,11 @@ async def test_list_dashboard_threads_page_refreshes_only_unsettled_threads(monk
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.list_dashboard_threads_page("octocat", email=None, limit=3, offset=0)
+    result = await thread_listing.list_dashboard_threads_page(
+        "octocat", email=None, limit=3, offset=0
+    )
 
     assert run_list_thread_ids == ["t1"]
     assert updates == [
@@ -2421,9 +2512,9 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.list_dashboard_threads_page(
+    result = await thread_listing.list_dashboard_threads_page(
         "octocat", email=None, limit=25, offset=0, status="finished"
     )
 
@@ -2540,9 +2631,9 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
         "truncated": False,
         "summary": {"files": 1, "additions": 1, "deletions": 0},
     }
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", AsyncMock(return_value=metadata))
     sandbox = object()
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
+    patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(return_value=sandbox))
     monkeypatch.setattr(
         "agent.sandboxes.paths.resolve_sandbox_work_dir",
         AsyncMock(return_value="/work"),
@@ -2550,7 +2641,7 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
     read_diff = AsyncMock(return_value=live)
     monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
 
-    result = await thread_api.get_dashboard_thread_working_tree_diff("thread-1", "owner")
+    result = await thread_diffs.get_dashboard_thread_working_tree_diff("thread-1", "owner")
 
     assert result == live
     read_diff.assert_awaited_once_with(sandbox, "/work", "HEAD", None, repo_path="/work/repo")
@@ -2558,11 +2649,11 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
 
 async def test_working_tree_diff_raises_when_the_sandbox_is_unreachable(monkeypatch) -> None:
     metadata = {"sandbox_id": "sandbox-1"}
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(side_effect=RuntimeError))
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(side_effect=RuntimeError))
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_working_tree_diff("thread-1", "owner")
+        await thread_diffs.get_dashboard_thread_working_tree_diff("thread-1", "owner")
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == "Could not connect to the workspace."
@@ -2575,14 +2666,14 @@ async def test_branch_diff_uses_repository_from_pr_url(monkeypatch) -> None:
         "pr_number": 1925,
         "pr_url": "https://github.com/langchain-ai/open-swe/pull/1925",
     }
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    monkeypatch.setattr(thread_api, "_github_token_for_login", AsyncMock(return_value="token"))
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    patch_thread_module(monkeypatch, "_github_token_for_login", AsyncMock(return_value="token"))
     build_diff = AsyncMock(
         return_value={"base_sha": "base", "head_sha": "head", "truncated": False, "files": []}
     )
-    monkeypatch.setattr(thread_api, "build_pr_diff_files", build_diff)
+    patch_thread_module(monkeypatch, "build_pr_diff_files", build_diff)
 
-    await thread_api.get_dashboard_thread_branch_diff("thread-1", "owner")
+    await thread_diffs.get_dashboard_thread_branch_diff("thread-1", "owner")
 
     assert build_diff.await_args is not None
     assert build_diff.await_args.args[1:] == ("langchain-ai/open-swe", 1925)
@@ -2595,14 +2686,14 @@ async def test_branch_diff_without_a_pull_request_compares_against_the_base(monk
         "base_branch": "main",
         "branch_name": "open-swe/feature",
     }
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    monkeypatch.setattr(thread_api, "_github_token_for_login", AsyncMock(return_value="token"))
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    patch_thread_module(monkeypatch, "_github_token_for_login", AsyncMock(return_value="token"))
     build_compare = AsyncMock(
         return_value={"base_sha": "merge-base", "head_sha": "head", "truncated": False, "files": []}
     )
-    monkeypatch.setattr(thread_api, "build_compare_diff_files", build_compare)
+    patch_thread_module(monkeypatch, "build_compare_diff_files", build_compare)
 
-    result = await thread_api.get_dashboard_thread_branch_diff("thread-1", "owner")
+    result = await thread_diffs.get_dashboard_thread_branch_diff("thread-1", "owner")
 
     assert build_compare.await_args is not None
     assert build_compare.await_args.args[1:] == (
@@ -2621,13 +2712,13 @@ async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
         "base_branch": "main",
         "branch_name": "../../etc/passwd",
     }
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    monkeypatch.setattr(thread_api, "_github_token_for_login", AsyncMock(return_value="token"))
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    patch_thread_module(monkeypatch, "_github_token_for_login", AsyncMock(return_value="token"))
     build_compare = AsyncMock()
-    monkeypatch.setattr(thread_api, "build_compare_diff_files", build_compare)
+    patch_thread_module(monkeypatch, "build_compare_diff_files", build_compare)
 
     with pytest.raises(HTTPException) as excinfo:
-        await thread_api.get_dashboard_thread_branch_diff("thread-1", "owner")
+        await thread_diffs.get_dashboard_thread_branch_diff("thread-1", "owner")
 
     assert excinfo.value.status_code == 404
     build_compare.assert_not_awaited()
@@ -2674,7 +2765,7 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
         runs = FakeRuns()
         store = FakeStore()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     result = await thread_api.cancel_dashboard_thread("thread-1", "owner")
 
@@ -2713,7 +2804,7 @@ async def test_cancel_dashboard_thread_rejects_non_owner(monkeypatch) -> None:
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException):
         await thread_api.cancel_dashboard_thread("thread-1", "someone-else")
@@ -2756,7 +2847,7 @@ async def test_admin_cancel_dashboard_thread_interrupts_all_active_runs(monkeypa
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     result = await thread_api.admin_cancel_dashboard_thread("thread-1")
 
@@ -2795,7 +2886,7 @@ async def test_admin_cancel_dashboard_thread_does_not_update_on_cancel_failure(m
         threads = FakeThreads()
         runs = FakeRuns()
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.admin_cancel_dashboard_thread("thread-1")

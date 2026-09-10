@@ -100,6 +100,7 @@ def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _Rout
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -> None:
     monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable}, raising=False)
 
 
 def _open(base: str = "main") -> dict[str, Any]:
@@ -862,10 +863,24 @@ def test_resolves_thread_flag_defaults_to_false(monkeypatch: pytest.MonkeyPatch)
     assert record_telemetry.await_args.kwargs["resolves_thread"] is False
 
 
+@pytest.mark.parametrize("top_level_run_id", [False, True])
 async def test_record_pr_telemetry_persists_resolves_thread_flag(
     monkeypatch: pytest.MonkeyPatch,
+    top_level_run_id: bool,
 ) -> None:
-    _set_config(monkeypatch, {"source": "slack", "thread_id": "t1", "github_login": "octo"})
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "thread_id": "t1",
+            "github_login": "octo",
+            "run_id": "old-run" if top_level_run_id else "run-1",
+            "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+        },
+    )
+    if top_level_run_id:
+        config = {**opr.get_config(), "run_id": "run-1"}
+        monkeypatch.setattr(opr, "get_config", lambda: config)
     monkeypatch.setattr(opr, "record_agent_pr_usage", AsyncMock())
     monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
     langgraph = MagicMock()
@@ -911,5 +926,23 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
             "created_at": "",
             "diff_stats": {"files": 0, "additions": 0, "deletions": 0},
             "resolves_thread": True,
+            "slack_feedback": {"run_id": "run-1", "channel_id": "C1"},
         }
     ]
+
+
+def test_updating_pr_preserves_original_feedback_run() -> None:
+    original = {
+        "url": "https://github.com/lc/repo/pull/7",
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "slack_feedback": {"run_id": "original-run", "channel_id": "C1"},
+    }
+    updated = {
+        **original,
+        "state": "open",
+        "slack_feedback": {"run_id": "later-run", "channel_id": "C2"},
+    }
+    result = opr._upsert_pull_request([original], updated)
+    assert result[0]["slack_feedback"] == original["slack_feedback"]
+    assert result[0]["state"] == "open"

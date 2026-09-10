@@ -25,6 +25,7 @@ from agent.input_messages import (
 )
 from agent.media import MediaRef, media_data
 from agent.middleware.trace import scrub_middleware_inputs
+from agent.prompts import load_prompt
 from agent.run_config import RunConfig
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.thread_ops import QueuedMessage
@@ -79,13 +80,22 @@ class _QueuedUpdates:
             self._notices.append(text)
         self._notice_media.extend(media or [])
 
-    def envelope(self, text: str, context: InputMessageContext, **identities: Any) -> None:
+    def envelope(
+        self,
+        text: str,
+        context: InputMessageContext,
+        *,
+        message_id: str | None = None,
+        **identities: Any,
+    ) -> None:
         self.flush()
-        self.messages.extend(
-            build_input_messages(
-                text, context, injected_dynamic_context_hashes=self._injected, **identities
-            )
+        built = build_input_messages(
+            text, context, injected_dynamic_context_hashes=self._injected, **identities
         )
+        # The dashboard mints the id client-side so its optimistic bubble is replaced.
+        if message_id and built:
+            built[-1]["id"] = message_id
+        self.messages.extend(built)
 
     def flush(self) -> None:
         if not self._notices and not self._notice_media:
@@ -120,12 +130,7 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
         logger.debug(
             "Could not clear pending auto-fix event", extra={"thread_id": thread_id}, exc_info=True
         )
-    message = (
-        "A PR babysitting event arrived while you were already working on this PR. "
-        "Do not start a separate run for that event. Before finishing, re-check the "
-        "PR's latest CI status and review comments, then address any newly failed "
-        "checks or actionable comments that are clear and deterministic."
-    )
+    message = load_prompt("runs/autofix-event.md")
     details = item.value.get("details")
     if isinstance(details, list):
         joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
@@ -202,6 +207,7 @@ async def check_message_queue_before_model(
                     queued.text,
                     _context(queued.sender.id, "web", "human", queued.media),
                     people=[queued.sender.identity()],
+                    message_id=queued.queue_id,
                 )
         updates.flush()
         if not updates.messages:

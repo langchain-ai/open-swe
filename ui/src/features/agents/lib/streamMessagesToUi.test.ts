@@ -99,8 +99,13 @@ describe("streamMessagesToUi", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({ id: "user-1", content: "Fix the bug" }),
       new AIMessage({ id: "ai-1", content: "Working" }),
+      new AIMessage({
+        id: "live-summary",
+        content: "SESSION INTENT: secret context",
+        additional_kwargs: { lc_source: "summarization" },
+      }),
       new HumanMessage({
-        id: "summary",
+        id: "persisted-summary",
         content:
           "Here is a summary of the conversation to date: secret context",
         additional_kwargs: { lc_source: "summarization" },

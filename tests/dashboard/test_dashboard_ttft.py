@@ -1,4 +1,3 @@
-import json
 import logging
 
 from agent.dashboard import ttft
@@ -10,32 +9,30 @@ def _event(
     *,
     namespace: list[str],
     event_id: str,
-) -> bytes:
-    payload = {
+) -> dict[str, object]:
+    return {
         "type": "event",
         "event_id": event_id,
         "method": method,
         "params": {"namespace": namespace, "timestamp": 2_250, "data": data},
     }
-    return f"event: {method}\r\ndata: {json.dumps(payload)}\r\n\r\n".encode()
 
 
-def _lifecycle(run_id: str) -> bytes:
+def _lifecycle(run_id: str) -> dict[str, object]:
     return _event(
         "lifecycle",
         {"event": "running"},
         namespace=[],
-        event_id=f"synth:{run_id}:lc::running",
+        event_id=f"synth:{run_id}:lc||running",
     )
 
 
-def _message(data: dict[str, object], event_id: str = "1-0") -> bytes:
+def _message(data: dict[str, object], event_id: str = "1-0") -> dict[str, object]:
     return _event("messages", data, namespace=["agent"], event_id=event_id)
 
 
-def test_detector_handles_fragmented_ai_text_events() -> None:
+def test_detector_observes_first_ai_text_event() -> None:
     detector = ttft.AssistantTextEventDetector()
-    lifecycle = _lifecycle("run-1")
     start = _message({"event": "message-start", "role": "ai", "id": "message-1"})
     empty = _message(
         {
@@ -54,12 +51,13 @@ def test_detector_handles_fragmented_ai_text_events() -> None:
         "3-0",
     )
 
-    assert detector.feed(lifecycle + start[:12]) == []
-    assert detector.feed(start[12:] + empty + text[:20]) == []
-    assert detector.feed(text[20:]) == [
-        ttft.AssistantTextObservation(run_id="run-1", event_timestamp_ms=2_250)
-    ]
-    assert detector.feed(text) == []
+    assert detector.observe(_lifecycle("run-1")) is None
+    assert detector.observe(start) is None
+    assert detector.observe(empty) is None
+    assert detector.observe(text) == ttft.AssistantTextObservation(
+        run_id="run-1", event_timestamp_ms=2_250
+    )
+    assert detector.observe(text) is None
 
 
 def test_detector_ignores_non_ai_and_correlates_later_runs() -> None:
@@ -70,19 +68,19 @@ def test_detector_ignores_non_ai_and_correlates_later_runs() -> None:
         "delta": {"type": "text-delta", "text": "Hello"},
     }
 
-    assert detector.feed(_lifecycle("run-1")) == []
-    assert detector.feed(_message({"event": "message-start", "role": "human"})) == []
-    assert detector.feed(_message(text_delta)) == []
-    assert detector.feed(_message({"event": "message-start", "role": "ai"})) == []
-    assert detector.feed(_message(text_delta)) == [
-        ttft.AssistantTextObservation(run_id="run-1", event_timestamp_ms=2_250)
-    ]
-    assert detector.feed(_message({"event": "message-finish"})) == []
-    assert detector.feed(_lifecycle("run-2")) == []
-    assert detector.feed(_message({"event": "message-start", "role": "ai"})) == []
-    assert detector.feed(_message(text_delta, "2-0")) == [
-        ttft.AssistantTextObservation(run_id="run-2", event_timestamp_ms=2_250)
-    ]
+    assert detector.observe(_lifecycle("run-1")) is None
+    assert detector.observe(_message({"event": "message-start", "role": "human"})) is None
+    assert detector.observe(_message(text_delta)) is None
+    assert detector.observe(_message({"event": "message-start", "role": "ai"})) is None
+    assert detector.observe(_message(text_delta)) == ttft.AssistantTextObservation(
+        run_id="run-1", event_timestamp_ms=2_250
+    )
+    assert detector.observe(_message({"event": "message-finish"})) is None
+    assert detector.observe(_lifecycle("run-2")) is None
+    assert detector.observe(_message({"event": "message-start", "role": "ai"})) is None
+    assert detector.observe(_message(text_delta, "2-0")) == ttft.AssistantTextObservation(
+        run_id="run-2", event_timestamp_ms=2_250
+    )
 
 
 async def test_record_dashboard_thread_ttft_emits_histogram_and_log(

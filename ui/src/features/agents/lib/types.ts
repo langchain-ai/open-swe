@@ -184,6 +184,8 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  deliveryStatus?: "sending" | "failed"
+  optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
@@ -238,6 +240,10 @@ export interface QueuedThreadMessage {
   /** Attachments as stored refs from the server; base64 only for a message this browser just sent. */
   images?: Array<ImageChunk | AttachmentChunk>
   createdAt: number
+}
+
+export interface PendingThreadMessage extends QueuedThreadMessage {
+  status: "sending" | "failed"
 }
 
 export type WorkflowApprovalStatus = "pending" | "approved" | "rejected"
@@ -394,6 +400,7 @@ export interface AgentThread {
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>
+  pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary
   pullRequests?: Array<AgentPullRequest>
   diffStats?: {

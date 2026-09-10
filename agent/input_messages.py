@@ -83,8 +83,6 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
     "system": ("display_name", "platform", "sender_type", "subject_id", "context_hash"),
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
-_SYSTEM_ENTITY_ID = "system:open-swe"
-_SYSTEM_WRAPPER_MARKER = '<system-instructions format="open-swe-v1">'
 
 
 def _xml_text(value: object) -> str:
@@ -425,38 +423,3 @@ def build_run_input(
     if files is not None:
         result["files"] = files
     return result
-
-
-def wrap_system_prompt(text: str, *, additions: list[str] | None = None) -> str:
-    if text.startswith(_SYSTEM_WRAPPER_MARKER) and text.endswith("</system-instructions>"):
-        if not additions:
-            return text
-        closing = "</system-instructions>"
-        serialized_additions = [
-            _serialize_message(
-                addition,
-                {"sender_id": _SYSTEM_ENTITY_ID, "surface": "automation", "kind": "system"},
-            )
-            for addition in additions
-        ]
-        extra = "\n".join(item for item in serialized_additions if item not in text)
-        if not extra:
-            return text
-        return f"{text[: -len(closing)]}{extra}\n{closing}"
-    identity = system_introduction(
-        {"id": _SYSTEM_ENTITY_ID, "display_name": "Open SWE", "platform": "open-swe"}
-    )["content"]
-    message = _serialize_message(
-        text,
-        {"sender_id": _SYSTEM_ENTITY_ID, "surface": "automation", "kind": "system"},
-    )
-    extras = [
-        _serialize_message(
-            addition,
-            {"sender_id": _SYSTEM_ENTITY_ID, "surface": "automation", "kind": "system"},
-        )
-        for addition in additions or []
-    ]
-    return "\n".join(
-        [_SYSTEM_WRAPPER_MARKER, str(identity), message, *extras, "</system-instructions>"]
-    )

@@ -1,10 +1,41 @@
-import type { Message, QueuedThreadMessage } from "@/features/agents/lib/types"
+import type {
+  Message,
+  PendingThreadMessage,
+  QueuedThreadMessage,
+} from "@/features/agents/lib/types"
 
 function messageText(message: Message): string {
   return message.chunks
     .map((chunk) => (chunk.kind === "text" ? chunk.text : ""))
     .join("\n")
     .trim()
+}
+
+function messageIds(messages: Array<Message>): Set<string> {
+  return new Set(messages.map((message) => message.id))
+}
+
+export function visiblePendingMessages(
+  pendingMessages: Array<PendingThreadMessage> | undefined,
+  messages: Array<Message>
+): Array<Message> {
+  const persistedIds = messageIds(messages)
+  return (pendingMessages ?? [])
+    .filter((message) => !persistedIds.has(message.id))
+    .map((message) => ({
+      id: message.id,
+      author: "user",
+      timestamp: new Date(message.createdAt).toISOString(),
+      timestampIsFallback: true,
+      deliveryStatus: message.status,
+      optimistic: true,
+      chunks: [
+        ...(message.images ?? []),
+        ...(message.content
+          ? [{ kind: "text" as const, text: message.content }]
+          : []),
+      ],
+    }))
 }
 
 export function visibleQueuedMessages(
@@ -14,6 +45,7 @@ export function visibleQueuedMessages(
   const queued = queuedMessages ?? []
   if (queued.length === 0) return queued
 
+  const persistedIds = messageIds(messages)
   const userMessages = messages
     .filter((message) => message.author === "user")
     .map((message) => ({
@@ -23,6 +55,8 @@ export function visibleQueuedMessages(
     }))
 
   return queued.filter((queuedMessage) => {
+    if (persistedIds.has(queuedMessage.id)) return false
+    if (!queuedMessage.id.startsWith("queued-")) return true
     const queuedText = queuedMessage.content.trim()
     if (!queuedText) return true
 

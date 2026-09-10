@@ -67,7 +67,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and environment snapshot captures — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and environment snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 
@@ -230,7 +230,169 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 | `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
 | `slack_thread_reply` | `agent/slack/tools/thread_reply.py` | Reply in Slack threads |
 
-### Adding a tool
+### Workspace MCP servers
+
+Admins can connect generic remote MCP servers under **Admin → Workspace MCPs**.
+Connections belong to this Open SWE deployment and are shared across repositories
+and remote coding-agent threads. Enabled connections provide baseline tools for
+all users, limited to the tools selected by an admin. Only admins can manage
+connections or reveal saved credentials. Plan mode continues to block workspace
+MCP tools.
+
+1. Choose **Add MCP server** and enter a unique lowercase connection name, an
+   HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
+2. Choose **Headers / API key** or **OAuth client credentials** for authentication.
+   For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY`
+   in the LangGraph Store; normal dashboard responses only return header names.
+   Admins can use the eye icon (**Show saved headers**) to reveal values on demand,
+   then the crossed-out eye to clear them from the editor. Entered or imported
+   values also have an eye icon to show or hide them. Use headers
+   for credentials, rather than URL query parameters.
+   For OAuth, enter the token URL, client ID, client secret, scopes, and the
+   provider's client authentication method. The secret is encrypted in the Store
+   and is never returned to the browser. Leave it blank when editing to keep it.
+3. Choose **Save and discover tools**. For new connections, all discovered tools
+   are selected by default. Review the selection, then choose **Save connection**
+   to enable those tools. Rediscovering an existing connection preserves its
+   selected tools, including an intentionally empty selection. Newly added tools
+   on the remote server require explicit selection.
+   Discovery checks the draft before saving; if it fails, no connection is
+   created and existing settings stay unchanged. Discovery only lists tools.
+
+Alternatively, choose **Import JSON** and paste a Claude-style configuration:
+
+```json
+{
+  "mcpServers": {
+    "datadog": {
+      "type": "http",
+      "url": "https://mcp.us5.datadoghq.com/v1/mcp?toolsets=core",
+      "headers": {
+        "DD_API_KEY": "YOUR_API_KEY",
+        "DD_APPLICATION_KEY": "YOUR_APPLICATION_KEY"
+      }
+    }
+  }
+}
+```
+
+Datadog, LangSmith, Linear, and Currents agent tools are configured through
+Workspace MCPs. The dedicated Datadog and Currents credentials forms and built-in
+provider tools have been removed. Reconnect Datadog using the MCP configuration
+above; legacy saved credentials are not migrated automatically. Use the JSON
+import or connection form to add the other MCP servers as needed.
+
+The [Currents MCP server](https://github.com/currents-dev/currents-mcp) wraps the
+Currents REST API. Run its Streamable HTTP server on an HTTPS host reachable by
+Open SWE, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY`
+header. The Currents REST API URL itself does not speak MCP, and the local
+`npx @currents/mcp` command cannot be imported as a workspace connection.
+
+Optional reviewer trace resolution and personal LangSmith credential proxying
+have been removed. Configure agent access to LangSmith through Workspace MCPs.
+Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and
+`LANGSMITH_ENDPOINT`. Linear webhook intake and replies continue to use the
+existing Linear app setup.
+
+Use the endpoint for your Datadog site (this example uses US5). Replace the key
+placeholders directly in the dashboard. Import supports multiple named servers,
+optional `type` (`http` by default, or `sse`), and string authentication headers.
+It opens each connection for review without saving automatically. Existing
+connections keep their enabled state and selected tools. Local `command` servers
+and environment-variable expansion are not supported.
+
+For a Linear OAuth application, enable **Client credentials tokens** in the
+application's settings, then import this configuration. The `oauth` object is
+an Open SWE extension to the remote MCP JSON format:
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "oauth": {
+        "grant_type": "client_credentials",
+        "token_url": "https://api.linear.app/oauth/token",
+        "client_id": "YOUR_CLIENT_ID",
+        "client_secret": "YOUR_CLIENT_SECRET",
+        "scope": "read,write",
+        "token_endpoint_auth_method": "client_secret_post"
+      }
+    }
+  }
+}
+```
+
+Client credentials require no redirect URI. Open SWE requests a bearer token,
+caches it in memory until shortly before expiry, and obtains another when needed.
+A rejected token is renewed once on HTTP 401. Client credentials go only to the
+configured token URL; bearer tokens go to the MCP server. Both destinations use
+the same public HTTPS address validation and redirect restrictions. An explicit
+`Authorization` header cannot be combined with OAuth.
+
+Other providers can use the same `oauth` settings with their own token URL and
+scope format; `client_secret_basic` sends credentials using HTTP Basic instead
+of the request body. Changing the token URL, client ID, or MCP URL requires
+re-entering the client secret. Sending `oauth: null` removes OAuth credentials;
+omitting `oauth` from a partial API update preserves them. Linear documents this
+flow under [client credentials tokens](https://linear.app/developers/oauth-2-0-authentication#client-credentials-tokens).
+
+Examples for the generic connection form:
+
+| Connection | URL | Authentication headers |
+|---|---|---|
+| `incident` | `https://mcp.incident.io/mcp` | `Authorization`: `Bearer <your incident.io API key>` |
+| `datadog` | `https://mcp.datadoghq.com/v1/mcp?toolsets=core` | `DD_API_KEY`: your API key; `DD_APPLICATION_KEY`: your application key |
+
+Both examples use Streamable HTTP. Choose the Datadog MCP hostname for your site
+(for example, `mcp.datadoghq.eu`). Use appropriately scoped provider keys and
+select the read tools you need for investigation. The incident.io authentication
+and catalog are documented in [its remote MCP guide](https://docs.incident.io/ai/remote-mcp).
+Datadog documents its headers and site-specific endpoints in the
+[MCP setup guide](https://docs.datadoghq.com/mcp_server/setup/#api-and-application-keys).
+Enter Datadog key values directly, without a `Bearer` prefix. The `core` toolset
+includes logs, metrics, traces, dashboards, monitors, and incidents.
+
+Allowed tools appear in the agent's **Workspace MCPs** tool group with connection
+prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming
+collisions. Catalogs are cached for ten minutes
+per settings revision. Changing a connection causes the next run to discover its
+catalog again. Every tool call reloads the current authentication settings and checks whether the
+connection and tool are still enabled. Disabling or deleting a connection blocks
+subsequent calls from already-loaded tools; it does not cancel an in-flight call.
+
+Editing keeps saved headers unless **Replace headers** is selected. Replacing
+with an empty header list clears those headers. Changing the URL requires
+explicitly replacing or clearing saved headers. Requests must remain on the
+configured public HTTPS origin; redirects, private addresses, local processes,
+and interactive OAuth login are not supported by this connection manager.
+
+The backend implementation lives in `agent/mcp`: connection models and credential
+preparation, OAuth, HTTPS transport, and tool discovery/execution. Workspace storage
+and dashboard authorization remain in the workspace adapters. Existing stored
+connections and imported JSON need no migration.
+
+For another scope, provide an `MCPSource` with an owner-specific `namespace` plus
+async `list_connections` and `get_connection` callbacks. The caller must authorize
+each source before passing it to `load_mcp_tools(workspace_source, user_source)`.
+Sources are ordered from lowest to highest precedence. Distinct connection names
+contribute tools; a later connection with the same name replaces the entire earlier
+connection, including credentials and allowed tools. Disabled connections and empty
+tool selections also override earlier entries, preventing fallback to broader access.
+Saved secrets must only be preserved from the previous record in the same scope.
+
+Catalog and token caches include the source namespace. Each tool call resolves the
+current winning connection again, checks its allowlist, and refuses to switch scopes
+mid-run. Source lookup errors must raise instead of returning an empty result, so a
+failed lookup cannot expose a lower-precedence connection. Only workspace sources
+are wired into the product today; user-scoped storage, authorization, and UI can use
+this package when added.
+An unavailable server omits its tools without preventing other connections from
+loading. This catalog is not attached to the separate read-only reviewer or
+Investigate graphs.
+
+### Adding a Python tool
 
 Create a new file in `agent/tools/`, define a function, and add it to the tools list.
 

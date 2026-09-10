@@ -4,7 +4,7 @@ The webhook triggers (Slack / Linear / GitHub) dispatch through
 ``agent.dispatch.dispatch_agent_run`` with ``multitask_strategy="interrupt"``,
 so they no longer need a busy-check or an in-process lock. The store-queue
 below is retained for the dashboard's deliberate "inject a follow-up into a
-run that's already in flight" path (``thread_api.send_dashboard_message``).
+run that's already in flight" path (``threads.api.send_dashboard_message``).
 """
 
 import logging
@@ -111,6 +111,13 @@ async def queue_message_for_thread(thread_id: str, message: QueuedMessage) -> bo
         except Exception:  # noqa: BLE001
             logger.debug("No existing queued messages for thread %s", thread_id)
 
+        if message.queue_id and any(
+            isinstance(existing.get("content"), dict)
+            and existing["content"].get("queue_id") == message.queue_id
+            for existing in existing_messages
+        ):
+            return True
+
         existing_messages.append(new_message)
         if len(existing_messages) > MAX_QUEUED_MESSAGES:
             existing_messages = existing_messages[-MAX_QUEUED_MESSAGES:]
@@ -120,6 +127,9 @@ async def queue_message_for_thread(thread_id: str, message: QueuedMessage) -> bo
                 MAX_QUEUED_MESSAGES,
             )
         await client.store.put_item(namespace, key, {"messages": existing_messages})
+        from agent.thread_feedback import note_feedback_activity
+
+        await note_feedback_activity(thread_id, client=client)
         logger.info(
             "Queued message for thread %s (total queued: %d)",
             thread_id,
