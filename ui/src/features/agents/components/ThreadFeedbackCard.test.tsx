@@ -16,7 +16,6 @@ import { ThreadFeedbackCard } from "./ThreadFeedbackCard"
 const api = vi.hoisted(() => ({
   getThreadFeedback: vi.fn(),
   submitThreadFeedback: vi.fn(),
-  dismissThreadFeedback: vi.fn(),
 }))
 vi.mock("@/features/agents/lib/api", () => ({ agentsApi: api }))
 
@@ -36,10 +35,10 @@ function renderCard() {
 beforeEach(() => {
   api.getThreadFeedback.mockResolvedValue(ready)
   api.submitThreadFeedback.mockImplementation(async (_threadId, body) => ({
+    ...ready,
     ...body,
-    status: "completed",
+    status: body.action === "dismiss" ? "dismissed" : "completed",
   }))
-  api.dismissThreadFeedback.mockResolvedValue({ ...ready, status: "dismissed" })
 })
 afterEach(() => {
   cleanup()
@@ -95,8 +94,9 @@ it("dismisses the card without saving a rating", async () => {
   renderCard()
   fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }))
   await waitFor(() => expect(screen.queryByRole("form")).toBeNull())
-  expect(api.submitThreadFeedback).not.toHaveBeenCalled()
-  expect(api.dismissThreadFeedback).toHaveBeenCalledExactlyOnceWith("thread-1")
+  expect(api.submitThreadFeedback).toHaveBeenCalledExactlyOnceWith("thread-1", {
+    action: "dismiss",
+  })
 })
 
 it("hides during activity and rechecks eligibility before showing a cached prompt", async () => {

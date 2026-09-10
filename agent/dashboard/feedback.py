@@ -1,6 +1,6 @@
 """Private web feedback on completed agent threads."""
 
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
@@ -29,13 +29,16 @@ class ThreadFeedbackResponse(BaseModel):
 
 
 class FeedbackSubmission(BaseModel):
-    rating: Rating
+    action: Literal["submit", "dismiss"] = "submit"
+    rating: Rating | None = None
     comment: str = Field(default="", max_length=3000)
 
     @model_validator(mode="after")
-    def validate_comment(self) -> Self:
+    def validate_submission(self) -> Self:
         self.comment = self.comment.strip()
-        if self.rating == "other" and not self.comment:
+        if self.action == "submit" and self.rating is None:
+            raise ValueError("Choose a rating before submitting feedback.")
+        if self.action == "submit" and self.rating == "other" and not self.comment:
             raise ValueError("Add a comment when choosing Other.")
         return self
 
@@ -69,9 +72,11 @@ async def get_thread_feedback(
     )
 
 
-async def _save_feedback(
-    thread_id: str, login: str, submission: FeedbackSubmission | None
+@feedback_router.post("/{thread_id}/feedback")
+async def submit_thread_feedback(
+    thread_id: str, submission: FeedbackSubmission, session: dict[str, Any] = _SESSION_DEP
 ) -> ThreadFeedbackResponse:
+    login = str(session["sub"]).strip().lower()
     if not await _is_initiator(thread_id, login):
         raise HTTPException(403, "Only the thread initiator can give feedback.")
     async with agent_thread_pr_state_lock(langgraph_client(), thread_id):
@@ -81,22 +86,9 @@ async def _save_feedback(
         if record.status not in {"completed", "dismissed"}:
             if await feedback_prompt_status(thread_id) != "ready":
                 raise HTTPException(409, "Feedback is not available for this thread yet.")
-            record.status = "completed" if submission else "dismissed"
-            record.rating = submission.rating if submission else None
-            record.comment = submission.comment if submission else ""
+            dismiss = submission.action == "dismiss"
+            record.status = "dismissed" if dismiss else "completed"
+            record.rating = None if dismiss else submission.rating
+            record.comment = "" if dismiss else submission.comment
             await feedback_store().put(thread_id, record)
     return ThreadFeedbackResponse.model_validate(record, from_attributes=True)
-
-
-@feedback_router.post("/{thread_id}/feedback")
-async def submit_thread_feedback(
-    thread_id: str, submission: FeedbackSubmission, session: dict[str, Any] = _SESSION_DEP
-) -> ThreadFeedbackResponse:
-    return await _save_feedback(thread_id, str(session["sub"]).strip().lower(), submission)
-
-
-@feedback_router.post("/{thread_id}/feedback/dismiss")
-async def dismiss_thread_feedback(
-    thread_id: str, session: dict[str, Any] = _SESSION_DEP
-) -> ThreadFeedbackResponse:
-    return await _save_feedback(thread_id, str(session["sub"]).strip().lower(), None)

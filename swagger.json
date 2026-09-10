@@ -552,6 +552,15 @@
       },
       "FeedbackSubmission": {
         "properties": {
+          "action": {
+            "default": "submit",
+            "enum": [
+              "submit",
+              "dismiss"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
           "comment": {
             "default": "",
             "maxLength": 3000,
@@ -559,18 +568,22 @@
             "type": "string"
           },
           "rating": {
-            "enum": [
-              "bad",
-              "good",
-              "other"
+            "anyOf": [
+              {
+                "enum": [
+                  "bad",
+                  "good",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Rating",
-            "type": "string"
+            "title": "Rating"
           }
         },
-        "required": [
-          "rating"
-        ],
         "title": "FeedbackSubmission",
         "type": "object"
       },
@@ -7243,54 +7256,6 @@
           }
         ],
         "summary": "Submit Thread Feedback",
-        "tags": [
-          "dashboard",
-          "thread-feedback"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/feedback/dismiss": {
-      "post": {
-        "operationId": "dismiss_thread_feedback_dashboard_api_threads__thread_id__feedback_dismiss_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThreadFeedbackResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Dismiss Thread Feedback",
         "tags": [
           "dashboard",
           "thread-feedback"

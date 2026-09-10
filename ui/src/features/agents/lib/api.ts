@@ -264,6 +264,10 @@ export interface PullRequestSnapshot {
 
 export type ThreadFeedbackRating = "bad" | "good" | "other"
 
+export type ThreadFeedbackSubmission =
+  | { action?: "submit"; rating: ThreadFeedbackRating; comment: string }
+  | { action: "dismiss" }
+
 export interface ThreadFeedback {
   status: "unavailable" | "ready" | "completed" | "dismissed"
   rating: ThreadFeedbackRating | null
@@ -276,22 +280,12 @@ export const agentsApi = {
     agentsRequest<ThreadFeedback>(
       `/threads/${encodeURIComponent(threadId)}/feedback`
     ),
-  submitThreadFeedback: (
-    threadId: string,
-    body: { rating: ThreadFeedbackRating; comment: string }
-  ) =>
+  submitThreadFeedback: (threadId: string, body: ThreadFeedbackSubmission) =>
     agentsRequest<ThreadFeedback>(
       `/threads/${encodeURIComponent(threadId)}/feedback`,
       {
         method: "POST",
         body: JSON.stringify(body),
-      }
-    ),
-  dismissThreadFeedback: (threadId: string) =>
-    agentsRequest<ThreadFeedback>(
-      `/threads/${encodeURIComponent(threadId)}/feedback/dismiss`,
-      {
-        method: "POST",
       }
     ),
   listThreadProjects: (

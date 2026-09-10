@@ -4,7 +4,10 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { agentsApi } from "@/features/agents/lib/api"
-import type { ThreadFeedbackRating } from "@/features/agents/lib/api"
+import type {
+  ThreadFeedbackRating,
+  ThreadFeedbackSubmission,
+} from "@/features/agents/lib/api"
 
 const ratings: Array<{ value: ThreadFeedbackRating; label: string }> = [
   { value: "bad", label: "💩 Bad" },
@@ -20,12 +23,8 @@ export function ThreadFeedbackCard({
   login: string | null
 }) {
   const mutation = useMutation({
-    mutationFn: (
-      value: { rating: ThreadFeedbackRating; comment: string } | "dismiss"
-    ) =>
-      value === "dismiss"
-        ? agentsApi.dismissThreadFeedback(threadId)
-        : agentsApi.submitThreadFeedback(threadId, value),
+    mutationFn: (value: ThreadFeedbackSubmission) =>
+      agentsApi.submitThreadFeedback(threadId, value),
   })
   const query = useQuery({
     queryKey: ["thread-feedback", threadId, login],
@@ -120,7 +119,7 @@ export function ThreadFeedbackCard({
           size="sm"
           variant="ghost"
           disabled={mutation.isPending}
-          onClick={() => mutation.mutate("dismiss")}
+          onClick={() => mutation.mutate({ action: "dismiss" })}
         >
           Dismiss
         </Button>
