@@ -9,7 +9,7 @@ type RumClient = {
 type RumLoader = () => Promise<RumClient>
 
 let initializedRum: RumClient | undefined
-let initializedSite = "datadoghq.com"
+let initializedSite = "us5.datadoghq.com"
 const initializationListeners = new Set<() => void>()
 
 function envString(env: PublicEnv, name: string): string | undefined {
@@ -162,7 +162,7 @@ export async function initializeDatadogRum(
   const rum = await loadRum().catch(() => undefined)
   if (!rum) return
 
-  const site = envString(env, "VITE_DATADOG_SITE") ?? "datadoghq.com"
+  const site = envString(env, "VITE_DATADOG_SITE") ?? "us5.datadoghq.com"
 
   if (typeof window !== "undefined") {
     const globalRum = window as Window & { DD_RUM?: RumClient }
