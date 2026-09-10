@@ -57,6 +57,24 @@ test.describe("show_user", () => {
     await expect(diagram).toContainText("File type");
   });
 
+  // Mermaid attaches its own "Syntax error" graphic to document.body before
+  // rejecting unless error rendering is suppressed, which would sit outside the
+  // card on top of the fallback.
+  test("falls back to source for an unparseable diagram, with no stray graphic", async ({
+    page,
+  }) => {
+    await startWebThread(page, "E2E_SHOW_USER_BAD_DIAGRAM show me the flow");
+
+    const card = page.locator("section").filter({ hasText: "Broken Diagram" });
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    await expect(card).toContainText("flowchart LR", { timeout: 30_000 });
+    await expect(card.locator("[data-mermaid-diagram]")).toHaveCount(0);
+    await expect(page.getByText("Syntax error")).toHaveCount(0);
+    await expect(page.locator('svg[aria-roledescription="error"]')).toHaveCount(
+      0,
+    );
+  });
+
   test("renders no card when the command fails", async ({ page }) => {
     await startWebThread(page, "E2E_SHOW_USER_FAIL show me the output");
 

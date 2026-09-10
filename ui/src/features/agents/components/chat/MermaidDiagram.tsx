@@ -32,6 +32,10 @@ export function MermaidDiagram({ text }: { text: string }) {
         const mermaid = (await (mermaidModule ??= import("mermaid"))).default
         mermaid.initialize({
           startOnLoad: false,
+          // Otherwise a diagram that will not parse leaves mermaid's own
+          // "Syntax error" graphic attached to document.body, outside this
+          // card, on top of the fallback below.
+          suppressErrorRendering: true,
           // The source is model-authored, so keep mermaid's own sanitizer on.
           securityLevel: "strict",
           theme: theme === "dark" ? "dark" : "default",
