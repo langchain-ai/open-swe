@@ -36,11 +36,12 @@ def test_real_image_bytes_pass_through_unchanged() -> None:
     assert validate_read_file_message(message) is message
 
 
-def test_webp_and_jpeg_are_recognised() -> None:
+def test_webp_jpeg_and_heic_are_recognised() -> None:
     webp = b"RIFF\x00\x00\x00\x00WEBPVP8 "
     jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 8
-    for payload in (webp, jpeg):
-        message = _read_file_image(payload, mime_type="image/webp")
+    heic = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00"
+    for payload in (webp, jpeg, heic):
+        message = _read_file_image(payload, mime_type="image/heic")
         assert validate_read_file_message(message) is message
 
 
