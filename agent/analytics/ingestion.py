@@ -395,9 +395,31 @@ async def _reconcile_finding(conn: AsyncConnection, event: EventEnvelope) -> Non
                     WHEN 'finding.dismissed' THEN 'dismissed' ELSE 'open' END,
                 source_version = latest.source_version,
                 latest_occurred_at = latest.occurred_at,
-                resolved_at = history.resolved_at,
-                dismissed_at = history.dismissed_at,
-                reopened_count = history.reopened_count,
+                -- Raw events expire after the retention window; the durable baseline
+                -- columns keep prior history from being erased by a post-retention
+                -- rebuild, and absorb every newly observed transition.
+                resolved_at = GREATEST(
+                    COALESCE(history.resolved_at, history_baseline_resolved_at),
+                    COALESCE(history_baseline_resolved_at, history.resolved_at)
+                ),
+                dismissed_at = GREATEST(
+                    COALESCE(history.dismissed_at, history_baseline_dismissed_at),
+                    COALESCE(history_baseline_dismissed_at, history.dismissed_at)
+                ),
+                reopened_count = GREATEST(
+                    COALESCE(history.reopened_count, 0), history_baseline_reopened_count
+                ),
+                history_baseline_resolved_at = GREATEST(
+                    COALESCE(history.resolved_at, history_baseline_resolved_at),
+                    COALESCE(history_baseline_resolved_at, history.resolved_at)
+                ),
+                history_baseline_dismissed_at = GREATEST(
+                    COALESCE(history.dismissed_at, history_baseline_dismissed_at),
+                    COALESCE(history_baseline_dismissed_at, history.dismissed_at)
+                ),
+                history_baseline_reopened_count = GREATEST(
+                    COALESCE(history.reopened_count, 0), history_baseline_reopened_count
+                ),
                 updated_at = clock_timestamp()
             FROM latest, history
             WHERE workspace_id = :workspace_id AND finding_id = :finding_id

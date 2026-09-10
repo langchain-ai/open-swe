@@ -755,3 +755,73 @@ async def test_feedback_migration_recovers_acknowledged_withdrawals(analytics_db
             .all()
         )
         assert rows == [DAY + timedelta(days=1)] * 2
+
+
+async def test_finding_history_baseline_survives_raw_event_retention(analytics_db):
+    workspace, transaction = analytics_db
+    finding_id = uuid4()
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.FINDING_SURFACED,
+            FindingSurfacedPayload(severity="high", category="correctness"),
+            finding_id=finding_id,
+        )
+    )
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.FINDING_RESOLVED,
+            FindingStatePayload(),
+            finding_id=finding_id,
+            day=1,
+            source_version=2,
+        )
+    )
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.FINDING_REOPENED,
+            FindingStatePayload(),
+            finding_id=finding_id,
+            day=2,
+            source_version=3,
+        )
+    )
+    async with transaction() as conn:
+        # Simulate retention: drop the projection history along with its raw events.
+        schema = await conn.scalar(text("SELECT current_schema()"))
+        await database._run_script(
+            conn,
+            (Path(database.__file__).with_name("migrations") / "0004_finding_history_baseline.sql")
+            .read_text()
+            .replace("open_swe_analytics", schema),
+        )
+        await conn.execute(
+            text("DELETE FROM events WHERE finding_id = :finding_id"), {"finding_id": finding_id}
+        )
+        await conn.execute(
+            text(
+                "UPDATE finding_projection SET resolved_at = NULL, dismissed_at = NULL, "
+                "reopened_count = 0 WHERE finding_id = :finding_id"
+            ),
+            {"finding_id": finding_id},
+        )
+    # A much later transition must re-add history, not erase the pre-retention facts.
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.FINDING_RESOLVED,
+            FindingStatePayload(),
+            finding_id=finding_id,
+            day=40,
+            source_version=5,
+        )
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM finding_projection"))).mappings().one()
+        assert row["current_state"] == "resolved"
+        assert row["resolved_at"] == DAY + timedelta(days=40)
+        assert row["reopened_count"] == 1
+    stats = await queries.reviewer_stats(DAY)
+    assert stats["reopened_findings"] == 1
