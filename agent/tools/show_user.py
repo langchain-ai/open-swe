@@ -23,6 +23,9 @@ MAX_TEXT_BYTES = 200_000
 MAX_IMAGE_BYTES = 3_000_000
 MAX_HTML_BYTES = 1_000_000
 MAX_COMMAND_ERROR_CHARS = 4_000
+# The largest per-kind limit, so a command may produce any renderable artifact
+# while the capture itself stays bounded on disk.
+MAX_COMMAND_CAPTURE_BYTES = MAX_HTML_BYTES
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 120
 ARTIFACT_DIR = ".open-swe/artifacts"
 
@@ -170,28 +173,46 @@ async def _run_command(command: str, path: str | None, timeout: int | None) -> s
     backend = await get_sandbox_backend(thread_id)
     work_dir = posixpath.normpath(await resolve_sandbox_work_dir(backend))
 
-    if path:
-        out_path = _resolve_output_path(path, work_dir)
-    else:
-        out_path = posixpath.join(work_dir, ARTIFACT_DIR, f"show-{uuid4().hex}.txt")
-    err_path = f"{out_path}.stderr"
+    scratch = posixpath.join(work_dir, ARTIFACT_DIR, f"show-{uuid4().hex}")
+    out_path = _resolve_output_path(path, work_dir) if path else f"{scratch}.txt"
+    # Diagnostics stay in scratch rather than beside a caller-chosen path, so a
+    # run never drops a sidecar into the worktree, and are removed either way.
+    err_path = f"{scratch}.stderr"
+    status_path = f"{scratch}.status"
 
     quoted_out = shlex.quote(out_path)
     quoted_err = shlex.quote(err_path)
-    result = await backend.aexecute(
-        f"mkdir -p -- {shlex.quote(posixpath.dirname(out_path))} && "
+    quoted_status = shlex.quote(status_path)
+    # `head` bounds what the command can write, so runaway output (`yes`) is
+    # capped instead of filling the sandbox. It also makes the pipeline's status
+    # useless, hence the command's own status via a file.
+    capture = (
+        f"mkdir -p -- {shlex.quote(posixpath.dirname(out_path))} "
+        f"{shlex.quote(posixpath.dirname(scratch))} && "
         f"cd {shlex.quote(work_dir)} && "
-        f"{{ {command}\n}} > {quoted_out} 2> {quoted_err}",
-        timeout=timeout or DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        f"{{ {{ {command}\n}}; echo $? > {quoted_status}; }} 2> {quoted_err} "
+        f"| head -c {MAX_COMMAND_CAPTURE_BYTES + 1} > {quoted_out}"
     )
-    if result.exit_code != 0:
-        stdout = await _read_capture(backend, out_path)
-        stderr = await _read_capture(backend, err_path)
-        raise ValueError(
-            f"command exited {result.exit_code}: {command}\n"
-            f"--- stderr ({err_path}) ---\n{stderr or '(empty)'}\n"
-            f"--- stdout ({out_path}) ---\n{stdout or '(empty)'}"
-        )
+    try:
+        await backend.aexecute(capture, timeout=timeout or DEFAULT_COMMAND_TIMEOUT_SECONDS)
+        status = await _read_capture(backend, status_path)
+        exit_code = int(status) if status.strip().isdigit() else None
+        if exit_code != 0:
+            stdout = await _read_capture(backend, out_path)
+            stderr = await _read_capture(backend, err_path)
+            reported = exit_code if exit_code is not None else "abnormally (no status recorded)"
+            raise ValueError(
+                f"command exited {reported}: {command}\n"
+                f"--- stderr ---\n{stderr or '(empty)'}\n"
+                f"--- stdout ---\n{stdout or '(empty)'}"
+            )
+        if await _file_size(backend, out_path) > MAX_COMMAND_CAPTURE_BYTES:
+            raise ValueError(
+                f"command output exceeded {MAX_COMMAND_CAPTURE_BYTES} bytes and was truncated: "
+                f"{command}. Narrow what it prints."
+            )
+    finally:
+        await backend.aexecute(f"rm -f -- {quoted_err} {quoted_status}", timeout=10)
     return out_path
 
 

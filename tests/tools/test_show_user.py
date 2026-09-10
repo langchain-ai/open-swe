@@ -1,6 +1,5 @@
 import base64
 import importlib
-import posixpath
 import shlex
 from types import SimpleNamespace
 from typing import Any
@@ -13,6 +12,10 @@ from agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 show_user_tool = importlib.import_module("agent.tools.show_user")
 
 WORK_DIR = "/workspace/project"
+SCRATCH = f"{WORK_DIR}/.open-swe/artifacts/show-artifact-id"
+OUT_PATH = f"{SCRATCH}.txt"
+ERR_PATH = f"{SCRATCH}.stderr"
+STATUS_PATH = f"{SCRATCH}.status"
 
 
 class _Backend:
@@ -22,14 +25,17 @@ class _Backend:
         self.timeouts: list[int | None] = []
         self.copy_exit_code = 0
         self.copy_output = "42\n"
-        self.run_exit_code = 0
+        self.removed: list[str] = []
         self.captures: dict[str, str] = {}
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> Any:
         self.commands.append(command)
         self.timeouts.append(timeout)
-        if "} > " in command:
-            return SimpleNamespace(exit_code=self.run_exit_code, output="")
+        if "| head -c " in command:
+            return SimpleNamespace(exit_code=0, output="")
+        if command.startswith("rm -f "):
+            self.removed.append(command)
+            return SimpleNamespace(exit_code=0, output="")
         if command.startswith("tail -c "):
             for path, text in self.captures.items():
                 if f"-- {shlex.quote(path)} " in command:
@@ -131,17 +137,17 @@ async def test_show_user_result_elides_the_middle_of_long_content(
 async def test_show_user_runs_a_command_and_renders_its_captured_stdout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    out_path = f"{WORK_DIR}/{show_user_tool.ARTIFACT_DIR}/show-artifact-id.txt"
-    backend, _ = _configure(monkeypatch, {out_path: b"one\ntwo\n"})
+    backend, _ = _configure(monkeypatch, {OUT_PATH: b"one\ntwo\n"})
+    backend.captures = {STATUS_PATH: "0\n"}
 
     content, artifact = await show_user_tool._show_user(command="git diff")
 
-    run = next(cmd for cmd in backend.commands if "} > " in cmd)
-    assert f"mkdir -p -- {shlex.quote(posixpath.dirname(out_path))}" in run
+    run = next(cmd for cmd in backend.commands if "| head -c " in cmd)
     assert f"cd {shlex.quote(WORK_DIR)}" in run
-    assert (
-        f"{{ git diff\n}} > {shlex.quote(out_path)} 2> {shlex.quote(out_path + '.stderr')}" in run
-    )
+    assert f"{{ {{ git diff\n}}; echo $? > {shlex.quote(STATUS_PATH)}; }} " in run
+    assert f"2> {shlex.quote(ERR_PATH)}" in run
+    # Capture is bounded on disk so runaway output cannot fill the sandbox.
+    assert f"| head -c {show_user_tool.MAX_COMMAND_CAPTURE_BYTES + 1} > " in run
     assert backend.timeouts[0] == show_user_tool.DEFAULT_COMMAND_TIMEOUT_SECONDS
     assert artifact["kind"] == "text"
     assert artifact["content"] == "one\ntwo\n"
@@ -151,17 +157,73 @@ async def test_show_user_runs_a_command_and_renders_its_captured_stdout(
 
 
 @pytest.mark.asyncio
+async def test_show_user_command_removes_its_diagnostic_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_path = f"{WORK_DIR}/report.md"
+    backend, _ = _configure(monkeypatch, {out_path: b"# ok\n"})
+    backend.captures = {STATUS_PATH: "0\n"}
+
+    await show_user_tool._show_user(command="./gen", path="report.md")
+
+    # The sidecars live in scratch, never beside the caller's path, and are gone.
+    assert not any("report.md.stderr" in cmd for cmd in backend.commands)
+    removed = " ".join(backend.removed)
+    assert shlex.quote(ERR_PATH) in removed
+    assert shlex.quote(STATUS_PATH) in removed
+
+
+@pytest.mark.asyncio
+async def test_show_user_command_cleans_up_after_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _configure(monkeypatch, {})
+    backend.captures = {STATUS_PATH: "2\n", ERR_PATH: "boom"}
+
+    with pytest.raises(ValueError, match="command exited 2"):
+        await show_user_tool._show_user(command="false")
+
+    removed = " ".join(backend.removed)
+    assert shlex.quote(ERR_PATH) in removed
+    assert shlex.quote(STATUS_PATH) in removed
+
+
+@pytest.mark.asyncio
+async def test_show_user_rejects_output_that_hit_the_capture_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    oversized = b"y" * (show_user_tool.MAX_COMMAND_CAPTURE_BYTES + 1)
+    backend, _ = _configure(monkeypatch, {OUT_PATH: oversized})
+    backend.captures = {STATUS_PATH: "0\n"}
+
+    with pytest.raises(ValueError, match="exceeded .* bytes and was truncated"):
+        await show_user_tool._show_user(command="yes")
+
+
+@pytest.mark.asyncio
+async def test_show_user_command_without_a_recorded_status_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _configure(monkeypatch, {})
+    backend.captures = {ERR_PATH: "killed"}
+
+    with pytest.raises(ValueError, match="no status recorded"):
+        await show_user_tool._show_user(command="./dies")
+
+
+@pytest.mark.asyncio
 async def test_show_user_command_writes_to_the_requested_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     out_path = f"{WORK_DIR}/.open-swe/artifacts/flow.mmd"
     backend, _ = _configure(monkeypatch, {out_path: b"graph TD\n  A --> B\n"})
+    backend.captures = {STATUS_PATH: "0\n"}
 
     _, artifact = await show_user_tool._show_user(
         command="./gen", path=".open-swe/artifacts/flow.mmd"
     )
 
-    assert any(shlex.quote(out_path) in cmd for cmd in backend.commands if "} > " in cmd)
+    assert any(shlex.quote(out_path) in cmd for cmd in backend.commands if "| head -c " in cmd)
     assert artifact["kind"] == "diagram"
 
 
@@ -169,10 +231,12 @@ async def test_show_user_command_writes_to_the_requested_path(
 async def test_show_user_failed_command_raises_with_both_streams(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    out_path = f"{WORK_DIR}/{show_user_tool.ARTIFACT_DIR}/show-artifact-id.txt"
     backend, _ = _configure(monkeypatch, {})
-    backend.run_exit_code = 2
-    backend.captures = {out_path: "partial output", f"{out_path}.stderr": "boom: no such ref"}
+    backend.captures = {
+        STATUS_PATH: "2\n",
+        OUT_PATH: "partial output",
+        ERR_PATH: "boom: no such ref",
+    }
 
     with pytest.raises(ValueError) as excinfo:
         await show_user_tool._show_user(command="git diff bogus")
@@ -188,7 +252,7 @@ async def test_show_user_failed_command_reports_empty_streams(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend, _ = _configure(monkeypatch, {})
-    backend.run_exit_code = 1
+    backend.captures = {STATUS_PATH: "1\n"}
 
     with pytest.raises(ValueError, match=r"\(empty\)"):
         await show_user_tool._show_user(command="false")
