@@ -234,4 +234,11 @@ async def test_admin_cancel_reaches_private_thread_without_exporting_details(
     result = await tools.manage_thread("private-thread", "admin_cancel")
 
     assert result == {"success": True, "thread": {"id": "private-thread", "status": "idle"}}
-    cancel.assert_awaited_once_with("private-thread", "admin")
+    cancel.assert_awaited_once_with("private-thread", "admin", email=None)
+
+
+async def test_email_admin_can_cancel_private_thread(private_thread, monkeypatch):
+    monkeypatch.setattr(api, "_cancel_active_thread_runs", AsyncMock())
+    with pytest.raises(HTTPException):
+        await api.admin_cancel_dashboard_thread("private-thread", "someone")
+    await api.admin_cancel_dashboard_thread("private-thread", "someone", email="admin@example.com")

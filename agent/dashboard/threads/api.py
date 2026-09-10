@@ -376,7 +376,9 @@ async def cancel_dashboard_thread(
     return await _thread_summary(thread)
 
 
-async def admin_cancel_dashboard_thread(thread_id: str, login: str | None = None) -> dict[str, Any]:
+async def admin_cancel_dashboard_thread(
+    thread_id: str, login: str | None = None, *, email: str | None = None
+) -> dict[str, Any]:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -384,7 +386,7 @@ async def admin_cancel_dashboard_thread(thread_id: str, login: str | None = None
         raise HTTPException(404, "thread not found") from exc
 
     if thread_metadata(thread).get("visibility", "public") != "public":
-        _assert_thread_readable(thread_metadata(thread), login)
+        _assert_thread_readable(thread_metadata(thread), login, email)
 
     try:
         await _cancel_active_thread_runs(client, thread_id)

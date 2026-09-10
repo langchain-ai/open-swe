@@ -1010,7 +1010,7 @@ async def manage_thread(
             thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
             return {"success": True, "thread": _list_item(thread)}
         if action == "admin_cancel":
-            thread = await admin_cancel_dashboard_thread(thread_id, actor.login)
+            thread = await admin_cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
             if summary.get("visibility") == "private":
                 return {
                     "success": True,

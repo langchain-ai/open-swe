@@ -2384,7 +2384,7 @@ async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"])
+    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"], email=_admin.get("email"))
 
 
 @router.delete("/threads/{thread_id}")

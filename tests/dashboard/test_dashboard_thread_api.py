@@ -2868,7 +2868,7 @@ async def test_admin_cancel_thread_route_preserves_actor_identity(monkeypatch) -
     result = await routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
 
     assert result == {"id": "thread-1", "status": "interrupted"}
-    cancel.assert_awaited_once_with("thread-1", "admin")
+    cancel.assert_awaited_once_with("thread-1", "admin", email=None)
 
 
 def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
