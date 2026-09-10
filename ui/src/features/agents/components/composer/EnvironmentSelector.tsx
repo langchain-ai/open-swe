@@ -51,7 +51,6 @@ export function EnvironmentSelector({
         onClick={() => setOpen((value) => !value)}
         className="flex max-w-[220px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
       >
-        <span className="shrink-0">Environment:</span>
         <StackIcon className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
           {selected?.name ?? "No environment"}
@@ -60,6 +59,9 @@ export function EnvironmentSelector({
       </button>
       {open && (
         <div className="absolute top-full left-0 z-50 mt-1 flex max-h-72 w-64 flex-col overflow-y-auto rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg">
+          <div className="px-2 pt-2 pb-1 text-[10px] tracking-wide text-muted-foreground uppercase">
+            Environment
+          </div>
           {environments.map((env) => {
             const isSelected = env.slug === selectedSlug
             return (
