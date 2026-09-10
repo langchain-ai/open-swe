@@ -27,6 +27,7 @@ class _Backend:
         self.copy_output = "42\n"
         self.removed: list[str] = []
         self.captures: dict[str, str] = {}
+        self.base64: dict[str, str] = {}
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> Any:
         self.commands.append(command)
@@ -36,6 +37,11 @@ class _Backend:
         if command.startswith("rm -f "):
             self.removed.append(command)
             return SimpleNamespace(exit_code=0, output="")
+        if command.startswith("base64 < "):
+            for path, encoded in self.base64.items():
+                if shlex.quote(path) in command:
+                    return SimpleNamespace(exit_code=0, output=encoded)
+            return SimpleNamespace(exit_code=1, output="")
         if command.startswith("tail -c "):
             for path, text in self.captures.items():
                 if f"-- {shlex.quote(path)} " in command:
@@ -453,6 +459,24 @@ async def test_show_user_rejects_a_file_that_grows_after_the_size_check(
     monkeypatch.setattr(backend, "adownload_files", grown_download)
     with pytest.raises(ValueError, match="limit"):
         await show_user_tool._show_user("growing.log")
+
+
+@pytest.mark.asyncio
+async def test_show_user_reads_through_the_shell_when_the_file_api_cannot_see_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `virtual_mode` backend reports shell-resolved host paths as missing."""
+    backend, _ = _configure(monkeypatch, {f"{WORK_DIR}/out.txt": b"from the shell\n"})
+
+    async def missing(paths: list[str]) -> list[Any]:
+        return [SimpleNamespace(path=paths[0], content=None, error="file_not_found")]
+
+    monkeypatch.setattr(backend, "adownload_files", missing)
+    backend.base64 = {f"{WORK_DIR}/out.txt": "ZnJvbSB0aGUgc2hlbGwK"}
+
+    _, artifact = await show_user_tool._show_user("out.txt")
+
+    assert artifact["content"] == "from the shell\n"
 
 
 @pytest.mark.asyncio

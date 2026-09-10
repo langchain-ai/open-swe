@@ -94,10 +94,7 @@ async def _show_user(
             {**base, "kind": "html", **urls},
         )
 
-    (download,) = await backend.adownload_files([source_path])
-    if download.error or download.content is None:
-        raise ValueError(f"failed to read {relative_path}: {download.error or 'no content'}")
-    data = download.content
+    data = await _read_bytes(backend, source_path, relative_path)
     # The file can grow between the stat above and this read, so the bytes we
     # actually got decide whether the artifact stays inside the cap.
     _enforce_limit(relative_path, len(data), limit)
@@ -300,6 +297,26 @@ def _result(summary: str, lines: list[str]) -> str:
         ]
     excerpt = "\n".join(clipped)
     return f"{summary} in the dashboard. Refer to the card rather than repeating it.\n\n{excerpt}"
+
+
+async def _read_bytes(backend: Any, path: str, relative_path: str) -> bytes:
+    """Read a file the tool located through the shell.
+
+    Paths here come from `realpath`, so they are host paths. A `virtual_mode`
+    backend resolves its file API against a virtual root instead and reports
+    those paths as missing, so fall back to reading through the same shell that
+    produced them.
+    """
+    (download,) = await backend.adownload_files([path])
+    if download.content is not None:
+        return download.content
+    encoded = await backend.aexecute(f"base64 < {shlex.quote(path)}", timeout=30)
+    if encoded.exit_code != 0:
+        raise ValueError(f"failed to read {relative_path}: {download.error or 'no content'}")
+    try:
+        return base64.standard_b64decode("".join((encoded.output or "").split()))
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"failed to decode {relative_path}") from exc
 
 
 def _enforce_limit(relative_path: str, size: int, limit: int) -> None:
