@@ -37,6 +37,11 @@ from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
 )
+from agent.dashboard.environment_refresh import (
+    ensure_refresh_cron,
+    is_refresh_in_flight,
+    start_refresh_run,
+)
 from agent.dashboard.environments import (
     DEFAULT_ENVIRONMENT_SLUG,
     ENVIRONMENTS,
@@ -46,6 +51,7 @@ from agent.dashboard.environments import (
     list_environment_options,
     slugify,
 )
+from agent.dashboard.feedback import feedback_router
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -63,7 +69,7 @@ from agent.dashboard.oauth import (
     decode_terminal_ticket,
     desktop_callback_url,
     desktop_handoff_from_state,
-    enforce_org_login_gate,
+    enforce_github_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
@@ -104,7 +110,6 @@ from agent.dashboard.repo_cache import (
 )
 from agent.dashboard.review_api import (
     create_review_comment,
-    dry_run_trace_resolution,
     get_review,
     get_review_diff,
     list_review_comments,
@@ -149,15 +154,6 @@ from agent.dashboard.skills import (
     list_skills,
     update_organization_skill,
     update_skill,
-)
-from agent.dashboard.team_credentials import (
-    DatadogCredentialsUpdate,
-    LangSmithCredentialsUpdate,
-    connect_datadog,
-    connect_langsmith,
-    disconnect_datadog,
-    disconnect_langsmith,
-    get_team_credentials_status,
 )
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
@@ -208,23 +204,9 @@ from agent.dashboard.threads.runs import (
     ThreadResolveBody,
 )
 from agent.dashboard.user_credentials import (
-    CurrentsCredentialsUpdate,
-    UserLangSmithCredentialsUpdate,
-    connect_currents,
     connect_notion,
-    disconnect_currents,
     disconnect_notion,
-    get_currents_status,
     get_notion_status,
-)
-from agent.dashboard.user_credentials import (
-    connect_langsmith as connect_user_langsmith,
-)
-from agent.dashboard.user_credentials import (
-    disconnect_langsmith as disconnect_user_langsmith,
-)
-from agent.dashboard.user_credentials import (
-    get_langsmith_status as get_user_langsmith_status,
 )
 from agent.dashboard.user_instructions import (
     UserInstructionsUpdate,
@@ -289,6 +271,7 @@ router = APIRouter(
     tags=["dashboard"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
+router.include_router(feedback_router)
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
@@ -552,7 +535,7 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
-    await enforce_org_login_gate(login)
+    await enforce_github_login_gate(login)
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
@@ -690,56 +673,6 @@ async def get_my_mapping(
     """Return the logged-in user's own GitHub↔Slack mapping (or empty)."""
     mapping = await get_mapping(session["sub"])
     return mapping or {}
-
-
-@router.get("/my-credentials/currents")
-async def get_my_currents_status(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await get_currents_status(session["sub"])
-    return status.get("currents", {"connected": False})
-
-
-@router.put("/my-credentials/currents")
-async def connect_my_currents(
-    update: CurrentsCredentialsUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await connect_currents(session["sub"], update)
-    return status.get("currents", {"connected": False})
-
-
-@router.delete("/my-credentials/currents")
-async def disconnect_my_currents(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await disconnect_currents(session["sub"])
-    return status.get("currents", {"connected": False})
-
-
-@router.get("/my-credentials/langsmith")
-async def get_my_langsmith_status(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await get_user_langsmith_status(session["sub"])
-    return status.get("langsmith", {"connected": False})
-
-
-@router.put("/my-credentials/langsmith")
-async def connect_my_langsmith(
-    update: UserLangSmithCredentialsUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await connect_user_langsmith(session["sub"], update)
-    return status.get("langsmith", {"connected": False})
-
-
-@router.delete("/my-credentials/langsmith")
-async def disconnect_my_langsmith(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await disconnect_user_langsmith(session["sub"])
-    return status.get("langsmith", {"connected": False})
 
 
 @router.get("/my-credentials/notion")
@@ -1001,13 +934,6 @@ async def api_put_team_settings(
     return await upsert_team_settings(update)
 
 
-@router.get("/team-credentials")
-async def api_get_team_credentials(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await get_team_credentials_status()
-
-
 workspace_mcp_router = APIRouter(route_class=WorkspaceMCPRoute)
 
 
@@ -1061,36 +987,6 @@ async def api_discover_workspace_mcp(
 
 
 router.include_router(workspace_mcp_router)
-
-
-@router.put("/team-credentials/datadog")
-async def api_connect_datadog(
-    update: DatadogCredentialsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await connect_datadog(update)
-
-
-@router.delete("/team-credentials/datadog")
-async def api_disconnect_datadog(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await disconnect_datadog()
-
-
-@router.put("/team-credentials/langsmith")
-async def api_connect_langsmith(
-    update: LangSmithCredentialsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await connect_langsmith(update)
-
-
-@router.delete("/team-credentials/langsmith")
-async def api_disconnect_langsmith(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await disconnect_langsmith()
 
 
 class EnabledReviewRepoUpdate(BaseModel):
@@ -1152,18 +1048,21 @@ async def api_create_environment(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Environment:
     try:
-        return await ENVIRONMENTS.create(body, _admin["sub"])
+        record = await ENVIRONMENTS.create(body, _admin["sub"])
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
+    if record.setup_script:
+        await ensure_refresh_cron(record.slug)
+    return record
 
 
 @router.get("/environments/options")
 async def api_environment_options(
-    _session: dict[str, Any] = _SESSION_DEP,
+    session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    """Pickable environments for any signed-in user: names only, no prompts."""
+    """Pickable environments for any signed-in user; refresh logs only for admins."""
     return {
-        "environments": await list_environment_options(),
+        "environments": await list_environment_options(include_logs=_session_is_admin(session)),
         "default_slug": DEFAULT_ENVIRONMENT_SLUG,
     }
 
@@ -1186,9 +1085,36 @@ async def api_update_environment(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Environment:
     try:
-        return await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
+        record = await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    if record.setup_script:
+        await ensure_refresh_cron(record.slug)
+    return record
+
+
+@router.post("/environments/{slug}/refresh")
+async def api_refresh_environment(
+    slug: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    """Start a snapshot rebuild from the environment's scripts.
+
+    Started in the background rather than awaited: a rebuild takes minutes, and
+    the outcome lands on the record for the dashboard to poll.
+    """
+    normalized = _normalized_slug(slug)
+    record = await ENVIRONMENTS.get(normalized)
+    if not record:
+        raise HTTPException(404, "environment not found")
+    if not record.setup_script:
+        raise HTTPException(400, "environment has no setup script to run")
+    if is_refresh_in_flight(record):
+        raise HTTPException(409, "a refresh of this environment is already running")
+    run_id = await start_refresh_run(normalized)
+    if run_id is None:
+        raise HTTPException(502, "could not start the refresh job")
+    return {"started": True, "run_id": run_id}
 
 
 @router.delete("/environments/{slug}")
@@ -1506,17 +1432,6 @@ async def api_re_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await trigger_re_review(owner, repo, pr_number, session["sub"])
-
-
-@router.post("/reviews/{owner}/{repo}/{pr_number}/resolve-trace")
-async def api_resolve_trace(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await dry_run_trace_resolution(owner, repo, pr_number)
 
 
 class ReviewCommentCreate(BaseModel):

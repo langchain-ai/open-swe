@@ -19,18 +19,19 @@ from typing import Any
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
-from agent.agent_cost import finalize_agent_run_usage
+from agent.agent_cost import finalize_agent_invocation_usage
 from agent.config import ENV
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
+from agent.invocation import resolve_invocation_id, with_invocation_id
 from agent.linear.client import comment_on_linear_issue
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
-from agent.slack.thread_feedback import post_slack_feedback_prompt
 from agent.source_context import SourceContext
+from agent.thread_feedback import schedule_answer_feedback
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.thread_ops import langgraph_client
@@ -258,10 +259,15 @@ def _cost_refresh_metadata(metadata: dict[str, Any], run_id: str) -> dict[str, A
     }
 
 
-def _prepare_run_id(payload: dict[str, Any]) -> str | None:
+def _invocation_id(payload: dict[str, Any]) -> str | None:
     metadata = payload.get("metadata")
-    value = metadata.get("prepare_run_id") if isinstance(metadata, dict) else None
-    return value if isinstance(value, str) and value else None
+    if not isinstance(metadata, dict):
+        return None
+    try:
+        return resolve_invocation_id(metadata)
+    except ValueError:
+        logger.warning("run-complete: conflicting invocation identifiers")
+        return None
 
 
 async def _finalize_agent_usage_telemetry(
@@ -270,8 +276,8 @@ async def _finalize_agent_usage_telemetry(
     """Finalize Agent telemetry from the platform's terminal webhook payload."""
     if status not in _TERMINAL_RUN_STATUSES:
         return
-    prepare_run_id = _prepare_run_id(payload)
-    if prepare_run_id is None:
+    invocation_id = _invocation_id(payload)
+    if invocation_id is None:
         return
     values = payload.get("values")
     state = dict(values) if isinstance(values, dict) else None
@@ -280,8 +286,8 @@ async def _finalize_agent_usage_telemetry(
             state["messages"] = convert_to_messages(state["messages"])
         except _MESSAGE_CONVERSION_ERRORS:
             state = None
-    await finalize_agent_run_usage(
-        run_id=prepare_run_id,
+    await finalize_agent_invocation_usage(
+        invocation_id=invocation_id,
         thread_id=thread_id,
         state=state,
     )
@@ -324,18 +330,18 @@ async def _handle_successful_run(
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
-    slack_thread = SourceContext.from_metadata(metadata).slack_thread
     payload_metadata = payload.get("metadata")
     automated = (
         isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
     )
-    if slack_thread is not None and slack_thread.channel_id and not automated:
-        await post_slack_feedback_prompt(
-            thread_id, run_id, slack_thread.channel_id, require_answer=True
-        )
-    prepare_run_id = _prepare_run_id(payload)
-    if prepare_run_id is None:
-        return {"status": "ignored", "reason": "missing prepare_run_id"}
+    if not automated:
+        try:
+            await schedule_answer_feedback(thread_id, run_id, metadata)
+        except Exception:
+            logger.warning("Could not schedule completion feedback", extra={"thread_id": thread_id})
+    invocation_id = _invocation_id(payload)
+    if invocation_id is None:
+        return {"status": "ignored", "reason": "missing or conflicting invocation_id"}
     if run_id in _scheduled_cost_run_ids(metadata):
         return {"status": "ignored", "reason": "cost refresh already scheduled for run"}
 
@@ -351,7 +357,7 @@ async def _handle_successful_run(
         {
             "agent_thread_id": thread_id,
             "run_id": run_id,
-            "prepare_run_id": prepare_run_id,
+            **with_invocation_id(None, invocation_id),
             "channel_id": channel_id,
             "thread_ts": thread_ts,
         },

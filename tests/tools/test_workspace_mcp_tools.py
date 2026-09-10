@@ -6,7 +6,6 @@ import pytest
 from cryptography.fernet import Fernet
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-from agent import server
 from agent.dashboard import workspace_mcps as settings
 from agent.mcp import MCPConnectionUpdate, runtime
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
@@ -219,19 +218,6 @@ async def test_remote_arguments_survive_langchain_invocation(fake_store, monkeyp
     assert result.tool_call_id == "call-1"
     assert result.status == "success"
     assert json.loads(result.content[0]["text"]) == {argument: "remote-value"}
-
-
-async def test_workspace_tools_use_existing_authorization_gate(monkeypatch):
-    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
-    monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "")
-    monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        server, "load_workspace_mcp_tools", AsyncMock(return_value=["mcp_example_search"])
-    )
-    authorized = {"configurable": {"user_email": "admin@example.com"}}
-    outsider = {"configurable": {"user_email": "outsider@example.com"}}
-    assert await server._workspace_mcp_tools_for(authorized, None) == ["mcp_example_search"]
-    assert await server._workspace_mcp_tools_for(outsider, None) == []
 
 
 def test_connection_tool_pairs_cannot_collide():

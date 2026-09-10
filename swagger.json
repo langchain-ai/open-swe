@@ -123,20 +123,6 @@
         "title": "CommentBody",
         "type": "object"
       },
-      "CurrentsCredentialsUpdate": {
-        "description": "Connect Currents.dev with an organization API key.",
-        "properties": {
-          "api_key": {
-            "title": "Api Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "api_key"
-        ],
-        "title": "CurrentsCredentialsUpdate",
-        "type": "object"
-      },
       "DashboardImageBody": {
         "properties": {
           "base64": {
@@ -177,30 +163,6 @@
           "mimeType"
         ],
         "title": "DashboardImageBody",
-        "type": "object"
-      },
-      "DatadogCredentialsUpdate": {
-        "description": "Connect Datadog with a scoped API + application key pair.",
-        "properties": {
-          "api_key": {
-            "title": "Api Key",
-            "type": "string"
-          },
-          "app_key": {
-            "title": "App Key",
-            "type": "string"
-          },
-          "site": {
-            "default": "datadoghq.com",
-            "title": "Site",
-            "type": "string"
-          }
-        },
-        "required": [
-          "api_key",
-          "app_key"
-        ],
-        "title": "DatadogCredentialsUpdate",
         "type": "object"
       },
       "DesktopConnectExchange": {
@@ -588,6 +550,43 @@
         "title": "FeedbackResponse",
         "type": "object"
       },
+      "FeedbackSubmission": {
+        "properties": {
+          "action": {
+            "default": "submit",
+            "enum": [
+              "submit",
+              "comment",
+              "dismiss"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "comment": {
+            "default": "",
+            "maxLength": 3000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "enum": [
+                  "bad",
+                  "good"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          }
+        },
+        "title": "FeedbackSubmission",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -625,29 +624,126 @@
         "type": "object"
       },
       "JsonValue": {},
-      "LangSmithCredentialsUpdate": {
-        "description": "Connect LangSmith with a read-scoped API key.",
+      "MCPConnectionUpdate": {
+        "additionalProperties": false,
         "properties": {
-          "api_key": {
-            "title": "Api Key",
-            "type": "string"
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Tools",
+            "type": "array"
           },
-          "endpoint": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "headers": {
             "anyOf": [
               {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "oauth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPOAuthUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transport": {
+            "default": "streamable_http",
+            "enum": [
+              "streamable_http",
+              "sse"
+            ],
+            "title": "Transport",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "MCPConnectionUpdate",
+        "type": "object"
+      },
+      "MCPOAuthUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Endpoint"
+            "title": "Client Secret"
+          },
+          "grant_type": {
+            "const": "client_credentials",
+            "default": "client_credentials",
+            "title": "Grant Type",
+            "type": "string"
+          },
+          "scope": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Scope",
+            "type": "string"
+          },
+          "token_endpoint_auth_method": {
+            "default": "client_secret_post",
+            "enum": [
+              "client_secret_post",
+              "client_secret_basic"
+            ],
+            "title": "Token Endpoint Auth Method",
+            "type": "string"
+          },
+          "token_url": {
+            "maxLength": 2048,
+            "title": "Token Url",
+            "type": "string"
           }
         },
         "required": [
-          "api_key"
+          "token_url",
+          "client_id"
         ],
-        "title": "LangSmithCredentialsUpdate",
+        "title": "MCPOAuthUpdate",
         "type": "object"
       },
       "PlanRejection": {
@@ -754,6 +850,17 @@
               }
             ],
             "title": "Draft Prs"
+          },
+          "model_routing_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Routing Enabled"
           },
           "reasoning_effort": {
             "title": "Reasoning Effort",
@@ -1420,6 +1527,72 @@
             ],
             "title": "Default Agent Reasoning Effort"
           },
+          "default_agent_routing_balanced_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Balanced Model"
+          },
+          "default_agent_routing_balanced_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Balanced Reasoning Effort"
+          },
+          "default_agent_routing_fast_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Model"
+          },
+          "default_agent_routing_fast_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Reasoning Effort"
+          },
+          "default_agent_routing_performance_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Performance Model"
+          },
+          "default_agent_routing_performance_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Performance Reasoning Effort"
+          },
           "default_agent_subagent_model": {
             "anyOf": [
               {
@@ -1605,17 +1778,6 @@
             "title": "Review Trace Links",
             "type": "boolean"
           },
-          "review_tracing_project": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Tracing Project"
-          },
           "transcription_model": {
             "default": "gpt-transcribe",
             "title": "Transcription Model",
@@ -1676,6 +1838,46 @@
           "end"
         ],
         "title": "TextAnchor",
+        "type": "object"
+      },
+      "ThreadFeedbackResponse": {
+        "properties": {
+          "comment": {
+            "default": "",
+            "title": "Comment",
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "enum": [
+                  "bad",
+                  "good",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "status": {
+            "enum": [
+              "unavailable",
+              "ready",
+              "completed",
+              "dismissed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ThreadFeedbackResponse",
         "type": "object"
       },
       "ThreadMessageBody": {
@@ -1785,21 +1987,6 @@
         "title": "UserInstructionsUpdate",
         "type": "object"
       },
-      "UserLangSmithCredentialsUpdate": {
-        "additionalProperties": false,
-        "description": "Connect LangSmith with an API key.",
-        "properties": {
-          "api_key": {
-            "title": "Api Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "api_key"
-        ],
-        "title": "UserLangSmithCredentialsUpdate",
-        "type": "object"
-      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1868,62 +2055,6 @@
           "status"
         ],
         "title": "WebhookResponse",
-        "type": "object"
-      },
-      "WorkspaceMCPUpdate": {
-        "additionalProperties": false,
-        "properties": {
-          "allowed_tools": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Allowed Tools",
-            "type": "array"
-          },
-          "enabled": {
-            "default": true,
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "headers": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Headers"
-          },
-          "name": {
-            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
-            "title": "Name",
-            "type": "string"
-          },
-          "transport": {
-            "default": "streamable_http",
-            "enum": [
-              "streamable_http",
-              "sse"
-            ],
-            "title": "Transport",
-            "type": "string"
-          },
-          "url": {
-            "maxLength": 2048,
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "url"
-        ],
-        "title": "WorkspaceMCPUpdate",
         "type": "object"
       }
     },
@@ -3072,206 +3203,6 @@
           }
         ],
         "summary": "Api Put My Instructions",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/my-credentials/currents": {
-      "delete": {
-        "operationId": "disconnect_my_currents_dashboard_api_my_credentials_currents_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Disconnect My Currents Dashboard Api My Credentials Currents Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Disconnect My Currents",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "get": {
-        "operationId": "get_my_currents_status_dashboard_api_my_credentials_currents_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Currents Status Dashboard Api My Credentials Currents Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get My Currents Status",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "put": {
-        "operationId": "connect_my_currents_dashboard_api_my_credentials_currents_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CurrentsCredentialsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Connect My Currents Dashboard Api My Credentials Currents Put",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Connect My Currents",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/my-credentials/langsmith": {
-      "delete": {
-        "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Disconnect My Langsmith Dashboard Api My Credentials Langsmith Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Disconnect My Langsmith",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "get": {
-        "operationId": "get_my_langsmith_status_dashboard_api_my_credentials_langsmith_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Langsmith Status Dashboard Api My Credentials Langsmith Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get My Langsmith Status",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "put": {
-        "operationId": "connect_my_langsmith_dashboard_api_my_credentials_langsmith_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserLangSmithCredentialsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Connect My Langsmith Dashboard Api My Credentials Langsmith Put",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Connect My Langsmith",
         "tags": [
           "dashboard"
         ]
@@ -5686,73 +5617,6 @@
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/resolve-trace": {
-      "post": {
-        "operationId": "api_resolve_trace_dashboard_api_reviews__owner___repo___pr_number__resolve_trace_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Resolve Trace Dashboard Api Reviews  Owner   Repo   Pr Number  Resolve Trace Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Resolve Trace",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
     "/dashboard/api/sandbox-settings": {
       "get": {
         "operationId": "api_get_sandbox_settings_dashboard_api_sandbox_settings_get",
@@ -6437,182 +6301,6 @@
           }
         ],
         "summary": "Slack Login",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/team-credentials": {
-      "get": {
-        "operationId": "api_get_team_credentials_dashboard_api_team_credentials_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Team Credentials Dashboard Api Team Credentials Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Team Credentials",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/team-credentials/datadog": {
-      "delete": {
-        "operationId": "api_disconnect_datadog_dashboard_api_team_credentials_datadog_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Disconnect Datadog Dashboard Api Team Credentials Datadog Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Disconnect Datadog",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "put": {
-        "operationId": "api_connect_datadog_dashboard_api_team_credentials_datadog_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DatadogCredentialsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Connect Datadog Dashboard Api Team Credentials Datadog Put",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Connect Datadog",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/team-credentials/langsmith": {
-      "delete": {
-        "operationId": "api_disconnect_langsmith_dashboard_api_team_credentials_langsmith_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Disconnect Langsmith Dashboard Api Team Credentials Langsmith Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Disconnect Langsmith",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "put": {
-        "operationId": "api_connect_langsmith_dashboard_api_team_credentials_langsmith_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LangSmithCredentialsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Connect Langsmith Dashboard Api Team Credentials Langsmith Put",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Connect Langsmith",
         "tags": [
           "dashboard"
         ]
@@ -7467,6 +7155,110 @@
         "summary": "Api Thread Commands",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/feedback": {
+      "get": {
+        "operationId": "get_thread_feedback_dashboard_api_threads__thread_id__feedback_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadFeedbackResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Thread Feedback",
+        "tags": [
+          "dashboard",
+          "thread-feedback"
+        ]
+      },
+      "post": {
+        "operationId": "submit_thread_feedback_dashboard_api_threads__thread_id__feedback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadFeedbackResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Submit Thread Feedback",
+        "tags": [
+          "dashboard",
+          "thread-feedback"
         ]
       }
     },
@@ -8467,7 +8259,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WorkspaceMCPUpdate"
+                "$ref": "#/components/schemas/MCPConnectionUpdate"
               }
             }
           },
@@ -8528,7 +8320,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/WorkspaceMCPUpdate"
+                    "$ref": "#/components/schemas/MCPConnectionUpdate"
                   },
                   {
                     "type": "null"

@@ -38,7 +38,7 @@ async def report_platform_issue(
     problem_description: str,
     keywords: list[str],
 ) -> dict[str, str]:
-    """Report an issue with the sandbox or execution environment with a required description."""
+    """Implement the `report_platform_issue` tool."""
     report_id = _uuid7()
     cfg = RunConfig.from_runtime()
     thread_details: dict[str, Any] = {"configurable": cfg.dump()}
