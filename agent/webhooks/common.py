@@ -1493,9 +1493,9 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             continue
         if new_state == "merged":
             await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
-            from agent.slack.thread_feedback import post_slack_pr_feedback_prompt
+            from agent.thread_feedback import schedule_pr_feedback
 
-            await post_slack_pr_feedback_prompt(thread_id, metadata, pr_url)
+            await schedule_pr_feedback(thread_id, metadata, pr_url)
 
 
 async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
