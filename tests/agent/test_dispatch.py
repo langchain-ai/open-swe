@@ -4,6 +4,8 @@ from xml.etree import ElementTree
 
 import pytest
 
+from agent import thread_feedback
+
 dispatch = importlib.import_module("agent.dispatch")
 
 _ABSOLUTE = "https://open-swe-v3-abc.us.langgraph.app/webhooks/run-complete"
@@ -191,6 +193,22 @@ async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) 
     )
 
     assert client.runs.created[0]["input"] == run_input
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    client.runs.fail_next = True
+    monkeypatch.setattr(thread_feedback, "now_ms", lambda: 123000)
+
+    with pytest.raises(RuntimeError, match="dispatch failed"):
+        await dispatch.dispatch_agent_run(
+            "thread-1", "Please revise the plan.", {}, source="dashboard", client=client
+        )
+
+    assert client.threads.metadata[thread_feedback.ACTIVITY_KEY] == 123000
 
 
 def test_dispatch_slack_identity_includes_verified_context() -> None:

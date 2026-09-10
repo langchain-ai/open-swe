@@ -268,7 +268,11 @@ async def _create_dashboard_thread_record(
         metadata["repo_explicitly_none"] = True
 
     client = langgraph_client()
-    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
+    await client.threads.create(
+        thread_id=thread_id,
+        metadata={**metadata, "feedback_initiator_login": login},
+        if_exists="do_nothing",
+    )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     thread = await client.threads.get(thread_id)
     return as_thread_dict(thread)
@@ -578,6 +582,7 @@ async def _enrich_run_start_command(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     metadata_update["updated_at_ms"] = _now_ms()
+    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(client, thread_id):
