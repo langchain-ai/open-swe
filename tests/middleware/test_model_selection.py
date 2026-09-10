@@ -56,6 +56,21 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_existing_route_is_reused_without_classifier() -> None:
+    middleware, models, classifier = _middleware()
+    state = {
+        "messages": [HumanMessage(content="Follow up on the task")],
+        "model_route": "performance",
+    }
+
+    state.update(await middleware.abefore_agent(cast(Any, state), MagicMock()))
+
+    assert state["model_route"] == "performance"
+    assert (await _invoke(middleware, state)).model is models["performance"]
+    classifier.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_plan_mode_uses_performance_route_without_classifier() -> None:
     middleware, models, classifier = _middleware(initial_plan_mode=True)
     state = {"messages": [HumanMessage(content="Update the docs")]}

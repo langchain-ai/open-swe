@@ -46,6 +46,8 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         runtime: Runtime,
     ) -> dict[str, Route]:
         del runtime
+        if model_route := state.get("model_route"):
+            return {"model_route": model_route}
         route: Route = "performance" if self._initial_plan_mode else "balanced"
         if not self._initial_plan_mode:
             messages = state.get("messages", [])
