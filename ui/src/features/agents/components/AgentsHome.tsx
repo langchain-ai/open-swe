@@ -454,6 +454,7 @@ export function AgentsHome({
         {
           config: { configurable },
           onError: handleCloudSubmitError,
+          multitaskStrategy: "enqueue"
         }
       )
       .catch(handleCloudSubmitError)

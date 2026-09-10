@@ -296,6 +296,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 ...modelConfigurable(activeSelection),
               },
             },
+            multitaskStrategy: "enqueue",
           }
         )
         return true

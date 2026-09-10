@@ -456,7 +456,7 @@ function ChatBody({
       if ((!trimmed && !first) || busy) return
       const content = serializeMessage(trimmed, atts)
       onUserSend(trimmed || (first ? attachmentPillLabel(first) : ""))
-      void stream.submit({ messages: [{ type: "human", content }] })
+      void stream.submit({ messages: [{ type: "human", content }] }, { multitaskStrategy: "enqueue" })
     },
     [busy, stream, onUserSend]
   )
