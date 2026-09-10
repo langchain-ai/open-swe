@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ThumbsDown, ThumbsUp } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -13,17 +15,20 @@ import { cn } from "@/lib/utils"
 const ratings: Array<{
   value: ThreadFeedbackRating
   label: string
+  icon: LucideIcon
   className: string
 }> = [
   {
     value: "good",
-    label: "🙂 Good",
+    label: "Good",
+    icon: ThumbsUp,
     className:
       "border-success/40 bg-success/10 text-success-foreground hover:bg-success/20 hover:text-success-foreground dark:bg-success/10",
   },
   {
     value: "bad",
-    label: "💩 Bad",
+    label: "Bad",
+    icon: ThumbsDown,
     className:
       "border-destructive/40 bg-destructive/10 text-destructive-foreground hover:bg-destructive/20 hover:text-destructive-foreground dark:bg-destructive/10",
   },
@@ -133,6 +138,7 @@ export function ThreadFeedbackCard({
               disabled={mutation.isPending}
               onClick={() => mutation.mutate({ rating: option.value })}
             >
+              <option.icon aria-hidden="true" className="size-4" />
               {option.label}
             </Button>
           ))}
