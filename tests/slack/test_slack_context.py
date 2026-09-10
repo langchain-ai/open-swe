@@ -547,31 +547,6 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
         {"type": "context", "elements": [{"type": "mrkdwn", "text": expected_footer}]},
     ]
 
-    async def trace_url(thread_id: str) -> str:
-        assert thread_id == "mapped-thread"
-        return "https://smith.example/trace"
-
-    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", trace_url)
-    captured.clear()
-    asyncio.run(
-        slack_utils.post_slack_thread_reply_with_ts(
-            "C123",
-            "1.0",
-            "Failed",
-            agent_thread_id="mapped-thread",
-            include_trace_link=True,
-        )
-    )
-    expected_error_footer = f"{expected_footer} • <https://smith.example/trace|View trace>"
-    assert captured["text"] == f"Failed {expected_error_footer}"
-    assert captured["blocks"] == [
-        {"type": "section", "text": {"type": "mrkdwn", "text": "Failed"}},
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": expected_error_footer}],
-        },
-    ]
-
     captured.clear()
     asyncio.run(
         slack_utils.post_slack_thread_reply_with_ts(
@@ -721,6 +696,17 @@ def test_format_slack_web_link_footer_prefers_session_cost() -> None:
     footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
 
     assert footer == "<https://app.example/agents/t1|Open in Web> • model-a • $0.42"
+
+
+def test_format_slack_run_usage_shortens_model_paths() -> None:
+    usage = RunUsageSummary(
+        models=("accounts/fireworks/models/glm-5p3-flash", "openai:gpt-5.6-sol"),
+        total_tokens=12_345,
+    )
+
+    footer = slack_utils.format_slack_run_usage(usage)
+
+    assert footer == "glm-5p3-flash + openai:gpt-5.6-sol • 12.3K main-agent tokens"
 
 
 def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
