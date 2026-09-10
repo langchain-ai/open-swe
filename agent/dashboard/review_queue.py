@@ -252,9 +252,26 @@ class _DetailsCommits(BaseModel):
     nodes: list[_DetailsCommitNode] = Field(default_factory=list)
 
 
+class _RefUpdateRule(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    required_status_check_contexts: list[str] | None = Field(
+        default=None, alias="requiredStatusCheckContexts"
+    )
+
+
+class _DetailsBaseRef(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    ref_update_rule: _RefUpdateRule | None = Field(default=None, alias="refUpdateRule")
+
+
 class _DetailsPullRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     files: _SearchFiles = Field(default_factory=_SearchFiles)
     commits: _DetailsCommits = Field(default_factory=_DetailsCommits)
+    base_ref: _DetailsBaseRef | None = Field(default=None, alias="baseRef")
 
 
 class _DetailsRepository(BaseModel):
@@ -420,9 +437,18 @@ def _context_failed(context: _CheckContext) -> bool:
 class _HeadChecks(NamedTuple):
     contexts: list[_CheckContext]
     truncated: bool
+    required_names: list[str]
 
     def required_pass(self) -> bool:
         if self.truncated:
+            return False
+        reported: dict[str, bool] = {}
+        for context in self.contexts:
+            name = context.name or context.context
+            reported[name] = reported.get(name, True) and _context_passed(context)
+        # A protected name with no context yet is not a pass; the workflow may
+        # simply not have created its check run.
+        if not all(reported.get(name, False) for name in self.required_names):
             return False
         return all(_context_passed(context) for context in self.contexts if context.is_required)
 
@@ -432,14 +458,21 @@ class _HeadChecks(NamedTuple):
         )
 
 
+def _required_names(details: _DetailsPullRequest | None) -> list[str]:
+    base_ref = details.base_ref if details is not None else None
+    rule = base_ref.ref_update_rule if base_ref is not None else None
+    return list(rule.required_status_check_contexts or []) if rule is not None else []
+
+
 def _head_checks(details: _DetailsPullRequest | None) -> _HeadChecks:
+    required = _required_names(details)
     head = details.commits.nodes[0] if details and details.commits.nodes else None
     commit = head.commit if head is not None else None
     rollup = commit.status_check_rollup if commit is not None else None
     contexts = rollup.contexts if rollup is not None else None
     if contexts is None:
-        return _HeadChecks([], False)
-    return _HeadChecks(contexts.nodes, contexts.total_count > _CONTEXT_PAGE_SIZE)
+        return _HeadChecks([], False, required)
+    return _HeadChecks(contexts.nodes, contexts.total_count > _CONTEXT_PAGE_SIZE, required)
 
 
 def _matched_paths(files: _SearchFiles, paths: list[str]) -> list[str]:
@@ -489,7 +522,8 @@ def _fetch_failed(login: str, phase: str, count: int) -> HTTPException:
 
 def _contexts_selection(index: int) -> str:
     return (
-        "commits(last: 1) { nodes { commit { statusCheckRollup { state"
+        "baseRef { refUpdateRule { requiredStatusCheckContexts } }"
+        " commits(last: 1) { nodes { commit { statusCheckRollup { state"
         f" contexts(first: {_CONTEXT_PAGE_SIZE}) {{ totalCount nodes {{ __typename"
         f" ... on CheckRun {{ name status conclusion"
         f" isRequired(pullRequestNumber: $n{index}) }}"

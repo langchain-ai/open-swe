@@ -62,6 +62,7 @@ def _pull(
     more_file_pages: list[list[str]] | None = None,
     contexts: list[dict[str, Any]] | None = None,
     total_contexts: int | None = None,
+    required_contexts: list[str] | None = None,
 ) -> dict[str, Any]:
     paths = file_paths if file_paths is not None else [f"file{number}.py"]
     pages = more_file_pages or []
@@ -87,6 +88,7 @@ def _pull(
             "totalCount": total_contexts if total_contexts is not None else len(nodes),
             "nodes": nodes,
         },
+        "required_contexts": required_contexts,
         "repository": {"nameWithOwner": repo},
         "commits": {
             "nodes": [{"commit": {"statusCheckRollup": {"state": rollup} if has_rollup else None}}]
@@ -132,6 +134,7 @@ def _patch_github(
             "files": node.pop("files", None),
             "contexts": node.pop("contexts", None),
             "more_files": node.pop("more_files", []),
+            "required_contexts": node.pop("required_contexts", None),
         }
         for node in _search_nodes(payload)
         if "files" in node or "contexts" in node
@@ -187,6 +190,13 @@ def _patch_github(
             pull_request: dict[str, Any] = {}
             if node["files"] is not None and "files(first:" in selection:
                 pull_request["files"] = node["files"]
+            if "baseRef" in selection:
+                names = node["required_contexts"]
+                pull_request["baseRef"] = {
+                    "refUpdateRule": None
+                    if names is None
+                    else {"requiredStatusCheckContexts": names}
+                }
             if node["contexts"] is not None and "statusCheckRollup" in selection:
                 pull_request["commits"] = {
                     "nodes": [
@@ -738,6 +748,48 @@ async def test_required_mode_hides_failing_pending_and_unknown_required_checks(
     assert [item.number for item in payload.items] == [5]
 
 
+async def test_required_mode_honours_branch_protection_contexts(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    await set_review_queue_repos("octocat", _repos("acme/alpha"))
+    _patch_github(
+        monkeypatch,
+        {
+            "data": {
+                "search": {
+                    "nodes": [
+                        _pull("acme/alpha", 1, required_contexts=["ci"], contexts=[]),
+                        _pull(
+                            "acme/alpha",
+                            2,
+                            required_contexts=["ci"],
+                            contexts=[_check("ci", "SUCCESS", required=False)],
+                        ),
+                        _pull("acme/alpha", 3, contexts=[_check("ci", "SUCCESS", required=True)]),
+                        _pull(
+                            "acme/alpha",
+                            4,
+                            required_contexts=["ci"],
+                            contexts=[_check("ci", None, required=False, status="IN_PROGRESS")],
+                        ),
+                        _pull(
+                            "acme/alpha",
+                            5,
+                            required_contexts=["legacy"],
+                            contexts=[_status("legacy", "SUCCESS", required=False)],
+                        ),
+                    ]
+                }
+            }
+        },
+        [],
+    )
+
+    payload = await get_review_queue("octocat")
+
+    assert [item.number for item in payload.items] == [2, 3, 5]
+
+
 async def test_all_mode_filters_on_the_rollup_without_a_details_query(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
@@ -848,8 +900,10 @@ async def test_details_query_selects_only_what_each_repo_needs(
     alpha, beta, gamma = (_alias_selection(query, index) for index in range(3))
     assert "files(first: 100)" in alpha
     assert "isRequired(pullRequestNumber: $n0)" in alpha
+    assert "requiredStatusCheckContexts" in alpha
     assert "files(first: 100)" in beta
     assert "statusCheckRollup" not in beta
+    assert "requiredStatusCheckContexts" not in beta
     assert "files" not in gamma
     assert "isRequired(pullRequestNumber: $n2)" in gamma
 

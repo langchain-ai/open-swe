@@ -95,6 +95,7 @@ export type SeedPullValues = {
     conclusion?: string | null;
     required?: boolean;
   }>;
+  required_contexts?: string[];
   additions?: number;
   deletions?: number;
   files?: number;

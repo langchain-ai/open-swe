@@ -195,6 +195,12 @@ async def control_seed_pull(request: Request) -> JSONResponse:
         not isinstance(file_paths, list) or not all(isinstance(path, str) for path in file_paths)
     ):
         raise HTTPException(400, "file_paths must be a list of strings")
+    required_contexts = body.get("required_contexts")
+    if required_contexts is not None and (
+        not isinstance(required_contexts, list)
+        or not all(isinstance(name, str) for name in required_contexts)
+    ):
+        raise HTTPException(400, "required_contexts must be a list of strings")
     pull = fakes.seed_pull(
         owner,
         repo,
@@ -203,6 +209,7 @@ async def control_seed_pull(request: Request) -> JSONResponse:
         mergeable=bool(body.get("mergeable", True)),
         check_conclusion=check_conclusion,
         check_runs=check_runs,
+        required_contexts=required_contexts,
         additions=int(body.get("additions", 0)),
         deletions=int(body.get("deletions", 0)),
         files=int(body.get("files", 0)),
@@ -757,6 +764,11 @@ def _details_rollup(pr: dict[str, Any]) -> dict[str, Any] | None:
     return {**rollup, "contexts": {"totalCount": len(nodes), "nodes": nodes}}
 
 
+def _details_base_ref(pr: dict[str, Any]) -> dict[str, Any]:
+    names = pr["required_contexts"]
+    return {"refUpdateRule": {"requiredStatusCheckContexts": names} if names else None}
+
+
 def _search_node(pr: dict[str, Any]) -> dict[str, Any]:
     return {
         "number": pr["number"],
@@ -838,6 +850,7 @@ async def gh_graphql(request: Request) -> Response:
                     "commits": {
                         "nodes": [{"commit": {"statusCheckRollup": _details_rollup(pull)}}]
                     },
+                    "baseRef": _details_base_ref(pull),
                 }
             }
         return JSONResponse({"data": data})

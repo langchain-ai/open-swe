@@ -183,6 +183,13 @@ test.describe("review queue", () => {
       ],
     });
 
+    const notStarted = await seedPull(page, {
+      owner: "fakeorg",
+      repo: "demo",
+      title: "Blocked: the required check has not reported yet",
+      required_contexts: ["ci"],
+    });
+
     await page.goto("/agents/reviews?tab=queue");
     await addRepo(page, "fakeorg/demo");
 
@@ -195,10 +202,14 @@ test.describe("review queue", () => {
     const allGreenRow = page.getByTestId(
       `review-queue-row-fakeorg/demo-${allGreen}`,
     );
+    const notStartedRow = page.getByTestId(
+      `review-queue-row-fakeorg/demo-${notStarted}`,
+    );
 
     await expect(optionalRedRow).toBeVisible();
     await expect(allGreenRow).toBeVisible();
     await expect(requiredRedRow).toHaveCount(0);
+    await expect(notStartedRow).toHaveCount(0);
     await expect(
       optionalRedRow.getByTestId("review-queue-optional-failures"),
     ).toHaveText(/1 optional/);
@@ -212,11 +223,13 @@ test.describe("review queue", () => {
     await expect(optionalRedRow).toBeVisible();
     await expect(requiredRedRow).toBeVisible();
     await expect(allGreenRow).toBeVisible();
+    await expect(notStartedRow).toBeVisible();
 
     await setChecksMode(page, "fakeorg/demo", "required");
     await expect(optionalRedRow).toBeVisible();
     await expect(allGreenRow).toBeVisible();
     await expect(requiredRedRow).toHaveCount(0);
+    await expect(notStartedRow).toHaveCount(0);
   });
 
   test("surfaces the GitHub failure instead of an endless skeleton", async ({

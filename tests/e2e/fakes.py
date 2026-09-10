@@ -246,6 +246,7 @@ def create_pull(
         "mergeable_state": "clean",
         "check_runs": [],
         "statuses": [],
+        "required_contexts": [],
         "review_threads": [],
         "reviews": [],
         "review_decision": "REVIEW_REQUIRED",
@@ -278,6 +279,7 @@ def seed_pull(
     mergeable: bool = True,
     check_conclusion: str | None = None,
     check_runs: list[SeedCheckRun] | None = None,
+    required_contexts: list[str] | None = None,
     additions: int = 0,
     deletions: int = 0,
     files: int = 0,
@@ -313,6 +315,7 @@ def seed_pull(
     pull["mergeable"] = mergeable
     pull["mergeable_state"] = "clean" if mergeable else "dirty"
     pull["author"] = author
+    pull["required_contexts"] = list(required_contexts or [])
     seeded = check_runs
     if seeded is None and check_conclusion is not None:
         seeded = [SeedCheckRun(name="ci", conclusion=check_conclusion, required=True)]
