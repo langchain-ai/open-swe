@@ -18,6 +18,194 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+it.each(["form", "import"])(
+  "configures OAuth through %s and preserves saved credentials when editing",
+  async (source) => {
+    let connection: WorkspaceMCP | null = null
+    const writes: WorkspaceMCPUpdate[] = []
+    const oauth = {
+      grant_type: "client_credentials" as const,
+      token_url: "https://api.linear.app/oauth/token",
+      client_id: "test-app",
+      client_secret: "test-client-secret",
+      scope: "read,write",
+      token_endpoint_auth_method: "client_secret_post" as const,
+    }
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input).endsWith("/discover"))
+        return new Response(
+          JSON.stringify([{ name: "search", description: "Search" }])
+        )
+      if (init?.method === "PUT") {
+        const update = JSON.parse(String(init.body)) as WorkspaceMCPUpdate
+        writes.push(update)
+        const publicOAuth = update.oauth ? { ...update.oauth } : null
+        if (publicOAuth) delete publicOAuth.client_secret
+        connection = {
+          ...update,
+          oauth: publicOAuth,
+          header_names: [],
+          revision: "v1",
+          updated_at: "now",
+        }
+        return new Response(JSON.stringify(connection))
+      }
+      return new Response(JSON.stringify(connection ? [connection] : []))
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <WorkspaceMCPSection />
+      </QueryClientProvider>
+    )
+    const add = screen.getByRole("button", { name: "Add MCP server" })
+    await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false))
+    if (source === "import") {
+      fireEvent.click(screen.getByRole("button", { name: "Import JSON" }))
+      fireEvent.change(screen.getByLabelText("MCP configuration JSON"), {
+        target: {
+          value: JSON.stringify({
+            mcpServers: {
+              linear: { url: "https://mcp.linear.app/mcp", oauth },
+            },
+          }),
+        },
+      })
+      fireEvent.click(
+        screen.getByRole("button", { name: "Review connections" })
+      )
+    } else {
+      fireEvent.click(add)
+      fireEvent.change(screen.getByLabelText("Connection name"), {
+        target: { value: "linear" },
+      })
+      fireEvent.change(screen.getByLabelText("Server URL"), {
+        target: { value: "https://mcp.linear.app/mcp" },
+      })
+      fireEvent.change(screen.getByLabelText("Authentication"), {
+        target: { value: "oauth" },
+      })
+      fireEvent.change(screen.getByLabelText("Token URL"), {
+        target: { value: oauth.token_url },
+      })
+      fireEvent.change(screen.getByLabelText("Client ID"), {
+        target: { value: oauth.client_id },
+      })
+      fireEvent.change(screen.getByLabelText("Client secret"), {
+        target: { value: oauth.client_secret },
+      })
+      fireEvent.change(screen.getByLabelText("Scopes"), {
+        target: { value: oauth.scope },
+      })
+    }
+    expect(
+      (screen.getByLabelText("Client secret") as HTMLInputElement).type
+    ).toBe("password")
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save and discover tools" })
+    )
+    await screen.findByRole("checkbox", { name: "Allow search" })
+    expect(writes[0]?.oauth).toEqual(oauth)
+    expect(screen.queryByDisplayValue("test-client-secret")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
+    await screen.findByRole("button", { name: "Edit linear" })
+    expect(writes[1]?.oauth?.client_secret).toBeUndefined()
+    fireEvent.click(screen.getByRole("button", { name: "Import JSON" }))
+    fireEvent.change(screen.getByLabelText("MCP configuration JSON"), {
+      target: {
+        value: JSON.stringify({
+          mcpServers: { linear: { url: "https://mcp.linear.app/mcp" } },
+        }),
+      },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Review connections" }))
+    expect((screen.getByLabelText("Client ID") as HTMLInputElement).value).toBe(
+      "test-app"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
+    await screen.findByRole("button", { name: "Edit linear" })
+    expect(writes[2]?.oauth?.client_id).toBe("test-app")
+    expect(writes[2]?.oauth?.client_secret).toBeUndefined()
+    fireEvent.click(screen.getByRole("button", { name: "Edit linear" }))
+    expect((screen.getByLabelText("Client ID") as HTMLInputElement).value).toBe(
+      "test-app"
+    )
+    fireEvent.change(screen.getByLabelText("Authentication"), {
+      target: { value: "headers" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
+    await screen.findByRole("button", { name: "Add MCP server" })
+    expect(writes[3]?.oauth).toBeNull()
+    client.clear()
+  }
+)
+
+it.each([
+  ["Server URL", "https://other.example/mcp"],
+  ["Token URL", "https://other.example/token"],
+  ["Client ID", "other-app"],
+])("requires a replacement secret when %s changes", async (label, value) => {
+  const connection: WorkspaceMCP = {
+    name: "linear",
+    url: "https://mcp.linear.app/mcp",
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: ["search"],
+    header_names: [],
+    oauth: {
+      token_url: "https://api.linear.app/oauth/token",
+      client_id: "test-app",
+    },
+    revision: "v1",
+    updated_at: "now",
+  }
+  const requests: WorkspaceMCPUpdate[] = []
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (init?.body) requests.push(JSON.parse(String(init.body)))
+    if (String(input).endsWith("/discover"))
+      return new Response(JSON.stringify([]))
+    return new Response(
+      JSON.stringify(init?.method === "PUT" ? connection : [connection])
+    )
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <WorkspaceMCPSection />
+    </QueryClientProvider>
+  )
+  fireEvent.click(await screen.findByRole("button", { name: "Edit linear" }))
+  const identity = screen.getByLabelText(label) as HTMLInputElement
+  const original = identity.value
+  const secret = screen.getByLabelText("Client secret") as HTMLInputElement
+  expect(secret.checkValidity()).toBe(true)
+  fireEvent.change(identity, { target: { value } })
+  expect(secret.validity.valueMissing).toBe(true)
+  fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save and discover tools" })
+  )
+  expect(requests).toEqual([])
+  fireEvent.change(identity, { target: { value: original } })
+  expect(secret.checkValidity()).toBe(true)
+  fireEvent.change(identity, { target: { value } })
+  fireEvent.change(secret, { target: { value: "test-replacement-secret" } })
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save and discover tools" })
+  )
+  await waitFor(() => expect(requests).toHaveLength(2))
+  expect(requests.map((request) => request.oauth?.client_secret)).toEqual([
+    "test-replacement-secret",
+    "test-replacement-secret",
+  ])
+  await waitFor(() => expect(secret.value).toBe(""))
+  client.clear()
+})
+
 it("validates the connection name before saving and discovering tools", async () => {
   const fetchMock = vi
     .spyOn(globalThis, "fetch")

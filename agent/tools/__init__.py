@@ -19,13 +19,6 @@ _TOOL_MODULES = {
     "get_thread": ".threads",
     "http_request": ".http_request",
     "linear_comment": "agent.linear.tools.comment",
-    "linear_create_issue": "agent.linear.tools.create_issue",
-    "linear_delete_issue": "agent.linear.tools.delete_issue",
-    "linear_get_issue": "agent.linear.tools.get_issue",
-    "linear_get_issue_comments": "agent.linear.tools.get_issue_comments",
-    "linear_list_teams": "agent.linear.tools.list_teams",
-    "linear_search_issues": "agent.linear.tools.search_issues",
-    "linear_update_issue": "agent.linear.tools.update_issue",
     "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
@@ -34,6 +27,7 @@ _TOOL_MODULES = {
     "manage_baby_sit": ".manage_baby_sit",
     "manage_code_channel": "agent.slack.tools.manage_code_channel",
     "manage_thread": ".threads",
+    "mark_question_answered": ".mark_question_answered",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
@@ -85,13 +79,6 @@ __all__ = [
     "get_thread",
     "http_request",
     "linear_comment",
-    "linear_create_issue",
-    "linear_delete_issue",
-    "linear_get_issue",
-    "linear_get_issue_comments",
-    "linear_list_teams",
-    "linear_search_issues",
-    "linear_update_issue",
     "list_automations",
     "list_environments",
     "list_findings",
@@ -100,6 +87,7 @@ __all__ = [
     "manage_baby_sit",
     "manage_code_channel",
     "manage_thread",
+    "mark_question_answered",
     "notify_automation_channel",
     "open_pull_request",
     "output_iframe",
@@ -138,13 +126,6 @@ if TYPE_CHECKING:
     from agent.github.tools.read_repo_file import read_repo_file
     from agent.github.tools.search_repo_code import search_repo_code
     from agent.linear.tools.comment import linear_comment
-    from agent.linear.tools.create_issue import linear_create_issue
-    from agent.linear.tools.delete_issue import linear_delete_issue
-    from agent.linear.tools.get_issue import linear_get_issue
-    from agent.linear.tools.get_issue_comments import linear_get_issue_comments
-    from agent.linear.tools.list_teams import linear_list_teams
-    from agent.linear.tools.search_issues import linear_search_issues
-    from agent.linear.tools.update_issue import linear_update_issue
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel
@@ -178,6 +159,7 @@ if TYPE_CHECKING:
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit
+    from agent.tools.mark_question_answered import mark_question_answered
     from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill

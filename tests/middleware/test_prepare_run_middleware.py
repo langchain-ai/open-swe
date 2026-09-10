@@ -93,14 +93,7 @@ async def test_prepare_prompt_injection():
         },
     )()
     await middleware.awrap_model_call(cast(ModelRequest[None], request), handler)
-    prompt = ElementTree.fromstring(seen["system_prompt"])
-    assert prompt.tag == "system-instructions"
-    entity = prompt.find("dynamic-context")
-    message = prompt.find("input-message")
-    assert entity is not None
-    assert message is not None
-    assert entity.attrib["id"] == "system:open-swe"
-    assert message.findtext("content") == "prepared prompt"
+    assert seen["system_prompt"] == "prepared prompt"
 
 
 def _sender_message(sender_id: str, text: str = "ship it") -> HumanMessage:

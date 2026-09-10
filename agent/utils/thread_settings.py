@@ -29,6 +29,7 @@ class ThreadSettings(TypedDict, total=False):
     effort: str | None
     subagent_model_id: str
     subagent_effort: str | None
+    model_routing_enabled: bool
     repo_instructions: str | None
 
 

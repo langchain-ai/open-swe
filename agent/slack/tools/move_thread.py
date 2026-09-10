@@ -73,7 +73,7 @@ async def slack_move_thread(
     message: str,
     channel_id: str | None = None,
 ) -> dict[str, Any]:
-    """Move the current Open SWE thread to a new Slack thread."""
+    """Implement the `slack_move_thread` tool."""
     config = get_config()
     configurable = config.get("configurable", {})
     thread_id = configurable.get("thread_id")
