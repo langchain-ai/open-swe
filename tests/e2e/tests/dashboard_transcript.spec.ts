@@ -277,6 +277,12 @@ test.describe("transcript rendering", () => {
               id: "legacy-e2e",
               content: "Legacy stays visible",
             },
+            {
+              type: "ai",
+              id: "live-compaction-summary",
+              content: "SESSION INTENT: internal context must stay hidden",
+              additional_kwargs: { lc_source: "summarization" },
+            },
             ...messages,
           ],
         };
@@ -295,6 +301,9 @@ test.describe("transcript rendering", () => {
     await systemChip.click();
     await expect(page.getByText("Automation checks CI")).toBeVisible();
     await expect(page.getByText("Legacy stays visible")).toBeVisible();
+    await expect(
+      page.getByText("SESSION INTENT: internal context must stay hidden"),
+    ).toHaveCount(0);
     await expect(page.getByText("github:alice", { exact: false })).toHaveCount(
       0,
     );
