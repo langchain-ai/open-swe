@@ -40,7 +40,7 @@ async def api(monkeypatch, fake_store):
         yield SimpleNamespace(client=client, metadata=metadata, session=session, quiet=quiet)
 
 
-@pytest.mark.parametrize("rating", ["bad", "good", "other"])
+@pytest.mark.parametrize("rating", ["bad", "good"])
 async def test_submit_saves_rating_and_comment_and_keeps_first_response(api, rating):
     response = await api.client.post(
         "/dashboard/api/threads/t1/feedback",
@@ -103,6 +103,8 @@ async def test_private_thread_owner_can_give_feedback(api):
     "payload",
     [
         {"rating": "other", "comment": "  "},
+        {"rating": "other", "comment": "Details"},
+        {"action": "comment", "comment": "  "},
         {"rating": "great"},
         {},
         {"action": "submit"},
@@ -114,6 +116,41 @@ async def test_invalid_feedback_is_not_saved(api, payload):
     response = await api.client.post("/dashboard/api/threads/t1/feedback", json=payload)
     assert response.status_code == 422
     assert (await api.client.get("/dashboard/api/threads/t1/feedback")).json()["status"] == "ready"
+
+
+async def test_bad_rating_is_saved_before_optional_comment(api):
+    rated = await api.client.post("/dashboard/api/threads/t1/feedback", json={"rating": "bad"})
+    assert rated.json() == {"status": "completed", "rating": "bad", "comment": ""}
+    commented = await api.client.post(
+        "/dashboard/api/threads/t1/feedback",
+        json={"action": "comment", "comment": "  The fix did not work.  "},
+    )
+    assert commented.status_code == 200
+    assert commented.json() == {
+        "status": "completed",
+        "rating": "bad",
+        "comment": "The fix did not work.",
+    }
+    duplicate = await api.client.post(
+        "/dashboard/api/threads/t1/feedback",
+        json={"action": "comment", "comment": "Overwrite"},
+    )
+    assert duplicate.json() == commented.json()
+
+
+@pytest.mark.parametrize("state", ["ready", "good", "dismissed"])
+async def test_comment_requires_completed_bad_rating(api, state):
+    if state != "ready":
+        await api.client.post(
+            "/dashboard/api/threads/t1/feedback",
+            json={"rating": "good"} if state == "good" else {"action": "dismiss"},
+        )
+    before = (await api.client.get("/dashboard/api/threads/t1/feedback")).json()
+    response = await api.client.post(
+        "/dashboard/api/threads/t1/feedback", json={"action": "comment", "comment": "Details"}
+    )
+    assert response.status_code == 409
+    assert (await api.client.get("/dashboard/api/threads/t1/feedback")).json() == before
 
 
 @pytest.mark.parametrize("payload", [{"rating": "good"}, {"action": "dismiss"}])

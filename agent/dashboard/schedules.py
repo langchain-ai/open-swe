@@ -18,6 +18,7 @@ from agent.dashboard.threads.access import agent_version_metadata, resolve_run_e
 from agent.dashboard.user_mappings import slack_id_for_login
 from agent.dispatch import create_durable_run
 from agent.input_messages import InputMessageContext, build_run_input
+from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import render_prompt
 from agent.slack.client import (
     bind_slack_thread_id,
@@ -503,15 +504,17 @@ async def _agent_run_config(
     test_run: bool = False,
     admin_thread: bool = False,
 ) -> dict[str, Any]:
-    configurable: dict[str, Any] = {
-        "thread_id": thread_id,
-        "source": "schedule",
-        "github_login": record.get("created_by"),
-        "user_email": record.get("user_email"),
-        "schedule_id": record["id"],
-        "schedule_test": test_run,
-        "prepare_run_id": str(uuid.uuid4()),
-    }
+    configurable = with_invocation_id(
+        {
+            "thread_id": thread_id,
+            "source": "schedule",
+            "github_login": record.get("created_by"),
+            "user_email": record.get("user_email"),
+            "schedule_id": record["id"],
+            "schedule_test": test_run,
+        },
+        new_invocation_id(),
+    )
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     if repo and repo.get("owner") and repo.get("name"):
         configurable["repo"] = repo

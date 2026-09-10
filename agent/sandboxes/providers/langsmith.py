@@ -442,6 +442,40 @@ def get_async_sandbox_client() -> AsyncSandboxClient:
     )
 
 
+async def capture_snapshot_with_tag(
+    client: AsyncSandboxClient,
+    sandbox_id: str,
+    name: str,
+    tag: str,
+    *,
+    timeout: int,
+) -> Any:
+    """Capture ``sandbox_id`` as ``name:tag``.
+
+    Snapshots are Docker-style: ``name:tag`` is a mutable pointer at immutable
+    content, so re-capturing a tag moves it rather than colliding. The Python SDK
+    has no ``tag`` parameter yet, so the field is injected into the capture body
+    the same way ``_install_create_extra_fields`` injects sandbox-create fields.
+    Drop this for a plain ``capture_snapshot(..., tag=...)`` once
+    langchain-ai/langsmith-sdk#3447 ships.
+    """
+    # Reaching into the SDK's transport is the whole mechanism: there is no public
+    # seam for a field the client does not model.
+    original_post = client._http.post  # noqa: SLF001
+
+    async def post_with_tag(url: Any, *args: Any, **kwargs: Any) -> Any:
+        payload = kwargs.get("json")
+        if str(url).endswith("/snapshot") and isinstance(payload, dict):
+            kwargs["json"] = {**payload, "tag": tag}
+        return await original_post(url, *args, **kwargs)
+
+    client._http.post = post_with_tag  # noqa: SLF001 # ty: ignore[invalid-assignment]
+    try:
+        return await client.capture_snapshot(sandbox_id, name, timeout=timeout)
+    finally:
+        client._http.post = original_post  # noqa: SLF001 # ty: ignore[invalid-assignment]
+
+
 async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
     client = get_async_sandbox_client()
     try:

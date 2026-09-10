@@ -36,6 +36,7 @@ from agent.dashboard.workflow_approval import (
     workflow_push_approval_responses,
 )
 from agent.input_messages import input_message_text, message_sender_id
+from agent.invocation import resolve_invocation_id
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.utils.dashboard_links import (
@@ -493,21 +494,25 @@ def _run_history(runs: list[Any]) -> dict[str, Any]:
     }
 
 
-def _run_prepare_id(run: Any) -> str | None:
+def _run_invocation_id(run: Any) -> str | None:
     metadata = _value(run, "metadata")
-    value = metadata.get("prepare_run_id") if isinstance(metadata, Mapping) else None
-    return value if isinstance(value, str) and value else None
+    if not isinstance(metadata, Mapping):
+        return None
+    try:
+        return resolve_invocation_id(metadata)
+    except ValueError:
+        return None
 
 
 async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
     run_detail = _run_detail(run)
     if run_detail and run_detail.get("status") in {"pending", "running"}:
         return {"status": "pending", "total_usd": None}
-    prepare_run_id = _run_prepare_id(run)
-    if not prepare_run_id:
+    invocation_id = _run_invocation_id(run)
+    if not invocation_id:
         return {"status": "unavailable", "total_usd": None}
     try:
-        snapshot = await get_langsmith_thread_cost(thread_id, prepare_run_id)
+        snapshot = await get_langsmith_thread_cost(thread_id, invocation_id)
     except LangSmithCostUnavailable:
         return {"status": "unavailable", "total_usd": None}
     except Exception:
