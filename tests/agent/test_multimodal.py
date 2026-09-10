@@ -217,7 +217,7 @@ async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) 
             status_code=200,
             url=url,
             headers={"Content-Type": "image/png"},
-            content=b"png",
+            content=b"\x89PNG\r\n\x1a\npng",
         )
 
     client = FakeImageClient(responder)
@@ -226,7 +226,7 @@ async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) 
         "https://example.com/image.png", cast(httpx2.AsyncClient, client)
     )
 
-    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert result == {"base64": "iVBORw0KGgpwbmc=", "mime_type": "image/png"}
     assert [urlparse(call["url"]).hostname for call in client.calls] == [
         "93.184.216.34",
         "93.184.216.35",
@@ -235,7 +235,7 @@ async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) 
 
 async def test_fetch_image_block_accepts_image_at_size_limit(monkeypatch: Any) -> None:
     _patch_image_dns(monkeypatch)
-    monkeypatch.setattr(multimodal, "_MAX_IMAGE_BYTES", 3)
+    monkeypatch.setattr(multimodal, "_MAX_IMAGE_BYTES", 12)
     monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
@@ -243,14 +243,14 @@ async def test_fetch_image_block_accepts_image_at_size_limit(monkeypatch: Any) -
             status_code=200,
             url=url,
             headers={"Content-Type": "image/png"},
-            content=b"png",
+            content=b"\x89PNG\r\n\x1a\npng",
         )
 
     result = await fetch_image_block(
         "https://example.com/image.png", cast(httpx2.AsyncClient, FakeImageClient(responder))
     )
 
-    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert result == {"base64": "iVBORw0KGgpwbmc=", "mime_type": "image/png"}
 
 
 async def test_fetch_image_block_warns_about_image_above_size_limit(monkeypatch: Any) -> None:
@@ -263,7 +263,7 @@ async def test_fetch_image_block_warns_about_image_above_size_limit(monkeypatch:
             status_code=200,
             url=url,
             headers={"Content-Type": "image/png"},
-            content=b"large",
+            content=b"\x89PNG\r\n\x1a\nlarge",
         )
 
     result = await fetch_image_block(
@@ -275,6 +275,24 @@ async def test_fetch_image_block_warns_about_image_above_size_limit(monkeypatch:
     assert result["text"] == (
         "An attached image was skipped because it exceeded the 10 MiB size limit."
     )
+
+
+async def test_fetch_image_block_skips_json_body_labeled_as_image(monkeypatch: Any) -> None:
+    _patch_image_dns(monkeypatch)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b'{"detail": "Not Found"}',
+        )
+
+    result = await fetch_image_block(
+        "https://example.com/image.png", cast(httpx2.AsyncClient, FakeImageClient(responder))
+    )
+
+    assert result is None
 
 
 async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
@@ -296,7 +314,7 @@ async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
             status_code=200,
             url=url,
             headers={"Content-Type": "image/png"},
-            content=b"png",
+            content=b"\x89PNG\r\n\x1a\npng",
         )
 
     client = FakeImageClient(responder)
@@ -305,7 +323,7 @@ async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
         "https://files.slack.com/image.png", cast(httpx2.AsyncClient, client)
     )
 
-    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert result == {"base64": "iVBORw0KGgpwbmc=", "mime_type": "image/png"}
     assert len(client.calls) == 2
     assert client.calls[0]["headers"]["Authorization"] == "Bearer test-slack-token"
     assert "Authorization" not in client.calls[1]["headers"]
@@ -330,7 +348,7 @@ async def test_fetch_image_block_does_not_add_slack_auth_after_untrusted_redirec
             status_code=200,
             url=url,
             headers={"Content-Type": "image/png"},
-            content=b"png",
+            content=b"\x89PNG\r\n\x1a\npng",
         )
 
     client = FakeImageClient(responder)
@@ -339,7 +357,7 @@ async def test_fetch_image_block_does_not_add_slack_auth_after_untrusted_redirec
         "https://example.com/start.png", cast(httpx2.AsyncClient, client)
     )
 
-    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert result == {"base64": "iVBORw0KGgpwbmc=", "mime_type": "image/png"}
     assert len(client.calls) == 2
     assert all("Authorization" not in call["headers"] for call in client.calls)
 
@@ -360,7 +378,7 @@ async def test_fetch_image_block_keeps_auth_within_slack_host_family(monkeypatch
             status_code=200,
             url=url,
             headers={"Content-Type": "image/png"},
-            content=b"png",
+            content=b"\x89PNG\r\n\x1a\npng",
         )
 
     client = FakeImageClient(responder)
@@ -369,7 +387,7 @@ async def test_fetch_image_block_keeps_auth_within_slack_host_family(monkeypatch
         "https://files.slack.com/image.png", cast(httpx2.AsyncClient, client)
     )
 
-    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert result == {"base64": "iVBORw0KGgpwbmc=", "mime_type": "image/png"}
     assert len(client.calls) == 2
     assert all(
         call["headers"]["Authorization"] == "Bearer test-slack-token" for call in client.calls

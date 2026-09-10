@@ -2,7 +2,6 @@
 
 import base64
 import logging
-import mimetypes
 import re
 from urllib.parse import urlparse
 
@@ -20,6 +19,25 @@ from agent.utils.url_safety import request_with_safe_redirects
 logger = logging.getLogger(__name__)
 
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+# Sniffed from actual bytes; a response can lie about its Content-Type (e.g. a
+# JSON error body labeled image/png), and providers reject impostor payloads.
+_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def _sniff_image_type(data: bytes) -> str | None:
+    for magic, mime in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
 
 IMAGE_MARKDOWN_RE = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+)\)")
 IMAGE_URL_RE = re.compile(
@@ -105,22 +123,19 @@ async def fetch_image_block(
         if response is None:
             return None
         response.raise_for_status()
-        content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
-        if not content_type:
-            guessed, _ = mimetypes.guess_type(image_url)
-            if not guessed:
-                logger.warning(
-                    "Could not determine content type for %s; skipping image",
-                    image_url,
-                )
-                return None
-            content_type = guessed
+        sniffed = _sniff_image_type(response.content)
+        if sniffed is None:
+            logger.warning(
+                "Response for %s is not a decodable image; skipping",
+                image_url,
+            )
+            return None
 
         supported_types = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-        if content_type not in supported_types:
+        if sniffed not in supported_types:
             logger.warning(
                 "Unsupported content type '%s' for %s; skipping image",
-                content_type,
+                sniffed,
                 image_url,
             )
             return None
@@ -138,10 +153,10 @@ async def fetch_image_block(
         logger.info(
             "Fetched image %s (%s, %d bytes)",
             image_url,
-            content_type,
+            sniffed,
             len(response.content),
         )
-        return create_image_block(base64=encoded, mime_type=content_type)
+        return create_image_block(base64=encoded, mime_type=sniffed)
     except Exception:
         logger.exception("Failed to fetch image from %s", image_url)
         return None
