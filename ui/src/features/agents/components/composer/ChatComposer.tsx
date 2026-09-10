@@ -507,7 +507,13 @@ export const ChatComposer = memo(function ChatComposer({
       if (!trigger) return
 
       if (item.type === "slash-command" && item.command === "offload") {
-        applyPrompt("/offload ", 9)
+        const next = replaceTextRange(
+          value,
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          "/offload "
+        )
+        applyPrompt(next.text, next.cursor)
         return
       }
 

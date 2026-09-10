@@ -83,7 +83,7 @@ async def test_automatic_completion_precedes_handler_and_suppresses_tokens(
     middleware._lc_helper.keep = ("messages", 2)
     middleware._lc_helper._trigger_clauses = [{"messages": 4}]
     if not suppress:
-        middleware.model.tags = [tag for tag in middleware.model.tags if tag != "nostream"]
+        middleware.model.tags = [tag for tag in (middleware.model.tags or []) if tag != "nostream"]
     events = []
     original_status = middleware._status
 

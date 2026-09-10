@@ -10,6 +10,7 @@ from deepagents.middleware.summarization import (
     compute_summarization_defaults,
 )
 from langchain.agents.middleware.types import (
+    AgentState,
     ExtendedModelResponse,
     ModelRequest,
     ModelResponse,
@@ -93,9 +94,7 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
         return response
 
     @hook_config(can_jump_to=["end"])
-    async def abefore_model(
-        self, state: OffloadingState, runtime: Runtime
-    ) -> dict[str, Any] | None:
+    async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
         if not self.manual:
             return None
 
