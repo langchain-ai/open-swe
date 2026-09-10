@@ -799,6 +799,21 @@ async def gh_graphql(request: Request) -> Response:
             if pull["state"] == "open" and f"{pull['owner']}/{pull['repo']}".lower() in wanted
         ]
         return JSONResponse({"data": {"search": {"issueCount": len(nodes), "nodes": nodes}}})
+    if "ReviewQueueMoreFiles" in query:
+        return JSONResponse(
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "files": {
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                "nodes": [],
+                            }
+                        }
+                    }
+                }
+            }
+        )
     if "ReviewQueueDetails" in query:
         data: dict[str, Any] = {}
         for index in range(len(variables) // 3):
@@ -817,7 +832,7 @@ async def gh_graphql(request: Request) -> Response:
                 if pull is None
                 else {
                     "files": {
-                        "totalCount": len(pull["files"]),
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
                         "nodes": [{"path": file["filename"]} for file in pull["files"]],
                     },
                     "commits": {

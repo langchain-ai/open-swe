@@ -42,11 +42,13 @@ _MAX_REPOS = 50
 _MAX_PATHS_PER_REPO = 20
 _MAX_PATH_LENGTH = 200
 _FILE_PAGE_SIZE = 100
+_MAX_FILE_PAGES = 10
 _CONTEXT_PAGE_SIZE = 100
 _DETAILS_BATCH_SIZE = 20
 _CACHE_TTL_SECONDS = 60.0
 _CACHE_MAX_ENTRIES = 500
 _REVIEW_LOOKUP_CONCURRENCY = 10
+_MORE_FILES_CONCURRENCY = 5
 
 _PASSING_CHECK_CONCLUSIONS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 _FAILING_CHECK_CONCLUSIONS = {
@@ -73,6 +75,19 @@ query ReviewQueueSearch($q: String!) {
     } }
   }
 }
+"""
+
+_MORE_FILES_QUERY = f"""
+query ReviewQueueMoreFiles($o: String!, $r: String!, $n: Int!, $cursor: String) {{
+  repository(owner:$o, name:$r) {{
+    pullRequest(number:$n) {{
+      files(first: {_FILE_PAGE_SIZE}, after: $cursor) {{
+        pageInfo {{ hasNextPage endCursor }}
+        nodes {{ path }}
+      }}
+    }}
+  }}
+}}
 """
 
 ReviewDecision = Literal["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"]
@@ -102,7 +117,6 @@ class ReviewQueueItem(BaseModel):
     review_decision: ReviewDecision | None = None
     updated_at: str
     matched_paths: list[str] = Field(default_factory=list)
-    files_truncated: bool = False
     optional_failures: int = 0
     ai_review: ReviewQueueAiReview | None = None
 
@@ -150,10 +164,17 @@ class _SearchFile(BaseModel):
     path: str = ""
 
 
+class _PageInfo(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    has_next_page: bool = Field(default=False, alias="hasNextPage")
+    end_cursor: str | None = Field(default=None, alias="endCursor")
+
+
 class _SearchFiles(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    total_count: int = Field(default=0, alias="totalCount")
+    page_info: _PageInfo = Field(default_factory=_PageInfo, alias="pageInfo")
     nodes: list[_SearchFile] = Field(default_factory=list)
 
 
@@ -247,6 +268,15 @@ class _DetailsResponse(BaseModel):
     errors: list[Any] | None = None
 
 
+class _MoreFilesData(BaseModel):
+    repository: _DetailsRepository | None = None
+
+
+class _MoreFilesResponse(BaseModel):
+    data: _MoreFilesData | None = None
+    errors: list[Any] | None = None
+
+
 class _ReadyQueue(BaseModel):
     items: list[ReviewQueueItem] = Field(default_factory=list)
     total_open: int = 0
@@ -261,6 +291,23 @@ class _PullNeed(NamedTuple):
     number: int
     files: bool
     contexts: bool
+
+
+class _MoreFiles(NamedTuple):
+    """A PR whose first page of changed files matched no configured prefix."""
+
+    owner: str
+    repo: str
+    number: int
+    paths: list[str]
+    cursor: str | None
+
+
+class _Deferred(NamedTuple):
+    slot: int
+    pull: _SearchPullRequest
+    optional_failures: int
+    more: _MoreFiles
 
 
 _CacheKey = tuple[str, tuple[tuple[str, tuple[str, ...], str], ...]]
@@ -395,27 +442,19 @@ def _head_checks(details: _DetailsPullRequest | None) -> _HeadChecks:
     return _HeadChecks(contexts.nodes, contexts.total_count > _CONTEXT_PAGE_SIZE)
 
 
-def _path_match(files: _SearchFiles, paths: list[str]) -> tuple[list[str], bool] | None:
-    """The configured prefixes this PR touches, or ``None`` when it touches none."""
-    if not paths:
-        return [], False
+def _matched_paths(files: _SearchFiles, paths: list[str]) -> list[str]:
+    """The configured prefixes the given page of changed files touches."""
     changed = [node.path for node in files.nodes]
-    matched = [
+    return [
         path
         for path in paths
         if any(file == path or file.startswith(f"{path}/") for file in changed)
     ]
-    if matched:
-        return matched, False
-    if files.total_count > _FILE_PAGE_SIZE:
-        return [], True
-    return None
 
 
 def _to_item(
     pull: _SearchPullRequest,
     matched_paths: list[str],
-    files_truncated: bool,
     optional_failures: int,
 ) -> ReviewQueueItem | None:
     full_name = pull.repository.name_with_owner
@@ -436,7 +475,6 @@ def _to_item(
         review_decision=pull.review_decision,
         updated_at=pull.updated_at,
         matched_paths=matched_paths,
-        files_truncated=files_truncated,
         optional_failures=optional_failures,
     )
 
@@ -468,7 +506,10 @@ def _build_details_query(needs: Sequence[_PullNeed]) -> tuple[str, dict[str, Any
         declarations.append(f"$o{index}:String!,$r{index}:String!,$n{index}:Int!")
         fields: list[str] = []
         if need.files:
-            fields.append(f"files(first: {_FILE_PAGE_SIZE}) {{ totalCount nodes {{ path }} }}")
+            fields.append(
+                f"files(first: {_FILE_PAGE_SIZE}) {{"
+                " pageInfo { hasNextPage endCursor } nodes { path } }"
+            )
         if need.contexts:
             fields.append(_contexts_selection(index))
         selections.append(
@@ -529,6 +570,60 @@ async def _fetch_details(
     return details
 
 
+async def _match_remaining_files(
+    login: str, client: httpx2.AsyncClient, more: _MoreFiles
+) -> list[str] | None:
+    """Page past the first 100 changed files until a prefix matches, or give up."""
+    cursor = more.cursor
+    for _ in range(_MAX_FILE_PAGES):
+        if cursor is None:
+            return None
+        variables = {
+            "o": more.owner,
+            "r": more.repo,
+            "n": more.number,
+            "cursor": cursor,
+        }
+        try:
+            response = await github_request(
+                client,
+                "POST",
+                GITHUB_GRAPHQL,
+                json={"query": _MORE_FILES_QUERY, "variables": variables},
+            )
+            response.raise_for_status()
+            payload = _MoreFilesResponse.model_validate(response.json())
+        except (httpx2.HTTPError, ValueError, ValidationError) as exc:
+            raise _fetch_failed(login, "files", 1) from exc
+
+        if payload.errors or payload.data is None:
+            raise _fetch_failed(login, "files", 1)
+
+        repository = payload.data.repository
+        pull_request = repository.pull_request if repository is not None else None
+        if pull_request is None:
+            return None
+        matched = _matched_paths(pull_request.files, more.paths)
+        if matched:
+            return matched
+        page = pull_request.files.page_info
+        cursor = page.end_cursor if page.has_next_page else None
+    return None
+
+
+async def _match_all_remaining_files(
+    login: str, needs: list[_MoreFiles], token: str
+) -> list[list[str] | None]:
+    limit = asyncio.Semaphore(_MORE_FILES_CONCURRENCY)
+
+    async def one(client: httpx2.AsyncClient, more: _MoreFiles) -> list[str] | None:
+        async with limit:
+            return await _match_remaining_files(login, client, more)
+
+    async with github_client(token=token) as client:
+        return list(await asyncio.gather(*(one(client, more) for more in needs)))
+
+
 async def _search_ready_items(login: str, repos: list[ReviewQueueRepo], token: str) -> _ReadyQueue:
     query = _SEARCH_PREFIX + " ".join(f"repo:{repo.full_name}" for repo in repos)
     repos_by_name = {repo.full_name.lower(): repo for repo in repos}
@@ -571,7 +666,8 @@ async def _search_ready_items(login: str, repos: list[ReviewQueueRepo], token: s
     ]
     details = await _fetch_details(login, needs, token) if needs else {}
 
-    items: list[ReviewQueueItem] = []
+    slots: list[ReviewQueueItem | None] = []
+    deferred: list[_Deferred] = []
     for pull in candidates:
         key = _pull_key(pull)
         repo = followed(key)
@@ -579,13 +675,43 @@ async def _search_ready_items(login: str, repos: list[ReviewQueueRepo], token: s
         checks = _head_checks(detail)
         if repo.checks == "required" and not checks.required_pass():
             continue
-        match = _path_match(detail.files if detail is not None else _SearchFiles(), repo.paths)
-        if match is None:
-            continue
+        files = detail.files if detail is not None else _SearchFiles()
         optional_failures = checks.optional_failures() if repo.checks == "required" else 0
-        item = _to_item(pull, *match, optional_failures)
-        if item is not None:
-            items.append(item)
+        if not repo.paths:
+            slots.append(_to_item(pull, [], optional_failures))
+            continue
+        matched = _matched_paths(files, repo.paths)
+        if matched:
+            slots.append(_to_item(pull, matched, optional_failures))
+            continue
+        if not files.page_info.has_next_page:
+            continue
+        owner, name = pull.repository.name_with_owner.split("/", 1)
+        deferred.append(
+            _Deferred(
+                slot=len(slots),
+                pull=pull,
+                optional_failures=optional_failures,
+                more=_MoreFiles(
+                    owner=owner,
+                    repo=name,
+                    number=pull.number,
+                    paths=repo.paths,
+                    cursor=files.page_info.end_cursor,
+                ),
+            )
+        )
+        slots.append(None)
+
+    if deferred:
+        resolved = await _match_all_remaining_files(
+            login, [entry.more for entry in deferred], token
+        )
+        for entry, matched in zip(deferred, resolved, strict=True):
+            if matched:
+                slots[entry.slot] = _to_item(entry.pull, matched, entry.optional_failures)
+
+    items = [item for item in slots if item is not None]
     return _ReadyQueue(items=items, total_open=payload.data.search.issue_count)
 
 

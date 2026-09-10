@@ -524,7 +524,6 @@ export interface ReviewQueueItem {
   updated_at: string
   ai_review: ReviewQueueAiReview | null
   matched_paths: Array<string>
-  files_truncated: boolean
   optional_failures: number
 }
 

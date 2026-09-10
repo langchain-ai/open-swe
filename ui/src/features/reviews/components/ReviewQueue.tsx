@@ -31,8 +31,10 @@ import { cn, formatRelativeTime } from "@/lib/utils"
 const FULL_NAME_RE = /^[^\s/]+\/[^\s/]+$/
 const MAX_SUGGESTIONS = 50
 
-const REPOS_QUERY_KEY = ["reviewQueueRepos"] as const
-const QUEUE_QUERY_KEY = ["reviewQueue"] as const
+/** Keyed by login so one account's queue never bleeds into another in one SPA session. */
+const reposQueryKey = (login: string | null) =>
+  ["reviewQueueRepos", login] as const
+const queueQueryKey = (login: string | null) => ["reviewQueue", login] as const
 // Mirrors the `first: 100` on the backend's GitHub search.
 const QUEUE_SEARCH_LIMIT = 100
 
@@ -137,7 +139,7 @@ function ReviewQueueRepoPicker({
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key !== "Enter" || !canAddTyped) return
+            if (event.key !== "Enter" || !canAddTyped || saving) return
             event.preventDefault()
             toggle(typed)
             setText("")
@@ -156,7 +158,8 @@ function ReviewQueueRepoPicker({
                 setText("")
               }}
               data-testid="review-queue-repo-add"
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground hover:bg-sidebar-row-hover"
+              disabled={saving}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground hover:bg-sidebar-row-hover disabled:opacity-50"
             >
               <PlusIcon className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate">Add {typed}</span>
@@ -168,7 +171,8 @@ function ReviewQueueRepoPicker({
               type="button"
               onClick={() => toggle(full_name)}
               data-testid={`review-queue-repo-option-${full_name}`}
-              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground hover:bg-sidebar-row-hover"
+              disabled={saving}
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground hover:bg-sidebar-row-hover disabled:opacity-50"
             >
               <span className="truncate">{full_name}</span>
               {selected.has(full_name) && (
@@ -224,6 +228,7 @@ function ReviewQueueRepoChip({
   saving: boolean
 }) {
   const qc = useQueryClient()
+  const login = useSession().data?.login ?? null
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
   const [checks, setChecks] = useState<ReviewQueueChecksMode>(repo.checks)
@@ -236,8 +241,8 @@ function ReviewQueueRepoChip({
         )
       ),
     onSuccess: (payload: ReviewQueueReposPayload) => {
-      qc.setQueryData(REPOS_QUERY_KEY, payload)
-      void qc.invalidateQueries({ queryKey: QUEUE_QUERY_KEY })
+      qc.setQueryData(reposQueryKey(login), payload)
+      void qc.invalidateQueries({ queryKey: queueQueryKey(login) })
       setOpen(false)
     },
   })
@@ -336,10 +341,11 @@ function ReviewQueueRepoChip({
 
 export function ReviewQueue() {
   const session = useSession()
+  const login = session.data?.login ?? null
   const qc = useQueryClient()
 
   const reposQuery = useQuery({
-    queryKey: REPOS_QUERY_KEY,
+    queryKey: reposQueryKey(login),
     queryFn: api.getReviewQueueRepos,
     enabled: !!session.data,
   })
@@ -348,20 +354,21 @@ export function ReviewQueue() {
   const save = useMutation({
     mutationFn: (next: Array<ReviewQueueRepo>) => api.setReviewQueueRepos(next),
     onSuccess: (payload: ReviewQueueReposPayload) => {
-      qc.setQueryData(REPOS_QUERY_KEY, payload)
-      void qc.invalidateQueries({ queryKey: QUEUE_QUERY_KEY })
+      qc.setQueryData(reposQueryKey(login), payload)
+      void qc.invalidateQueries({ queryKey: queueQueryKey(login) })
     },
   })
 
   const queue = useQuery({
-    queryKey: QUEUE_QUERY_KEY,
+    queryKey: queueQueryKey(login),
     queryFn: api.getReviewQueue,
     enabled: !!session.data && repos.length > 0,
     refetchInterval: 60_000,
   })
 
-  const items = queue.data?.items ?? []
-  const totalOpen = queue.data?.total_open ?? 0
+  const queueData = repos.length > 0 ? queue.data : undefined
+  const items = queueData?.items ?? []
+  const totalOpen = queueData?.total_open ?? 0
 
   return (
     <div className="mt-3 space-y-3">
@@ -433,7 +440,7 @@ export function ReviewQueue() {
             {queue.error.message || "Could not load pull requests."}
           </p>
         )}
-        {repos.length > 0 && queue.data && items.length === 0 && (
+        {queueData && items.length === 0 && (
           <p
             data-testid="review-queue-no-items"
             className="px-4 py-3 text-xs text-muted-foreground"
@@ -502,14 +509,6 @@ export function ReviewQueue() {
                         {item.optional_failures} optional{" "}
                         {item.optional_failures === 1 ? "check" : "checks"}{" "}
                         failing
-                      </span>
-                    )}
-                    {item.files_truncated && (
-                      <span
-                        title="Too many files to confirm the path match"
-                        className="rounded bg-muted px-1 font-mono text-[11px] text-muted-foreground"
-                      >
-                        100+ files
                       </span>
                     )}
                   </div>

@@ -42,6 +42,12 @@ def _status(context: str, state: str, *, required: bool) -> dict[str, Any]:
     }
 
 
+def _page_info(pages: list[list[str]], taken: int) -> dict[str, Any]:
+    """``pageInfo`` after ``taken`` of the extra file pages have been served."""
+    has_next = len(pages) > taken
+    return {"hasNextPage": has_next, "endCursor": f"cursor{taken}" if has_next else None}
+
+
 def _pull(
     repo: str,
     number: int,
@@ -53,11 +59,12 @@ def _pull(
     review_decision: str | None = None,
     author: str | None = "someone",
     file_paths: list[str] | None = None,
-    total_files: int | None = None,
+    more_file_pages: list[list[str]] | None = None,
     contexts: list[dict[str, Any]] | None = None,
     total_contexts: int | None = None,
 ) -> dict[str, Any]:
     paths = file_paths if file_paths is not None else [f"file{number}.py"]
+    pages = more_file_pages or []
     nodes = contexts if contexts is not None else []
     return {
         "number": number,
@@ -72,9 +79,10 @@ def _pull(
         "changedFiles": number + 1,
         "author": {"login": author} if author else None,
         "files": {
-            "totalCount": total_files if total_files is not None else len(paths),
+            "pageInfo": _page_info(pages, 0),
             "nodes": [{"path": path} for path in paths],
         },
+        "more_files": pages,
         "contexts": {
             "totalCount": total_contexts if total_contexts is not None else len(nodes),
             "nodes": nodes,
@@ -116,12 +124,14 @@ def _patch_github(
     payload: dict[str, Any],
     calls: list[dict[str, Any]],
     details_payload: dict[str, Any] | None = None,
+    more_files_payload: dict[str, Any] | None = None,
 ) -> None:
     """Answer both review queue phases; ``files``/``contexts`` on a node feed the second one."""
     details = {
         (node["repository"]["nameWithOwner"].lower(), node["number"]): {
             "files": node.pop("files", None),
             "contexts": node.pop("contexts", None),
+            "more_files": node.pop("more_files", []),
         }
         for node in _search_nodes(payload)
         if "files" in node or "contexts" in node
@@ -139,6 +149,28 @@ def _patch_github(
 
     async def request(_client: object, _method: str, _url: str, *, json: Any, **_kwargs: object):
         calls.append(json)
+        if "ReviewQueueMoreFiles" in json["query"]:
+            if more_files_payload is not None:
+                return _Response(more_files_payload)
+            variables = json["variables"]
+            repo = f"{variables['o']}/{variables['r']}".lower()
+            node = details.get((repo, variables["n"]))
+            pages: list[list[str]] = node["more_files"] if node else []
+            taken = int(str(variables["cursor"]).removeprefix("cursor")) + 1
+            return _Response(
+                {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "files": {
+                                    "pageInfo": _page_info(pages, taken),
+                                    "nodes": [{"path": path} for path in pages[taken - 1]],
+                                }
+                            }
+                        }
+                    }
+                }
+            )
         if "ReviewQueueDetails" not in json["query"]:
             return _Response(payload)
         if details_payload is not None:
@@ -173,6 +205,18 @@ def _patch_github(
 
     monkeypatch.setattr(review_queue, "github_client", client)
     monkeypatch.setattr(review_queue, "github_request", request)
+
+
+def _more_files_requests(calls: list[dict[str, Any]]) -> list[tuple[str, int, str]]:
+    return [
+        (
+            f"{call['variables']['o']}/{call['variables']['r']}",
+            call["variables"]["n"],
+            call["variables"]["cursor"],
+        )
+        for call in calls
+        if "ReviewQueueMoreFiles" in call["query"]
+    ]
 
 
 def _details_requests(calls: list[dict[str, Any]]) -> list[list[tuple[str, int]]]:
@@ -243,7 +287,7 @@ async def test_keeps_only_ready_pulls_and_maps_fields(
     assert (first.additions, first.deletions, first.changed_files) == (10, 1, 2)
     assert first.review_decision == "REVIEW_REQUIRED"
     assert first.ai_review is None
-    assert (first.matched_paths, first.files_truncated, first.optional_failures) == ([], False, 0)
+    assert (first.matched_paths, first.optional_failures) == ([], 0)
     # A PR with no checks configured still counts as ready, and a missing author is null.
     assert second.author is None
 
@@ -482,6 +526,7 @@ async def test_path_filter_keeps_only_matching_pulls(
             ReviewQueueRepo(full_name="acme/beta"),
         ],
     )
+    calls: list[dict[str, Any]] = []
     _patch_github(
         monkeypatch,
         {
@@ -491,22 +536,125 @@ async def test_path_filter_keeps_only_matching_pulls(
                         _pull("acme/alpha", 1, file_paths=["ui/src/a.tsx", "docs/readme.md"]),
                         _pull("acme/alpha", 2, file_paths=["agent/x.py"]),
                         _pull("acme/alpha", 3, file_paths=["uix/a.tsx"]),
-                        _pull("acme/alpha", 4, file_paths=["agent/x.py"], total_files=250),
                         _pull("acme/beta", 5, file_paths=["agent/x.py"]),
                     ]
                 }
             }
         },
-        [],
+        calls,
     )
 
     payload = await get_review_queue("octocat")
 
-    assert [(item.number, item.matched_paths, item.files_truncated) for item in payload.items] == [
-        (1, ["ui", "docs/readme.md"], False),
-        (4, [], True),
-        (5, [], False),
+    assert [(item.number, item.matched_paths) for item in payload.items] == [
+        (1, ["ui", "docs/readme.md"]),
+        (5, []),
     ]
+    assert _more_files_requests(calls) == []
+
+
+async def test_a_match_on_a_later_file_page_keeps_the_pull(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    await set_review_queue_repos(
+        "octocat", [ReviewQueueRepo(full_name="acme/alpha", paths=["ui/"])]
+    )
+    calls: list[dict[str, Any]] = []
+    _patch_github(
+        monkeypatch,
+        {
+            "data": {
+                "search": {
+                    "nodes": [
+                        _pull(
+                            "acme/alpha",
+                            1,
+                            file_paths=["agent/a.py"],
+                            more_file_pages=[["agent/b.py"], ["ui/src/c.tsx"]],
+                        ),
+                        _pull("acme/alpha", 2, file_paths=["ui/src/d.tsx"]),
+                    ]
+                }
+            }
+        },
+        calls,
+    )
+
+    payload = await get_review_queue("octocat")
+
+    assert [(item.number, item.matched_paths) for item in payload.items] == [
+        (1, ["ui"]),
+        (2, ["ui"]),
+    ]
+    assert _more_files_requests(calls) == [
+        ("acme/alpha", 1, "cursor0"),
+        ("acme/alpha", 1, "cursor1"),
+    ]
+
+
+async def test_a_pull_with_no_match_within_the_page_cap_is_excluded(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    await set_review_queue_repos(
+        "octocat", [ReviewQueueRepo(full_name="acme/alpha", paths=["ui/"])]
+    )
+    calls: list[dict[str, Any]] = []
+    _patch_github(
+        monkeypatch,
+        {
+            "data": {
+                "search": {
+                    "nodes": [
+                        _pull(
+                            "acme/alpha",
+                            1,
+                            file_paths=["agent/a.py"],
+                            more_file_pages=[[f"agent/{page}.py"] for page in range(15)],
+                        )
+                    ]
+                }
+            }
+        },
+        calls,
+    )
+
+    payload = await get_review_queue("octocat")
+
+    assert payload.items == []
+    assert len(_more_files_requests(calls)) == 10
+
+
+async def test_more_files_errors_surface_as_bad_gateway(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    await set_review_queue_repos(
+        "octocat", [ReviewQueueRepo(full_name="acme/alpha", paths=["ui/"])]
+    )
+    _patch_github(
+        monkeypatch,
+        {
+            "data": {
+                "search": {
+                    "nodes": [
+                        _pull(
+                            "acme/alpha",
+                            1,
+                            file_paths=["agent/a.py"],
+                            more_file_pages=[["agent/b.py"]],
+                        )
+                    ]
+                }
+            }
+        },
+        [],
+        more_files_payload={"errors": [{"message": "nope"}]},
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_review_queue("octocat")
+
+    assert exc.value.status_code == 502
+    assert not review_queue._cache
 
 
 async def test_required_mode_ignores_checks_that_are_not_required(
