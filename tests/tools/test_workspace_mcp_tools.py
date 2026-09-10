@@ -248,7 +248,7 @@ async def test_personal_mcps_load_only_in_the_owners_private_thread(monkeypatch)
     await server._mcp_tools_for("private", "outsider")
     assert namespaces() == [("workspace_mcps",), ("user_mcps", "outsider")]
     await server._mcp_tools_for("private", "OUTSIDER")
-    assert namespaces() == [("workspace_mcps",), ("user_mcps", "OUTSIDER")]
+    assert namespaces() == [("workspace_mcps",), ("user_mcps", "outsider")]
     # A collaborative thread, another user's private thread, or an unreadable
     # thread never loads personal credentials.
     for thread_id, login in (

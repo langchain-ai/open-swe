@@ -11,9 +11,11 @@ Covers:
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
+from fastapi import HTTPException
 
 from agent.github import comments as github_comments
 from agent.github import thread_token as github_token
@@ -231,6 +233,58 @@ def test_fetch_issue_comments_raises_on_401(monkeypatch: pytest.MonkeyPatch) -> 
 # (c) successful re-auth following stale-cache invalidation -------------------
 
 
+async def test_private_pr_followup_rejected_before_credentials_or_dispatch(monkeypatch):
+    thread_id = "00000000-0000-0000-0000-000000000001"
+    client = MagicMock()
+    client.threads.get = AsyncMock(
+        return_value={
+            "metadata": {"source": "dashboard", "visibility": "private", "owner_login": "alice"}
+        }
+    )
+    monkeypatch.setattr(webhook_common, "get_client", lambda **kwargs: client)
+    monkeypatch.setattr(
+        webhook_common,
+        "extract_pr_context",
+        AsyncMock(
+            return_value=(
+                {"owner": "o", "name": "r"},
+                7,
+                f"open-swe/{thread_id}",
+                "bob",
+                "",
+                42,
+                None,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        webhook_common, "email_for_login", AsyncMock(return_value="bob@example.com")
+    )
+    token = AsyncMock()
+    dispatch = AsyncMock()
+    monkeypatch.setattr(webhook_common, "get_or_resolve_thread_github_token", token)
+    monkeypatch.setattr(webhook_common, "dispatch_agent_run", dispatch)
+    with pytest.raises(HTTPException, match="thread not found"):
+        await github_webhooks.process_github_pr_comment({}, "issue_comment")
+    with pytest.raises(HTTPException, match="thread not found"):
+        await webhook_common.trigger_or_queue_run(
+            thread_id,
+            "leak transcript",
+            github_login="bob",
+            github_user_id=2,
+            repo_config={"owner": "o", "name": "r"},
+            pr_number=7,
+        )
+    token.assert_not_awaited()
+    dispatch.assert_not_awaited()
+    await webhook_common.authorize_github_thread(thread_id, "ALICE")
+    client.threads.get.side_effect = RuntimeError("store unavailable")
+    with pytest.raises(RuntimeError, match="store unavailable"):
+        await github_webhooks.process_github_pr_comment({}, "issue_comment")
+    token.assert_not_awaited()
+    dispatch.assert_not_awaited()
+
+
 def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -289,6 +343,9 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     async def fake_trigger_or_queue_run(*args: Any, **kwargs: Any) -> None:
         return None
 
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": {"source": "github"}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda **kwargs: client)
     monkeypatch.setattr(webhook_common, "extract_pr_context", fake_extract_pr_context)
     monkeypatch.setattr(webhook_common, "get_or_resolve_thread_github_token", fake_get_or_resolve)
     monkeypatch.setattr(webhook_common, "invalidate_cached_github_token", fake_invalidate)

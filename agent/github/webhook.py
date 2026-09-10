@@ -847,6 +847,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     email = await common.email_for_login(github_login) or ""
     if email:
+        await common.authorize_github_thread(thread_id, github_login)
         github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     else:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)

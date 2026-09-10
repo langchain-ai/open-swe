@@ -16,7 +16,7 @@ USER_MCPS_NAMESPACE = ["user_mcps"]
 
 
 def _store(login: str) -> TypedStore[MCPConnection]:
-    return TypedStore([*USER_MCPS_NAMESPACE, login], MCPConnection)
+    return TypedStore([*USER_MCPS_NAMESPACE, login.strip().lower()], MCPConnection)
 
 
 async def get_user_mcp(login: str, name: str) -> MCPConnection | None:
@@ -59,11 +59,12 @@ async def discover_user_mcp(
     )
     if record is None:
         raise ValueError("Personal MCP connection does not exist")
-    definitions = await discover_tools(record, (*USER_MCPS_NAMESPACE, login))
+    definitions = await discover_tools(record, tuple(_store(login).namespace))
     return [{"name": tool.name, "description": tool.description or ""} for tool in definitions]
 
 
 def user_mcp_source(login: str) -> MCPSource:
+    login = login.strip().lower()
     return MCPSource(
         namespace=(*USER_MCPS_NAMESPACE, login),
         list_connections=partial(list_user_mcp_records, login),

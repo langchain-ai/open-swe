@@ -397,7 +397,7 @@ Investigate graphs.
 Any signed-in user can connect remote MCP servers with their own credentials under
 **My settings → Personal MCPs**. The form, JSON import, OAuth, header handling, and
 tool discovery work exactly like workspace connections. Records live in the Store
-under `["user_mcps", <github login>]`, so one user's connections and credentials are
+under `["user_mcps", <trimmed lowercase github login>]`, so one user's connections and credentials are
 never visible to, reused by, or revealed to another user. The dashboard API is
 `/dashboard/api/my-mcps` and requires only a signed-in session.
 
@@ -408,7 +408,16 @@ personal credentials; to use yours, continue the thread privately from the dashb
 Both scopes share the **MCPs** tool group. A personal connection with the same name as a
 workspace connection replaces it entirely for that user's runs, and a disabled personal
 connection hides the workspace one rather than falling back to it.
-Desktop (local) runs do not load MCP connections yet.
+Desktop (local) runs do not load MCP connections yet. GitHub PR follow-ups targeting a
+private thread are rejected unless the commenter owns that thread, before credentials
+are read or a run is dispatched.
+
+If a pre-release deployment already stored mixed-case personal MCP namespaces, pause
+MCP writes and runs before upgrading. Run
+`uv run python scripts/normalize_user_mcp_logins.py --url <deployment-url>` with the
+deployment's API credentials to preview the migration, then repeat with `--apply`.
+The script preserves encrypted records and aborts on duplicate connection names across
+case variants; resolve those manually before retrying. Workspace connections are unchanged.
 
 ### Adding a Python tool
 
