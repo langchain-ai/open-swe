@@ -1,5 +1,6 @@
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
+const { createHash } = require("node:crypto");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -33,6 +34,7 @@ const {
   repositoryMetadata,
   restoreWorktree,
   validBranchName,
+  watchProjectHead,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
@@ -106,9 +108,16 @@ let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
-let updateState = { status: "idle" };
+type DesktopUpdateState = {
+  status: "idle" | "downloading" | "ready" | "installing";
+  version?: string;
+};
+let updateState: DesktopUpdateState = { status: "idle" };
 
-function setUpdateState(status, version) {
+function setUpdateState(
+  status: DesktopUpdateState["status"],
+  version?: string,
+) {
   updateState = { status, ...(version ? { version } : {}) };
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:update-state", updateState);
@@ -137,6 +146,31 @@ function configureAutoUpdater() {
     );
 }
 
+async function checkForDesktopUpdates() {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    if (result?.isUpdateAvailable) {
+      await dialog.showMessageBox({
+        type: "info",
+        message: `${appRuntime.name} ${result.updateInfo.version} is available`,
+        detail: "The update is downloading and will be ready to install soon.",
+      });
+      return;
+    }
+    await dialog.showMessageBox({
+      type: "info",
+      message: `${appRuntime.name} is up to date`,
+      detail: `Version ${app.getVersion()} is the latest available version.`,
+    });
+  } catch (error) {
+    console.warn("Could not check for desktop updates", error);
+    dialog.showErrorBox(
+      `Could not check for ${appRuntime.name} updates`,
+      error.message,
+    );
+  }
+}
+
 function sendDesktopCommand(commandId) {
   if (!isDesktopCommandId(commandId) || !mainWindow || mainWindow.isDestroyed())
     return;
@@ -152,12 +186,29 @@ function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json");
 }
 
+/**
+ * Terminal identity for a project itself, so the new-thread screen can open
+ * terminals before a thread exists. Short and stable, unlike the cwd.
+ */
+function projectScopeId(cwd) {
+  return `project-${createHash("sha256").update(cwd).digest("hex").slice(0, 16)}`;
+}
+
+function withScopeId(project) {
+  return { ...project, scopeId: projectScopeId(project.cwd) };
+}
+
 function worktreesPath() {
   return path.join(app.getPath("userData"), "worktrees");
 }
 
 function listProjects() {
-  return readProjects(projectsPath());
+  return readProjects(projectsPath()).map(withScopeId);
+}
+
+function projectScopeSession(scopeId) {
+  const project = listProjects().find((item) => item.scopeId === scopeId);
+  return project ? { id: scopeId, cwd: project.cwd } : null;
 }
 
 function sendProjectsChanged() {
@@ -367,20 +418,59 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);
+    if (updateState.status === "installing") return true;
     if (updateState.status !== "ready") return false;
+    const version = updateState.version;
+    setUpdateState("installing", version);
     quitting = true;
-    await Promise.all([
-      closeAllTerminals(),
-      backendSupervisor?.close(),
-      openAiOAuth?.close(),
-    ]);
-    autoUpdater.quitAndInstall(false, true);
-    return true;
+    try {
+      await Promise.all([
+        closeAllTerminals(),
+        backendSupervisor?.close(),
+        openAiOAuth?.close(),
+      ]);
+      autoUpdater.quitAndInstall(false, true);
+      return true;
+    } catch (error) {
+      quitting = false;
+      setUpdateState("ready", version);
+      throw error;
+    }
   });
 
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event);
     return listProjects();
+  });
+
+  const projectHeadWatches = new Map<number, () => void>();
+  ipcMain.handle("desktop:watch-project-head", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const sender = event.sender;
+    projectHeadWatches.get(sender.id)?.();
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    if (!project) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    const close = () => {
+      disposed = true;
+      stop?.();
+      projectHeadWatches.delete(sender.id);
+      sender.removeListener("destroyed", close);
+      sender.removeListener("did-start-navigation", close);
+    };
+    projectHeadWatches.set(sender.id, close);
+    sender.once("destroyed", close);
+    sender.once("did-start-navigation", close);
+    try {
+      stop = await watchProjectHead(project, () => {
+        if (!disposed && !sender.isDestroyed())
+          sender.send("desktop:project-head-changed", cwd);
+      });
+      if (disposed) stop();
+    } catch {
+      if (!disposed) close();
+    }
   });
 
   ipcMain.handle("desktop:project-branches", async (event, cwd) => {
@@ -417,7 +507,7 @@ function configureDesktopIpc() {
     if (result.canceled || !result.filePaths[0]) return null;
     const project = addProject(projectsPath(), result.filePaths[0]);
     sendProjectsChanged();
-    return project;
+    return withScopeId(project);
   });
 
   ipcMain.handle("desktop:remove-project", async (event, cwd) => {
@@ -483,7 +573,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
-    if (!openAiOAuth) throw new Error("OpenAI sign-in is unavailable");
+    if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");
     return openAiOAuth.login((url) => shell.openExternal(url));
   });
   ipcMain.handle("desktop:start-local-thread", async (event, input) => {
@@ -544,6 +634,7 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     return localThreadStore.update(input?.threadId, {
+      ...(typeof input?.title === "string" ? { title: input.title } : {}),
       ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
       ...(typeof input?.archived === "boolean"
         ? { archived: input.archived }
@@ -624,6 +715,23 @@ function configureDesktopIpc() {
       const [diff, repository] = await Promise.all([
         readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
         repositoryMetadata(thread.checkpoint.repo),
+      ]);
+      return { ...diff, repository };
+    } catch {
+      return { status: "error", files: [], truncated: false };
+    }
+  });
+  /** Worktree changes for a project, for screens with no thread yet. */
+  ipcMain.handle("desktop:get-project-diff", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    const repo = project ? await repoRoot(project) : null;
+    if (!repo) return { status: "missing", files: [], truncated: false };
+    try {
+      const branch = await currentBranch(repo);
+      const [diff, repository] = await Promise.all([
+        readDiff(repo, "HEAD"),
+        repositoryMetadata(repo, undefined, branch),
       ]);
       return { ...diff, repository };
     } catch {
@@ -879,6 +987,11 @@ function createMenu() {
     accelerator: "CmdOrCtrl+,",
     click: () => sendDesktopCommand("open-settings"),
   };
+  const checkForUpdatesItem = {
+    label: "Check for Updates…",
+    enabled: app.isPackaged,
+    click: () => void checkForDesktopUpdates(),
+  };
   const template = [
     ...(process.platform === "darwin"
       ? [
@@ -887,6 +1000,7 @@ function createMenu() {
             submenu: [
               { role: "about" },
               settingsItem,
+              checkForUpdatesItem,
               backendSettingsItem,
               { type: "separator" },
               { role: "services" },
@@ -947,7 +1061,10 @@ function createMenu() {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
           click: () => {
-            if (mainWindow) void loadApp(mainWindow);
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            if (isAppUrl(mainWindow.webContents.getURL()))
+              mainWindow.webContents.reload();
+            else void loadApp(mainWindow);
           },
         },
         ...(isDevelopment ? [{ role: "toggleDevTools" }] : []),
@@ -959,10 +1076,12 @@ function createMenu() {
         { role: "togglefullscreen" },
       ],
     },
-    {
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
-    },
+    process.platform === "darwin"
+      ? { role: "windowMenu" }
+      : {
+          label: "Window",
+          submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
+        },
     {
       role: "help",
       submenu: [
@@ -1315,7 +1434,6 @@ if (!hasSingleInstanceLock) {
       return;
     }
 
-    if (process.platform === "darwin") app.dock.setIcon(iconPath());
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-local-threads.json"),
     );
@@ -1354,7 +1472,8 @@ if (!hasSingleInstanceLock) {
       ipcMain,
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
-      getSessionRoot: (id) => threadRoot(localThreadStore.get(id)),
+      getSessionRoot: (id) =>
+        threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd,
       userDataPath: app.getPath("userData"),
     });
 

@@ -1,0 +1,1 @@
+Reviews the pull request this thread just opened or updated, applying the same bar as the PR reviewer, and records what it finds with `record_inline_finding`. Delegate here once per delivery, after `open_pull_request` succeeds. It only reports — you decide what to do with each finding.

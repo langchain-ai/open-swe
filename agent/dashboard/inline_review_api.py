@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
 
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
-from agent.dashboard.thread_api import _thread_is_readable
+from agent.dashboard.threads.summary import thread_is_readable
 from agent.review.inline_review import REVIEWS, InlineReview
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ async def get_inline_review(
     metadata = (
         thread.get("metadata") if isinstance(thread, dict) else getattr(thread, "metadata", None)
     )
-    if not _thread_is_readable(metadata if isinstance(metadata, dict) else {}):
+    if not thread_is_readable(metadata if isinstance(metadata, dict) else {}):
         raise HTTPException(404, "thread not found")
 
     reviews = await REVIEWS.for_thread(thread_id)

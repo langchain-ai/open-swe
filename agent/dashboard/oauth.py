@@ -4,27 +4,29 @@ import base64
 import hashlib
 import hmac
 import logging
-import os
 import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
-from functools import cache
 from typing import Any
 from urllib.parse import quote, urlparse
 
-import httpx
+import httpx2
 import jwt
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
+from fastapi.security import APIKeyCookie
 from starlette.requests import HTTPConnection
 
+from agent.config import ENV
 from agent.github.org_membership import is_user_active_org_member
 from agent.github.token_auth import bearer_github_token
+from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "osw_session"
+SESSION_COOKIE = APIKeyCookie(name=COOKIE_NAME, scheme_name="DashboardSession", auto_error=False)
 STATE_COOKIE_NAME = "osw_oauth_state"
 _DESKTOP_APP_ORIGIN = "open-swe://app"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -69,12 +71,12 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
     return {"sub": login, "email": email if isinstance(email, str) else None}
 
 
-GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
-GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")
+GITHUB_APP_CLIENT_ID = ENV.GITHUB_APP_CLIENT_ID.get()
+GITHUB_APP_CLIENT_SECRET = ENV.GITHUB_APP_CLIENT_SECRET.get()
 
 
 def _secret() -> str:
-    s = os.environ.get("DASHBOARD_JWT_SECRET", "")
+    s = ENV.DASHBOARD_JWT_SECRET.get()
     if not s:
         raise HTTPException(500, "DASHBOARD_JWT_SECRET not configured")
     return s
@@ -88,10 +90,10 @@ def allowed_dashboard_origins() -> set[str]:
     else.
     """
     origins: set[str] = set()
-    base = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    base = dashboard_base_url()
     if base:
         origins.add(_origin_of(base))
-    for entry in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(","):
+    for entry in ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(","):
         entry = entry.strip()
         if entry:
             origins.add(_origin_of(entry))
@@ -129,7 +131,7 @@ def _is_blocked_redirect_path(path: str) -> bool:
 
 def sanitize_redirect_to(redirect_to: str | None) -> str:
     """Return a safe post-login redirect URL."""
-    fallback = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    fallback = dashboard_base_url()
     if not redirect_to:
         return fallback
     trimmed = redirect_to.strip()
@@ -155,58 +157,34 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     return fallback
 
 
-def _allowed_login_orgs() -> frozenset[str]:
-    """Orgs whose members may log in to the dashboard.
-
-    Reuses the webhook-side ``ALLOWED_GITHUB_ORGS`` allowlist so deployments
-    configure a single org gate. When empty the dashboard login gate is
-    disabled (fail-open) to preserve existing deployments.
-    """
-    return frozenset(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
-    )
+def _allowed_login_orgs() -> tuple[str, ...]:
+    return tuple(dict.fromkeys(org.lower() for org in ENV.ALLOWED_GITHUB_ORGS.get_list()))
 
 
-@cache
-def _warn_login_gate_disabled() -> None:
-    """Announce the fail-open login gate once per process.
-
-    Every other unset secret here says so in the log — see the
-    ``GITHUB_WEBHOOK_SECRET``/``SLACK_SIGNING_SECRET`` warnings and the one in
-    ``agent.completion``. Those all fail closed, so a missed warning costs a
-    rejected request. This gate fails open, so a missed warning costs an
-    unrestricted dashboard, which is the case that most needs saying out loud.
-
-    Cached rather than logged per call because ``enforce_org_login_gate`` also
-    runs from the thread tools, not only from the OAuth callback.
-    """
-    logger.warning(
-        "ALLOWED_GITHUB_ORGS is not configured — dashboard login is open to any GitHub "
-        "account, and every logged-in user can read all surfaced threads. Set it to "
-        "restrict logins to members of your organization(s)."
-    )
+def _allowed_login_users() -> tuple[str, ...]:
+    return tuple(dict.fromkeys(user.lower() for user in ENV.ALLOWED_GITHUB_USERS.get_list()))
 
 
-async def enforce_org_login_gate(login: str) -> None:
-    """Reject dashboard login for users outside the allowed GitHub org(s).
-
-    No-op when ``ALLOWED_GITHUB_ORGS`` is unset, which leaves login open to any
-    GitHub account; that case warns once per process rather than passing
-    silently. Otherwise the user must be an active member of at least one
-    configured org; membership is checked with the GitHub App installation
-    token (fail-closed on any API error).
-    """
-    orgs = _allowed_login_orgs()
-    if not orgs:
-        _warn_login_gate_disabled()
+def validate_github_login_allowlist() -> None:
+    if ENV.OPEN_SWE_LOCAL_AUTH_TOKEN.is_set() or _allowed_login_orgs() or _allowed_login_users():
         return
-    for org in orgs:
-        if await is_user_active_org_member(login, org):
+    message = "ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured"
+    logger.error(message)
+    raise RuntimeError(message)
+
+
+async def enforce_github_login_gate(login: str) -> None:
+    normalized_login = login.strip().lower()
+    if any(hmac.compare_digest(normalized_login, user) for user in _allowed_login_users()):
+        return
+    for org in _allowed_login_orgs():
+        if await is_user_active_org_member(normalized_login, org):
             return
-    logger.warning("Rejected dashboard login for %r — not in allowed org(s)", login)
-    raise HTTPException(403, "your GitHub account is not a member of an authorized organization")
+    logger.warning(
+        "Rejected dashboard login",
+        extra={"github_login": login, "reason": "not in allowed users or orgs"},
+    )
+    raise HTTPException(403, "your GitHub account is not authorized")
 
 
 def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:
@@ -395,13 +373,15 @@ def build_settings_url() -> str | None:
     safe to share in a public Slack thread. The user signs in with GitHub from
     their own session and connects Slack via verified OIDC on the settings page.
     """
-    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    frontend_base = dashboard_base_url()
     if not frontend_base:
         return None
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
-def require_session(request: HTTPConnection) -> dict[str, Any]:
+def require_session(
+    request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
+) -> dict[str, Any]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")
@@ -496,7 +476,7 @@ def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
 async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
     if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
         raise HTTPException(500, "GitHub App OAuth not configured")
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.post(
             "https://github.com/login/oauth/access_token",
             headers={"Accept": "application/json"},
@@ -551,7 +531,7 @@ async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | No
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         u = await client.get("https://api.github.com/user", headers=headers)
         u.raise_for_status()
         user = u.json()

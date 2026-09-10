@@ -9,7 +9,7 @@ dependencies = [
     "deepagents==0.7.13",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
-    "httpx>=0.28.1",
+    "httpx2>=2.12.0,<3.0.0",
     "PyJWT>=2.13.0",
     "cryptography>=50.0.0",
     "langgraph-sdk>=0.4.3",
@@ -19,7 +19,8 @@ dependencies = [
     "langchain-anthropic>=1.6.1",
     "langgraph-cli[inmem]>=0.4.31",
     "langsmith>=0.12.0",
-    "langchain-openai>=1.6.0,<2.0.0",
+    "langchain-openai>=1.6.1,<2.0.0",
+    "openai>=3.10.0,<4.0.0",
     "langchain-fireworks>=1.6.0",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
     "fireworks-ai>=1.2.9",
@@ -45,10 +46,10 @@ dev = [
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.11 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.13 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
-override-dependencies = ["deepagents==0.7.11", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.13", "wcmatch>=11.0"]
 # Each langgraph-api release pins its langgraph-runtime-inmem peer to a single
 # minor window expressed in `.dev0` bounds (`>=0.32.0.dev0,<0.33.0.dev0`), which
 # uv's default pre-release policy shies away from, so a plain resolve lands on the
@@ -70,6 +71,10 @@ packages = ["agent"]
 line-length = 100
 
 [tool.ruff.lint]
+# PLC2701 (private-name imports) is preview-only; explicit-preview-rules keeps every
+# other preview rule off.
+preview = true
+explicit-preview-rules = true
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -79,10 +84,19 @@ select = [
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
     "TID251",
+    "SLF",  # flake8-self: no cross-module access to _private names
+    "PLC2701",  # no cross-module imports of _private names
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["SLF001", "PLC2701"]
+# Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
+# an intra-package import from a cross-package one; names these modules expose
+# to the rest of the codebase are public.
+"agent/dashboard/threads/*" = ["PLC2701"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Do not use postponed annotation evaluation."

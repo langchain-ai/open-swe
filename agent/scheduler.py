@@ -7,13 +7,17 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import RunnableConfig
 from pydantic import BaseModel, ConfigDict
 
+from agent.agent_cost import run_agent_cost_refresh
 from agent.baby_sit import evaluate_watch
 from agent.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from agent.background_tasks import monitor_background_tasks
+from agent.dashboard.environment_refresh import REFRESH_TASK as ENVIRONMENT_REFRESH_TASK
+from agent.dashboard.environment_refresh import run_environment_refresh_tick
 from agent.dashboard.schedules import launch_scheduled_agent_run
 from agent.reconcile import reconcile_stale_runs
 from agent.run_config import RunConfig
 from agent.session_cost import run_session_cost_refresh
+from agent.thread_feedback import run_feedback_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +27,18 @@ class SchedulerState(BaseModel):
 
     schedule_id: str | None = None
     task: str | None = None
+    environment_slug: str | None = None
+    refresh_kind: str | None = None
     watch_key: str | None = None
     thread_id: str | None = None
     agent_thread_id: str | None = None
     run_id: str | None = None
+    invocation_id: str | None = None
     prepare_run_id: str | None = None
     channel_id: str | None = None
     thread_ts: str | None = None
     attempt: int | None = None
+    feedback: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
 
 
@@ -49,8 +57,16 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         if not thread_id:
             return {"result": {"status": "missing_thread_id"}}
         return {"result": await monitor_background_tasks(thread_id)}
+    if task == ENVIRONMENT_REFRESH_TASK:
+        slug = state.environment_slug or cfg.environment
+        kind = "update" if state.refresh_kind == "update" else "full"
+        return {"result": await run_environment_refresh_tick(slug or None, kind)}
     if task == "session_cost":
-        return {"result": await run_session_cost_refresh(state.model_dump())}
+        return {"result": await run_session_cost_refresh(state.model_dump(exclude_none=True))}
+    if task == "thread_feedback":
+        return {"result": await run_feedback_prompt(state.model_dump(exclude_none=True))}
+    if task == "agent_cost":
+        return {"result": await run_agent_cost_refresh(state.model_dump(exclude_none=True))}
     schedule_id = state.schedule_id or cfg.schedule_id
     if not schedule_id:
         logger.warning("Scheduled agent tick missing schedule_id")

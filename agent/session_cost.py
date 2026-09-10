@@ -6,6 +6,7 @@ from typing import Any, Literal, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
+from agent.invocation import resolve_invocation_id
 from agent.slack.client import (
     fetch_slack_thread_message_by_ts,
     format_slack_session_cost,
@@ -25,6 +26,7 @@ class SessionCostRefresh(TypedDict):
     task: Literal["session_cost"]
     agent_thread_id: str
     run_id: str
+    invocation_id: str
     prepare_run_id: str
     channel_id: str
     thread_ts: str
@@ -38,16 +40,20 @@ def _value(state: Mapping[str, Any], key: str) -> str | None:
 
 def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | None:
     values = {
-        key: _value(state, key)
-        for key in ("agent_thread_id", "run_id", "prepare_run_id", "channel_id", "thread_ts")
+        key: _value(state, key) for key in ("agent_thread_id", "run_id", "channel_id", "thread_ts")
     }
-    if any(value is None for value in values.values()):
+    try:
+        invocation_id = resolve_invocation_id(state)
+    except ValueError:
+        return None
+    if invocation_id is None or any(value is None for value in values.values()):
         return None
     return {
         "task": "session_cost",
         "agent_thread_id": values["agent_thread_id"] or "",
         "run_id": values["run_id"] or "",
-        "prepare_run_id": values["prepare_run_id"] or "",
+        "invocation_id": invocation_id,
+        "prepare_run_id": invocation_id,
         "channel_id": values["channel_id"] or "",
         "thread_ts": values["thread_ts"] or "",
         "attempt": attempt,
@@ -115,7 +121,7 @@ async def _refresh_once(
 
     try:
         snapshot = await get_langsmith_thread_cost(
-            payload["agent_thread_id"], payload["prepare_run_id"]
+            payload["agent_thread_id"], payload["invocation_id"]
         )
     except LangSmithCostUnavailable as exc:
         return "unavailable", str(exc)

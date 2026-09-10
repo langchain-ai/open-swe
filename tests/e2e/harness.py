@@ -31,7 +31,7 @@ import patches  # noqa: E402
 patches.apply()
 
 import fakes  # noqa: E402
-import httpx  # noqa: E402
+import httpx2  # noqa: E402
 import reviewer_apis  # noqa: E402
 from e2e_env import (  # noqa: E402
     BASE_URL,
@@ -66,6 +66,7 @@ from langgraph_sdk import get_client  # noqa: E402
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from agent.slack.client import lookup_slack_thread_id  # noqa: E402
+from agent.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -170,7 +171,7 @@ async def control_queued(thread_id: str = "") -> JSONResponse:
     return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
 
 
-async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> httpx.Response:
+async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> httpx2.Response:
     """POST a signed Events-API delivery to the real /webhooks/slack route."""
     raw = json.dumps(payload).encode()
     req_ts = str(int(time.time()))
@@ -185,12 +186,12 @@ async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> 
         headers["X-Slack-Retry-Num"] = retry_num
         headers["X-Slack-Retry-Reason"] = "http_timeout"
 
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://harness") as client:
         return await client.post("/webhooks/slack", content=raw, headers=headers)
 
 
-async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx.Response:
+async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response:
     raw = urlencode({"payload": json.dumps(payload)}).encode()
     req_ts = str(int(time.time()))
     base = f"v0:{req_ts}:{raw.decode()}".encode()
@@ -200,12 +201,12 @@ async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx.Response:
         "X-Slack-Request-Timestamp": req_ts,
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://harness") as client:
         return await client.post("/webhooks/slack/interactivity", content=raw, headers=headers)
 
 
-async def _slack_send_result(payload: dict[str, Any], resp: httpx.Response) -> JSONResponse:
+async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> JSONResponse:
     event = payload["event"]
     channel = str(event["channel"])
     thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
@@ -982,6 +983,10 @@ async def slack_archive_code_channel(request: Request) -> JSONResponse:
 async def slack_get_permalink(channel: str = "", message_ts: str = "") -> JSONResponse:  # noqa: ARG001
     return _ok({"permalink": f"{BASE_URL}/mock/slack"})
 
+
+# A dashboard build under ui/.output puts the UI catch-all on the app before the
+# mock pages above were registered; keep it behind them.
+keep_dashboard_ui_last(app)
 
 # Quietly reference imports used only for env side effects.
 _ = (e2e_env, HUMAN_USER)

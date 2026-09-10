@@ -23,6 +23,14 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
   getProjectBranches: (cwd) =>
     ipcRenderer.invoke("desktop:project-branches", cwd),
+  watchProjectHead: (cwd) =>
+    ipcRenderer.invoke("desktop:watch-project-head", cwd),
+  onProjectHeadChanged: (callback) => {
+    const listener = (_event, cwd) => callback(cwd);
+    ipcRenderer.on("desktop:project-head-changed", listener);
+    return () =>
+      ipcRenderer.removeListener("desktop:project-head-changed", listener);
+  },
   setLocalBranch: (input) =>
     ipcRenderer.invoke("desktop:set-local-branch", { ...input }),
   checkoutProjectBranch: (input) =>
@@ -65,6 +73,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:get-local-diff", threadId),
   getLocalPrDiff: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
+  getProjectDiff: (cwd) => ipcRenderer.invoke("desktop:get-project-diff", cwd),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects);
     ipcRenderer.on("desktop:projects-changed", listener);

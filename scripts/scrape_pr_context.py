@@ -11,9 +11,9 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent.github.pull_request_context import (  # noqa: E402
-    _CHECKS_QUERY,
-    _REVIEWS_QUERY,
-    _actionable_check,
+    CHECKS_QUERY,
+    REVIEWS_QUERY,
+    actionable_check,
     parse_pull_request_url,
 )
 
@@ -48,7 +48,7 @@ def _scan(owner: str, repo: str, number: int) -> dict[str, Any]:
     review_decision = None
     merge_state = None
     while True:
-        pull = _graphql(_REVIEWS_QUERY, owner, repo, number, cursor)
+        pull = _graphql(REVIEWS_QUERY, owner, repo, number, cursor)
         if cursor is None:
             review_decision = pull.get("reviewDecision")
             merge_state = pull.get("mergeStateStatus")
@@ -91,7 +91,7 @@ def _scan(owner: str, repo: str, number: int) -> dict[str, Any]:
     cursor = None
     head_sha = None
     while True:
-        pull = _graphql(_CHECKS_QUERY, owner, repo, number, cursor)
+        pull = _graphql(CHECKS_QUERY, owner, repo, number, cursor)
         commit_nodes = pull["commits"]["nodes"]
         if not commit_nodes:
             break
@@ -102,7 +102,7 @@ def _scan(owner: str, repo: str, number: int) -> dict[str, Any]:
             break
         connection = rollup["contexts"]
         checks.extend(
-            check for node in connection["nodes"] if (check := _actionable_check(node)) is not None
+            check for node in connection["nodes"] if (check := actionable_check(node)) is not None
         )
         if not connection["pageInfo"]["hasNextPage"]:
             break
