@@ -1557,47 +1557,6 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     assert "prompt" not in captured
 
 
-def test_process_slack_mention_bot_only_mode_runs_without_user_token(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """In bot-token-only mode an unmapped user still gets a run (no blocking)."""
-    captured: dict[str, object] = {}
-    _setup_slack_mention_fakes(monkeypatch, captured)
-
-    async def fake_thread_exists(thread_id: str) -> bool:
-        return False
-
-    async def fake_login_for_slack_id(slack_user_id):
-        return None
-
-    async def fake_login_for_email(email):
-        return None
-
-    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
-    monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
-    monkeypatch.setattr(webhook_common, "login_for_email", fake_login_for_email)
-    monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: True)
-
-    asyncio.run(
-        slack_webhooks.process_slack_mention(
-            SlackRequest.model_validate(
-                {
-                    "channel_id": "C123",
-                    "thread_ts": "1700000000.000100",
-                    "event_ts": "1700000000.000200",
-                    "user_id": "U123",
-                    "text": "<@UBOT> do the thing",
-                    "bot_user_id": "UBOT",
-                }
-            ),
-            Repo(owner="langchain-ai", name="open-swe"),
-        )
-    )
-
-    assert "run_create" in captured
-    assert "prompt" not in captured
-
-
 class _FakeResponse:
     def __init__(self, payload: dict) -> None:
         self._payload = payload

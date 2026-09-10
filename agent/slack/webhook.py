@@ -487,15 +487,9 @@ async def _slack_login(user_id: str, user_email: str | None = None) -> str | Non
     return await common.login_for_email(user_email) if user_email else None
 
 
-def _slack_thread_visibility(
-    channel_context: dict[str, Any] | None, owner_login: str | None
-) -> str:
-    """A bot DM from a mapped user is private to them; anything else is collaborative.
-
-    Bot-token-only mode lets unmapped senders through, and a private thread
-    nobody owns would be unreachable, so those DMs stay collaborative.
-    """
-    if owner_login and isinstance(channel_context, dict) and channel_context.get("is_im") is True:
+def _slack_thread_visibility(channel_context: dict[str, Any] | None) -> str:
+    """Bot DMs are private to the person; anything in a channel is collaborative."""
+    if isinstance(channel_context, dict) and channel_context.get("is_im") is True:
         return "private"
     return "public"
 
@@ -524,7 +518,7 @@ async def _mark_slack_thread_errored(
                     triggering_event_ts=request.event_ts,
                 )
             ),
-            visibility=_slack_thread_visibility(request.channel_context, owner_login),
+            visibility=_slack_thread_visibility(request.channel_context),
             owner_login=owner_login or "",
         )
     except Exception:  # noqa: BLE001
@@ -761,7 +755,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             user_token = None
     has_valid_user_token = bool(user_token)
 
-    if not has_valid_user_token and not common.is_bot_token_only_mode():
+    if not has_valid_user_token:
         # A stored-but-unusable token means "sign in again"; no record at all
         # means the user has never connected GitHub + Slack via the dashboard.
         # Guard the store read like token resolution above so a transient
@@ -835,7 +829,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
-    visibility = _slack_thread_visibility(channel_context, mapped_login)
+    visibility = _slack_thread_visibility(channel_context)
     persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
