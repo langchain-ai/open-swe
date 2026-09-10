@@ -34,6 +34,9 @@ export interface ModelPickerProps {
 
 type Pane = "main" | "models"
 
+/** Sentinel id for the "Auto" entry in the model list; never a real model id. */
+const AUTO_ID = "__auto__"
+
 function effortForModel(
   model: ModelOption,
   selection: ModelSelection | null
@@ -139,9 +142,10 @@ export function ModelPicker({
 
   const pickerDisabled = disabled || models.length === 0 || !onSelectionChange
 
-  const selectedModel = selection
-    ? (models.find((model) => model.id === selection.modelId) ?? models[0])
-    : null
+  // Undefined while routing automatically: the main pane then only offers the
+  // `Model >` row, since context and reasoning belong to a concrete model.
+  const selectedModel = models.find((model) => model.id === selection?.modelId)
+  const selectedEntryId = selectedModel?.id ?? AUTO_ID
   const efforts = selectedModel?.efforts ?? []
   const currentEffort = selectedModel
     ? effortForModel(selectedModel, selection)
@@ -158,15 +162,23 @@ export function ModelPicker({
     )
   }, [models, query])
 
-  const focusedModel =
-    filteredModels.find((model) => model.id === focusedModelId) ??
-    filteredModels.find((model) => model.id === selectedModel?.id) ??
-    filteredModels[0]
+  const showAuto = !query.trim()
+  const entryIds = useMemo(
+    () => [
+      ...(showAuto ? [AUTO_ID] : []),
+      ...filteredModels.map((model) => model.id),
+    ],
+    [filteredModels, showAuto]
+  )
+  const focusedEntryId =
+    [focusedModelId, selectedEntryId].find(
+      (id): id is string => id != null && entryIds.includes(id)
+    ) ?? entryIds[0]
 
   useEffect(() => {
     if (!open) return
     // oxlint-disable-next-line react/set-state-in-effect
-    setPane(selection ? "main" : "models")
+    setPane("main")
     setQuery("")
     setFocusedModelId(null)
     const index = currentEffort ? efforts.indexOf(currentEffort) : -1
@@ -245,10 +257,27 @@ export function ModelPicker({
     [close, modelDisabled, onSelectionChange, selection]
   )
 
+  const selectAuto = useCallback(() => {
+    onSelectionChange?.(null)
+    close()
+  }, [close, onSelectionChange])
+
+  const selectEntry = useCallback(
+    (id: string) => {
+      if (id === AUTO_ID) {
+        selectAuto()
+        return
+      }
+      const model = filteredModels.find((entry) => entry.id === id)
+      if (model) selectModel(model)
+    },
+    [filteredModels, selectAuto, selectModel]
+  )
+
   const openModelPane = useCallback(() => {
     setPane("models")
-    setFocusedModelId(selectedModel?.id ?? null)
-  }, [selectedModel])
+    setFocusedModelId(selectedEntryId)
+  }, [selectedEntryId])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
@@ -271,21 +300,19 @@ export function ModelPicker({
       }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault()
-        if (filteredModels.length === 0) return
+        if (entryIds.length === 0) return
         const step = e.key === "ArrowDown" ? 1 : -1
-        const current = filteredModels.findIndex(
-          (model) => model.id === focusedModel?.id
-        )
+        const current = entryIds.indexOf(focusedEntryId ?? "")
         const nextIndex = Math.min(
           Math.max(current + step, 0),
-          filteredModels.length - 1
+          entryIds.length - 1
         )
-        setFocusedModelId(filteredModels[nextIndex]?.id ?? null)
+        setFocusedModelId(entryIds[nextIndex] ?? null)
         return
       }
-      if (e.key === "Enter" && focusedModel) {
+      if (e.key === "Enter" && focusedEntryId) {
         e.preventDefault()
-        selectModel(focusedModel)
+        selectEntry(focusedEntryId)
       }
       return
     }
@@ -349,45 +376,52 @@ export function ModelPicker({
           style={{ zIndex: Z.DROPDOWN }}
           className="absolute bottom-full left-0 mb-1"
         >
-          {selection && (
-            <div
-              ref={mainPaneRef}
-              tabIndex={-1}
-              className="dropdown-glass flex w-56 flex-col overflow-hidden rounded-xl py-1 outline-none"
-            >
-            {contextWindow != null && (
+          <div
+            ref={mainPaneRef}
+            tabIndex={-1}
+            className="dropdown-glass flex w-56 flex-col overflow-hidden rounded-xl py-1 outline-none"
+          >
+            {selectedModel ? (
               <>
-                <SectionHeading>Context</SectionHeading>
+                {contextWindow != null && (
+                  <>
+                    <SectionHeading>Context</SectionHeading>
+                    <div
+                      className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-foreground"
+                      title="Context window reported for this model"
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {formatTokenCount(contextWindow)}
+                      </span>
+                    </div>
+                  </>
+                )}
+                <SectionHeading>Reasoning</SectionHeading>
                 <div
-                  className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-foreground"
-                  title="Context window reported for this model"
+                  role="listbox"
+                  aria-label="Reasoning effort"
+                  className="max-h-60 overflow-y-auto"
                 >
-                  <span className="min-w-0 flex-1 truncate">
-                    {formatTokenCount(contextWindow)}
-                  </span>
+                  {efforts.map((effort, index) => (
+                    <OptionRow
+                      key={effort}
+                      label={formatEffort(effort)}
+                      selected={currentEffort === effort}
+                      focused={pane === "main" && mainIndex === index}
+                      onMouseEnter={() => {
+                        setPane("main")
+                        setMainIndex(index)
+                      }}
+                      onClick={() => applyEffort(effort)}
+                    />
+                  ))}
                 </div>
               </>
+            ) : (
+              <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
+                Model and reasoning are chosen per request.
+              </p>
             )}
-            <SectionHeading>Reasoning</SectionHeading>
-            <div
-              role="listbox"
-              aria-label="Reasoning effort"
-              className="max-h-60 overflow-y-auto"
-            >
-              {efforts.map((effort, index) => (
-                <OptionRow
-                  key={effort}
-                  label={formatEffort(effort)}
-                  selected={currentEffort === effort}
-                  focused={pane === "main" && mainIndex === index}
-                  onMouseEnter={() => {
-                    setPane("main")
-                    setMainIndex(index)
-                  }}
-                  onClick={() => applyEffort(effort)}
-                />
-              ))}
-            </div>
             <div ref={modelRowRef} className="mt-1 border-t border-border pt-1">
               <SectionHeading>Model</SectionHeading>
               <OptionRow
@@ -402,7 +436,6 @@ export function ModelPicker({
               />
             </div>
           </div>
-          )}
           {pane === "models" && (
             <div
               ref={modelPaneRef}
@@ -422,15 +455,13 @@ export function ModelPicker({
                 aria-label="Models"
                 className="max-h-72 overflow-y-auto py-1"
               >
-                {!query.trim() && (
+                {showAuto && (
                   <OptionRow
                     label="Auto"
-                    selected={selection === null}
-                    focused={false}
-                    onClick={() => {
-                      onSelectionChange?.(null)
-                      close()
-                    }}
+                    selected={!selectedModel}
+                    focused={focusedEntryId === AUTO_ID}
+                    onMouseEnter={() => setFocusedModelId(AUTO_ID)}
+                    onClick={selectAuto}
                   />
                 )}
                 {filteredModels.length === 0 ? (
@@ -441,8 +472,8 @@ export function ModelPicker({
                   filteredModels.map((model) => (
                     <OptionRow
                       key={model.id}
-                      selected={selection?.modelId === model.id}
-                      focused={focusedModel?.id === model.id}
+                      selected={selectedModel?.id === model.id}
+                      focused={focusedEntryId === model.id}
                       disabled={modelDisabled(model)}
                       onMouseEnter={() => setFocusedModelId(model.id)}
                       onClick={() => selectModel(model)}

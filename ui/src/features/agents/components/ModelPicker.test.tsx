@@ -60,23 +60,64 @@ function openModelPane() {
 }
 
 describe("ModelPicker", () => {
-  it("supports automatic routing", () => {
-    const onSelectionChange = vi.fn()
-    render(
-      <ModelPicker
-        models={MODELS}
-        selection={null}
-        onSelectionChange={onSelectionChange}
-      />
+  it("presents Auto as the selected model without per-model settings", () => {
+    const { panel } = openPicker({ selection: null })
+
+    expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
+    expect(panel.textContent).not.toContain("Context")
+    expect(
+      screen.queryByRole("listbox", { name: "Reasoning effort" })
+    ).toBeNull()
+
+    fireEvent.click(screen.getByRole("option", { name: "Auto" }))
+
+    const models = screen.getByRole("listbox", { name: "Models" })
+    expect(
+      within(models)
+        .getByRole("option", { name: "Auto" })
+        .getAttribute("aria-selected")
+    ).toBe("true")
+    expect(
+      within(models)
+        .getByRole("option", { name: "GPT-5.6 Sol Extra High" })
+        .getAttribute("aria-selected")
+    ).toBe("false")
+  })
+
+  it("returns to automatic routing from the model list", () => {
+    const { onSelectionChange } = openPicker()
+    openModelPane()
+
+    fireEvent.click(
+      within(screen.getByRole("listbox", { name: "Models" })).getByRole(
+        "option",
+        { name: "Auto" }
+      )
     )
 
-    const trigger = screen.getByRole("button", { name: "Auto" })
-    fireEvent.click(trigger)
-    const auto = screen.getByRole("option", { name: "Auto" })
-    expect(auto.getAttribute("aria-selected")).toBe("true")
-    fireEvent.click(auto)
-
     expect(onSelectionChange).toHaveBeenCalledWith(null)
+    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
+  })
+
+  it("reaches Auto and models with the keyboard while routing automatically", () => {
+    const { onSelectionChange, panel } = openPicker({ selection: null })
+
+    fireEvent.keyDown(panel, { key: "ArrowRight" })
+    fireEvent.keyDown(panel, { key: "ArrowDown" })
+    fireEvent.keyDown(panel, { key: "Enter" })
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      modelId: "openai:gpt-5.6-sol",
+      effort: "xhigh",
+    })
+
+    fireEvent.click(screen.getByRole("button", { expanded: false }))
+    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
+      key: "ArrowRight",
+    })
+    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
+      key: "Enter",
+    })
+    expect(onSelectionChange).toHaveBeenLastCalledWith(null)
   })
 
   it("labels the trigger with the selected model and effort", () => {
