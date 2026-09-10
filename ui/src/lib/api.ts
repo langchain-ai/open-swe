@@ -157,6 +157,14 @@ export interface ProfileUpdate {
   review_draft_prs?: boolean | null
 }
 
+export interface SlackBotOption {
+  team_id: string
+  bot_id: string
+  user_id: string
+  name: string
+  image_url: string
+}
+
 export interface AllowedSlackBot {
   team_id: string
   bot_id: string
@@ -754,6 +762,7 @@ export const api = {
   listEnvironmentOptions: () =>
     request<EnvironmentOptionList>("/environments/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (botId: string) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {

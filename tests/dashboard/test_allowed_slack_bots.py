@@ -10,7 +10,14 @@ from agent.dashboard import profiles, routes
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, fake_store: Any) -> TestClient:
+def directory() -> dict[str, Any]:
+    return {"pages": {}, "calls": [], "error": None}
+
+
+@pytest.fixture
+def client(
+    monkeypatch: pytest.MonkeyPatch, fake_store: Any, directory: dict[str, Any]
+) -> TestClient:
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="test-token"))
@@ -24,6 +31,13 @@ def client(monkeypatch: pytest.MonkeyPatch, fake_store: Any) -> TestClient:
     def slack(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/api/auth.test":
             data = {"ok": True, "team_id": "T123", "user_id": "UOWN", "bot_id": "BOWN"}
+        elif request.url.path == "/api/users.list":
+            directory["calls"].append(str(request.url.params.get("cursor", "")))
+            if directory["error"]:
+                return directory["error"]
+            data = directory["pages"].get(
+                request.url.params.get("cursor", ""), {"ok": True, "members": []}
+            )
         elif request.url.path == "/api/users.info":
             user_id = request.url.params["user"]
             if user_id == "UMISSING":
@@ -82,6 +96,7 @@ def test_admin_can_add_list_and_remove_bot(client: TestClient) -> None:
     "method,path,body",
     [
         ("GET", "/dashboard/api/slack/allowed-bots", None),
+        ("GET", "/dashboard/api/slack/bots", None),
         ("POST", "/dashboard/api/slack/allowed-bots", {"bot_id": "B123"}),
         ("DELETE", "/dashboard/api/slack/allowed-bots/T123/B123", None),
     ],
@@ -128,3 +143,113 @@ def test_owner_must_have_github_authorization(
     assert (
         client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"}).status_code == 400
     )
+
+
+def _member(user_id: str, name: str, **overrides: Any) -> dict[str, Any]:
+    return {
+        "id": user_id,
+        "team_id": "T123",
+        "name": name,
+        "deleted": False,
+        "is_bot": True,
+        "profile": {
+            "bot_id": "B" + user_id[1:],
+            "display_name": name,
+            "image_48": "https://avatars.slack-edge.com/bot.png",
+            "email": "private@example.com",
+        },
+        **overrides,
+    }
+
+
+def test_bot_directory_paginates_filters_and_caches(
+    client: TestClient, directory: dict[str, Any]
+) -> None:
+    directory["pages"] = {
+        "": {
+            "ok": True,
+            "members": [
+                _member("UHUMAN", "Human", is_bot=False),
+                _member("UDELETED", "Deleted", deleted=True),
+                _member("UOWN", "Open SWE"),
+                _member("USLACKBOT", "slackbot"),
+                _member("UOTHER", "Other workspace", team_id="TOTHER"),
+            ],
+            "response_metadata": {"next_cursor": "next-page"},
+        },
+        "next-page": {
+            "ok": True,
+            "members": [_member("U123", "Release bot"), _member("U456", "Build bot")],
+        },
+    }
+    response = client.get("/dashboard/api/slack/bots")
+    assert response.status_code == 200, response.text
+    assert response.json() == [
+        {
+            "team_id": "T123",
+            "bot_id": "B456",
+            "user_id": "U456",
+            "name": "Build bot",
+            "image_url": "https://avatars.slack-edge.com/bot.png",
+        },
+        {
+            "team_id": "T123",
+            "bot_id": "B123",
+            "user_id": "U123",
+            "name": "Release bot",
+            "image_url": "https://avatars.slack-edge.com/bot.png",
+        },
+    ]
+    assert client.get("/dashboard/api/slack/bots").json() == response.json()
+    assert directory["calls"] == ["", "next-page"]
+
+
+def test_bot_directory_does_not_reuse_another_installation_cache(
+    client: TestClient, directory: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory["pages"] = {"": {"ok": True, "members": [_member("U123", "Release bot")]}}
+    response = client.get("/dashboard/api/slack/bots")
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "another-test-token")
+    directory["pages"] = {"": {"ok": True, "members": []}}
+    assert client.get("/dashboard/api/slack/bots").json() == []
+
+
+def test_bot_directory_reports_rate_limit_without_partial_results(
+    client: TestClient, directory: dict[str, Any]
+) -> None:
+    directory["error"] = httpx2.Response(
+        429, headers={"Retry-After": "30"}, json={"ok": False, "error": "ratelimited"}
+    )
+    response = client.get("/dashboard/api/slack/bots")
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "30"
+    assert len(directory["calls"]) == 1
+
+
+def test_bot_directory_reports_missing_scope(client: TestClient, directory: dict[str, Any]) -> None:
+    directory["error"] = httpx2.Response(200, json={"ok": False, "error": "missing_scope"})
+    response = client.get("/dashboard/api/slack/bots")
+    assert response.status_code == 400
+    assert "users:read" in response.json()["detail"]
+
+
+def test_bot_directory_rejects_repeated_pagination_cursor(
+    client: TestClient, directory: dict[str, Any]
+) -> None:
+    page = {"ok": True, "members": [], "response_metadata": {"next_cursor": "same-cursor"}}
+    directory["pages"] = {"": page, "same-cursor": page}
+    assert client.get("/dashboard/api/slack/bots").status_code == 502
+
+
+def test_selected_bot_is_reverified_at_add_time(
+    client: TestClient, directory: dict[str, Any]
+) -> None:
+    directory["pages"] = {"": {"ok": True, "members": [_member("UHUMAN", "Former bot")]}}
+    response = client.get("/dashboard/api/slack/bots")
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    response = client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "UHUMAN"})
+    assert response.status_code == 400
+    assert client.get("/dashboard/api/slack/allowed-bots").json() == []

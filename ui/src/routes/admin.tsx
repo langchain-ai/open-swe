@@ -2,6 +2,7 @@ import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
+import type { ReactNode } from "react"
 
 import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
@@ -60,8 +61,9 @@ function AdminPage() {
         )}
       />
 
-      <SlackIntegrationSection />
-      <AllowedSlackBotsSection isAdmin={session.data.is_admin} />
+      <SlackIntegrationSection>
+        <AllowedSlackBotsSection isAdmin={session.data.is_admin} />
+      </SlackIntegrationSection>
       <WorkspaceMCPSection />
 
       <LLMGatewaySection />
@@ -100,7 +102,11 @@ function AdminPage() {
 const SLACK_CODE_CHANNELS_STORAGE_KEY =
   "open-swe.admin.slack-code-channels-enabled"
 
-export function SlackIntegrationSection() {
+export function SlackIntegrationSection({
+  children,
+}: {
+  children?: ReactNode
+}) {
   const [enabled, setEnabled] = useState(false)
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle"
@@ -131,7 +137,7 @@ export function SlackIntegrationSection() {
   return (
     <SettingsSection
       title="Slack integration"
-      description="Select the Slack app manifest for this installation. This browser-only setting does not change backend behavior."
+      description="Configure Slack and choose which bots can start Open SWE runs."
     >
       <SettingsRow
         htmlFor="slack-code-channels"
@@ -167,6 +173,7 @@ export function SlackIntegrationSection() {
               : "Copy manifest"}
         </Button>
       </div>
+      {children}
     </SettingsSection>
   )
 }

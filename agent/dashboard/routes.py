@@ -246,7 +246,9 @@ from agent.slack.allowed_bots import (
     ALLOWED_SLACK_BOTS,
     AllowedSlackBot,
     AllowSlackBot,
+    SlackBotOption,
     allow_slack_bot,
+    list_slack_bots,
 )
 from agent.slack.oauth import (
     SLACK_STATE_COOKIE_NAME,
@@ -910,6 +912,13 @@ async def slack_desktop_exchange(
         status="active",
     )
     return {"connected": True}
+
+
+@router.get("/slack/bots")
+async def api_list_slack_bots(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[SlackBotOption]:
+    return await list_slack_bots()
 
 
 @router.get("/slack/allowed-bots")
