@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
+import { Dialog } from "@base-ui/react/dialog"
+import { CheckIcon } from "@phosphor-icons/react"
 
 import type { ModelOption } from "@/lib/api"
 import {
@@ -49,6 +51,7 @@ function CloudAgentsPage() {
   const [baseBranch, setBaseBranch] = useState("")
   const [branchPrefix, setBranchPrefix] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [showSaved, setShowSaved] = useState(false)
   const initialized = useRef(false)
 
   const defaultModels = options.data?.models.filter(
@@ -126,6 +129,7 @@ function CloudAgentsPage() {
       .mutateAsync(
         buildProfileUpdate(profile.data, patch, fallbackModel, fallbackEffort)
       )
+      .then(() => setShowSaved(true))
       .catch((e: Error) => setError(e.message))
   }
 
@@ -335,6 +339,32 @@ function CloudAgentsPage() {
       </SettingsSection>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
+
+      <Dialog.Root open={showSaved} onOpenChange={setShowSaved}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+          <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <span className="flex size-10 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                <CheckIcon className="size-5" weight="bold" />
+              </span>
+              <Dialog.Title className="text-sm font-medium">
+                Defaults saved
+              </Dialog.Title>
+              <Dialog.Description className="text-xs text-muted-foreground">
+                Your agent defaults have been updated for your account.
+              </Dialog.Description>
+              <Button
+                size="sm"
+                className="mt-2"
+                onClick={() => setShowSaved(false)}
+              >
+                Done
+              </Button>
+            </div>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
     </AppShell>
   )
 }
