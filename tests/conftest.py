@@ -9,8 +9,8 @@ import pytest
 
 from agent import store as agent_store
 from agent.dashboard.threads import access, api, diffs, listing, proxy, runs, summary
-from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
+from coding_agent.utils import ttl_cache
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, api, diffs, listing, proxy, runs, summary)
 

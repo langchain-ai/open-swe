@@ -16,9 +16,9 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
-from agent.sandboxes.read_only_backend import ReadOnlyBackend
-from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 from agent.server import DesktopAgentState, _registered_tool_name, get_agent
+from coding_agent.sandboxes.read_only_backend import ReadOnlyBackend
+from coding_agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 
 
 class _DummyAgent:
@@ -338,7 +338,7 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
 async def test_agent_loads_browser_tools_dynamically_without_a_browser_subagent() -> None:
     from langchain_core.tools import StructuredTool
 
-    from agent.middleware import DynamicToolMiddleware
+    from coding_agent.middleware import DynamicToolMiddleware
 
     async def browser_navigate(url: str) -> str:
         """Navigate to a URL."""

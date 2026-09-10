@@ -18,7 +18,7 @@ from agent.slack.client import (
     stop_slack_stream,
     store_slack_run_mapping,
 )
-from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
+from coding_agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 
 logger = logging.getLogger(__name__)
 

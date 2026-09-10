@@ -19,15 +19,15 @@ import httpx2
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 
-from agent.config import ENV
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
-from agent.utils.run_usage import RunUsageSummary
-from agent.utils.url_safety import request_with_safe_redirects
 from agent.utils.user_messages import WARNING_ICON
+from coding_agent.config import ENV
+from coding_agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from coding_agent.utils.run_usage import RunUsageSummary
+from coding_agent.utils.url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
 

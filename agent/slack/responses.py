@@ -2,7 +2,7 @@
 
 from typing import Literal, NotRequired, TypedDict
 
-from agent.utils.json_types import JsonObject
+from coding_agent.utils.json_types import JsonObject
 
 
 class WebhookResponse(TypedDict):

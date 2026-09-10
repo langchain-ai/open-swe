@@ -140,7 +140,7 @@ async def capture_environment_snapshot(name: str) -> dict[str, Any]:
         return {"ok": False, "error": "no thread_id in the current run config"}
 
     try:
-        from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+        from coding_agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
         # ready() reconnects through the provider, which starts a stopped/idle box
         # before handing it back — so the capture always targets a running sandbox.

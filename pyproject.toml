@@ -65,7 +65,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["agent"]
+packages = ["agent", "coding_agent"]
 
 [tool.ruff]
 line-length = 100
@@ -106,7 +106,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ty.src]
-include = ["agent", "tests"]
+include = ["agent", "coding_agent", "tests"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = ["langgraph_api.metrics_datadog"]

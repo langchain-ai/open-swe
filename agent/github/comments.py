@@ -9,10 +9,10 @@ from typing import Any
 
 import httpx2
 
-from agent.config import ENV
 from agent.github.thread_token import GitHubAuthError
-from agent.prompts import render_prompt
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from coding_agent.config import ENV
+from coding_agent.prompts import render_prompt
+from coding_agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 

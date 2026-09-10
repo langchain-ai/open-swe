@@ -29,7 +29,7 @@ from starlette.responses import FileResponse, PlainTextResponse, Response, Strea
 from starlette.routing import Match, Route, get_route_path
 from starlette.types import Scope
 
-from agent.config import ENV
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

@@ -20,9 +20,9 @@ from typing import TypedDict
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, Field
 
-from agent.prompts import load_prompt, render_prompt
 from agent.review.diff import parse_unified_diff
 from agent.review.findings import get_thread_metadata, set_reviewer_thread_metadata
+from coding_agent.prompts import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,8 @@
 from typing import Any
 
 from agent.run_config import RunConfig
-from agent.sandboxes.providers.langsmith import get_async_sandbox_client
-from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+from coding_agent.sandboxes.providers.langsmith import get_async_sandbox_client
+from coding_agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 
 async def create_sandbox_service_url(

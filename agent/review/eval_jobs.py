@@ -12,7 +12,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Literal, TypedDict
 
-from agent.config import ENV
 from agent.review.eval_store import (
     DEFAULT_EVAL_PROJECT,
     EVALS_NAMESPACE,
@@ -21,6 +20,7 @@ from agent.review.eval_store import (
 )
 from agent.review.findings import REVIEW_FINDING_CAP
 from agent.store import get_value, now_iso, put_value
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

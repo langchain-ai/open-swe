@@ -1,6 +1,6 @@
 """Admin gate driven by the CONFIGURED_ADMINS env var."""
 
-from agent.config import ENV
+from coding_agent.config import ENV
 
 
 def _configured_admins() -> frozenset[str]:

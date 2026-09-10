@@ -5,12 +5,12 @@ from uuid import uuid4
 
 from langchain_core.tools import tool
 
-from agent.prompts import load_prompt
 from agent.tools.create_sandbox_file_download_url import (
     create_sandbox_file_download_url,
     resolve_sandbox_file,
 )
-from agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
+from coding_agent.prompts import load_prompt
+from coding_agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 
 _MAX_HTML_BYTES = 1_000_000
 

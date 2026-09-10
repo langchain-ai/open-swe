@@ -3,9 +3,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard import options
 from agent.dashboard.agent_overrides import normalize_profile_overrides
-from agent.dashboard.options import (
+from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
+from agent.dashboard.team_settings import (
+    TeamSettingsUpdate,
+    get_team_default_model,
+    normalize_team_settings_for_response,
+)
+from coding_agent import models as options
+from coding_agent.models import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     SUPPORTED_MODELS,
@@ -17,12 +23,6 @@ from agent.dashboard.options import (
     models_with_profile_context_windows,
     normalize_model_choice,
     provider_fallback_pair,
-)
-from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
-from agent.dashboard.team_settings import (
-    TeamSettingsUpdate,
-    get_team_default_model,
-    normalize_team_settings_for_response,
 )
 
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"

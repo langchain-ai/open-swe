@@ -14,11 +14,11 @@ exa_py_stub = types.ModuleType("exa_py")
 exa_py_stub.__dict__["Exa"] = object
 sys.modules.setdefault("exa_py", exa_py_stub)
 
-importlib.import_module("agent.tools.fetch_url")
+importlib.import_module("coding_agent.tools.fetch_url")
 importlib.import_module("agent.tools.http_request")
-fetch_url_tool = sys.modules["agent.tools.fetch_url"]
+fetch_url_tool = sys.modules["coding_agent.tools.fetch_url"]
 http_request_tool = sys.modules["agent.tools.http_request"]
-url_safety = importlib.import_module("agent.utils.url_safety")
+url_safety = importlib.import_module("coding_agent.utils.url_safety")
 
 _NO_JSON = object()
 

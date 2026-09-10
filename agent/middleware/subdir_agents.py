@@ -12,9 +12,9 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
-from agent.sandboxes.state import SANDBOX_BACKENDS
+from coding_agent.middleware.trace import CodingAgentMiddleware
+from coding_agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ def _append_reminder(result: ToolMessage | Command, reminder: str | None) -> Too
     return result
 
 
-class SubdirAgentsReadMiddleware(OpenSWEMiddleware):
+class SubdirAgentsReadMiddleware(CodingAgentMiddleware):
     """Append applicable ancestor ``AGENTS.md`` files to ``read_file`` results."""
 
     state_schema = AgentState

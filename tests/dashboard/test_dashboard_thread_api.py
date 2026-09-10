@@ -11,7 +11,6 @@ from fastapi import HTTPException
 
 from agent.dashboard import routes
 from agent.dashboard.agent_overrides import resolve_agent_model_id
-from agent.dashboard.options import model_supports_images
 from agent.dashboard.threads import api as thread_api
 from agent.dashboard.threads import diffs as thread_diffs
 from agent.dashboard.threads import listing as thread_listing
@@ -19,6 +18,7 @@ from agent.dashboard.threads import proxy as thread_proxy
 from agent.dashboard.threads import runs as thread_runs
 from agent.dashboard.threads import summary as thread_summary
 from agent.dashboard.ttft import AssistantTextObservation
+from coding_agent.models import model_supports_images
 from tests.conftest import patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
@@ -2600,11 +2600,11 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
     sandbox = object()
     patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(return_value=sandbox))
     monkeypatch.setattr(
-        "agent.sandboxes.paths.resolve_sandbox_work_dir",
+        "coding_agent.sandboxes.paths.resolve_sandbox_work_dir",
         AsyncMock(return_value="/work"),
     )
     read_diff = AsyncMock(return_value=live)
-    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
+    monkeypatch.setattr("coding_agent.utils.turn_checkpoint.read_turn_diff", read_diff)
 
     result = await thread_diffs.get_dashboard_thread_working_tree_diff("thread-1", "owner")
 

@@ -5,11 +5,11 @@ from urllib.parse import quote
 
 import httpx2
 
-from agent.config import ENV
 from agent.github.app import (
     get_github_app_installation_id_for_org,
     get_github_app_installation_token,
 )
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

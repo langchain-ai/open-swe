@@ -30,7 +30,7 @@ from typing import Any
 import jwt
 from fastapi import HTTPException
 
-from agent.config import ENV
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

@@ -20,7 +20,6 @@ from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
 from agent.agent_cost import finalize_agent_run_usage
-from agent.config import ENV
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
 from agent.linear.client import comment_on_linear_issue
@@ -32,9 +31,10 @@ from agent.slack.code_channels import is_code_channel_session, set_session_statu
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
 from agent.utils.dashboard_links import dashboard_thread_url
-from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.user_messages import warning
+from coding_agent.config import ENV
+from coding_agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 
 logger = logging.getLogger(__name__)
 

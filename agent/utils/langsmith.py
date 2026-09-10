@@ -13,8 +13,8 @@ from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
 from langsmith.utils import LangSmithNotFoundError, get_host_url
 
-from agent.config import ENV
-from agent.utils.tracing import tracing_project
+from coding_agent.config import ENV
+from coding_agent.utils.tracing import tracing_project
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ from langgraph.config import get_config
 
 from agent.dashboard.agent_overrides import resolve_github_login
 from agent.dashboard.user_instructions import MAX_USER_INSTRUCTIONS_CHARS, set_user_instructions
-from agent.utils.json_types import as_json_object
+from coding_agent.utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)
 

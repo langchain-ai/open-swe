@@ -1,7 +1,7 @@
 import pytest
 
 from agent.dashboard import agent_usage
-from agent.utils.run_usage import RunUsageSummary
+from coding_agent.utils.run_usage import RunUsageSummary
 
 
 class FakeStore:

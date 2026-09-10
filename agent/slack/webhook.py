@@ -24,20 +24,20 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
-from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
 from agent.utils.thread_ops import queue_message_for_thread
 from agent.webhooks import common
+from coding_agent.prompts import load_prompt
+from coding_agent.utils.json_types import as_json_object
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60

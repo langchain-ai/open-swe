@@ -8,10 +8,10 @@ from urllib.parse import urlencode, urlparse
 
 import httpx2
 
-from agent.config import ENV
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value
 from agent.utils.dashboard_links import dashboard_base_url
+from coding_agent.config import ENV
 
 NOTION_MCP_URL = "https://mcp.notion.com/mcp"
 NOTION_STATE_COOKIE_NAME = "osw_notion_oauth_state"

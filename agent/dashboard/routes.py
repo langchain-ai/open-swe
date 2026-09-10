@@ -24,7 +24,6 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from agent.config import ENV
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
@@ -82,12 +81,6 @@ from agent.dashboard.oauth import (
     valid_handoff_challenge,
 )
 from agent.dashboard.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
-from agent.dashboard.options import (
-    FABLE_MODEL_IDS,
-    SUPPORTED_MODELS,
-    gate_fable_model,
-    models_with_profile_context_windows,
-)
 from agent.dashboard.profiles import (
     ProfileUpdate,
     get_profile,
@@ -257,7 +250,14 @@ from agent.utils.dashboard_links import (
     dashboard_is_same_origin,
 )
 from agent.utils.thread_ops import langgraph_url
-from agent.utils.timing import server_timing_header
+from coding_agent.config import ENV
+from coding_agent.models import (
+    FABLE_MODEL_IDS,
+    SUPPORTED_MODELS,
+    gate_fable_model,
+    models_with_profile_context_windows,
+)
+from coding_agent.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
 
@@ -2108,7 +2108,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         await websocket.close(code=1013, reason="Cloud terminal capacity reached")
         return
     try:
-        from agent.sandboxes.providers.langsmith import connect_async_langsmith_sandbox
+        from coding_agent.sandboxes.providers.langsmith import connect_async_langsmith_sandbox
 
         client, sandbox = await connect_async_langsmith_sandbox(sandbox_id)
         cwd = posixpath.join("/workspace", repo_name) if repo_name else "/workspace"

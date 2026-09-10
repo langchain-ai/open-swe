@@ -8,9 +8,9 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-from agent.config import ENV
 from agent.run_config import RunConfig
-from agent.sandboxes.state import get_sandbox_backend
+from coding_agent.config import ENV
+from coding_agent.sandboxes.state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
 

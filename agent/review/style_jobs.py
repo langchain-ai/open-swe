@@ -6,7 +6,6 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
-from agent.config import ENV
 from agent.dispatch import create_durable_run
 from agent.input_messages import RunInput, build_run_input
 from agent.review.style_collector import (
@@ -20,6 +19,7 @@ from agent.review.styles import (
 )
 from agent.thread_ids import review_style_thread_id
 from agent.utils.analyzer_skills import build_skill_files
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

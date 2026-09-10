@@ -6,8 +6,8 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.prompts import load_prompt
 from agent.tools.admin_gate import configurable, require_admin
+from coding_agent.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 

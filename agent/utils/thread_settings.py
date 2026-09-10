@@ -16,7 +16,7 @@ from typing import Any, TypedDict
 
 from pydantic import TypeAdapter, ValidationError
 
-from agent.utils import ttl_cache
+from coding_agent.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
 

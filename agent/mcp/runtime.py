@@ -24,7 +24,7 @@ from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 from agent.mcp.models import MCPConnection
 from agent.mcp.oauth import MCPOAuthError, connection_auth
 from agent.mcp.transport import mcp_http_client
-from agent.utils import ttl_cache
+from coding_agent.utils import ttl_cache
 from mcp.types import PaginatedRequestParams, Tool
 
 logger = logging.getLogger(__name__)

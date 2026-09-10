@@ -9,7 +9,6 @@ from typing import Any
 import httpx2
 from fastapi import HTTPException
 
-from agent.config import ENV
 from agent.dashboard.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -27,9 +26,10 @@ from agent.dashboard.threads.summary import (
     _thread_is_busy,
 )
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
-from agent.utils.json_types import thread_metadata
-from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from agent.utils.thread_ops import langgraph_client, langgraph_url
+from coding_agent.config import ENV
+from coding_agent.utils.json_types import thread_metadata
+from coding_agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 
 logger = logging.getLogger(__name__)
 

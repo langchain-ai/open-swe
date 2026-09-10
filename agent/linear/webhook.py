@@ -17,10 +17,10 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.prompts import render_prompt
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
 from agent.webhooks import common
+from coding_agent.prompts import render_prompt
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915

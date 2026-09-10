@@ -8,7 +8,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import Command
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
+from coding_agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
 
 
 def _tool(name: str, description: str = "schema details that must stay hidden") -> BaseTool:

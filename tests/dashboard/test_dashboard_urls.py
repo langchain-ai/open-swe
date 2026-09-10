@@ -95,7 +95,7 @@ def test_local_dev_model_check_needs_an_explicit_localhost_dashboard(
     monkeypatch: pytest.MonkeyPatch, bundled: Path
 ) -> None:
     """A fresh platform deployment has the bundled UI and no LANGGRAPH_URL yet; it must boot."""
-    from agent.utils import model
+    from coding_agent.utils import model
 
     for name in ("DASHBOARD_BASE_URL", "LANGGRAPH_URL", "OPENAI_API_KEY", "LLM_MODEL_ID"):
         monkeypatch.delenv(name, raising=False)

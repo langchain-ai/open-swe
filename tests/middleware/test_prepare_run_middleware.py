@@ -11,9 +11,9 @@ from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
 from agent.input_messages import human_input, system_introduction
-from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from agent.server import PrepareAgentRunMiddleware
-from agent.utils import ttl_cache
+from coding_agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
+from coding_agent.utils import ttl_cache
 
 
 class DummyPrepareMiddleware(BasePrepareRunMiddleware):

@@ -511,7 +511,7 @@ def _names(req: _FakeReq) -> set[str]:
 
 
 def test_plan_mode_middleware_initial_always_filters() -> None:
-    from agent.middleware import PlanModeMiddleware
+    from coding_agent.middleware import PlanModeMiddleware
 
     mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=True)
     req = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {})
@@ -519,7 +519,7 @@ def test_plan_mode_middleware_initial_always_filters() -> None:
 
 
 def test_plan_mode_middleware_self_activation_via_state() -> None:
-    from agent.middleware import PlanModeMiddleware
+    from coding_agent.middleware import PlanModeMiddleware
 
     mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=False)
     # Plan mode not yet active: nothing filtered.
@@ -531,7 +531,7 @@ def test_plan_mode_middleware_self_activation_via_state() -> None:
 
 
 def test_plan_mode_middleware_self_deactivation_via_state() -> None:
-    from agent.middleware import PlanModeMiddleware
+    from coding_agent.middleware import PlanModeMiddleware
 
     mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=True)
     off = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {"plan_mode": False})

@@ -7,8 +7,6 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
-from agent.middleware.message_content import content_to_text
-from agent.middleware.trace import scrub_middleware_inputs
 from agent.run_config import RunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
@@ -16,6 +14,8 @@ from agent.slack.client import (
     post_slack_thread_reply,
 )
 from agent.utils.user_messages import warning
+from coding_agent.middleware.message_content import content_to_text
+from coding_agent.middleware.trace import scrub_middleware_inputs
 
 logger = logging.getLogger(__name__)
 

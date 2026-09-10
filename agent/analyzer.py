@@ -18,7 +18,7 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
-from agent.config import ENV
+from coding_agent.config import ENV
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -33,15 +33,7 @@ from langchain_core.language_models import BaseChatModel
 
 from agent.dashboard.team_settings import get_effective_gateway_enabled
 from agent.github.app import get_github_app_installation_token
-from agent.middleware import (
-    BasePrepareRunMiddleware,
-    PrepareRunState,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeToolInputsMiddleware,
-    TimeoutWrapupMiddleware,
-    ToolErrorMiddleware,
-)
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.middleware import ToolErrorMiddleware
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
 from agent.run_config import RunConfig
 from agent.runtime import (
@@ -53,15 +45,23 @@ from agent.runtime import (
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
-from agent.sandboxes.paths import resolve_sandbox_work_dir
-from agent.sandboxes.providers.langsmith import configure_github_proxy
-from agent.sandboxes.state import unwrap_sandbox_backend
 from agent.tools.read_finding_outcomes import read_finding_outcomes
 from agent.tools.save_review_style import save_review_style_prompt
-from agent.utils import ttl_cache
 from agent.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
-from agent.utils.deferred_model import make_deferred_error_model
-from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from coding_agent.middleware import (
+    BasePrepareRunMiddleware,
+    PrepareRunState,
+    SanitizeOpenAIResponsesMiddleware,
+    SanitizeToolInputsMiddleware,
+    TimeoutWrapupMiddleware,
+)
+from coding_agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
+from coding_agent.sandboxes.providers.langsmith import configure_github_proxy
+from coding_agent.sandboxes.state import unwrap_sandbox_backend
+from coding_agent.utils import ttl_cache
+from coding_agent.utils.deferred_model import make_deferred_error_model
+from coding_agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 

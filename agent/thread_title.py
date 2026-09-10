@@ -9,9 +9,9 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from agent.input_messages import dynamic_context_hash, human_input, input_message_text
-from agent.prompts import load_prompt
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, rename_session
 from agent.source_context import SourceContext
+from coding_agent.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 

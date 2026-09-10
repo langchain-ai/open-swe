@@ -7,11 +7,11 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from agent.config import ENV
 from agent.slack.client import lookup_slack_run_mapping
 from agent.utils.langsmith import create_langsmith_feedback, delete_langsmith_feedback
 from agent.utils.reviewer_outcomes import outcome_from_score as _outcome_from_score
 from agent.utils.reviewer_outcomes import upsert_run_outcome
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

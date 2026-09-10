@@ -11,8 +11,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from agent.config import ENV
-from agent.dashboard.options import (
+from agent.store import get_value, now_iso, put_value
+from coding_agent.config import ENV
+from coding_agent.models import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
@@ -23,8 +24,7 @@ from agent.dashboard.options import (
     model_supports_effort,
     provider_fallback_pair,
 )
-from agent.store import get_value, now_iso, put_value
-from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
+from coding_agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -417,7 +417,7 @@ async def get_team_default_model(
     still supported; otherwise the newest supported model for the same provider
     (so a stale Anthropic/OpenAI selection stays on its provider rather than
     jumping cross-provider); otherwise the hardcoded global default from
-    :func:`agent.dashboard.options.default_model_pair`.
+    :func:`coding_agent.models.default_model_pair`.
 
     ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
     admin setting is unset/invalid it inherits the team **agent** default.
@@ -521,7 +521,7 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
     # bypassed and the call still needs a real OpenAI credential.
     if gateway_enabled and gateway_overrides(pair[0]) is not None:
         return pair
-    from agent.utils.openai_oauth import desktop_openai_oauth_available
+    from coding_agent.utils.openai_oauth import desktop_openai_oauth_available
 
     if ENV.OPENAI_API_KEY.optional() or desktop_openai_oauth_available():
         return pair

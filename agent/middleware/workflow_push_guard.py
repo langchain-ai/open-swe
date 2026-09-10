@@ -21,9 +21,7 @@ from agent.dashboard.workflow_approval import (
     mark_workflow_push_notified,
     workflow_push_approved,
 )
-from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
-from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
@@ -31,6 +29,8 @@ from agent.slack.client import (
 )
 from agent.slack.tools.thread_reply import build_workflow_approval_blocks
 from agent.utils.dashboard_links import dashboard_workflow_approval_url
+from coding_agent.middleware.trace import CodingAgentMiddleware
+from coding_agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 
@@ -568,7 +568,7 @@ async def _approval_state(request: ToolCallRequest, change: WorkflowPushChange) 
         return "approval_error"
 
 
-class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
+class WorkflowPushGuardMiddleware(CodingAgentMiddleware):
     """Require approval before pushing `.github/workflows` changes."""
 
     state_schema = AgentState

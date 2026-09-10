@@ -20,11 +20,11 @@ from datetime import UTC, datetime
 
 from langgraph_sdk import get_client
 
-from agent.config import ENV
 from agent.tools.schedule_thread_wakeup import (
     find_expired_wakeup_cron_ids,
     purge_expired_wakeup_crons,
 )
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

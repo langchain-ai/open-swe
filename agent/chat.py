@@ -32,30 +32,13 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from agent.dashboard.options import (
-    SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
-    gate_fable_model,
-    model_supports_effort,
-)
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model,
     get_team_fable_enabled,
 )
 from agent.github.app import get_github_app_installation_token
-from agent.middleware import (
-    BasePrepareRunMiddleware,
-    ExcludeToolsMiddleware,
-    ModelCallTimeoutMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
-    ToolErrorMiddleware,
-)
-from agent.middleware.prepare_run import PrepareRunState
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.middleware import ToolErrorMiddleware
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -63,16 +46,28 @@ from agent.runtime import (
     bindable_config,
     graph_loaded_for_execution,
 )
-from agent.tools import (
-    fetch_url,
-    list_review_findings,
-    read_repo_file,
-    search_repo_code,
-    web_search,
+from agent.tools import list_review_findings, read_repo_file, search_repo_code, web_search
+from coding_agent.middleware import (
+    BasePrepareRunMiddleware,
+    ExcludeToolsMiddleware,
+    ModelCallTimeoutMiddleware,
+    SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
+    SanitizeThinkingBlocksMiddleware,
+    SanitizeToolInputsMiddleware,
 )
-from agent.utils import ttl_cache
-from agent.utils.deferred_model import make_deferred_error_model
-from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from coding_agent.middleware.prepare_run import PrepareRunState
+from coding_agent.models import (
+    SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
+    gate_fable_model,
+    model_supports_effort,
+)
+from coding_agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from coding_agent.tools import fetch_url
+from coding_agent.utils import ttl_cache
+from coding_agent.utils.deferred_model import make_deferred_error_model
+from coding_agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 

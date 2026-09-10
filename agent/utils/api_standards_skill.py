@@ -12,7 +12,7 @@ Best-effort: any failure (missing handle, no API key, SDK error) returns
 import asyncio
 import logging
 
-from agent.config import ENV
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

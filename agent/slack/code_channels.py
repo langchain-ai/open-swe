@@ -16,7 +16,7 @@ from agent.slack.client import (
     get_slack_channel_info,
     slack_headers,
 )
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from coding_agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 

@@ -28,9 +28,9 @@ from agent.middleware.sandbox_circuit_breaker import (
     extract_sandbox_id,
     post_sandbox_unreachable_notification,
 )
-from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
-from agent.sandboxes.retry import is_transient_sandbox_error
+from coding_agent.middleware.trace import CodingAgentMiddleware
+from coding_agent.sandboxes.retry import is_transient_sandbox_error
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ def _generic_error_tool_message(e: Exception, request: ToolCallRequest) -> ToolM
     )
 
 
-class ToolErrorMiddleware(OpenSWEMiddleware):
+class ToolErrorMiddleware(CodingAgentMiddleware):
     """Normalize tool execution errors into predictable payloads.
 
     Catches any exception thrown during a tool call and converts it into

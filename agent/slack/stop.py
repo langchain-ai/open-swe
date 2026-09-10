@@ -8,9 +8,7 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from agent.config import ENV
 from agent.dispatch import dispatch_agent_run
-from agent.prompts import render_prompt
 from agent.slack.client import (
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
@@ -19,6 +17,8 @@ from agent.slack.client import (
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
 from agent.slack.events import claim_slack_event
 from agent.source_context import SourceContext
+from coding_agent.config import ENV
+from coding_agent.prompts import render_prompt
 
 logger = logging.getLogger(__name__)
 

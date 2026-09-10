@@ -3,9 +3,9 @@ import shlex
 from typing import Any, Literal
 
 from agent.run_config import RunConfig
-from agent.sandboxes.paths import resolve_sandbox_work_dir
-from agent.sandboxes.providers.langsmith import get_async_sandbox_client
-from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
+from coding_agent.sandboxes.providers.langsmith import get_async_sandbox_client
+from coding_agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 
 async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:

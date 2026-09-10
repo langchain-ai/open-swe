@@ -18,11 +18,11 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import APIKeyCookie
 from starlette.requests import HTTPConnection
 
-from agent.config import ENV
 from agent.github.org_membership import is_user_active_org_member
 from agent.github.token_auth import bearer_github_token
 from agent.utils.dashboard_links import dashboard_base_url
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from coding_agent.config import ENV
+from coding_agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 

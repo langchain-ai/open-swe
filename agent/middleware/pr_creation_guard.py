@@ -12,7 +12,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from agent.middleware.trace import OpenSWEMiddleware
+from coding_agent.middleware.trace import CodingAgentMiddleware
 
 _SHELL_SEPARATORS = {";", "&&", "||", "|", "&"}
 _SHELL_EXECUTABLES = {"bash", "dash", "sh", "zsh"}
@@ -254,7 +254,7 @@ def _blocked_tool_message(request: ToolCallRequest, command: str) -> ToolMessage
     )
 
 
-class PullRequestCreationGuardMiddleware(OpenSWEMiddleware):
+class PullRequestCreationGuardMiddleware(CodingAgentMiddleware):
     """Prevent attributed-PR failures from being hidden by shell fallbacks."""
 
     state_schema = AgentState

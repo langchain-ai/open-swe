@@ -26,9 +26,9 @@ from agent.dashboard.threads.summary import (
     thread_is_readable,
     thread_source,
 )
-from agent.utils.json_types import JsonObject, ThreadLike
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import participant_search_filters
+from coding_agent.utils.json_types import JsonObject, ThreadLike
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
-from agent.config import ENV
 from agent.dashboard import router as dashboard_router
 from agent.dashboard.plan_api import plan_router
 from agent.dashboard.workflow_approval_api import workflow_approval_router
@@ -15,7 +14,8 @@ from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
 from agent.slack.routes import router as slack_webhook_router
 from agent.utils.dashboard_ui import mount_dashboard_ui
-from agent.utils.event_loop import pin_single_event_loop
+from coding_agent.config import ENV
+from coding_agent.utils.event_loop import pin_single_event_loop
 
 # Before the queue starts: it reads this when it builds its workers, and Open SWE
 # cannot survive them landing on different loops.
@@ -24,8 +24,8 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    from agent.sandboxes.providers.registry import validate_sandbox_startup_config
-    from agent.utils.model import close_cached_models, validate_local_dev_llm_config
+    from coding_agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from coding_agent.utils.model import close_cached_models, validate_local_dev_llm_config
 
     pin_single_event_loop()
     validate_sandbox_startup_config()

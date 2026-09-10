@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from agent.utils.streaming import root_lifecycle
+from coding_agent.utils.streaming import root_lifecycle
 
 logger = logging.getLogger(__name__)
 

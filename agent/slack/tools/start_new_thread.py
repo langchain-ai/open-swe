@@ -7,7 +7,6 @@ from fastapi import HTTPException
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
-from agent.prompts import render_prompt
 from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
@@ -21,6 +20,7 @@ from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks.common import is_repo_allowed
+from coding_agent.prompts import render_prompt
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000

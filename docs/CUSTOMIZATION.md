@@ -26,7 +26,7 @@ return create_deep_agent(
 
 ## 1. Sandbox
 
-By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/sandboxes/providers/langsmith.py`.
+By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `coding_agent/sandboxes/providers/langsmith.py`.
 
 ### Using a custom sandbox snapshot
 
@@ -54,16 +54,16 @@ The proxy token is minted at runtime from the GitHub App installation credential
 
 ### Using a different sandbox provider
 
-Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/sandboxes/providers/` and a factory function registered in `agent/sandboxes/providers/registry.py`:
+Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `coding_agent/sandboxes/providers/` and a factory function registered in `coding_agent/sandboxes/providers/registry.py`:
 
 | `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
-| `langsmith` (default) | `agent/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY`, `SANDBOX_TYPE="langsmith"` |
-| `daytona` | `agent/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
-| `runloop` | `agent/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
-| `e2b` | `agent/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
-| `modal` | `agent/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
-| `local` | `agent/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
+| `langsmith` (default) | `coding_agent/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY`, `SANDBOX_TYPE="langsmith"` |
+| `daytona` | `coding_agent/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
+| `runloop` | `coding_agent/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `e2b` | `coding_agent/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
+| `modal` | `coding_agent/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `local` | `coding_agent/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
@@ -71,7 +71,7 @@ For `langsmith`, sandbox provisioning, connection, proxy configuration, and envi
 
 ### Adding a new sandbox provider
 
-1. **Create an integration file** at `agent/sandboxes/providers/my_provider.py` with a factory function matching this signature:
+1. **Create an integration file** at `coding_agent/sandboxes/providers/my_provider.py` with a factory function matching this signature:
 
 ```python
 def create_my_provider_sandbox(sandbox_id: str | None = None):
@@ -87,12 +87,12 @@ def create_my_provider_sandbox(sandbox_id: str | None = None):
     ...
 ```
 
-2. **Register it** in `agent/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
+2. **Register it** in `coding_agent/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
 
 ```python
 SANDBOX_FACTORIES = {
     ...
-    "my_provider": ("agent.sandboxes.providers.my_provider", "create_my_provider_sandbox"),
+    "my_provider": ("coding_agent.sandboxes.providers.my_provider", "create_my_provider_sandbox"),
 }
 ```
 
@@ -130,7 +130,7 @@ class MySandbox(BaseSandbox):
         )
 ```
 
-See `deepagents.backends.LangSmithSandbox` and `agent/sandboxes/providers/langsmith.py` for a full reference implementation.
+See `deepagents.backends.LangSmithSandbox` and `coding_agent/sandboxes/providers/langsmith.py` for a full reference implementation.
 
 ---
 
@@ -145,7 +145,7 @@ LLM_REASONING_EFFORT="high"
 
 When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5`. All other deployments default to `openai:gpt-5.6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
 
-Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `agent/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
+Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `coding_agent/models.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
 These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
 
@@ -166,7 +166,7 @@ model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort"
 model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
 ```
 
-The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
+The `make_model()` helper in `coding_agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
 
 ```python
 from langchain_anthropic import ChatAnthropic
@@ -212,7 +212,7 @@ Routing is opt-in and off by default. Enable it either way:
 
 The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
 
-Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
+Routing is applied centrally in `make_model` (`coding_agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `coding_agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
 **Caveat — OpenAI endpoint:** Open SWE uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic, Baseten, and Fireworks are unaffected.
 
@@ -224,7 +224,7 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 
 | Tool | File | Purpose |
 |---|---|---|
-| `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
+| `fetch_url` | `coding_agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `linear_comment` | `agent/linear/tools/comment.py` | Post comments on Linear tickets |
 | `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
@@ -471,7 +471,7 @@ The browser schemas appear in the `load_integration_tools` catalog only when the
 | `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Stagehand model; Anthropic and OpenAI are supported. |
 | `STAGEHAND_HEADLESS` | `true` | Run Chromium headless. |
 
-The sandbox snapshot must include Chromium and Stagehand, install `agent/resources/stagehand_runtime.py` at `/opt/open-swe/stagehand_runtime.py`, and set `STAGEHAND_LOCAL_CHROME_PATH` to the Chromium executable (usually `/usr/bin/chromium`).
+The sandbox snapshot must include Chromium and Stagehand, install `coding_agent/resources/stagehand_runtime.py` at `/opt/open-swe/stagehand_runtime.py`, and set `STAGEHAND_LOCAL_CHROME_PATH` to the Chromium executable (usually `/usr/bin/chromium`).
 
 ---
 
@@ -504,7 +504,7 @@ These are used as the fallback when:
 
 ### Repository extraction from messages
 
-Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
+Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `coding_agent/utils/repo.py` handles parsing these formats:
 
 - `repo:owner/name` — explicit org and repo
 - `repo owner/name` — space syntax (same result)
@@ -624,7 +624,7 @@ Open SWE supports a `default_prompt.md` file for org-level instructions that app
 
 The file is loaded at agent startup and injected into the system prompt between the task overview and repository setup sections.
 
-**Location:** [`agent/resources/default_prompt.md`](../agent/resources/default_prompt.md) for the bundled default.
+**Location:** [`coding_agent/resources/default_prompt.md`](../coding_agent/resources/default_prompt.md) for the bundled default.
 
 **Override:** Set the `DEFAULT_PROMPT_PATH` environment variable to use a different file:
 

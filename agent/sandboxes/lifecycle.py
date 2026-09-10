@@ -14,18 +14,19 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
-from agent.config import ENV
 from agent.dashboard.environments import SandboxResources, resolve_environment
 from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
-from agent.sandboxes.providers.langsmith import (
+from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
+from coding_agent.config import ENV
+from coding_agent.sandboxes.providers.langsmith import (
     configure_github_proxy,
     create_langsmith_sandbox_from_params,
     get_sandbox_proxy_config,
 )
-from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
-from agent.sandboxes.state import (
+from coding_agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
+from coding_agent.sandboxes.state import (
     SANDBOX_BACKENDS,
     SandboxBackendProxy,
     SandboxUnreachableError,
@@ -35,8 +36,7 @@ from agent.sandboxes.state import (
     set_sandbox_backend,
     unwrap_sandbox_backend,
 )
-from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
-from agent.utils.startup_trace import aphase
+from coding_agent.utils.startup_trace import aphase
 
 logger = logging.getLogger(__name__)
 

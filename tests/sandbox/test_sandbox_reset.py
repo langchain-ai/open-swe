@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.sandboxes.lifecycle import reset_sandbox_for_thread
-from agent.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
+from coding_agent.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
 
 
 @pytest.mark.asyncio

@@ -13,10 +13,10 @@ from langgraph_sdk import get_client
 
 from agent.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
 from agent.input_messages import build_run_input
-from agent.prompts import load_prompt
 from agent.run_config import RunConfig
 from agent.slack.client import get_active_slack_thread
 from agent.utils.thread_ops import langgraph_url
+from coding_agent.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 

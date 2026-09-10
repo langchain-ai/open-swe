@@ -16,8 +16,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.errors import APIStatusError
 
 from agent.review.findings import coerce_finding, is_surfaced
-from agent.utils.json_types import as_json_object, thread_metadata
-from agent.utils.run_usage import RunUsageSummary
+from coding_agent.utils.json_types import as_json_object, thread_metadata
+from coding_agent.utils.run_usage import RunUsageSummary
 
 AGENT_RUN_NAMESPACE = ["usage", "v2", "agent_runs"]
 AGENT_PR_NAMESPACE = ["usage", "v2", "agent_prs"]

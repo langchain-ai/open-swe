@@ -20,7 +20,7 @@ from agent.dashboard.threads.proxy import _PROXY_REQUEST_TIMEOUT
 from agent.dashboard.threads.summary import _metadata_repo
 from agent.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
 from agent.slack.client import parse_github_pr_url
-from agent.utils.json_types import thread_metadata
+from coding_agent.utils.json_types import thread_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ _UNSAFE_REF_CHARACTERS = set(" ~^:?*[\\\x7f") | {chr(code) for code in range(32)
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
     # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
-    from agent.sandboxes.providers.registry import create_sandbox as _create_sandbox
+    from coding_agent.sandboxes.providers.registry import create_sandbox as _create_sandbox
 
     return await _create_sandbox(*args, **kwargs)
 
@@ -39,7 +39,9 @@ async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
 @cache
 def _recovery_patch_script() -> str:
     return (
-        resources.files("agent.resources").joinpath("recovery_patch.py").read_text(encoding="utf-8")
+        resources.files("coding_agent.resources")
+        .joinpath("recovery_patch.py")
+        .read_text(encoding="utf-8")
     )
 
 
@@ -172,8 +174,8 @@ async def get_dashboard_thread_working_tree_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
-    from agent.sandboxes.paths import resolve_sandbox_work_dir
-    from agent.utils.turn_checkpoint import read_turn_diff
+    from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
+    from coding_agent.utils.turn_checkpoint import read_turn_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     sandbox_id = metadata.get("sandbox_id")

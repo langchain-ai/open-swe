@@ -14,8 +14,8 @@ from agent.dashboard.plan_store import (
     save_plan_content,
 )
 from agent.run_config import RunConfig
-from agent.sandboxes.state import get_sandbox_backend
-from agent.utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
+from coding_agent.sandboxes.state import get_sandbox_backend
+from coding_agent.utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
 
 logger = logging.getLogger(__name__)
 

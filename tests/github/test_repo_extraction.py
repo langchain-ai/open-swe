@@ -1,4 +1,4 @@
-"""Tests for agent.utils.repo and Linear webhook repo override behavior."""
+"""Tests for coding_agent.utils.repo and Linear webhook repo override behavior."""
 
 import json
 from unittest.mock import AsyncMock, patch
@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.slack.client import extract_channel_description_text
-from agent.utils.repo import extract_repo_from_text
+from coding_agent.utils.repo import extract_repo_from_text
 
 
 class TestExtractRepoFromText:

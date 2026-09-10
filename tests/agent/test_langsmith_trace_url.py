@@ -309,7 +309,7 @@ def test_feedback_clients_use_a_single_workspace(monkeypatch: pytest.MonkeyPatch
 
 def test_tracing_project_follows_the_sdk_tracer(monkeypatch: pytest.MonkeyPatch) -> None:
     """Links must query the project the tracer used, whichever legacy name supplied it."""
-    from agent.utils.tracing import tracing_project
+    from coding_agent.utils.tracing import tracing_project
 
     for name in ("LANGSMITH_PROJECT", "LANGCHAIN_PROJECT", "HOSTED_LANGSERVE_PROJECT_NAME"):
         monkeypatch.delenv(name, raising=False)

@@ -4,7 +4,7 @@ import logging
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
-from agent.config import ENV
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

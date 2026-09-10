@@ -5,7 +5,7 @@ from typing import Any
 import httpx2
 
 from agent.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
-from agent.utils.url_safety import (
+from coding_agent.utils.url_safety import (
     request_with_safe_redirects as _request_with_safe_redirects,
 )
 

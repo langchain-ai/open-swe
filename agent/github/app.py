@@ -10,8 +10,8 @@ from urllib.parse import quote
 import httpx2
 import jwt
 
-from agent.config import ENV
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from coding_agent.config import ENV
+from coding_agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 

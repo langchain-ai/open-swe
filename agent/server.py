@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from agent.config import ENV
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +58,6 @@ from agent.dashboard.agent_usage import record_agent_run_usage
 from agent.dashboard.environments import (
     resolve_environment,
 )
-from agent.dashboard.options import (
-    SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
-    gate_fable_model,
-    model_supports_effort,
-)
 from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
@@ -86,40 +80,21 @@ from agent.input_messages import (
     visible_dynamic_context_hashes,
 )
 from agent.middleware import (
-    BasePrepareRunMiddleware,
-    DynamicToolMiddleware,
-    ExcludeToolsMiddleware,
-    IntegrationGroup,
-    ModelCallTimeoutMiddleware,
-    ModelErrorMiddleware,
-    ModelFallbackMiddleware,
-    ModelSelectionMiddleware,
-    PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
-    StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
-    task_on_failure,
-    task_retry_on,
 )
-from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
     construct_sender_context,
     construct_system_prompt,
     render_open_swe_shared_base,
 )
-from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -133,12 +108,6 @@ from agent.runtime.execution import bindable_config, graph_loaded_for_execution
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
-)
-from agent.sandboxes.paths import resolve_sandbox_work_dir
-from agent.sandboxes.read_only_backend import ReadOnlyBackend
-from agent.sandboxes.state import (
-    SandboxUnreachableError,
-    get_or_create_sandbox_backend_proxy,
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -157,7 +126,6 @@ from agent.tools import (
     delete_organization_skill,
     delete_user_skill,
     enter_plan_mode,
-    fetch_url,
     get_thread,
     http_request,
     linear_comment,
@@ -192,24 +160,12 @@ from agent.tools import (
     update_automation,
     web_search,
 )
-from agent.utils import ttl_cache
 from agent.utils.authorship import (
     CollaboratorIdentity,
     resolve_participant_identities,
     resolve_triggering_user_identity,
 )
 from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
-from agent.utils.deferred_model import make_deferred_error_model
-from agent.utils.gateway import gateway_env_default
-from agent.utils.json_types import as_json_object, thread_metadata
-from agent.utils.model import (
-    DEFAULT_LLM_REASONING,
-    ModelKwargs,
-    fallback_model_id_for,
-    make_model,
-    provider_model_kwargs,
-)
-from agent.utils.startup_trace import aphase
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from agent.utils.thread_settings import (
     ThreadSettings,
@@ -217,6 +173,52 @@ from agent.utils.thread_settings import (
     normalize_thread_settings,
     store_thread_settings,
 )
+from coding_agent.middleware import (
+    BasePrepareRunMiddleware,
+    DynamicToolMiddleware,
+    ExcludeToolsMiddleware,
+    IntegrationGroup,
+    ModelCallTimeoutMiddleware,
+    ModelErrorMiddleware,
+    ModelFallbackMiddleware,
+    ModelSelectionMiddleware,
+    PlanModeMiddleware,
+    SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
+    SanitizeThinkingBlocksMiddleware,
+    SanitizeToolInputsMiddleware,
+    StableToolResultOrderMiddleware,
+    TimeoutWrapupMiddleware,
+    task_on_failure,
+    task_retry_on,
+)
+from coding_agent.middleware.prepare_run import PrepareRunState
+from coding_agent.models import (
+    SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
+    gate_fable_model,
+    model_supports_effort,
+)
+from coding_agent.prompts import apply_tool_descriptions, load_prompt
+from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
+from coding_agent.sandboxes.read_only_backend import ReadOnlyBackend
+from coding_agent.sandboxes.state import (
+    SandboxUnreachableError,
+    get_or_create_sandbox_backend_proxy,
+)
+from coding_agent.tools import fetch_url
+from coding_agent.utils import ttl_cache
+from coding_agent.utils.deferred_model import make_deferred_error_model
+from coding_agent.utils.gateway import gateway_env_default
+from coding_agent.utils.json_types import as_json_object, thread_metadata
+from coding_agent.utils.model import (
+    DEFAULT_LLM_REASONING,
+    ModelKwargs,
+    fallback_model_id_for,
+    make_model,
+    provider_model_kwargs,
+)
+from coding_agent.utils.startup_trace import aphase
 
 client = get_client()
 
@@ -846,7 +848,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     if local_run:
-        from agent.dashboard.options import default_model_pair
+        from coding_agent.models import default_model_pair
 
         team_defaults = (default_model_pair(), default_model_pair())
         routing_defaults = {

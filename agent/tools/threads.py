@@ -17,7 +17,6 @@ from agent.dashboard import plan_api, workflow_approval_api
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import resolve_login_from_email_async
 from agent.dashboard.oauth import enforce_org_login_gate
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.plan_store import get_plan_content, list_plan_comments
 from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
@@ -43,7 +42,6 @@ from agent.utils.dashboard_links import (
     dashboard_thread_id,
     dashboard_thread_url,
 )
-from agent.utils.json_types import as_json_object, thread_metadata
 from agent.utils.langsmith import (
     LangSmithCostUnavailable,
     get_langsmith_thread_cost,
@@ -52,6 +50,8 @@ from agent.utils.langsmith import (
 )
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from coding_agent.models import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from coding_agent.utils.json_types import as_json_object, thread_metadata
 
 logger = logging.getLogger(__name__)
 

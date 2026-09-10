@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import ToolMessage
 
-from agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
+from coding_agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 
 iframe_tool = importlib.import_module("agent.tools.output_iframe")
 

@@ -9,20 +9,20 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
 from agent.source_context import SourceContext
-from agent.utils.json_types import (
+from agent.utils.langsmith import get_langsmith_trace_url
+from coding_agent.models import SUPPORTED_MODEL_IDS, canonical_model_pair
+from coding_agent.utils.json_types import (
     JsonObject,
     ThreadLike,
     as_json_object,
     as_thread_dict,
     thread_metadata,
 )
-from agent.utils.langsmith import get_langsmith_trace_url
-from agent.utils.timing import phase
+from coding_agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
 

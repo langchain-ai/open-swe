@@ -15,8 +15,8 @@ from urllib.parse import urlencode
 import httpx2
 from fastapi import HTTPException
 
-from agent.config import ENV
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from coding_agent.config import ENV
+from coding_agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 

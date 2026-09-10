@@ -11,7 +11,6 @@ import jwt
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
-from agent.config import ENV
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import (
     cache_github_token_for_thread,
@@ -25,8 +24,9 @@ from agent.slack.client import (
     get_active_slack_thread,
     post_slack_thread_reply,
 )
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.user_messages import WARNING_ICON, warning
+from coding_agent.config import ENV
+from coding_agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 _legacy_auth_impact_tasks: set[asyncio.Task[None]] = set()

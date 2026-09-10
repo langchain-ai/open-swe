@@ -39,7 +39,6 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.dashboard.options import gate_fable_model
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_org_review_guidelines,
@@ -50,24 +49,12 @@ from agent.dashboard.team_settings import (
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
 from agent.middleware import (
-    BasePrepareRunMiddleware,
-    ModelCallTimeoutMiddleware,
-    ModelErrorMiddleware,
-    RepairOrphanedToolCallsMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
-    StableToolResultOrderMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
-from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -93,13 +80,9 @@ from agent.runtime import (
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
-from agent.sandboxes.paths import resolve_sandbox_work_dir
-from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
-from agent.sandboxes.state import SandboxUnreachableError
 from agent.tools import (
     add_finding,
     fetch_review_diff,
-    fetch_url,
     http_request,
     list_findings,
     publish_review,
@@ -108,11 +91,30 @@ from agent.tools import (
     update_finding,
     web_search,
 )
-from agent.utils import ttl_cache
-from agent.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from agent.utils.api_standards_skill import fetch_api_standards_skill
-from agent.utils.deferred_model import make_deferred_error_model
-from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from coding_agent.middleware import (
+    BasePrepareRunMiddleware,
+    ModelCallTimeoutMiddleware,
+    ModelErrorMiddleware,
+    RepairOrphanedToolCallsMiddleware,
+    SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
+    SanitizeThinkingBlocksMiddleware,
+    SanitizeToolInputsMiddleware,
+    StableToolResultOrderMiddleware,
+    TimeoutWrapupMiddleware,
+)
+from coding_agent.middleware.prepare_run import PrepareRunState
+from coding_agent.models import gate_fable_model
+from coding_agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
+from coding_agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
+from coding_agent.sandboxes.state import SandboxUnreachableError
+from coding_agent.tools import fetch_url
+from coding_agent.utils import ttl_cache
+from coding_agent.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
+from coding_agent.utils.deferred_model import make_deferred_error_model
+from coding_agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 HISTORICAL_REVIEW_GUIDANCE = load_prompt("reviewer/historical-guidance.md")
 

@@ -19,8 +19,8 @@ from agent.slack.client import (
 )
 from agent.slack.request import SlackRequest
 from agent.source_context import SourceContext
-from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import common as webhook_common
+from coding_agent.utils.run_usage import RunUsageSummary
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:

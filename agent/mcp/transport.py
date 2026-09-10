@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from agent.utils.url_safety import pinned_url, resolve_and_validate
+from coding_agent.utils.url_safety import pinned_url, resolve_and_validate
 
 
 class MCPTransport(httpx.AsyncBaseTransport):

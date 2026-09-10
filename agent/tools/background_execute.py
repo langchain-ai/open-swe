@@ -9,7 +9,7 @@ import uuid
 from typing import Any, Literal
 
 from agent.run_config import RunConfig
-from agent.sandboxes.state import SANDBOX_BACKENDS
+from coding_agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 

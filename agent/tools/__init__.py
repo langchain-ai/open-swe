@@ -15,7 +15,6 @@ _TOOL_MODULES = {
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
-    "fetch_url": ".fetch_url",
     "get_thread": ".threads",
     "http_request": ".http_request",
     "linear_comment": "agent.linear.tools.comment",
@@ -74,7 +73,6 @@ __all__ = [
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
-    "fetch_url",
     "get_thread",
     "http_request",
     "linear_comment",
@@ -152,7 +150,6 @@ if TYPE_CHECKING:
         save_environment,
     )
     from agent.tools.fetch_review_diff import fetch_review_diff
-    from agent.tools.fetch_url import fetch_url
     from agent.tools.http_request import http_request
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings

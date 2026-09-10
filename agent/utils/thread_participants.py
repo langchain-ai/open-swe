@@ -14,7 +14,7 @@ from agent.github.thread_token import get_github_token
 from agent.linear.client import fetch_linear_issue_participant_emails
 from agent.slack.client import fetch_slack_thread_messages
 from agent.source_context import SourceContext
-from agent.utils.json_types import as_json_object, thread_metadata
+from coding_agent.utils.json_types import as_json_object, thread_metadata
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
 # Slack and Linear senders who have no GitHub mapping are still participants;

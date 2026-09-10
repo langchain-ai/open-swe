@@ -6,7 +6,7 @@ from typing import Any
 from agent.review.diff import changed_files, materialize_review_diff, review_diff_range
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
-from agent.sandboxes.paths import resolve_sandbox_work_dir
+from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
 
 _MAX_CHANGED_FILES = 200
 _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")

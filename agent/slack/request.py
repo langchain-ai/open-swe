@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from agent.slack.client import SlackChannelContext
 from agent.slack.failures import SlackRequestTarget
-from agent.utils.json_types import JsonObject
+from coding_agent.utils.json_types import JsonObject
 
 
 class SlackRequest(BaseModel):

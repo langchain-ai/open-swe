@@ -1,8 +1,8 @@
 import httpx2
 from fastapi import HTTPException, Request
 
-from agent.config import ENV
 from agent.dashboard.team_settings import get_team_transcription_model
+from coding_agent.config import ENV
 
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 SUPPORTED_AUDIO_TYPES = {

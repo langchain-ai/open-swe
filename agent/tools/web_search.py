@@ -2,8 +2,8 @@ import asyncio
 import logging
 from typing import Any
 
-from agent.config import ENV
 from agent.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

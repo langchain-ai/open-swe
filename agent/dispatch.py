@@ -33,7 +33,6 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
-from agent.config import ENV
 from agent.input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -44,6 +43,7 @@ from agent.input_messages import (
     build_run_input,
 )
 from agent.run_config import RunConfig
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

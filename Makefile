@@ -93,7 +93,7 @@ format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
 typecheck:
-	uv run ty check agent tests
+	uv run ty check agent coding_agent tests
 
 ######################
 # HELP
@@ -113,7 +113,7 @@ help:
 	@echo 'install                      - install dependencies (incl. dev extras)'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
-	@echo 'typecheck                    - run ty on agent/ and tests/'
+	@echo 'typecheck                    - run ty on agent/, coding_agent/ and tests/'
 	@echo 'test                         - run unit tests'
 	@echo 'integration_tests            - run integration tests'
 	@echo '----'

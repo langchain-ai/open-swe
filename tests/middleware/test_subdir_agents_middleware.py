@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 
 from agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
-from agent.sandboxes import state as sandbox_state
+from coding_agent.sandboxes import state as sandbox_state
 
 
 class FakeReadResult:

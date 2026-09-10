@@ -7,7 +7,7 @@ from collections import OrderedDict
 
 from langgraph_sdk import get_client
 
-from agent.config import ENV
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

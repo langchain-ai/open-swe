@@ -4,7 +4,7 @@ import argparse
 
 from langsmith.sandbox import SandboxClient
 
-from agent.config import ENV
+from coding_agent.config import ENV
 
 DEFAULT_IMAGE = "johanneslangchain/open-swe-sandbox:gh-cli-amd64"
 DEFAULT_FS_CAPACITY = 32 * 1024**3  # 32 GiB

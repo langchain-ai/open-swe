@@ -18,10 +18,10 @@ from typing import Any
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 
-from agent.config import ENV
 from agent.review.findings import Finding
 from agent.run_config import RunConfig
 from agent.utils.langsmith import async_langsmith_client, sync_langsmith_client
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 

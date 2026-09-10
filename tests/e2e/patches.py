@@ -93,7 +93,7 @@ def apply() -> None:
     # fake store instead. The environment tools, store writes, name/tag scheme
     # and status transitions all still run for real.
     from agent.dashboard import environments as environments_store
-    from agent.sandboxes.providers import langsmith as langsmith_integration
+    from coding_agent.sandboxes.providers import langsmith as langsmith_integration
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
     # The capture path refuses to run off the langsmith provider; with that

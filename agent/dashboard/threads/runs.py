@@ -14,13 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.environments import ENVIRONMENTS, slugify
-from agent.dashboard.options import (
-    DEPRECATED_MODEL_IDS,
-    default_vision_model_pair,
-    gate_fable_model,
-    model_supports_images,
-    normalize_model_choice,
-)
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
 from agent.dashboard.threads.access import (
@@ -49,7 +42,6 @@ from agent.slack.client import (
 )
 from agent.source_context import SourceContext
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
-from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
@@ -57,6 +49,14 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from coding_agent.models import (
+    DEPRECATED_MODEL_IDS,
+    default_vision_model_pair,
+    gate_fable_model,
+    model_supports_images,
+    normalize_model_choice,
+)
+from coding_agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 
 logger = logging.getLogger(__name__)
 

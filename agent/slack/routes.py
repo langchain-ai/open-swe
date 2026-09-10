@@ -36,9 +36,9 @@ from agent.slack.responses import (
     ignored,
 )
 from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
-from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
+from coding_agent.utils.json_types import JsonObject
 
 router = APIRouter()
 

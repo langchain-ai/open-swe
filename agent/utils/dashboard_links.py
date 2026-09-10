@@ -2,8 +2,8 @@
 
 from urllib.parse import quote, unquote, urlsplit
 
-from agent.config import ENV
 from agent.utils.dashboard_ui import is_single_origin
+from coding_agent.config import ENV
 
 
 def dashboard_base_url() -> str:

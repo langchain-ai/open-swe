@@ -13,7 +13,7 @@ from agent.dashboard.skills import (
     get_skill,
     update_skill,
 )
-from agent.utils.json_types import as_json_object
+from coding_agent.utils.json_types import as_json_object
 
 
 def _login() -> str | None:

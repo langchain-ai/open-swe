@@ -8,11 +8,11 @@ from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
 from agent.input_messages import InputMessageContext, SystemIdentity
-from agent.prompts import render_prompt
-from agent.sandboxes.providers.registry import create_sandbox
 from agent.source_context import SourceContext
 from agent.tools.background_execute import TASK_ROOT, control_script, encoded, execute
 from agent.utils.thread_ops import langgraph_url
+from coding_agent.prompts import render_prompt
+from coding_agent.sandboxes.providers.registry import create_sandbox
 
 logger = logging.getLogger(__name__)
 

@@ -9,10 +9,10 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware
-from agent.middleware.plan_mode import PlanModeMiddleware
-from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.server import get_agent
+from coding_agent.middleware.dynamic_tools import DynamicToolMiddleware
+from coding_agent.middleware.plan_mode import PlanModeMiddleware
+from coding_agent.sandboxes.state import SANDBOX_BACKENDS
 
 _START_TIMEOUT_SECONDS = 2.0
 

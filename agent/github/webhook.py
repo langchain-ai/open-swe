@@ -17,7 +17,6 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.prompts import load_prompt, render_prompt
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
@@ -28,6 +27,7 @@ from agent.thread_ids import (
     thread_id_from_branch,
 )
 from agent.webhooks import common
+from coding_agent.prompts import load_prompt, render_prompt
 
 
 def build_github_issue_prompt(

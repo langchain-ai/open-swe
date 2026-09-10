@@ -14,7 +14,6 @@ from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from agent.config import ENV
 from agent.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
@@ -23,7 +22,6 @@ from agent.dashboard.agent_overrides import (
 from agent.dashboard.agent_usage import update_agent_pr_usage_from_webhook
 from agent.dashboard.enabled_repos import is_review_repo_enabled
 from agent.dashboard.oauth import build_settings_url
-from agent.dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
 from agent.dashboard.profiles import (  # noqa: F401
     get_profile,
     get_valid_access_token,
@@ -80,7 +78,6 @@ from agent.github.token import (
 from agent.linear.client import post_linear_trace_comment  # noqa: F401
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.linear.team_repo_map import LINEAR_TEAM_TO_REPO
-from agent.prompts import render_prompt
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -141,16 +138,7 @@ from agent.slack.feedback import (
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
-from agent.utils.json_types import ThreadLike, as_thread_dict
 from agent.utils.langsmith import create_langsmith_thread_feedback
-from agent.utils.multimodal import (
-    dedupe_urls,  # noqa: F401
-    extract_image_urls,  # noqa: F401
-    fetch_image_block,  # noqa: F401
-    vision_not_supported_warning,  # noqa: F401
-)
-from agent.utils.repo import extract_repo_from_text
 from agent.utils.thread_ops import queue_message_for_thread  # noqa: F401
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
@@ -158,6 +146,18 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from coding_agent.config import ENV
+from coding_agent.models import default_vision_model_pair, model_supports_images  # noqa: F401
+from coding_agent.prompts import render_prompt
+from coding_agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from coding_agent.utils.json_types import ThreadLike, as_thread_dict
+from coding_agent.utils.multimodal import (
+    dedupe_urls,  # noqa: F401
+    extract_image_urls,  # noqa: F401
+    fetch_image_block,  # noqa: F401
+    vision_not_supported_warning,  # noqa: F401
+)
+from coding_agent.utils.repo import extract_repo_from_text
 
 __all__ = [
     "Any",

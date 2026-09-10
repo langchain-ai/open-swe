@@ -15,7 +15,7 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from agent.github.proxy import maybe_refresh_proxy_token
-from agent.middleware.trace import scrub_middleware_inputs
+from coding_agent.middleware.trace import scrub_middleware_inputs
 
 logger = logging.getLogger(__name__)
 

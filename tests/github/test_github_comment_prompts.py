@@ -98,7 +98,7 @@ def test_construct_system_prompt_renders_working_environment_path() -> None:
 
 
 def test_slack_information_only_response_uses_single_output_path() -> None:
-    from agent.prompts import load_prompt
+    from coding_agent.prompts import load_prompt
 
     prompt = construct_system_prompt(working_dir="/workspace", source="slack", slack_context=True)
     tool_guidance = " ".join(load_prompt("tools/slack_thread_reply.md").split())

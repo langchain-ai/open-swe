@@ -8,7 +8,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from agent.dashboard.options import normalize_model_choice
 from agent.dashboard.threads.access import (
     _authorized_thread,
     _github_token_for_login,
@@ -39,7 +38,6 @@ from agent.github.pull_request_checks import PullRequestState, get_pull_request_
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
 from agent.slack.client import parse_github_pr_url
-from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -51,7 +49,9 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
-from agent.utils.timing import phase
+from coding_agent.models import normalize_model_choice
+from coding_agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
+from coding_agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
 

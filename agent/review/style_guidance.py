@@ -1,4 +1,4 @@
-from agent.prompts import load_prompt
+from coding_agent.prompts import load_prompt
 
 """Reviewer themes to steer repository style analysis."""
 

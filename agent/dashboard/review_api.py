@@ -28,8 +28,8 @@ from agent.review.findings import (
     is_thread_resolved,
 )
 from agent.thread_ids import reviewer_thread_id
-from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
 from agent.utils.thread_ops import langgraph_client
+from coding_agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
 
 logger = logging.getLogger(__name__)
 

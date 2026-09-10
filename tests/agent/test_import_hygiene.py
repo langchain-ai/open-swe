@@ -6,8 +6,12 @@ modules are allowed in each entrypoint's transitive import closure.
 """
 
 import json
+import pathlib
+import re
 import subprocess
 import sys
+
+_AGENT_IMPORT = re.compile(r"^\s*(from|import)\s+agent(\.|\s|$)")
 
 
 def _closure_check(entry: str, forbidden: list[str]) -> dict[str, bool]:
@@ -32,6 +36,8 @@ def test_webapp_does_not_import_agent_stack() -> None:
             "agent.server",
             "agent.middleware",
             "agent.tools",
+            "coding_agent.middleware",
+            "coding_agent.tools",
         ],
     )
     assert not any(loaded.values()), f"forbidden modules imported by agent.webapp: {loaded}"
@@ -47,7 +53,7 @@ def test_lazy_names_all_resolve() -> None:
 import importlib
 import types
 
-for package_name in ("agent.tools", "agent.middleware"):
+for package_name in ("agent.tools", "agent.middleware", "coding_agent.tools", "coding_agent.middleware"):
     package = importlib.import_module(package_name)
     for name in package.__all__:
         namespace = {}
@@ -61,3 +67,14 @@ if isinstance(namespace["value"], types.ModuleType):
     raise AssertionError("agent.dashboard.router resolved to a module")
 """
     subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+
+
+def test_coding_agent_does_not_import_agent() -> None:
+    package = pathlib.Path(__file__).resolve().parents[2] / "coding_agent"
+    offenders = [
+        f"{path.relative_to(package.parent)}:{number}: {line.strip()}"
+        for path in sorted(package.rglob("*.py"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if _AGENT_IMPORT.match(line)
+    ]
+    assert not offenders, "coding_agent must not import agent.*:\n" + "\n".join(offenders)

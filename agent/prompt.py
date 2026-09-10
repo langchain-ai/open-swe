@@ -4,15 +4,15 @@ from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
 
-from agent.config import ENV
 from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
-from agent.prompts import load_prompt, render_prompt
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
     build_pr_attribution_footer,
 )
+from coding_agent.config import ENV
+from coding_agent.prompts import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def _load_default_prompt() -> str:
             content = Path(DEFAULT_PROMPT_PATH).read_text().strip()
         else:
             content = (
-                resources.files("agent.resources")
+                resources.files("coding_agent.resources")
                 .joinpath("default_prompt.md")
                 .read_text(encoding="utf-8")
                 .strip()
@@ -41,7 +41,7 @@ def _load_default_prompt() -> str:
     except Exception:
         logger.warning(
             "Failed to read default prompt from %s",
-            DEFAULT_PROMPT_PATH or "agent.resources/default_prompt.md",
+            DEFAULT_PROMPT_PATH or "coding_agent.resources/default_prompt.md",
         )
     return ""
 

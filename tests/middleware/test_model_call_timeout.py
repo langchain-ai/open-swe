@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
-from agent.middleware.model_call_timeout import (
+from coding_agent.middleware.model_call_timeout import (
     DEFAULT_MODEL_CALL_TIMEOUT_SECONDS,
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,

@@ -14,8 +14,8 @@ from langsmith.sandbox import SandboxClientError
 from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
 from agent.run_config import RunConfig
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.sandboxes.providers.registry import SandboxGoneError
-from agent.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
+from coding_agent.sandboxes.providers.registry import SandboxGoneError
+from coding_agent.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
 
 
 @pytest.mark.asyncio

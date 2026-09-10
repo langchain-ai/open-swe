@@ -24,6 +24,8 @@ The FastAPI app is `agent.webapp:app`; dashboard routes live in `agent/dashboard
 
 The main agent is assembled in `agent/server.py` from the middleware in `agent/middleware/`, with tools from `agent/tools/` and sandboxes from `agent/sandboxes/`.
 
+The codebase is split into two top-level packages. `coding_agent/` holds the platform-agnostic coding-agent core — model-and-message middleware, sandbox providers and state, the model catalog (`coding_agent/models.py`), the environment-variable registry (`coding_agent/config.py`), prompt resources (`coding_agent/resources/`) and generic tools — and MUST NOT import `agent.*`. `agent/` holds the Open SWE platform (GitHub, Slack, Linear, dashboard, review) and builds on `coding_agent`.
+
 ## Conventions
 
 - Use async-only implementations. Add a sync method only when an interface requires it, and then raise `NotImplementedError`.

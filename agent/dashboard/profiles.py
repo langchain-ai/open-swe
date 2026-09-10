@@ -22,15 +22,15 @@ from agent.dashboard.oauth import (
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
 )
-from agent.dashboard.options import (
+from agent.encryption import decrypt_token, encrypt_token
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
+from coding_agent.models import (
     DEPRECATED_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     model_supports_effort,
     provider_fallback_pair,
 )
-from agent.encryption import decrypt_token, encrypt_token
-from agent.store import delete_value, get_value, now_iso, put_value, search_values
 
 logger = logging.getLogger(__name__)
 

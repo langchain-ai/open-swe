@@ -10,7 +10,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
-from agent.utils.json_types import JsonObject
+from coding_agent.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 

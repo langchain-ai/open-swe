@@ -13,8 +13,8 @@ from agent.dashboard.agent_usage import (
     record_agent_run_cost,
 )
 from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
-from agent.utils.run_usage import summarize_run_usage
 from agent.utils.thread_ops import langgraph_client
+from coding_agent.utils.run_usage import summarize_run_usage
 
 logger = logging.getLogger(__name__)
 

@@ -26,9 +26,9 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
-from agent.config import ENV
 from agent.review.styles import normalize_repo_full_name
 from agent.store import TypedStore, now_iso
+from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
@@ -519,7 +519,7 @@ async def _delete_snapshot(snapshot_id: object) -> None:
     """Best-effort delete of a superseded snapshot."""
     if not isinstance(snapshot_id, str) or not snapshot_id:
         return
-    from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+    from coding_agent.sandboxes.providers.langsmith import get_async_sandbox_client
 
     try:
         async with get_async_sandbox_client() as client:
@@ -572,7 +572,7 @@ async def capture_environment_snapshot(
     Only the langsmith provider can capture; other providers have no snapshot API
     to capture into, so this raises rather than failing deep in the SDK.
     """
-    from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+    from coding_agent.sandboxes.providers.langsmith import get_async_sandbox_client
 
     _require_capture_support()
 

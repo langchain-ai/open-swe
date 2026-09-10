@@ -24,11 +24,11 @@ from agent.github.ci import (
 )
 from agent.github.comments import post_github_comment
 from agent.linear.client import comment_on_linear_issue
-from agent.prompts import render_prompt
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
 from agent.thread_ids import baby_sit_lock_thread_id
+from coding_agent.prompts import render_prompt
 
 logger = logging.getLogger(__name__)
 
