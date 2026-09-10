@@ -16,6 +16,7 @@ from agent.dashboard.threads.access import (
     _readable_thread_metadata,
 )
 from agent.dashboard.threads.runs import (
+    _ASSISTANT_ID,
     ThreadMessageBody,
     _build_dashboard_configurable,
     _notify_slack_web_handoff,
@@ -502,6 +503,9 @@ async def continue_thread_privately(
             "title": new_metadata.get("title") or "Private continuation",
             "created_at_ms": now_ms,
             "updated_at_ms": now_ms,
+            # update_state refuses a thread with no graph, and LangGraph only
+            # stamps graph_id once a run has happened.
+            "graph_id": metadata.get("graph_id") or _ASSISTANT_ID,
         }
     )
     new_thread_id = str(uuid.uuid4())

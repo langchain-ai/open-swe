@@ -451,7 +451,7 @@ export function AgentsHome({
       modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
-    if (visibility === "private") configurable.visibility = "private"
+    configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment

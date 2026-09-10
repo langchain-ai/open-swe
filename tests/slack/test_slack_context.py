@@ -197,6 +197,30 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
     assert metadata["owner_login"] == "alice"
 
 
+def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub = _FakeThreadsClient(thread={"metadata": {"plan_mode": True}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(stub))
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="slack", visibility="private", owner_login="alice"
+        )
+    )
+
+    metadata = cast(dict, stub.thread)["metadata"]
+    assert metadata["visibility"] == "private"
+    assert metadata["owner_login"] == "alice"
+
+    legacy = _FakeThreadsClient(thread={"metadata": {"created_at_ms": 1, "source": "slack"}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(legacy))
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="slack", visibility="private", owner_login="alice"
+        )
+    )
+    assert "visibility" not in cast(dict, legacy.thread)["metadata"]
+
+
 def test_slack_dm_threads_are_private_and_channel_threads_are_not() -> None:
     assert slack_webhooks._slack_thread_visibility({"is_im": True}) == "private"
     assert slack_webhooks._slack_thread_visibility({"is_im": False}) == "public"

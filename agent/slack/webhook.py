@@ -507,6 +507,9 @@ async def _mark_slack_thread_errored(
                 )
             ),
             visibility=_slack_thread_visibility(request.channel_context),
+            owner_login=(await common.login_for_slack_id(request.user_id) or "")
+            if request.user_id
+            else "",
         )
     except Exception:  # noqa: BLE001
         common.logger.warning(
@@ -815,8 +818,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
 
     is_first_mention = not await common.thread_exists(thread_id)
     langgraph_client = get_langgraph_client()
-    if repo_dict:
-        await common.upsert_slack_thread_repo_metadata(thread_id, repo_dict, langgraph_client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.

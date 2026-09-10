@@ -20,10 +20,24 @@ test("private threads are owner-only and visibility is fixed at creation", async
           source: "dashboard",
           owner_login: "alice",
           visibility: "public",
+          graph_id: "agent",
         },
       },
     });
     expect(seed.ok()).toBeTruthy();
+    // A real transcript: the continuation has to copy it into a thread that
+    // has never run, which is the path a fresh thread without a graph rejects.
+    const seeded = await api.post(`/threads/${sharedId}/state`, {
+      data: {
+        values: {
+          messages: [
+            { type: "human", content: "Shared planning notes" },
+            { type: "ai", content: "Here is a plan." },
+          ],
+        },
+      },
+    });
+    expect(seeded.ok()).toBeTruthy();
 
     // Alice starts a new thread; the composer defaults to private and the
     // server records an immutable owner.
@@ -67,6 +81,18 @@ test("private threads are owner-only and visibility is fixed at creation", async
     ).json();
     expect(continued.visibility).toBe("private");
     expect(continued.continuedFromThreadId).toBe(sharedId);
+    const copied = (await (await api.get(`/threads/${continuedId}/state`)).json())
+      .values.messages;
+    expect(copied.map((m: { content: string }) => m.content)).toEqual([
+      "Shared planning notes",
+      "Here is a plan.",
+    ]);
+    expect(
+      copied.every(
+        (m: { additional_kwargs?: Record<string, unknown> }) =>
+          m.additional_kwargs?.collaborative_origin_thread_id === sharedId,
+      ),
+    ).toBe(true);
     const source = await (
       await page.request.get(`/dashboard/api/threads/${sharedId}`)
     ).json();

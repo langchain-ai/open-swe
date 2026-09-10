@@ -793,15 +793,10 @@ async def get_thread(
     }
 
 
-async def _send_message(
-    thread_id: str,
-    actor: _Actor,
-    message: str,
-    *,
-    model_id: str | None,
-    effort: str | None,
-    plan_mode: bool | None,
-) -> dict[str, Any]:
+def _message_args(
+    message: str, model_id: str | None, effort: str | None
+) -> dict[str, Any] | tuple[str | None, str | None]:
+    """Validate send_message arguments before any thread access."""
     if not message.strip():
         return _failure("message is required for send_message")
     if len(message) > _MAX_MESSAGE_CHARS:
@@ -816,14 +811,20 @@ async def _send_message(
         )
         if normalized is None:
             return _failure("model_id and effort are not a supported combination")
-        model_id, effort = normalized
+        return normalized
+    return model_id, effort
 
-    summary = await get_dashboard_thread(
-        thread_id,
-        actor.login,
-        email=actor.email,
-        mark_viewed=False,
-    )
+
+async def _send_message(
+    thread_id: str,
+    actor: _Actor,
+    message: str,
+    summary: Mapping[str, Any],
+    *,
+    model_id: str | None,
+    effort: str | None,
+    plan_mode: bool | None,
+) -> dict[str, Any]:
     resolved_plan_mode = summary.get("planMode") is True if plan_mode is None else plan_mode
     body = ThreadMessageBody(
         content=message,
@@ -969,13 +970,29 @@ async def manage_thread(
     )
     if unexpected:
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
+    if action == "admin_cancel" and not actor.admin:
+        return _failure("Only workspace admins can cancel another user's thread")
+    if action == "delete" and not confirm:
+        return _failure("delete requires confirm=true")
+    if action == "send_message":
+        validated = _message_args(message or "", model_id, effort)
+        if isinstance(validated, dict):
+            return validated
+        model_id, effort = validated
 
     try:
+        # A private thread is only reachable from its owner's private context,
+        # for management as much as for reading.
+        resolved = await _authorized_locator(thread_id, actor)
+        if isinstance(resolved, dict):
+            return resolved
+        thread_id, summary = resolved
         if action == "send_message":
             return await _send_message(
                 thread_id,
                 actor,
                 message or "",
+                summary,
                 model_id=model_id,
                 effort=effort,
                 plan_mode=plan_mode,
@@ -984,8 +1001,6 @@ async def manage_thread(
             thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
             return {"success": True, "thread": _list_item(thread)}
         if action == "admin_cancel":
-            if not actor.admin:
-                return _failure("Only workspace admins can cancel another user's thread")
             thread = await admin_cancel_dashboard_thread(thread_id, actor.login)
             return {"success": True, "thread": _list_item(thread)}
         if action in {"resolve", "unresolve"}:
@@ -997,8 +1012,6 @@ async def manage_thread(
             )
             return {"success": True, "thread": _list_item(thread)}
         if action == "delete":
-            if not confirm:
-                return _failure("delete requires confirm=true")
             await delete_dashboard_thread(thread_id, actor.login, email=actor.email)
             return {"success": True, "deleted": True, "thread_id": thread_id}
         if action == "add_plan_comment":

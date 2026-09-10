@@ -88,6 +88,17 @@ async def test_only_verified_initiator_gets_feedback(api, monkeypatch, identity,
     assert submitted.status_code == (200 if identity == "slack_initiator" else 403)
 
 
+async def test_private_thread_owner_can_give_feedback(api):
+    api.metadata.update({"visibility": "private", "owner_login": "owner"})
+    visible = await api.client.get("/dashboard/api/threads/t1/feedback")
+    assert visible.json()["status"] == "ready"
+    submitted = await api.client.post("/dashboard/api/threads/t1/feedback", json={"rating": "good"})
+    assert submitted.status_code == 200
+
+    api.session["sub"] = "other"
+    assert (await api.client.get("/dashboard/api/threads/t1/feedback")).status_code == 404
+
+
 @pytest.mark.parametrize(
     "payload",
     [

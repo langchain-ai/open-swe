@@ -167,6 +167,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert metadata["title"] == "Fix the flaky build"
     assert metadata["repo_owner"] == "acme"
     assert metadata["participant_logins"] == {"bob": True}
+    assert metadata["graph_id"] == "agent"
     for key in ("source_context", "sandbox_id", "latest_run_id", "latest_run_status"):
         assert key not in metadata
     (state_call,) = client.threads.update_state.await_args_list
@@ -212,3 +213,30 @@ async def test_tools_do_not_export_private_content_into_public_thread(private_th
     assert exc.value.status_code == 404
     thread["metadata"]["visibility"] = "private"
     assert (await tools._authorized_locator("private-thread", actor))[0] == "private-thread"
+
+
+async def test_manage_thread_denies_private_thread_outside_private_context(
+    private_thread, monkeypatch
+):
+    thread, _ = private_thread
+    cancel = AsyncMock()
+    monkeypatch.setattr(tools, "cancel_dashboard_thread", cancel)
+    monkeypatch.setattr(
+        tools,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "private-thread", "visibility": "private"}),
+    )
+    monkeypatch.setattr(tools, "_config", lambda: {"configurable": {"thread_id": "current"}})
+    actor = tools._Actor(login="alice", email=None, name="alice")
+    monkeypatch.setattr(tools, "_actor", AsyncMock(return_value=actor))
+
+    thread["metadata"]["visibility"] = "public"
+    result = await tools.manage_thread("private-thread", "cancel")
+    assert result == {"success": False, "error": "thread not found", "status_code": 404}
+    cancel.assert_not_awaited()
+
+    thread["metadata"]["visibility"] = "private"
+    cancel.return_value = {"id": "private-thread", "metadata": thread["metadata"]}
+    result = await tools.manage_thread("private-thread", "cancel")
+    assert result["success"] is True
+    cancel.assert_awaited_once()

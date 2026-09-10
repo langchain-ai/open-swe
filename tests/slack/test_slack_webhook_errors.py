@@ -493,7 +493,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
         slack_webhook.common, "get_thread_environment", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_webhook.common, "upsert_slack_thread_repo_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
     thinking = AsyncMock()
