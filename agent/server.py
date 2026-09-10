@@ -59,6 +59,7 @@ from agent.dashboard.agent_usage import record_agent_run_usage
 from agent.dashboard.environments import (
     resolve_environment,
 )
+from agent.dashboard.plan_store import DashboardPlanStore
 from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
@@ -99,14 +100,12 @@ from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
 from agent.tools import (
-    approve_plan,
     capture_environment_snapshot,
     create_automation,
     delete_automation,
     delete_environment,
     delete_organization_skill,
     delete_user_skill,
-    enter_plan_mode,
     get_thread,
     linear_comment,
     list_automations,
@@ -125,7 +124,6 @@ from agent.tools import (
     sandbox_reset,
     save_environment,
     save_organization_skill,
-    save_plan,
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
@@ -210,6 +208,7 @@ from coding_agent.tools import (
     fetch_url,
     http_request,
     output_iframe,
+    plan_tools,
     web_search,
 )
 from coding_agent.utils import ttl_cache
@@ -1067,6 +1066,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
     ]
     background_execute, background_task = background_tools(BACKGROUND_TASK_MONITOR)
+    enter_plan_mode, save_plan, approve_plan = plan_tools(DashboardPlanStore)
     static_tools = [
         http_request,
         fetch_url,

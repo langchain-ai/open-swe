@@ -22,13 +22,14 @@ whose snapshot is not ready, runs fall back to the configured base snapshot.
 import json
 import logging
 import re
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 from agent.review.styles import normalize_repo_full_name
 from agent.store import TypedStore, now_iso
 from coding_agent.config import ENV
+from coding_agent.sandboxes.resources import SandboxResources
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +37,6 @@ ENVIRONMENTS_NAMESPACE: list[str] = ["environments"]
 DEFAULT_ENVIRONMENT_SLUG = "default"
 
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
-
-
-class SandboxResources(TypedDict, total=False):
-    mem_bytes: int
-    vcpus: int
-    fs_capacity_bytes: int
 
 
 NAME_MAX_CHARS = 80

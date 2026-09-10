@@ -4,12 +4,10 @@ from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
-    "approve_plan": ".approve_plan",
     "capture_environment_snapshot": ".environments",
     "create_automation": ".automations",
     "delete_automation": ".automations",
     "delete_environment": ".environments",
-    "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
     "get_thread": ".threads",
     "linear_comment": "agent.linear.tools.comment",
@@ -35,7 +33,6 @@ _TOOL_MODULES = {
     "delete_organization_skill": ".organization_skills",
     "save_environment": ".environments",
     "save_organization_skill": ".organization_skills",
-    "save_plan": ".save_plan",
     "sandbox_reset": ".sandbox_reset",
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
@@ -55,12 +52,10 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
-    "approve_plan",
     "capture_environment_snapshot",
     "create_automation",
     "delete_automation",
     "delete_environment",
-    "enter_plan_mode",
     "fetch_review_diff",
     "get_thread",
     "linear_comment",
@@ -86,7 +81,6 @@ __all__ = [
     "save_environment",
     "save_organization_skill",
     "delete_organization_skill",
-    "save_plan",
     "sandbox_reset",
     "save_user_instructions",
     "save_user_skill",
@@ -117,7 +111,6 @@ if TYPE_CHECKING:
     from agent.slack.tools.start_new_thread import slack_start_new_thread
     from agent.slack.tools.thread_reply import slack_thread_reply
     from agent.tools.add_finding import add_finding
-    from agent.tools.approve_plan import approve_plan
     from agent.tools.automations import (
         create_automation,
         delete_automation,
@@ -125,7 +118,6 @@ if TYPE_CHECKING:
         trigger_automation,
         update_automation,
     )
-    from agent.tools.enter_plan_mode import enter_plan_mode
     from agent.tools.environments import (
         capture_environment_snapshot,
         delete_environment,
@@ -147,7 +139,6 @@ if TYPE_CHECKING:
     from agent.tools.report_platform_issue import report_platform_issue
     from agent.tools.resolve_finding_thread import resolve_finding_thread
     from agent.tools.sandbox_reset import sandbox_reset
-    from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from agent.tools.threads import get_thread, list_threads, manage_thread

@@ -9,6 +9,7 @@ _TOOL_MODULES = {
     "fetch_url": ".fetch_url",
     "http_request": ".http_request",
     "output_iframe": ".output_iframe",
+    "plan_tools": ".plan_mode",
     "web_search": ".web_search",
 }
 
@@ -19,6 +20,7 @@ __all__ = [
     "fetch_url",
     "http_request",
     "output_iframe",
+    "plan_tools",
     "web_search",
 ]
 
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
     from coding_agent.tools.fetch_url import fetch_url
     from coding_agent.tools.http_request import http_request
     from coding_agent.tools.output_iframe import output_iframe
+    from coding_agent.tools.plan_mode import plan_tools
     from coding_agent.tools.web_search import web_search
 
 

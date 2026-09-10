@@ -78,10 +78,11 @@ from agent.runtime import (
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
     bindable_config,
-    ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
+from agent.sandboxes.credentials import GitHubProxyCredentials
+from agent.sandboxes.lifecycle import OPEN_SWE_SANDBOXES
 from agent.tools import (
     add_finding,
     fetch_review_diff,
@@ -658,11 +659,15 @@ async def _ensure_reviewer_sandbox_for_thread(
             thread_id, github_token, expires_at=expires_at, is_bot_token=True
         )
 
+    sandboxes = OPEN_SWE_SANDBOXES.with_credentials(
+        GitHubProxyCredentials(
+            token=github_token,
+            repositories=[repo_name] if repo_name else None,
+        )
+    )
     return (
-        await ensure_sandbox_for_thread(
+        await sandboxes.ensure_for_thread(
             thread_id,
-            github_proxy_token=github_token,
-            github_proxy_repositories=[repo_name] if repo_name else None,
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
             # re-derives every run, and reviewer threads outlive their sandbox: one
             # thread per PR, re-triggered on every push. Refusing to replace an

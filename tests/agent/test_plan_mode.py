@@ -182,75 +182,21 @@ async def test_thread_summary_reports_plan_mode() -> None:
     assert summary_off["planMode"] is False
 
 
-async def test_enter_plan_mode_tool_returns_command() -> None:
-    from langchain_core.messages import ToolMessage
-    from langchain_core.tools import tool as as_tool
-    from langgraph.types import Command
-
-    from agent.tools.enter_plan_mode import enter_plan_mode
-
-    # Wrap as the agent does so the InjectedToolCallId is supplied from the call.
-    wrapped = as_tool(enter_plan_mode)
-    result = await wrapped.ainvoke(
-        {"name": "enter_plan_mode", "args": {}, "id": "call-1", "type": "tool_call"}
+def _plan_configurable(monkeypatch: pytest.MonkeyPatch, **values: Any) -> None:
+    monkeypatch.setattr(
+        "coding_agent.run_config.get_config", lambda: {"configurable": dict(values)}
     )
-    assert isinstance(result, Command)
-    assert result.update is not None
-    assert result.update["plan_mode"] is True
-    messages = result.update["messages"]
-    assert len(messages) == 1
-    assert isinstance(messages[0], ToolMessage)
-    assert messages[0].tool_call_id == "call-1"
 
 
-def test_enter_plan_mode_exported() -> None:
-    from agent.tools import enter_plan_mode
-
-    assert callable(enter_plan_mode)
-
-
-async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-
-    from langchain_core.messages import ToolMessage
-    from langgraph.types import Command
-
-    from agent.tools import approve_plan as approve_plan_export
-
-    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
-
-    assert callable(approve_plan_export)
+def _patch_plan_store(monkeypatch: pytest.MonkeyPatch, content: dict[str, Any]) -> dict[str, Any]:
+    """Stub the store reads/writes ``DashboardPlanStore`` drives, recording the writes."""
+    from agent.dashboard import plan_store
 
     saved: dict[str, Any] = {}
 
-    monkeypatch.setattr(
-        "coding_agent.run_config.get_config",
-        lambda: {
-            "configurable": {
-                "thread_id": "t1",
-                "github_login": "octo",
-                "user_email": "octo@example.com",
-                "plan_mode": True,
-            }
-        },
-    )
-
-    async def fake_thread_metadata(thread_id: str) -> dict[str, Any]:
-        assert thread_id == "t1"
-        return {
-            "source": "dashboard",
-            "github_login": "octo",
-            "triggering_user_email": "octo@example.com",
-            "plan_mode": True,
-            "plan_status": "ready",
-        }
-
     async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
         assert raise_on_error is True
-        return {
-            "html": "<html><head><title>Plan</title></head><body>Do it</body></html>",
-            "status": "ready",
-        }
+        return content
 
     async def fake_list_comments(
         thread_id: str, *, raise_on_error: bool = False
@@ -266,159 +212,166 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
         approved_by: Any = None,
     ) -> None:
         saved.update(
-            thread_id=thread_id,
-            status=status,
-            plan_mode=plan_mode,
-            approved_by=approved_by,
+            thread_id=thread_id, status=status, plan_mode=plan_mode, approved_by=approved_by
         )
 
-    monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
-    monkeypatch.setattr(approve_plan_tool, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(approve_plan_tool, "list_plan_comments", fake_list_comments)
-    monkeypatch.setattr(approve_plan_tool, "set_plan_status", fake_set_status)
+    async def fake_save_content(thread_id: str, **kwargs: Any) -> None:
+        saved.update(thread_id=thread_id, **kwargs)
 
-    result = await approve_plan_tool.approve_plan(
-        state={"plan_mode": True},
-        tool_call_id="call-1",
+    monkeypatch.setattr(plan_store, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(plan_store, "list_plan_comments", fake_list_comments)
+    monkeypatch.setattr(plan_store, "set_plan_status", fake_set_status)
+    monkeypatch.setattr(plan_store, "save_plan_content", fake_save_content)
+    return saved
+
+
+async def test_dashboard_store_approve_returns_the_plan_and_records_the_approver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard.plan_store import DashboardPlanStore
+
+    _plan_configurable(
+        monkeypatch, thread_id="t1", github_login="octo", user_email="octo@example.com"
+    )
+    saved = _patch_plan_store(
+        monkeypatch,
+        {
+            "html": "<html><head><title>Plan</title></head><body>Do it</body></html>",
+            "status": "ready",
+        },
     )
 
-    assert isinstance(result, Command)
-    assert result.update is not None
-    assert result.update["plan_mode"] is False
+    approved = await DashboardPlanStore("t1").approve()
+
+    assert "<title>Plan</title>" in approved.document
+    assert "add tests" in approved.reviewer_feedback
     assert saved == {
         "thread_id": "t1",
         "status": "approved",
         "plan_mode": False,
         "approved_by": {"id": "octo", "name": "octo", "source": "agent"},
     }
-    messages = result.update["messages"]
-    assert len(messages) == 1
-    assert isinstance(messages[0], ToolMessage)
-    assert messages[0].tool_call_id == "call-1"
-    assert "<title>Plan</title>" in messages[0].content
-    assert "add tests" in messages[0].content
-    assert "reasonable engineering judgment" in messages[0].content
-    assert "source of truth" not in messages[0].content
 
 
-async def test_approve_plan_tool_ignores_stale_state_approver(
+@pytest.mark.parametrize(
+    ("configurable", "expected"),
+    [
+        (
+            {"github_login": "current-user", "source": "dashboard"},
+            {"id": "current-user", "name": "current-user", "source": "dashboard"},
+        ),
+        (
+            {"github_login": "other", "source": "linear"},
+            {"id": "other", "name": "other", "source": "linear"},
+        ),
+        (
+            {
+                "source": "slack",
+                "github_login": "owner",
+                "slack_thread": {
+                    "channel_id": "C1",
+                    "thread_ts": "1.0",
+                    "triggering_user_id": "U9",
+                    "triggering_user_name": "Sender",
+                },
+            },
+            {"id": "U9", "name": "Sender", "source": "slack"},
+        ),
+    ],
+)
+async def test_dashboard_store_approver_is_whoever_this_run_answers(
+    monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any], expected: dict[str, str]
+) -> None:
+    from agent.dashboard.plan_store import DashboardPlanStore
+
+    _plan_configurable(monkeypatch, thread_id="t1", **configurable)
+    saved = _patch_plan_store(monkeypatch, {"markdown": "# Plan", "status": "ready"})
+
+    await DashboardPlanStore("t1").approve()
+
+    assert saved["approved_by"] == expected
+
+
+async def test_dashboard_store_refuses_to_approve_shared_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import importlib
+    from agent.dashboard.plan_store import DashboardPlanStore
+    from coding_agent.plans import PlanNotApprovable
 
-    from langgraph.types import Command
+    _plan_configurable(monkeypatch, thread_id="t1")
+    saved = _patch_plan_store(monkeypatch, {"html": "# Report", "status": "shared"})
 
-    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
-    saved: dict[str, Any] = {}
+    with pytest.raises(PlanNotApprovable, match="not an implementation plan"):
+        await DashboardPlanStore("t1").approve()
 
-    monkeypatch.setattr(
-        "coding_agent.run_config.get_config",
-        lambda: {
-            "configurable": {
-                "thread_id": "t1",
-                "github_login": "current-user",
-                "source": "dashboard",
-                "plan_mode": True,
-            }
-        },
-    )
+    assert saved == {}
 
-    async def fake_thread_metadata(thread_id: str) -> dict[str, Any]:
-        return {"github_login": "owner", "plan_mode": True}
 
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {"markdown": "# Plan", "status": "ready"}
+async def test_dashboard_store_begin_marks_the_thread_planning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard.plan_store import DashboardPlanStore
 
-    async def fake_list_comments(
-        thread_id: str, *, raise_on_error: bool = False
-    ) -> list[dict[str, Any]]:
-        return []
+    saved = _patch_plan_store(monkeypatch, {})
 
-    async def fake_set_status(
-        thread_id: str,
-        status: str,
-        *,
-        plan_mode: Any = None,
-        approved_by: Any = None,
-    ) -> None:
-        saved.update(status=status, plan_mode=plan_mode, approved_by=approved_by)
+    await DashboardPlanStore("t1").begin()
 
-    monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
-    monkeypatch.setattr(approve_plan_tool, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(approve_plan_tool, "list_plan_comments", fake_list_comments)
-    monkeypatch.setattr(approve_plan_tool, "set_plan_status", fake_set_status)
-
-    result = await approve_plan_tool.approve_plan(
-        state={
-            "plan_mode": True,
-            "plan_approver": {
-                "id": "teammate",
-                "name": "Teammate",
-                "source": "dashboard",
-            },
-        },
-        tool_call_id="call-1",
-    )
-
-    assert isinstance(result, Command)
     assert saved == {
-        "status": "approved",
-        "plan_mode": False,
-        "approved_by": {
-            "id": "current-user",
-            "name": "current-user",
-            "source": "dashboard",
-        },
+        "thread_id": "t1",
+        "status": "planning",
+        "plan_mode": True,
+        "approved_by": None,
     }
 
 
-async def test_approve_plan_tool_allows_non_owner_configurable_identity(
+@pytest.mark.parametrize(
+    ("plan_mode", "status", "recorded_plan_mode"),
+    [(True, "ready", True), (False, "shared", None)],
+)
+async def test_dashboard_store_publish_status_follows_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
+    plan_mode: bool,
+    status: str,
+    recorded_plan_mode: bool | None,
 ) -> None:
-    import importlib
+    from agent.dashboard.plan_store import DashboardPlanStore
 
-    from langgraph.types import Command
+    saved = _patch_plan_store(monkeypatch, {})
 
-    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
-    saved: dict[str, Any] = {}
-    monkeypatch.setattr(
-        "coding_agent.run_config.get_config",
-        lambda: {
-            "configurable": {
-                "thread_id": "t1",
-                "github_login": "other",
-                "source": "linear",
-                "plan_mode": True,
-            }
-        },
+    await DashboardPlanStore("t1").publish(
+        document="<h1>Plan</h1>", source_path="/workspace/plans/p.html", plan_mode=plan_mode
     )
 
-    async def fake_thread_metadata(thread_id: str) -> dict[str, Any]:
-        return {"github_login": "owner", "plan_mode": True}
+    assert saved == {
+        "thread_id": "t1",
+        "html": "<h1>Plan</h1>",
+        "status": status,
+        "plan_file_path": "/workspace/plans/p.html",
+        "plan_mode": recorded_plan_mode,
+    }
 
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {"markdown": "# Plan", "status": "ready"}
 
-    async def fake_list_comments(
-        thread_id: str, *, raise_on_error: bool = False
-    ) -> list[dict[str, Any]]:
-        return []
+async def test_dashboard_store_reads_plan_mode_from_thread_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard import plan_store
 
-    async def fake_set_status(
-        thread_id: str,
-        status: str,
-        *,
-        plan_mode: Any = None,
-        approved_by: Any = None,
-    ) -> None:
-        saved["approved_by"] = approved_by
+    class _Threads:
+        def __init__(self, metadata: dict[str, Any]) -> None:
+            self._metadata = metadata
 
-    monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
-    monkeypatch.setattr(approve_plan_tool, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(approve_plan_tool, "list_plan_comments", fake_list_comments)
-    monkeypatch.setattr(approve_plan_tool, "set_plan_status", fake_set_status)
+        async def get(self, thread_id: str) -> dict[str, Any]:
+            assert thread_id == "t1"
+            return {"metadata": self._metadata}
 
-    result = await approve_plan_tool.approve_plan(state={"plan_mode": True}, tool_call_id="call-1")
+    monkeypatch.setattr(
+        plan_store,
+        "get_client",
+        lambda: type("C", (), {"threads": _Threads({"plan_mode": True})})(),
+    )
+    assert await plan_store.DashboardPlanStore("t1").is_active() is True
 
-    assert isinstance(result, Command)
-    assert saved["approved_by"] == {"id": "other", "name": "other", "source": "linear"}
+    monkeypatch.setattr(
+        plan_store, "get_client", lambda: type("C", (), {"threads": _Threads({})})()
+    )
+    assert await plan_store.DashboardPlanStore("t1").is_active() is False

@@ -9,6 +9,18 @@ from langgraph.runtime import Runtime
 from agent import reviewer
 
 
+class _FakeSandboxes:
+    """Stands in for the module-level sandbox lifecycle the reviewer scopes."""
+
+    def __init__(self) -> None:
+        self.credentials: object | None = None
+        self.ensure_for_thread = AsyncMock(return_value=MagicMock())
+
+    def with_credentials(self, credentials: object) -> _FakeSandboxes:
+        self.credentials = credentials
+        return self
+
+
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     prompt = reviewer._reviewer_system_prompt(
         "/workspace/repo",
@@ -76,11 +88,7 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
             return_value=("app-token", None),
         ) as mock_app_token,
         patch("agent.reviewer.cache_github_token_for_thread") as mock_cache_token,
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -129,11 +137,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
             new_callable=AsyncMock,
             return_value=("app-token", "exp"),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ) as mock_sandbox,
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()) as sandboxes,
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -154,10 +158,11 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
         prepare = create_agent.call_args.kwargs["middleware"][0]
         await prepare.abefore_agent({}, None)
 
-    mock_sandbox.assert_awaited_once_with(
+    assert sandboxes.credentials is not None
+    assert sandboxes.credentials.token == "app-token"
+    assert sandboxes.credentials.repositories == ["repo"]
+    sandboxes.ensure_for_thread.assert_awaited_once_with(
         "reviewer-thread-id",
-        github_proxy_token="app-token",
-        github_proxy_repositories=["repo"],
         allow_replacement=True,
     )
 
@@ -180,11 +185,7 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
             new_callable=AsyncMock,
             return_value=(None, None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ) as mock_sandbox,
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()) as sandboxes,
         patch("agent.reviewer.make_model", return_value=MagicMock()),
         patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
     ):
@@ -193,7 +194,7 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
         with pytest.raises(RuntimeError, match="installation token unavailable"):
             await prepare.abefore_agent({}, None)
 
-    mock_sandbox.assert_not_awaited()
+    sandboxes.ensure_for_thread.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -217,11 +218,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
     dummy_agent = _DummyAgent()
 
     with (
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -265,11 +262,7 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
     dummy_agent = _DummyAgent()
 
     with (
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -326,11 +319,7 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -393,11 +382,7 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -460,11 +445,7 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -518,11 +499,7 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -873,11 +850,7 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -950,11 +923,7 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -1019,11 +988,7 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -1084,11 +1049,7 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -1159,11 +1120,7 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -1231,11 +1188,7 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -1297,11 +1250,7 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
-        patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
+        patch("agent.reviewer.OPEN_SWE_SANDBOXES", _FakeSandboxes()),
         patch(
             "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,

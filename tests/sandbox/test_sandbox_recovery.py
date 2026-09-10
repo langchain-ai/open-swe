@@ -88,7 +88,7 @@ async def test_unreachable_sandbox_notifies_then_ends_the_run() -> None:
     try:
         with (
             patch(
-                "agent.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
+                "coding_agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock
             ) as mock_create,
             pytest.raises(SandboxConnectionError),
         ):

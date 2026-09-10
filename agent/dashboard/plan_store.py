@@ -19,15 +19,14 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.run_config import OpenSWERunConfig
 from agent.store import delete_value, get_value, now_iso, put_value, search_values
+from coding_agent.plans import PLAN_FILE_DIRECTORY, ApprovedPlan, PlanNotApprovable
 
 logger = logging.getLogger(__name__)
 
 PLAN_CONTENT_NAMESPACE = ["plan", "content"]
 PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
-
-# Plans are mirrored into the sandbox outside cloned repositories.
-PLAN_FILE_DIRECTORY = "/workspace/plans"
 
 # Plan/share lifecycle, stored on both the content record and the thread metadata.
 PLAN_STATUS_PLANNING = "planning"
@@ -266,3 +265,61 @@ async def _merge_thread_metadata(thread_id: str, metadata: dict[str, Any]) -> No
         # The thread always exists by the time a plan is saved (the run created
         # it); a transient update failure must not crash the agent mid-run.
         pass
+
+
+class DashboardPlanStore:
+    """One thread's plan, as the dashboard stores and renders it."""
+
+    def __init__(self, thread_id: str) -> None:
+        self._thread_id = thread_id
+
+    async def begin(self) -> None:
+        await set_plan_status(self._thread_id, PLAN_STATUS_PLANNING, plan_mode=True)
+
+    async def publish(self, *, document: str, source_path: str, plan_mode: bool) -> None:
+        await save_plan_content(
+            self._thread_id,
+            html=document,
+            status=PLAN_STATUS_READY if plan_mode else PLAN_STATUS_SHARED,
+            plan_file_path=source_path,
+            plan_mode=plan_mode or None,
+        )
+
+    async def approve(self) -> ApprovedPlan:
+        content = await get_plan_content(self._thread_id, raise_on_error=True) or {}
+        if content.get("status") == PLAN_STATUS_SHARED:
+            raise PlanNotApprovable("shared content is not an implementation plan")
+        document = str(content.get("html") or content.get("markdown") or "").strip()
+        comments = await list_plan_comments(self._thread_id, raise_on_error=True)
+        await set_plan_status(
+            self._thread_id,
+            PLAN_STATUS_APPROVED,
+            plan_mode=False,
+            approved_by=_current_approver(),
+        )
+        return ApprovedPlan(document=document, reviewer_feedback=format_plan_comments(comments))
+
+    async def is_active(self) -> bool:
+        thread = await get_client().threads.get(self._thread_id)
+        metadata = (
+            thread.get("metadata")
+            if isinstance(thread, dict)
+            else getattr(thread, "metadata", None)
+        )
+        return isinstance(metadata, dict) and metadata.get("plan_mode") is True
+
+
+def _current_approver() -> dict[str, str]:
+    """Whoever sent the message this run is answering, never the thread's owner."""
+    cfg = OpenSWERunConfig.from_runtime()
+    slack_thread = cfg.slack_thread
+    actor_id = (
+        (slack_thread.triggering_user_id if slack_thread else "")
+        or cfg.github_login
+        or cfg.user_email
+        or ""
+    )
+    name = (
+        (slack_thread.triggering_user_name if slack_thread else "") or cfg.github_login or actor_id
+    )
+    return make_plan_approver(actor_id=actor_id, name=name, source=cfg.source or "agent")
