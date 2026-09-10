@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 DELAY_MS = 5 * 60 * 1000
 ACTIVITY_KEY = "feedback_last_activity_at_ms"
 Rating = Literal["bad", "good", "other"]
+PromptStatus = Literal["unavailable", "ready", "completed", "dismissed"]
 
 
 class Feedback(BaseModel):
@@ -71,7 +72,7 @@ async def _quiet_until(thread_id: str, record: Feedback) -> int | None:
     return activity + DELAY_MS
 
 
-async def feedback_prompt_status(thread_id: str) -> str:
+async def feedback_prompt_status(thread_id: str) -> PromptStatus:
     record = await feedback_store().get(thread_id)
     if record is None or record.status == "pending":
         return "unavailable"

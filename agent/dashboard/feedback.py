@@ -10,7 +10,7 @@ from agent.dashboard.plan_api import fetch_thread_metadata
 from agent.dashboard.threads.summary import thread_is_readable
 from agent.dashboard.user_mappings import login_for_slack_id
 from agent.source_context import SourceContext
-from agent.thread_feedback import Rating, feedback_prompt_status, feedback_store
+from agent.thread_feedback import PromptStatus, Rating, feedback_prompt_status, feedback_store
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 
@@ -20,6 +20,12 @@ feedback_router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 _SESSION_DEP = Depends(require_session)
+
+
+class ThreadFeedbackResponse(BaseModel):
+    status: PromptStatus
+    rating: Rating | None = None
+    comment: str = ""
 
 
 class FeedbackSubmission(BaseModel):
@@ -51,21 +57,21 @@ async def _is_initiator(thread_id: str, login: str) -> bool:
 @feedback_router.get("/{thread_id}/feedback")
 async def get_thread_feedback(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
-) -> dict[str, Any]:
+) -> ThreadFeedbackResponse:
     login = str(session["sub"]).strip().lower()
     if not await _is_initiator(thread_id, login):
-        return {"status": "unavailable"}
+        return ThreadFeedbackResponse(status="unavailable")
     record = await feedback_store().get(thread_id)
-    return {
-        "status": await feedback_prompt_status(thread_id),
-        "rating": record.rating if record else None,
-        "comment": record.comment if record else "",
-    }
+    return ThreadFeedbackResponse(
+        status=await feedback_prompt_status(thread_id),
+        rating=record.rating if record else None,
+        comment=record.comment if record else "",
+    )
 
 
 async def _save_feedback(
     thread_id: str, login: str, submission: FeedbackSubmission | None
-) -> dict[str, Any]:
+) -> ThreadFeedbackResponse:
     if not await _is_initiator(thread_id, login):
         raise HTTPException(403, "Only the thread initiator can give feedback.")
     async with agent_thread_pr_state_lock(langgraph_client(), thread_id):
@@ -79,18 +85,18 @@ async def _save_feedback(
             record.rating = submission.rating if submission else None
             record.comment = submission.comment if submission else ""
             await feedback_store().put(thread_id, record)
-    return record.model_dump(include={"status", "rating", "comment"})
+    return ThreadFeedbackResponse.model_validate(record, from_attributes=True)
 
 
 @feedback_router.post("/{thread_id}/feedback")
 async def submit_thread_feedback(
     thread_id: str, submission: FeedbackSubmission, session: dict[str, Any] = _SESSION_DEP
-) -> dict[str, Any]:
+) -> ThreadFeedbackResponse:
     return await _save_feedback(thread_id, str(session["sub"]).strip().lower(), submission)
 
 
 @feedback_router.post("/{thread_id}/feedback/dismiss")
 async def dismiss_thread_feedback(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
-) -> dict[str, Any]:
+) -> ThreadFeedbackResponse:
     return await _save_feedback(thread_id, str(session["sub"]).strip().lower(), None)

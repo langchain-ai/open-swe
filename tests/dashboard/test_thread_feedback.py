@@ -76,7 +76,11 @@ async def test_only_verified_initiator_gets_feedback(api, monkeypatch, identity)
             monkeypatch.setattr(feedback, "login_for_slack_id", AsyncMock(return_value="owner"))
     visible = await api.client.get("/dashboard/api/threads/t1/feedback")
     submitted = await api.client.post("/dashboard/api/threads/t1/feedback", json={"rating": "good"})
-    assert visible.json()["status"] == ("ready" if identity == "slack_initiator" else "unavailable")
+    assert visible.json() == {
+        "status": "ready" if identity == "slack_initiator" else "unavailable",
+        "rating": None,
+        "comment": "",
+    }
     assert submitted.status_code == (200 if identity == "slack_initiator" else 403)
 
 
@@ -113,3 +117,26 @@ async def test_slack_completion_hides_web_controls(api, status):
     await thread_feedback.complete_feedback_prompt("t1", status)
     response = await api.client.get("/dashboard/api/threads/t1/feedback")
     assert response.json() == {"status": status, "rating": None, "comment": ""}
+
+
+def test_openapi_exposes_one_typed_feedback_response():
+    app = FastAPI()
+    app.include_router(feedback.feedback_router)
+    schema = app.openapi()
+    responses = [
+        schema["paths"][path][method]["responses"]["200"]["content"]["application/json"]["schema"]
+        for path, method in [
+            ("/threads/{thread_id}/feedback", "get"),
+            ("/threads/{thread_id}/feedback", "post"),
+            ("/threads/{thread_id}/feedback/dismiss", "post"),
+        ]
+    ]
+    assert responses[0] == responses[1] == responses[2]
+    model = schema["components"]["schemas"][responses[0]["$ref"].rsplit("/", 1)[1]]
+    assert set(model["properties"]) == {"status", "rating", "comment"}
+    assert set(model["properties"]["status"]["enum"]) == {
+        "unavailable",
+        "ready",
+        "completed",
+        "dismissed",
+    }
