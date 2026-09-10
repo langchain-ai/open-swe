@@ -4,12 +4,13 @@ import asyncio
 import base64
 import json
 import logging
+import shlex
 from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx2
 from deepagents.backends import LangSmithSandbox
-from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from deepagents.backends.protocol import DeleteResult, ExecuteResponse, SandboxBackendProtocol
 from langsmith.sandbox import (
     AsyncSandboxClient,
     CommandTimeoutError,
@@ -656,6 +657,18 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
+
+    async def adelete(self, file_path: str) -> DeleteResult:
+        quoted = shlex.quote(file_path)
+        exists = await self.aexecute(f"test -e {quoted} || test -L {quoted}")
+        if exists.exit_code is not None and exists.exit_code != 0:
+            return DeleteResult(error=f"Error: '{file_path}' not found")
+        result = await self.aexecute(f"rm -rf {quoted}")
+        if result.exit_code == 0:
+            return DeleteResult(path=file_path)
+        return DeleteResult(
+            error=f"Error deleting file '{file_path}': {result.output.strip() or 'unknown error'}"
+        )
 
     async def aexecute(
         self,
