@@ -169,8 +169,27 @@ async def control_queued(thread_id: str = "") -> JSONResponse:
     return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
 
 
+_MAPPINGS_SEEDED = False
+
+
+async def _seed_test_user_mappings() -> None:
+    """Link each named test user's Slack id to their dashboard login, as the real
+    Slack-link flow would, so the webhook's account gate lets them through."""
+    global _MAPPINGS_SEEDED
+    if _MAPPINGS_SEEDED:
+        return
+    from agent.dashboard.user_mappings import upsert_mapping
+
+    for user in TEST_USERS:
+        await upsert_mapping(
+            github_login=user["login"], work_email=user["email"], slack_user_id=user["slack_id"]
+        )
+    _MAPPINGS_SEEDED = True
+
+
 async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> httpx2.Response:
     """POST a signed Events-API delivery to the real /webhooks/slack route."""
+    await _seed_test_user_mappings()
     raw = json.dumps(payload).encode()
     req_ts = str(int(time.time()))
     base = f"v0:{req_ts}:{raw.decode()}".encode()

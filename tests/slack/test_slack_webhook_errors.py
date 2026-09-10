@@ -618,3 +618,10 @@ async def test_errored_dm_owner_falls_back_to_email_mapping(
     kwargs = upsert.await_args.kwargs
     assert kwargs["visibility"] == "private"
     assert kwargs["owner_login"] == "alice"
+
+    # An unlinked DM sender never reaches thread creation, so the error path
+    # must not leave a private thread nobody owns.
+    upsert.reset_mock()
+    monkeypatch.setattr(slack_webhook.common, "login_for_email", AsyncMock(return_value=None))
+    await slack_webhook._mark_slack_thread_errored("t1", request, None)
+    upsert.assert_not_awaited()

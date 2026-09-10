@@ -499,28 +499,32 @@ async def _mark_slack_thread_errored(
 ) -> None:
     try:
         owner_login = await _slack_login(request.user_id)
-        clean_text = (
-            common.strip_bot_mention(
-                request.text, request.bot_user_id, bot_username=common.SLACK_BOT_USERNAME
-            )
-            or "Slack request"
-        )
-        await common.upsert_agent_thread_metadata(
-            thread_id,
-            source="slack",
-            repo_config=repo.model_dump() if repo else None,
-            title=clean_text,
-            source_context=SourceContext(
-                slack_thread=SlackThreadRef(
-                    channel_id=request.channel_id,
-                    thread_ts=request.thread_ts,
-                    triggering_user_id=request.user_id,
-                    triggering_event_ts=request.event_ts,
+        visibility = _slack_thread_visibility(request.channel_context)
+        # An unlinked sender is turned away at the account gate; a private thread
+        # nobody owns would be unreachable, so persist nothing for them.
+        if visibility == "public" or owner_login:
+            clean_text = (
+                common.strip_bot_mention(
+                    request.text, request.bot_user_id, bot_username=common.SLACK_BOT_USERNAME
                 )
-            ),
-            visibility=_slack_thread_visibility(request.channel_context),
-            owner_login=owner_login or "",
-        )
+                or "Slack request"
+            )
+            await common.upsert_agent_thread_metadata(
+                thread_id,
+                source="slack",
+                repo_config=repo.model_dump() if repo else None,
+                title=clean_text,
+                source_context=SourceContext(
+                    slack_thread=SlackThreadRef(
+                        channel_id=request.channel_id,
+                        thread_ts=request.thread_ts,
+                        triggering_user_id=request.user_id,
+                        triggering_event_ts=request.event_ts,
+                    )
+                ),
+                visibility=visibility,
+                owner_login=owner_login or "",
+            )
     except Exception:  # noqa: BLE001
         common.logger.warning(
             "Could not persist Slack error metadata for thread %s", thread_id, exc_info=True
