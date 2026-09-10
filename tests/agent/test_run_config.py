@@ -43,6 +43,18 @@ def test_from_config_reads_the_configurable():
     assert RunConfig.from_config(None).thread_id is None
 
 
+def test_invocation_id_accepts_legacy_and_equal_dual_fields():
+    assert RunConfig.parse({"prepare_run_id": "inv-1"}).invocation_id == "inv-1"
+    cfg = RunConfig.parse({"invocation_id": "inv-1", "prepare_run_id": "inv-1"})
+    assert cfg.invocation_id == "inv-1"
+
+
+def test_invocation_id_rejects_conflicting_fields():
+    cfg = RunConfig.parse({"invocation_id": "inv-1", "prepare_run_id": "inv-2"})
+    assert cfg.invocation_id is None
+    assert cfg.prepare_run_id is None
+
+
 def test_nested_source_refs_are_typed():
     cfg = RunConfig.parse(
         {

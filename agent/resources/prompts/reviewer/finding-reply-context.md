@@ -20,4 +20,4 @@ $safe_reply_body
 
 $existing_findings
 
-${prior_threads_section}Reassess only this finding. If the reply proves the finding is invalid, call `resolve_finding_thread(id, status="dismissed", note="<full reply body>")`. If code now fixes the finding, call `update_finding(id, status="resolved", note="<full reply body>")`. The `note` is posted verbatim, so write it as the complete GitHub reply body. Use `reply_to_finding_thread` only when the user asked a direct question or a concise clarification is necessary. Call `publish_review` once at the end so pending GitHub thread state is reconciled.
+${prior_threads_section}Reassess only this finding and reconcile it using the finding-reply rules in the system prompt.

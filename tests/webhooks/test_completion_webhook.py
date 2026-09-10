@@ -39,7 +39,7 @@ async def test_terminal_status_finalizes_agent_usage(
     client = _FakeClient({"source": "schedule"})
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     finalize = AsyncMock()
-    monkeypatch.setattr(completion, "finalize_agent_run_usage", finalize)
+    monkeypatch.setattr(completion, "finalize_agent_invocation_usage", finalize)
 
     await completion.handle_run_completion(
         {
@@ -64,7 +64,7 @@ async def test_terminal_status_finalizes_agent_usage(
     )
 
     finalize.assert_awaited_once()
-    assert finalize.await_args.kwargs["run_id"] == "prepare-1"
+    assert finalize.await_args.kwargs["invocation_id"] == "prepare-1"
     assert finalize.await_args.kwargs["thread_id"] == "t1"
     assert isinstance(finalize.await_args.kwargs["state"]["messages"][0], AIMessage)
 
@@ -319,6 +319,7 @@ async def test_success_status_schedules_session_cost_refresh(
         {
             "agent_thread_id": "t1",
             "run_id": "run-1",
+            "invocation_id": "prepare-1",
             "prepare_run_id": "prepare-1",
             "channel_id": "C1",
             "thread_ts": "123.45",

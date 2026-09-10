@@ -460,7 +460,8 @@ def _format_token_count(count: int) -> str:
 
 
 def _safe_model_label(model: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)[:48].strip("-")
+    sanitized = re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)
+    return sanitized.rsplit("/", 1)[-1][:48].strip("-")
 
 
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
