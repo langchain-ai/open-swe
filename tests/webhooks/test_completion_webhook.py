@@ -39,7 +39,7 @@ async def test_terminal_status_finalizes_agent_usage(
     client = _FakeClient({"source": "schedule"})
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     finalize = AsyncMock()
-    monkeypatch.setattr(completion, "finalize_agent_run_usage", finalize)
+    monkeypatch.setattr(completion, "finalize_agent_invocation_usage", finalize)
 
     await completion.handle_run_completion(
         {
@@ -64,7 +64,7 @@ async def test_terminal_status_finalizes_agent_usage(
     )
 
     finalize.assert_awaited_once()
-    assert finalize.await_args.kwargs["run_id"] == "prepare-1"
+    assert finalize.await_args.kwargs["invocation_id"] == "prepare-1"
     assert finalize.await_args.kwargs["thread_id"] == "t1"
     assert isinstance(finalize.await_args.kwargs["state"]["messages"][0], AIMessage)
 
@@ -91,6 +91,7 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
     assert args[0] == "C1"
     assert args[1] == "123.45"
     assert "<https://ui/t1|Open SWE Web>" in args[2]
+    assert await_args.kwargs == {"agent_thread_id": "t1", "include_trace_link": True}
     assert client.threads.updates == [
         {"failure_reply_posted_run_id": "run-1", "failure_reply_posted_run_ids": ["run-1"]}
     ]
@@ -290,11 +291,15 @@ async def test_success_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("feedback_error", [None, RuntimeError("Feedback unavailable")])
 async def test_success_status_schedules_session_cost_refresh(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, feedback_error: Exception | None
 ) -> None:
     client = _FakeClient(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        completion, "schedule_answer_feedback", AsyncMock(side_effect=feedback_error)
+    )
     schedule = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "schedule_session_cost_refresh", schedule)
 
@@ -312,6 +317,7 @@ async def test_success_status_schedules_session_cost_refresh(
         {
             "agent_thread_id": "t1",
             "run_id": "run-1",
+            "invocation_id": "prepare-1",
             "prepare_run_id": "prepare-1",
             "channel_id": "C1",
             "thread_ts": "123.45",

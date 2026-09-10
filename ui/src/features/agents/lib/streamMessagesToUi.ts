@@ -455,6 +455,7 @@ export function streamMessagesToUi(
     }
 
     if (AIMessage.isInstance(raw)) {
+      if (raw.additional_kwargs.lc_source === "summarization") return
       const chunks: Array<Chunk> = []
       const reasoning = reasoningText(raw)
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })

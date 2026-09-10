@@ -38,7 +38,7 @@ def test_signed_ci_events_route_without_mention(
         captured.update({"payload": payload, "event_type": kind, "delivery_id": delivery_id})
 
     monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", _SECRET)
-    monkeypatch.setattr(common, "_is_repo_allowed", lambda _repo: True)
+    monkeypatch.setattr(common, "is_repo_allowed", lambda _repo: True)
     monkeypatch.setattr(github, "process_github_ci_event", process)
     payload = {"repository": {"owner": {"login": "acme"}, "name": "repo"}}
 

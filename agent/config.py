@@ -172,8 +172,6 @@ ENV.var(
     "LangGraph Platform control-plane API, used by the legacy LangSmith-brokered GitHub auth.",
     default="https://api.host.langchain.com",
 )
-ENV.var("SANDBOX_LANGSMITH_API_KEY", "LangSmith key for a separate sandbox workspace.", secret=True)
-ENV.var("SANDBOX_LANGSMITH_ENDPOINT", "LangSmith endpoint for a separate sandbox workspace.")
 ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
     "LangSmith key with gateway:invoke for the LLM Gateway.",
@@ -253,6 +251,7 @@ ENV.var("EXTRA_INTERNAL_BOT_LOGINS", "Comma-separated bot logins treated as inte
 ENV.var(
     "ALLOWED_GITHUB_ORGS", "Comma-separated GitHub orgs allowed for webhooks and dashboard login."
 )
+ENV.var("ALLOWED_GITHUB_USERS", "Comma-separated GitHub users allowed to log in to the dashboard.")
 ENV.var("ALLOWED_GITHUB_REPOS", "Comma-separated owner/repo pairs allowed for webhooks.")
 ENV.var("PUBLIC_REPO_ORG_GATE", "Single org whose members may trigger runs on public repos.")
 ENV.var(
@@ -307,9 +306,6 @@ ENV.var(
     secret=True,
 )
 ENV.var("CONFIGURED_ADMINS", "Comma-separated GitHub logins or emails with admin access.")
-ENV.var(
-    "OBSERVABILITY_AUTHORIZED_EMAILS", "Comma-separated emails allowed to use observability tools."
-)
 ENV.var("ADMIN_OIDC_SUBJECTS", "Comma-separated GitHub Actions OIDC subjects allowed as admins.")
 ENV.var("ADMIN_OIDC_AUDIENCE", "Audience required on admin OIDC tokens.", default="open-swe")
 ENV.var(
@@ -348,14 +344,6 @@ ENV.var(
     default="/usr/bin/chromium",
 )
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
-ENV.var("DATADOG_MCP_TOOLSETS", "Datadog MCP toolsets to load.", default="core")
-ENV.var("CORRIDOR_MCP_URL", "Corridor MCP server URL.", aliases=("CORRIDOR_MCP_SERVER_URL",))
-ENV.var(
-    "CORRIDOR_API_TOKEN",
-    "Corridor API token for the MCP server.",
-    aliases=("CORRIDOR_MCP_TOKEN", "CORRIDOR_TOKEN"),
-    secret=True,
-)
 ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"
 )
@@ -381,6 +369,30 @@ ENV.var(
 ENV.var("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "Client-side grace past a command's own timeout.")
 ENV.var("SANDBOX_CREATE_EXTRA_JSON", "JSON object merged into the sandbox create body.")
 ENV.var("ENVIRONMENT_SNAPSHOT_PREFIX", "Prefix for environment snapshot names.", default="openswe")
+ENV.var(
+    "OPENSWE_SCRIPT_ROOT",
+    "Where an environment's setup/update scripts and their logs live inside a sandbox. "
+    "The default assumes a sandbox where the agent is root; the local provider runs on a "
+    "developer's own machine, whose filesystem root is not writable.",
+    default="/open-swe/environment",
+)
+ENV.var(
+    "ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",
+    "Deadline for an environment's setup script on a builder sandbox.",
+)
+ENV.var(
+    "ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",
+    "Deadline for an environment's update script on a builder sandbox.",
+)
+ENV.var(
+    "ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",
+    "Deadline for the update script when it runs in a run's own sandbox, before the first "
+    "model call. Tighter than the builder's on purpose.",
+)
+ENV.var(
+    "ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",
+    "Deadline for capturing a builder sandbox as an environment's snapshot.",
+)
 ENV.var("LOCAL_SANDBOX_ROOT_DIR", "Root directory for the local sandbox provider.")
 ENV.var(
     "GIT_CONFIG_GLOBAL",

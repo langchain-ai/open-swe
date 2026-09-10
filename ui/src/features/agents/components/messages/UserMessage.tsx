@@ -45,6 +45,8 @@ export function UserMessage({ message }: { message: Message }) {
     <div
       className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
       data-testid="user-message"
+      data-message-id={message.id}
+      data-message-delivery-status={message.deliveryStatus}
       data-message-sender-kind={message.structuredSenderKind}
       data-message-surface={message.structuredSurface}
     >
@@ -126,6 +128,17 @@ export function UserMessage({ message }: { message: Message }) {
                 )}
               </div>
             )}
+          </div>
+        )}
+        {message.deliveryStatus && (
+          <div
+            className={`mt-1 pr-1 text-right text-[11px] ${
+              message.deliveryStatus === "failed"
+                ? "text-destructive"
+                : "text-muted-foreground"
+            }`}
+          >
+            {message.deliveryStatus === "failed" ? "Failed to send" : "Sending"}
           </div>
         )}
         {!message.timestampIsFallback && (!isSystem || expanded) && (

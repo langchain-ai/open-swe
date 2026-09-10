@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ def classify_pr_state(pr_payload: dict[str, Any]) -> str:
 
 
 async def _fetch_pr_state(
-    http_client: httpx.AsyncClient,
+    http_client: httpx2.AsyncClient,
     pr_ref: PullRequestRef,
     github_pat: str,
     semaphore: asyncio.Semaphore,
@@ -124,7 +124,7 @@ async def summarize_pr_statuses(
     concurrency: int = DEFAULT_CONCURRENCY,
 ) -> dict[str, int]:
     semaphore = asyncio.Semaphore(concurrency)
-    async with httpx.AsyncClient(timeout=30.0) as http_client:
+    async with httpx2.AsyncClient(timeout=30.0) as http_client:
         tasks = [
             _fetch_pr_state(http_client, parse_github_pr_url(pr_url), github_pat, semaphore)
             for pr_url in pr_urls

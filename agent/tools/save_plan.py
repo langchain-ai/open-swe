@@ -27,6 +27,7 @@ async def _save_plan(
     plan_file_path: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Implement the `save_plan` tool."""
     if not isinstance(plan_file_path, str):
         return {"success": False, "error": "plan_file_path must be a string"}, None
     path = plan_file_path.strip()
@@ -62,17 +63,7 @@ async def _save_plan(
     )
 
 
-save_plan = tool(
-    "save_plan",
-    description="""Publish a self-contained HTML plan artifact from the sandbox.
-
-Use this in plan mode once the artifact is ready. Outside plan mode, use it
-for a long visual response. Write one `.html` file directly under
-`/workspace/plans/` and pass that path here. Read the `html-artifacts` skill
-first. The dashboard renders every publication inline at this tool call and
-keeps the latest publication available on the full plan page.""",
-    response_format="content_and_artifact",
-)(_save_plan)
+save_plan = tool("save_plan", response_format="content_and_artifact")(_save_plan)
 
 
 async def _save(thread_id: str, content: str, path: str, *, plan_mode: bool) -> None:

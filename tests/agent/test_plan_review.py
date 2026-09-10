@@ -424,8 +424,8 @@ async def test_list_workflow_approvals_requires_readable_thread(
         assert thread_id == "thread-1"
         return {"source": "unknown"}
 
-    monkeypatch.setattr(workflow_approval_api, "_thread_metadata", fake_metadata)
-    monkeypatch.setattr(workflow_approval_api, "_thread_is_readable", lambda metadata: False)
+    monkeypatch.setattr(workflow_approval_api, "fetch_thread_metadata", fake_metadata)
+    monkeypatch.setattr(workflow_approval_api, "thread_is_readable", lambda metadata: False)
 
     with pytest.raises(HTTPException) as exc:
         await workflow_approval_api.list_workflow_push_approvals(
@@ -455,8 +455,8 @@ async def test_list_workflow_approvals_returns_records(
             }
         }
 
-    monkeypatch.setattr(workflow_approval_api, "_thread_metadata", fake_metadata)
-    monkeypatch.setattr(workflow_approval_api, "_thread_is_readable", lambda metadata: True)
+    monkeypatch.setattr(workflow_approval_api, "fetch_thread_metadata", fake_metadata)
+    monkeypatch.setattr(workflow_approval_api, "thread_is_readable", lambda metadata: True)
     monkeypatch.setattr(workflow_approval_api, "get_workflow_push_approvals", fake_approvals)
 
     result = await workflow_approval_api.list_workflow_push_approvals(
@@ -720,7 +720,7 @@ async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyP
             "approved_at": "2026-08-16T12:00:00+00:00",
         }
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_content)
 
     result = await plan_api.get_plan(
@@ -772,7 +772,7 @@ def _patch_update_plan_deps(
         sandbox["plan_file_path"] = plan_file_path
         return plan_file_path or "/workspace/plans/fallback.html"
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "save_plan_content", fake_save)
     monkeypatch.setattr(plan_api, "write_plan_to_sandbox", fake_write)
@@ -848,7 +848,7 @@ async def test_approve_plan_hides_unreadable_thread(monkeypatch: pytest.MonkeyPa
     async def fake_meta(thread_id: str) -> dict[str, Any]:
         return {"source": "unknown", "github_login": "owner"}
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
 
     with pytest.raises(HTTPException) as exc:
         await plan_api.approve_plan("t1", session={"sub": "reviewer", "email": None})
@@ -887,11 +887,11 @@ async def test_any_participant_can_approve_and_dispatch_published_html(
         dispatched.update(text=text, plan_mode=plan_mode)
         return {"run_id": "run-1"}
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
 
     result = await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
     assert result == {"status": "approved", "run_id": "run-1"}
@@ -938,11 +938,11 @@ async def test_concurrent_plan_approvals_dispatch_once(monkeypatch: pytest.Monke
         dispatches.append(thread_id)
         return {"run_id": "run-1"}
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
     monkeypatch.setattr(plan_api, "_maybe_post_plan_approved_to_slack", AsyncMock())
 
     approver = {"id": "reviewer", "name": "Reviewer", "source": "dashboard"}
@@ -996,11 +996,11 @@ async def test_failed_approval_dispatch_rolls_back_and_can_retry(
             raise RuntimeError("dispatch unavailable")
         return {"run_id": "run-2"}
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
     monkeypatch.setattr(plan_api, "_maybe_post_plan_approved_to_slack", AsyncMock())
 
     approver = {"id": "reviewer", "name": "Reviewer", "source": "dashboard"}
@@ -1070,12 +1070,12 @@ async def test_approve_plan_posts_slack_approval_notice(
         dispatched.update(text=text, plan_mode=plan_mode)
         return {"run_id": "run-1"}
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
     monkeypatch.setattr(plan_api, "post_slack_thread_reply", fake_post)
-    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
 
     result = await plan_api.approve_plan(
         "t1", session={"sub": "alice", "email": None, "name": "Alice Example"}
@@ -1129,10 +1129,10 @@ async def test_approve_plan_aborts_when_plan_read_fails(
     async def fake_dispatch(*a: Any, **k: Any) -> None:
         dispatched.append((a, k))
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
 
     with pytest.raises(RuntimeError):
         await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
@@ -1157,9 +1157,9 @@ async def test_approve_plan_rejects_shared_content(
     async def fake_dispatch(*a: Any, **k: Any) -> None:
         dispatched.append((a, k))
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
 
     with pytest.raises(HTTPException) as exc:
         await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
@@ -1190,12 +1190,12 @@ async def test_reject_plan_can_mark_revising_without_dispatch(
     async def fake_dispatch(*args: Any, **kwargs: Any) -> None:
         dispatched.append((args, kwargs))
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "_thread_is_readable", lambda metadata: True)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "thread_is_readable", lambda metadata: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
 
     result = await plan_api.reject_plan(
         "t1", plan_api.PlanRejection(dispatch=False), session={"sub": "a", "email": None}
@@ -1224,8 +1224,8 @@ async def test_reject_plan_rejects_stale_decision(
     async def fake_set_status(thread_id: str, status: str, *, plan_mode: bool) -> None:
         statuses.append((status, plan_mode))
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "_thread_is_readable", lambda metadata: True)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "thread_is_readable", lambda metadata: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
 
@@ -1256,10 +1256,10 @@ async def test_reject_plan_rejects_shared_content(
     async def fake_dispatch(*a: Any, **k: Any) -> None:
         dispatched.append((a, k))
 
-    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "_thread_is_readable", lambda metadata: True)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "thread_is_readable", lambda metadata: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
 
     with pytest.raises(HTTPException) as exc:
         await plan_api.reject_plan("t1", session={"sub": "a", "email": None})

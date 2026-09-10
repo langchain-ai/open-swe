@@ -1,11 +1,8 @@
 ---
 type: integration
-title: Dashboard API & Web/Desktop UI
-description: How the dashboard FastAPI surface exposes authenticated thread discovery, project grouping, pinning, and thread operations to the TanStack Start UI while preserving proxy and Electron local-execution boundaries.
+title: Dashboard and Desktop Clients
+description: The dashboard's FastAPI API, React/TanStack Start serving and proxy boundary, authenticated product capabilities, and the Electron client's supervised local-project execution model.
 tags: [dashboard, fastapi, oauth, threads, authorization, tanstack-start, electron, langgraph]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-09-02T08:15:43.727Z
 sources:
   - id: openwiki-source-328bde9e94017848bb09ba23
     resource: repo://agent/api/app.py
@@ -15,8 +12,6 @@ sources:
     resource: repo://agent/dashboard/agent_instructions.py
   - id: openwiki-source-5460c3972fe61bb256d07994
     resource: repo://agent/dashboard/oauth.py
-  - id: openwiki-source-acdc56addb3618ddf7d67472
-    resource: repo://agent/dashboard/review_styles.py
   - id: openwiki-source-61ace7d4952db9ddb8316aeb
     resource: repo://agent/dashboard/routes.py
   - id: openwiki-source-202e70aa1fb446ab05cc6d99
@@ -25,20 +20,18 @@ sources:
     resource: repo://agent/dashboard/skills.py
   - id: openwiki-source-dc33a233b67bb1d08952543c
     resource: repo://agent/dashboard/thread_api.py
-  - id: openwiki-source-06b5873d690f4ed38ab8b41a
-    resource: repo://agent/dashboard/thread_pins.py
   - id: openwiki-source-8c60a9544ea26006748dd7a3
     resource: repo://agent/desktop.py
+  - id: openwiki-source-31ac80d273943055d537bae8
+    resource: repo://agent/review/styles.py
   - id: openwiki-source-856ade03ef31ac38e1347f7c
     resource: repo://agent/server.py
-  - id: openwiki-source-8037e2358a2c4f9b2c722a11
-    resource: repo://AGENTS.md
+  - id: openwiki-source-6e64b1ccdb133daeb8f4d1d4
+    resource: repo://agent/utils/dashboard_ui.py
   - id: openwiki-source-2f66613e587b7c57d9be522e
     resource: repo://desktop/README.md
   - id: openwiki-source-f94f5d5d16b6aac2f4bc309c
     resource: repo://desktop/src/backend-supervisor.cjs
-  - id: openwiki-source-59fa18cc02f03adafb329bfd
-    resource: repo://desktop/src/main.cts
   - id: openwiki-source-62d0819e47a738ba26f898fd
     resource: repo://tests/dashboard/test_dashboard_thread_api_activity.py
   - id: openwiki-source-654bec991273a9eb3ccdf2c1
@@ -51,114 +44,101 @@ sources:
     resource: repo://ui/src/routes/agents.tsx
   - id: openwiki-source-a741d432f952c0dbfb4fb35d
     resource: repo://ui/vite.config.ts
-generated: { by: "openwiki/0.4.2", at: "2026-09-02T08:15:43.727Z" }
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-09-08T08:15:30.533Z
+generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
 ---
 
-# Dashboard API & Web/Desktop UI
+# Dashboard and Desktop Clients
 
-The dashboard is the human-facing integration surface: a FastAPI router in the agent backend, a TanStack Start web application, and an experimental Electron wrapper. The dashboard API is the policy boundary for GitHub credentials, stored configuration, and LangGraph; browser code does not directly call the raw LangGraph API.
+The dashboard is the human-facing surface around the agent: a FastAPI router, a React application built with TanStack Start, and an experimental Electron client. The dashboard API is the policy boundary for sessions, GitHub-derived authority, dashboard records, and LangGraph operations; the browser-facing clients use proxies rather than exposing server credentials or calling a raw LangGraph deployment directly.
 
-## Mounting and request flow
+## Composition, serving, and mount paths
 
-`agent.api.app` mounts the lazy-exported dashboard router at `/dashboard/api`. The PEP 562 export in `agent/dashboard/__init__.py` avoids loading routes, FastAPI, and the feature modules merely because another component imports a dashboard helper. New dashboard HTTP entrypoints belong in `agent/dashboard/routes.py`; substantive behavior can remain in focused dashboard modules. The project also treats agent/UI parity as a product principle: a dashboard capability should generally be available through a curated agent tool subject to the same safety and authorization boundaries.
+`agent.api.app.create_app()` includes the dashboard router, then calls `mount_dashboard_ui(app)`. The router has the `/dashboard/api` prefix and a router-wide mutation-origin dependency. `agent.dashboard` exports that router lazily with `__getattr__`; helper imports consequently do not pull in FastAPI, routes, and the feature modules unless the web app mounts the router.
+
+When a dashboard build is available, `agent.utils.dashboard_ui` mounts immutable hashed assets at `/assets` and serves `_shell.html` for HTML navigation requests. It deliberately declines API, webhook, health, LangGraph, docs, metrics, and asset prefixes; a non-HTML request for an unknown UI route is likewise left for the underlying server to return as a 404. The shell is `no-cache` so it can reference a new asset manifest, while hashed assets can be cached for a year. With `DASHBOARD_DEV_SERVER_URL`, the backend instead reverse-proxies non-reserved traffic to Vite, preserving the backend origin and redirect responses. The catch-all is registered last; code which subsequently adds a route must call `keep_dashboard_ui_last`.
+
+`DASHBOARD_STATIC_DIR` selects an explicit build; otherwise the in-repository `ui/.output/public` build is used when present. A build served under a LangGraph mount prefix must be built with the matching `DASHBOARD_BASE_PATH`. The UI router uses Vite's `BASE_URL` as its `basepath`, so client navigation follows that mount.
 
 ```mermaid
 sequenceDiagram
     participant Browser
-    participant UI as UI proxy
+    participant UI as UI server or backend shell
     participant API as Dashboard API
-    participant GitHub
     participant Graph as LangGraph
 
-    Browser->>UI: dashboard API request
-    UI->>API: forward request and cookies
-    API->>GitHub: login or repository access
-    API->>Graph: authorized thread or run operation
-    Graph-->>API: result
-    API-->>UI: response or OAuth redirect
-    UI-->>Browser: response
+    Browser->>UI: Relative dashboard request
+    UI->>API: Proxy dashboard API request
+    API->>Graph: Authorized thread or run operation
+    Graph-->>API: Result
+    API-->>UI: Response or redirect
+    UI-->>Browser: Same-origin response
 ```
-Diagram: browser dashboard traffic reaches the backend through the UI proxy, where the API performs external authorization and LangGraph work.
+Diagram: normal web traffic reaches the dashboard API through either the UI server proxy or the backend's same-origin shell.
 
-## Authentication, CSRF, and authority
+## Session and request security
 
-GitHub login creates signed state containing a nonce hash and writes the nonce to a short-lived state cookie before redirecting to GitHub. The callback validates the nonce for ordinary browser login, exchanges the code, applies the organization login gate, persists the GitHub token, and writes a signed session JWT cookie. Cookie flags derive from `DASHBOARD_API_BASE_URL`: HTTPS uses `Secure; SameSite=None`, while local HTTP uses non-secure `SameSite=Lax`.
+GitHub login creates signed state containing a hash of a nonce placed in a short-lived, HTTP-only state cookie, then redirects to GitHub. The callback verifies the state cookie for normal browser login, exchanges the authorization code, resolves the GitHub user, applies the organization login gate, persists the token response, and redirects with a signed session cookie. A desktop handoff is different: after the same identity checks it returns a PKCE-challenge-bound code to the desktop loopback listener without setting a browser session; `POST /auth/desktop/exchange` requires the matching verifier before minting the desktop session.
 
-`require_session` decodes that cookie or returns `401`. The router-level `require_same_origin_for_mutations` is a CSRF control: it allows safe methods and bearer-only requests, but rejects a cookie-authenticated mutation whose `Origin` or `Referer` is outside the configured dashboard origins. WebSocket requests receive the origin check as well. Some CI administration endpoints can instead authenticate with an Actions OIDC token or an administrator GitHub PAT.
+Cookie security is derived from the API URL and whether UI and API share an origin: HTTP is non-secure and `SameSite=Lax`; same-origin HTTPS is `Secure; SameSite=Lax`; split-origin HTTPS is `Secure; SameSite=None`. `require_session` turns a missing or invalid session cookie into `401`. Admin routes additionally enforce `is_admin`; CI admin operations may authenticate with an Actions OIDC token or an administrator GitHub PAT.
 
-**Route-level validation is not mutation authority.** Passing the origin check only establishes that a request carrying an ambient cookie was not forged; it does not make the session an admin, grant repository access, or make a thread postable. Each mutation still needs its endpoint or domain authorization check. Examples include repository access for repository-scoped settings, an admin session for schedule changes and organization-skill writes, and the postability check for admin or automation threads.
+The router-wide CSRF guard permits safe methods and a request authenticated only with an explicit bearer token. Cookie-authenticated mutations require an allowed `Origin` or `Referer`; WebSockets always receive the origin check. This control protects the ambient cookie, not business authority: individual endpoints still enforce administrator status, repository access, or thread postability. At app construction, credentialed CORS may be configured from `DASHBOARD_ALLOWED_ORIGINS`, but `*` is rejected because it is unsafe with credentials.
 
-## Thread discovery, grouping, filtering, and pins
+## Threads: discovery, reading, and terminal access
 
-### Distinct access models
+Thread discovery and thread readability are intentionally different. Normal listings search participant login/email metadata, including legacy creator metadata. `all=true` is restricted to administrators. The paginated endpoint clamps `limit` to 1–100, normalizes negative offsets, validates `repo` as `owner/name`, and rejects `repo` together with `ownerless`. Metadata filtering occurs before summary construction; viewed/status filtering requires summaries. Potentially active latest runs are refreshed with a concurrency limit of eight.
 
-Thread **discovery is participant/admin scoped**, not a general readable-thread search. Ordinary `/threads`, `/threads/page`, and `/threads/projects` searches are assembled from participant login/email metadata, including legacy creator fields for older records. `all=true` replaces those filters only for an administrator; non-admin use is rejected with `403`. The page API supports bounded pagination (`limit` clamped to 1–100), nonnegative offsets, `created_at` or `updated_at` ordering, and filters for resolved/viewed state, source, run status, text, interactive versus automation scope, automation ID, repository, and ownerless threads. It rejects a malformed repository and the mutually exclusive `repo` plus `ownerless` combination.
+Any authenticated organization member can read a thread whose source is surfaced; unsurfaced threads return `404`. Posting applies that readable check and additionally requires an administrator for automation and `admin_thread` threads. `/threads/{thread_id}` returns a metadata-derived summary, not converted messages: the client stream provider obtains the transcript from the LangGraph state endpoint. A finished detail read normally writes viewed metadata but supports `mark_viewed=false`, never marks a running thread viewed, and treats metadata-write failure as non-fatal. An interrupted latest run is reported as interrupted even while the thread itself briefly remains busy.
 
-Project grouping is metadata-only: `/threads/projects` collapses matching threads by case-insensitive configured repository, uses the most recent update as `updatedAt`, skips ownerless threads, and by default excludes resolved and automation work. It therefore does not fetch run data or produce thread summaries. `include_resolved` and `include_automations` widen that participant/admin-scoped discovery set.
-
-Thread **readability is separate**. Any authenticated organization member may read a thread whose source is in the surfaced-source set, enabling shared “Open in Web” links; unsurfaced threads intentionally appear as `404`. Reading is not ownership, and posting first requires readability then requires an administrator for `admin_thread` or automation threads.
-
-Pins have a third, deliberately independent path. Pin IDs are persisted in the store namespace `thread_pins/<login>`, so they are per-login rather than thread metadata. Pinning first fetches the candidate thread and requires it to be readable. Listing `/threads/pinned` fetches each saved ID independently and returns only currently readable threads, silently omitting missing, inaccessible, or failed lookups. Consequently, a pin does not bypass current read checks, and it can surface a readable teammate thread even though the main discovery list is participant-scoped. Unpin simply removes that login’s stored ID.
+Projects are metadata-only groups of matching configured repositories, keyed case-insensitively and sorted by latest update; they omit ownerless work and default to excluding resolved and automation threads. Pins are stored per login, not in thread metadata. Pinning verifies readability; loading pins retrieves every saved ID independently and omits missing, failed, or no-longer-readable threads. Thus a pin never bypasses present access checks.
 
 ```mermaid
 flowchart TD
-    Request["Authenticated thread request"] --> Listing{"Discovery endpoint"}
-    Listing -->|"ordinary"| Participants["Search participant and legacy metadata"]
-    Listing -->|"all true and admin"| Broad["Search all metadata"]
-    Participants --> Filters["Apply scope repo state and text filters"]
-    Broad --> Filters
-    Filters --> Projects["Group projects or summarize page"]
-    Request --> Pins["Read per-login pin IDs"]
-    Pins --> Fetch["Fetch each saved thread"]
-    Fetch --> Readable{"Currently surfaced and readable"}
-    Readable -->|"yes"| Pinned["Return pinned summary"]
-    Readable -->|"no or lookup failure"| Omit["Omit pin"]
+    Req["Authenticated request"] --> List{"Listing"}
+    List -->|"normal"| Participant["Participant and legacy metadata"]
+    List -->|"all true admin"| AllThreads["All metadata"]
+    Participant --> Filters["Metadata filters"]
+    AllThreads --> Filters
+    Filters --> Summaries["Summaries and status filters"]
+    Req --> PinIds["Per-login pin IDs"]
+    PinIds --> PinFetch["Fetch each thread"]
+    PinFetch --> Readable{"Surfaced source"}
+    Readable -->|"yes"| Pinned["Return summary"]
+    Readable -->|"no"| Omit["Omit pin"]
 ```
-Diagram: discovery derives from participants unless an administrator requests all threads, while saved pins are independently rechecked for readability.
+Diagram: discovery is participant/admin scoped, whereas each pinned item is fetched and rechecked for current readability.
 
-### Summaries and lifecycle signals
+The cloud terminal uses a two-step contract. `POST /threads/{id}/terminal/connect` checks readable thread and ready sandbox, returns a no-store WebSocket URL, the `open-swe-terminal` protocol, and a signed ticket. The WebSocket expects protocol plus ticket, validates its thread-bound ticket and origin, then repeats readable/sandbox validation. It only operates for a LangSmith sandbox, permits 20 concurrent sessions, and closes with `1013` when full. It bridges bounded input and resize messages to a PTY shell and kills the handle when the connection ends.
 
-The thread API adapts LangGraph threads, runs, state, commands, and streaming to dashboard summaries. A summary includes configured repository identity, classification (interactive, pull request, issue, or automation), source/origin/trigger data, pull-request metadata, viewed/resolved markers, sandbox ID, and normalized run status. For potentially active or unrecorded runs, list and detail operations fetch the latest run and best-effort persist its ID/status with bounded concurrency. An interrupted latest run takes precedence over a temporarily `busy` thread so cancellation is not displayed as running.
+## Dashboard-managed configuration and automation
 
-`GET /threads/{thread_id}` returns metadata only. The UI SDK hydrates transcript messages through the LangGraph state endpoint, so the API does no server-side transcript conversion. A non-running detail read normally records `last_viewed_at_ms` and the latest run ID; it does not mark a running thread viewed, accepts `mark_viewed=false`, and treats a metadata-update failure as non-fatal to the read.
+Repository instruction records normalize `owner/repo`; route handlers filter lists and guard direct access through current repository authority. For a run's resolved repository, non-empty instructions are appended to the main prompt (and lookup failure is fail-soft). Review styles use similarly repository-guarded records with `idle`, `running`, `completed`, and `failed` states. A read reconciles an in-progress analyzer; a concurrent analysis returns `409`; a saved prompt allows a terminal or missing analyzer run to become completed.
 
-A missing dashboard thread can be created only by a `run.start` command. Creation stamps dashboard source/origin, interactive classification, participant identities, prompt-derived title, repository, selected/resolved model and effort, and run configuration. Image input is rejected with `422` when the chosen model cannot accept images.
+Personal skills are virtual `SKILL.md` files isolated by GitHub login. Organization skills are shared, cursor-paginated, limited to 1,000 records, readable by every session, and writable by administrators only. Schedule listing requires a session, while create, update, trigger, and delete require administration. Workspace-scoped schedule records keep cron configuration separate from run state. Creation writes the record before creating a LangGraph cron and removes it with `502` if creation fails; enabled changes create the replacement cron before deleting the old one, while disabling deletes the cron. Before launch, repository access for the recorded owner is rechecked; failure records an unauthorized run state rather than launching. Successful launch creates an automation thread and resumable durable agent run.
 
-### Cloud terminal
+## React UI and deployment proxy
 
-`POST /threads/{id}/terminal/connect` first applies the same readable-thread check and requires a ready sandbox, then returns a no-store WebSocket URL, `open-swe-terminal` subprotocol, and a signed short-lived ticket. The WebSocket validates that ticket, repeats readable/sandbox validation, requires `SANDBOX_TYPE=langsmith`, and uses a 20-slot semaphore before bridging browser input/output to a PTY shell in the sandbox. A full semaphore closes the socket with retryable status `1013`; terminal setup failures are contained to the socket.
+`ui/` is a React/TanStack Start application with TanStack Router, React Query SSR integration, and a Vite/Nitro server build. The browser API layer forms relative `/dashboard/api/*` URLs and uses `credentials: "include"`. In development, Vite proxies backend prefixes (with a localhost default); deployed Nitro explicitly sends `/dashboard/api/**` and `/webhooks/**` to `ui/server/backend-proxy.ts` and requires `DASHBOARD_API_URL` at runtime.
 
-## Adjacent dashboard configuration
+The production proxy retains OAuth redirects with `redirect: "manual"`, forwards request bodies and headers, removes hop-by-hop and reframed response headers, and appends each `Set-Cookie` separately. Server rendering targets `DASHBOARD_API_URL` directly and explicitly forwards the incoming `cookie` header because server-side `credentials: "include"` cannot do so. The Agents layout permits an unauthenticated desktop-local-only mode only at `/agents` and `/agents/local/...`; its shared stream provider chooses local transport only for a local thread and cloud transport otherwise.
 
-Repository-scoped agent instructions normalize `owner/repo`, filter lists by current repository access, and require access on direct operations. Non-empty instruction text is appended to the main agent prompt for runs targeting that repository.
+## Electron local client and execution boundary
 
-Review styles are also repository-access-controlled. Their analysis state is `idle`, `running`, `completed`, or `failed`; retrieval reconciles a running analysis, concurrent analysis returns `409`, and a terminal or missing analysis can resolve to completed when a saved prompt exists.
+The experimental Electron package bundles the compiled UI at `open-swe://app`. It proxies dashboard API traffic to a user-configured compatible backend and `/local-graph` traffic to a private loopback graph. This separation prevents the renderer from receiving LangSmith credentials or using a raw LangGraph API. Packaged builds have no hosted backend default; changing the configured backend clears that deployment's local session data. The desktop package builds the UI and packages both it and the local backend runtime.
 
-Personal skills are virtual `SKILL.md` records isolated by GitHub login. Organization skills are shared and cursor-paginated: any session may read them, but only administrators may write them, and the store bounds their total count. Schedule listing needs a session, whereas creating, editing, triggering, or deleting workspace-scoped schedules requires administration. Creation persists the record before creating its LangGraph cron and rolls the record back with `502` if cron creation fails; an enabled update creates the replacement cron before removal of the old one. Before an execution, repository access is rechecked; access loss records an unauthorized run state instead of launching a new automation thread and durable run.
+`BackendSupervisor` starts the local graph lazily and shares the in-progress readiness promise. It reserves a `127.0.0.1` port, creates a random bearer token, verifies required project/worktree paths, and starts `uv run langgraph dev` with `langgraph.desktop.json` in development or the bundled Python runtime/configuration when packaged. It passes the token, project allowlist, worktree directory, and an out-of-project artifact location to the child. Startup polls the authenticated loopback root for up to 60 seconds and includes retained child logs in failures. The stable renderer configuration is `{ apiUrl: "/local-graph", graphId: "agent" }`; the proxy strips renderer cookies, injects the bearer token, and does not expose the actual port. Shutdown clears supervisor state, sends `SIGTERM`, and escalates to `SIGKILL` after five seconds.
 
-## Web UI and proxy boundary
-
-`ui/` is a TanStack Start file-based-route application. Its Agents routes include thread, local, environments, instructions, and sandbox views, and the broader application includes review, admin, usage, cloud-agent, settings, and login routes. `/integrations` redirects to Profile Settings. The Agents layout permits an unauthenticated desktop-local-only session only on the root or `/agents/local/` routes; its shared stream provider uses local transport for that session and cloud transport otherwise.
-
-Browser calls build `/dashboard/api/*` from a relative base and use `credentials: "include"`, preserving the same-origin cookie model. In development, Vite proxies backend prefixes; in a deployed build the Nitro handler proxies `/dashboard/api/**` and `/webhooks/**`. It reads `DASHBOARD_API_URL` on every request, fails if it is unset, and uses `redirect: "manual"` so OAuth 3xx responses reach the browser. SSR instead targets `DASHBOARD_API_URL` directly and copies the incoming `cookie` header, since server-side `credentials: "include"` does not forward browser cookies.
-
-## Electron and local-execution boundary
-
-The experimental Electron app serves the compiled UI at `open-swe://app`, proxies `/dashboard/api` to the configured backend, and separately proxies `/local-graph` to a loopback LangGraph process. This avoids exposing a LangSmith key or raw LangGraph API to renderer code. Desktop OAuth is a PKCE-bound handoff: browser completion redirects a code to the desktop loopback listener, and `POST /auth/desktop/exchange` mints a session only when the retained verifier matches its challenge.
-
-`BackendSupervisor` starts the local process lazily. It reserves a random `127.0.0.1` port, generates a random bearer token, and launches either `uv run langgraph dev` using `langgraph.desktop.json` in development or a bundled runtime/configuration when packaged. Startup polls the authenticated loopback root for up to 60 seconds and reports retained child logs on failure. The public renderer configuration stays stable as `{ apiUrl: "/local-graph", graphId: "agent" }`; the proxy removes renderer cookies and injects its bearer token. Shutdown sends `SIGTERM` and escalates to `SIGKILL` after the timeout.
-
-A desktop graph run is permitted only when `local_project_path` resolves to an existing directory in `OPEN_SWE_LOCAL_PROJECTS_FILE`. It uses a `LocalShellBackend` rooted at that project rather than a cloud sandbox. The desktop branch selects local model defaults, uses state-backed user skills instead of organization skills, disables cloud-sandbox downloads, and stores sanitized per-thread artifacts outside the project. The shared graph protocol therefore does not imply shared filesystem authority.
+A `source == "desktop"` run selects `LocalShellBackend`, not a cloud sandbox. `local_project_path` must resolve to an existing allowlisted project directory or a desktop-managed worktree. The local factory uses local model defaults and state-backed user skills, disables cloud sandbox file downloads, and routes `large_tool_results` and conversation history into sanitized per-thread artifact directories outside the project. This preserves the graph protocol while limiting filesystem authority to the selected project and preventing agent scratch files from appearing in its working tree.
 
 ## Focused verification
 
-`tests/dashboard/test_dashboard_thread_api.py` covers image/model compatibility, lazy `run.start` metadata stamping, summary privacy-sensitive source links, terminal sandbox readiness, recovery-patch limits, and the missing-thread command rule. Its discovery tests cover repository/ownerless filtering, case-insensitive project grouping without summary/run calls, independently rechecked pins, unreadable/missing pin omission, and creation-time sorting. `tests/dashboard/test_dashboard_thread_api_activity.py` verifies latest-run refresh, viewed-state behavior for an authenticated reader, opt-out marking, and the rule that running threads are not marked viewed. Changes to the proxy or desktop boundary should retain redirect behavior, cookie/token separation, loopback authentication, startup health polling, and termination escalation.
+Dashboard thread tests cover image/model compatibility; `run.start` creation metadata; configured-repository display privacy; terminal sandbox readiness; recovery-patch behavior and limits; and the missing-thread command constraint. Activity tests cover run-status refresh, viewing by an authenticated reader, opt-out viewing, and the prohibition on marking a running thread viewed. Desktop changes should also retain the loopback token boundary, health polling, proxy cookie stripping, and termination escalation; UI proxy changes must preserve individual `Set-Cookie` headers and un-followed OAuth redirects.
 
 ## Related
 
 - [Architecture overview](../architecture/overview.md)
 - [Auth and security](../concepts/auth-and-security.md)
-- [Threads and state](../concepts/threads-and-state.md)
-- [Follow-up messages](../workflows/follow-up-messages.md)
-- [Scheduling and baby-sit](../workflows/scheduling-and-baby-sit.md)
-- [Testing overview](../testing/overview.md)
+- [Deployment](../operations/deployment.md)
+- [Invocation](../workflows/invocation.md)
