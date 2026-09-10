@@ -7,7 +7,7 @@ from langgraph.graph.state import RunnableConfig
 from agent import server
 from agent.dashboard.environments import Environment
 from agent.prompt import construct_sender_context, construct_system_prompt
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.sandboxes import lifecycle
 from agent.tools import environments as env_tools
 
@@ -100,9 +100,9 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
 
 
 def test_environment_slug_reads_the_run_config() -> None:
-    assert server.environment_slug(RunConfig(environment="staging")) == "staging"
-    assert server.environment_slug(RunConfig(environment="  ")) is None
-    assert server.environment_slug(RunConfig()) is None
+    assert server.environment_slug(OpenSWERunConfig(environment="staging")) == "staging"
+    assert server.environment_slug(OpenSWERunConfig(environment="  ")) is None
+    assert server.environment_slug(OpenSWERunConfig()) is None
 
 
 # --- admin thread gate ---
@@ -149,7 +149,9 @@ async def test_workspace_admin_resolves_email_for_github_login(
 @pytest.mark.asyncio
 async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with patch("agent.run_config.get_config", return_value=_config(github_login="someone-else")):
+    with patch(
+        "coding_agent.run_config.get_config", return_value=_config(github_login="someone-else")
+    ):
         assert await env_tools.list_environments() == {
             "ok": False,
             "error": "Only workspace admins can manage environments.",
@@ -173,7 +175,7 @@ async def test_save_environment_persists_sandbox_sizing(monkeypatch: pytest.Monk
         )
     )
     with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch("coding_agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
             env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=None
         ),
@@ -203,7 +205,7 @@ async def test_save_environment_can_clear_sandbox_sizing(monkeypatch: pytest.Mon
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     update = AsyncMock(return_value=Environment(slug="base", name="base", prompt="prompt"))
     with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch("coding_agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
             env_tools.store.ENVIRONMENTS,
             "get",
@@ -235,7 +237,7 @@ async def test_save_environment_rejects_clear_sizing_with_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")):
+    with patch("coding_agent.run_config.get_config", return_value=_config(github_login="ramonn")):
         result = await env_tools.save_environment("base", "prompt", vcpus=8, clear_sizing=True)
 
     assert result == {
@@ -249,7 +251,7 @@ async def test_capture_tool_requires_a_saved_environment(monkeypatch: pytest.Mon
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with (
         patch(
-            "agent.run_config.get_config",
+            "coding_agent.run_config.get_config",
             return_value=_config(github_login="ramonn", thread_id="t-1"),
         ),
         patch.object(

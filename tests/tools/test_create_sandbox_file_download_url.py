@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-download_tool = importlib.import_module("agent.tools.create_sandbox_file_download_url")
+download_tool = importlib.import_module("coding_agent.tools.create_sandbox_file_download_url")
 
 
 class _AsyncClient:
@@ -39,7 +39,7 @@ class _Backend:
 
 def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClient:
     monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
+        "coding_agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
 
     async def get_backend(_thread_id: str) -> _Backend:

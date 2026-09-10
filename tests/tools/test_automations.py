@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.tools import automations
 
 
@@ -12,7 +12,7 @@ def admin(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         automations,
         "configurable",
-        lambda: RunConfig(github_login="alice", user_email="alice@example.com"),
+        lambda: OpenSWERunConfig(github_login="alice", user_email="alice@example.com"),
     )
 
 

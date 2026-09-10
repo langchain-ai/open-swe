@@ -4,8 +4,8 @@ import sys
 import types
 from typing import Any
 
-sandbox_output = importlib.import_module("agent.tools.sandbox_output")
-web_search_tool = importlib.import_module("agent.tools.web_search")
+sandbox_output = importlib.import_module("coding_agent.tools.sandbox_output")
+web_search_tool = importlib.import_module("coding_agent.tools.web_search")
 
 
 def _decode_jsonl(content: str) -> str:
@@ -53,7 +53,7 @@ async def test_write_sandbox_output_uses_current_thread_backend(monkeypatch) -> 
         return "/workspace"
 
     monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-123"}}
+        "coding_agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-123"}}
     )
     monkeypatch.setattr(sandbox_output, "get_sandbox_backend", fake_get_backend)
     monkeypatch.setattr(sandbox_output, "resolve_sandbox_work_dir", fake_resolve_work_dir)

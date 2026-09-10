@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 
 from agent.agent_cost import finalize_agent_run_usage
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from coding_agent.middleware.trace import CodingAgentMiddleware
 
 
@@ -21,7 +21,7 @@ class RecordRunUsageMiddleware(CodingAgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         response = await handler(request)
-        run_id = RunConfig.from_runtime().prepare_run_id
+        run_id = OpenSWERunConfig.from_runtime().prepare_run_id
         if run_id:
             for message in response.result:
                 if isinstance(message, AIMessage):
@@ -33,7 +33,7 @@ class RecordRunUsageMiddleware(CodingAgentMiddleware):
 
     async def aafter_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
         del runtime
-        cfg = RunConfig.from_runtime()
+        cfg = OpenSWERunConfig.from_runtime()
         if not cfg.prepare_run_id or not cfg.thread_id:
             return None
         await finalize_agent_run_usage(

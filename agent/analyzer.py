@@ -33,9 +33,9 @@ from langchain_core.language_models import BaseChatModel
 
 from agent.dashboard.team_settings import get_effective_gateway_enabled
 from agent.github.app import get_github_app_installation_token
-from agent.middleware import ToolErrorMiddleware
+from agent.middleware.sandbox_circuit_breaker import SANDBOX_FAILURE_NOTIFIER
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL_ID,
@@ -54,6 +54,7 @@ from coding_agent.middleware import (
     SanitizeOpenAIResponsesMiddleware,
     SanitizeToolInputsMiddleware,
     TimeoutWrapupMiddleware,
+    ToolErrorMiddleware,
 )
 from coding_agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
 from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
@@ -104,7 +105,7 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         self._config = config
 
     def _prepare_config_fingerprint(self) -> object:
-        cfg = RunConfig.from_config(self._config)
+        cfg = OpenSWERunConfig.from_config(self._config)
         return {
             "prepare_run_id": cfg.prepare_run_id,
             "thread_id": self._thread_id,
@@ -115,7 +116,7 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
         work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-        cfg = RunConfig.from_config(self._config)
+        cfg = OpenSWERunConfig.from_config(self._config)
         full_name = cfg.review_style_full_name or "owner/repo"
         owner, _, name = full_name.partition("/")
         samples_text = cfg.review_style_samples_text or ""
@@ -142,7 +143,7 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
 
 
 async def get_analyzer(config: RunnableConfig) -> Pregel:
-    thread_id = RunConfig.from_config(config).thread_id
+    thread_id = OpenSWERunConfig.from_config(config).thread_id
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
@@ -178,7 +179,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                     run_limit=STYLE_ANALYZER_MODEL_CALL_LIMIT,
                     exit_behavior="end",
                 ),
-                ToolErrorMiddleware(),
+                ToolErrorMiddleware(notifier=SANDBOX_FAILURE_NOTIFIER),
                 TimeoutWrapupMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
             ],

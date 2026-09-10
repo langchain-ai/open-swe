@@ -5,7 +5,7 @@ from weakref import WeakValueDictionary
 
 from langgraph_sdk import get_client
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import (
     append_slack_web_link_footer,
     post_slack_top_level_message_with_ts,
@@ -47,7 +47,7 @@ async def _mark_action_posted(thread_id: str, notified_at: str) -> None:
 
 async def notify_automation_channel(message: str) -> dict[str, Any]:
     """Implement the `notify_automation_channel` tool."""
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     if cfg.source != "schedule":
         return {"success": False, "error": "This tool is only available to scheduled runs"}
 

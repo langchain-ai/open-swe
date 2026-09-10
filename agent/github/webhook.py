@@ -8,15 +8,6 @@ from typing import Any
 
 from agent.baby_sit import handle_ci_webhook
 from agent.github.comments import GitHubAuthError
-from agent.input_messages import (
-    PersonIdentity,
-    RunInput,
-    SystemIdentity,
-    human_input,
-    person_introduction,
-    system_input,
-    system_introduction,
-)
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
@@ -27,6 +18,15 @@ from agent.thread_ids import (
     thread_id_from_branch,
 )
 from agent.webhooks import common
+from coding_agent.input_messages import (
+    PersonIdentity,
+    RunInput,
+    SystemIdentity,
+    human_input,
+    person_introduction,
+    system_input,
+    system_introduction,
+)
 from coding_agent.prompts import load_prompt, render_prompt
 
 

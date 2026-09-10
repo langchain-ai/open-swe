@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from agent.review.diff import changed_files, materialize_review_diff, review_diff_range
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.runtime import get_cached_sandbox_backend
 from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
 
@@ -14,7 +14,7 @@ _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 async def fetch_review_diff() -> dict[str, Any]:
     """Implement the `fetch_review_diff` tool."""
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
 
     thread_id = cfg.thread_id
     if not thread_id:

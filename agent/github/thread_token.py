@@ -7,7 +7,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +127,11 @@ def _cached_token_if_fresh(
 
 
 def _thread_id_from_config(run_config: Mapping[str, Any]) -> str | None:
-    return RunConfig.from_config(run_config).thread_id or None
+    return OpenSWERunConfig.from_config(run_config).thread_id or None
 
 
 def _principal_from_config(run_config: Mapping[str, Any]) -> str | None:
-    cfg = RunConfig.from_config(run_config)
+    cfg = OpenSWERunConfig.from_config(run_config)
     return github_token_principal(login=cfg.github_login, email=cfg.user_email)
 
 

@@ -227,7 +227,7 @@ async def test_save_plan_reads_html_file_from_sandbox(
         )
 
     monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
+        "coding_agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
     monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
     monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
@@ -272,7 +272,7 @@ async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
         saved.update(kwargs)
 
     monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
+        "coding_agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
     monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
     monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
@@ -314,7 +314,7 @@ async def test_save_plan_preserves_plan_mode_from_state_when_active(
         saved.update(plan_mode=plan_mode, status=status)
 
     monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
+        "coding_agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
 
     async def fake_backend(thread_id: str) -> _Backend:
@@ -361,7 +361,7 @@ async def test_save_plan_preserves_plan_mode_from_config_when_active(
         saved.update(plan_mode=plan_mode, status=status)
 
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "coding_agent.run_config.get_config",
         lambda: {"configurable": {"thread_id": "thread-1", "plan_mode": True}},
     )
 

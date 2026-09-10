@@ -15,13 +15,13 @@ from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
-from agent.input_messages import (
+from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from coding_agent.input_messages import (
     PersonIdentity,
     SystemIdentity,
     build_input_messages,
     visible_dynamic_context_hashes,
 )
-from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from coding_agent.middleware.trace import scrub_middleware_inputs
 from coding_agent.models import model_supports_images
 from coding_agent.prompts import load_prompt

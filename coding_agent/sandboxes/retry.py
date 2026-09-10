@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import random
+import re
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
@@ -16,6 +17,14 @@ _MAX_BACKOFF = 8.0
 _JITTER_FACTOR = 0.2
 
 T = TypeVar("T")
+
+_SANDBOX_ID_RE = re.compile(r"\bsb-[A-Za-z0-9-]+\b")
+
+
+def extract_sandbox_id(text: str) -> str | None:
+    """The sandbox id an error message mentions, when it names one."""
+    match = _SANDBOX_ID_RE.search(text)
+    return match.group(0) if match else None
 
 
 def is_transient_sandbox_error(exc: BaseException) -> bool:

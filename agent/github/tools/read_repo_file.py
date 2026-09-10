@@ -11,14 +11,14 @@ from typing import Any
 import httpx2
 
 from agent.github.checks import github_headers
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 _GITHUB_API = "https://api.github.com"
 _MAX_FILE_BYTES = 256 * 1024
 
 
 def _chat_repo_context() -> tuple[str, str, str | None, str | None]:
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     return (
         cfg.chat_repo_owner or "",
         cfg.chat_repo_name or "",

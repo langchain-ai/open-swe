@@ -22,7 +22,7 @@ from agent.review.findings import (
     resolve_review_head_sha,
     thread_missing_tool_result,
 )
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 
 async def add_finding(
@@ -57,7 +57,7 @@ async def add_finding(
     if start_line is not None and end_line is not None and end_line < start_line:
         return {"success": False, "error": "end_line must be >= start_line"}
 
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     diff_line_set, diff_text = await _resolve_diff_context(state, cfg)
 
     in_diff = not isinstance(diff_line_set, dict) or is_range_in_diff(
@@ -125,7 +125,7 @@ async def add_finding(
 
 async def _resolve_diff_context(
     state: dict[str, Any] | None,
-    cfg: RunConfig,
+    cfg: OpenSWERunConfig,
 ) -> tuple[dict[str, Any] | None, str]:
     if isinstance(state, dict):
         state_line_set = state.get("diff_line_set")

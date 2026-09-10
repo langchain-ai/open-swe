@@ -5,18 +5,13 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
-    "background_execute": ".background_execute",
-    "background_task": ".background_execute",
     "capture_environment_snapshot": ".environments",
     "create_automation": ".automations",
-    "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
-    "create_sandbox_service_url": ".create_sandbox_service_url",
     "delete_automation": ".automations",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
     "get_thread": ".threads",
-    "http_request": ".http_request",
     "linear_comment": "agent.linear.tools.comment",
     "list_automations": ".automations",
     "list_environments": ".environments",
@@ -29,7 +24,6 @@ _TOOL_MODULES = {
     "mark_question_answered": ".mark_question_answered",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
-    "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
@@ -57,24 +51,18 @@ _TOOL_MODULES = {
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
-    "web_search": ".web_search",
 }
 
 __all__ = [
     "add_finding",
     "approve_plan",
-    "background_execute",
-    "background_task",
     "capture_environment_snapshot",
     "create_automation",
-    "create_sandbox_file_download_url",
-    "create_sandbox_service_url",
     "delete_automation",
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
     "get_thread",
-    "http_request",
     "linear_comment",
     "list_automations",
     "list_environments",
@@ -87,7 +75,6 @@ __all__ = [
     "mark_question_answered",
     "notify_automation_channel",
     "open_pull_request",
-    "output_iframe",
     "publish_review",
     "read_repo_file",
     "read_user_settings",
@@ -115,7 +102,6 @@ __all__ = [
     "trigger_automation",
     "update_automation",
     "update_finding",
-    "web_search",
 ]
 
 if TYPE_CHECKING:
@@ -139,9 +125,6 @@ if TYPE_CHECKING:
         trigger_automation,
         update_automation,
     )
-    from agent.tools.background_execute import background_execute, background_task
-    from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
-    from agent.tools.create_sandbox_service_url import create_sandbox_service_url
     from agent.tools.enter_plan_mode import enter_plan_mode
     from agent.tools.environments import (
         capture_environment_snapshot,
@@ -150,7 +133,6 @@ if TYPE_CHECKING:
         save_environment,
     )
     from agent.tools.fetch_review_diff import fetch_review_diff
-    from agent.tools.http_request import http_request
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit
@@ -158,7 +140,6 @@ if TYPE_CHECKING:
     from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
-    from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
     from agent.tools.read_user_settings import read_user_settings
     from agent.tools.recreate_sandbox import recreate_sandbox
@@ -172,7 +153,6 @@ if TYPE_CHECKING:
     from agent.tools.threads import get_thread, list_threads, manage_thread
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill
-    from agent.tools.web_search import web_search
 
 
 def _load_export(name: str) -> Any:

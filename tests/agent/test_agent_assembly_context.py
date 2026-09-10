@@ -425,7 +425,7 @@ async def test_agent_includes_sandbox_reset_only_in_admin_threads(
 
 @pytest.mark.asyncio
 async def test_agent_includes_sandbox_file_download_url_tools() -> None:
-    from agent.tools import (
+    from coding_agent.tools import (
         create_sandbox_file_download_url,
         create_sandbox_service_url,
         output_iframe,
@@ -446,7 +446,7 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 
     from agent.prompt import OPEN_SWE_SHARED_BASE
-    from agent.tools import (
+    from coding_agent.tools import (
         create_sandbox_file_download_url,
         create_sandbox_service_url,
         output_iframe,

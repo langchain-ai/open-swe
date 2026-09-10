@@ -15,7 +15,7 @@ from agent.dashboard import review_chat_api
 list_review_findings = importlib.import_module("agent.tools.list_review_findings")
 read_repo_file = importlib.import_module("agent.github.tools.read_repo_file")
 search_repo_code = importlib.import_module("agent.github.tools.search_repo_code")
-web_search = importlib.import_module("agent.tools.web_search")
+web_search = importlib.import_module("coding_agent.tools.web_search")
 
 
 def _fake_async_client(handler):
@@ -211,7 +211,8 @@ async def test_assert_chat_thread_access_rejects_unauthorized(monkeypatch, metad
 @pytest.mark.asyncio
 async def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
     monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"reviewer_thread_id": "rt-1"}}
+        "coding_agent.run_config.get_config",
+        lambda: {"configurable": {"reviewer_thread_id": "rt-1"}},
     )
 
     async def fake_list(thread_id: str) -> list[dict[str, Any]]:
@@ -239,7 +240,7 @@ async def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_list_review_findings_requires_reviewer_thread(monkeypatch) -> None:
-    monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": {}})
+    monkeypatch.setattr("coding_agent.run_config.get_config", lambda: {"configurable": {}})
     result = await list_review_findings.list_review_findings()
     assert result["count"] == 0
     assert "reviewer thread" in result["error"]
@@ -250,7 +251,7 @@ async def test_read_repo_file_decodes_file(monkeypatch) -> None:
     import base64
 
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "coding_agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "chat_repo_owner": "acme",
@@ -283,7 +284,7 @@ async def test_read_repo_file_decodes_file(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_read_repo_file_lists_directory(monkeypatch) -> None:
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "coding_agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "chat_repo_owner": "acme",
@@ -310,12 +311,12 @@ async def test_read_repo_file_lists_directory(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_repo_tools_require_context_and_token(monkeypatch) -> None:
-    monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": {}})
+    monkeypatch.setattr("coding_agent.run_config.get_config", lambda: {"configurable": {}})
     result = await read_repo_file.read_repo_file("src/app.py")
     assert result["success"] is False
 
     config = {"configurable": {"chat_repo_owner": "acme", "chat_repo_name": "repo"}}
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config)
+    monkeypatch.setattr("coding_agent.run_config.get_config", lambda: config)
     for tool, args in (
         (read_repo_file.read_repo_file, ("src/app.py",)),
         (search_repo_code.search_repo_code, ("foo",)),
@@ -327,7 +328,7 @@ async def test_repo_tools_require_context_and_token(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "coding_agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "chat_repo_owner": "acme",

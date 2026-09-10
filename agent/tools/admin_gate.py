@@ -5,14 +5,14 @@ metadata says "admin" cannot act on behalf of someone who is not one.
 """
 
 from agent.dashboard.admin import is_admin
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 
-def configurable() -> RunConfig:
+def configurable() -> OpenSWERunConfig:
     try:
-        return RunConfig.from_runtime()
+        return OpenSWERunConfig.from_runtime()
     except Exception:
-        return RunConfig()
+        return OpenSWERunConfig()
 
 
 def require_admin(action: str) -> str | None:

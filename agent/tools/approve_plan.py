@@ -20,7 +20,7 @@ from agent.dashboard.plan_store import (
     make_plan_approver,
     set_plan_status,
 )
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def approve_plan(
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command | dict[str, Any]:
     """Implement the `approve_plan` tool."""
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "no thread_id in run config"}
@@ -81,7 +81,7 @@ async def _thread_metadata(thread_id: str) -> dict[str, Any]:
 
 
 def _active_plan_mode(
-    state: Mapping[str, Any] | None, cfg: RunConfig, metadata: Mapping[str, Any]
+    state: Mapping[str, Any] | None, cfg: OpenSWERunConfig, metadata: Mapping[str, Any]
 ) -> bool:
     if isinstance(state, dict) and "plan_mode" in state:
         return state.get("plan_mode") is True
@@ -90,7 +90,7 @@ def _active_plan_mode(
     return metadata.get("plan_mode") is True
 
 
-def _current_approver(cfg: RunConfig) -> dict[str, str]:
+def _current_approver(cfg: OpenSWERunConfig) -> dict[str, str]:
     slack_thread = cfg.slack_thread
     actor_id = (
         (slack_thread.triggering_user_id if slack_thread else "")

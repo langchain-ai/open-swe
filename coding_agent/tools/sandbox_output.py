@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
-from agent.run_config import RunConfig
+from coding_agent.run_config import RunConfig
 from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
 from coding_agent.sandboxes.state import get_sandbox_backend
 

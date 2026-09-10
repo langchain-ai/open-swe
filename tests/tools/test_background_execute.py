@@ -10,11 +10,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent import background_tasks
-from agent.background_tasks import monitor_background_tasks
-from agent.tools.background_execute import (
+from agent.background_tasks import BACKGROUND_TASK_MONITOR, monitor_background_tasks
+from coding_agent.tools.background_execute import (
     TASK_ROOT,
     _launch_command,
-    background_execute,
+    background_tools,
     control_script,
 )
 
@@ -129,13 +129,15 @@ async def test_background_task_cron_search_uses_metadata_not_graph_name() -> Non
 async def test_background_execute_reports_monitor_scheduling_failure() -> None:
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
+    background_execute, _ = background_tools(BACKGROUND_TASK_MONITOR)
 
     with (
         patch(
-            "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
+            "coding_agent.tools.background_execute._current_backend",
+            return_value=("thread-1", backend),
         ),
         patch(
-            "agent.tools.background_execute.execute",
+            "coding_agent.tools.background_execute.execute",
             AsyncMock(
                 side_effect=[
                     {"tasks": []},

@@ -9,7 +9,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from agent.desktop import is_desktop_worktree
-from agent.input_messages import dynamic_context_hash, input_message_text
+from coding_agent.input_messages import dynamic_context_hash, input_message_text
 from coding_agent.prompts import load_prompt
 
 logger = logging.getLogger(__name__)

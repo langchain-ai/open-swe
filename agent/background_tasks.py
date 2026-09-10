@@ -7,19 +7,24 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
-from agent.input_messages import InputMessageContext, SystemIdentity
 from agent.source_context import SourceContext
-from agent.tools.background_execute import TASK_ROOT, control_script, encoded, execute
 from agent.utils.thread_ops import langgraph_url
+from coding_agent.input_messages import InputMessageContext, SystemIdentity
 from coding_agent.prompts import render_prompt
 from coding_agent.sandboxes.providers.registry import create_sandbox
+from coding_agent.tools.background_execute import (
+    MONITOR_LOCK,
+    TASK_ROOT,
+    control_script,
+    encoded,
+    execute,
+)
 
 logger = logging.getLogger(__name__)
 
 CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
-MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 _BACKGROUND_TASK_SENDER: SystemIdentity = {
     "id": "system:background-task",
     "display_name": "Background task",
@@ -197,3 +202,13 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
                     f"rmdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null || true", timeout=10
                 )
     return {"status": "running" if running or pending else "idle", "delivered": delivered}
+
+
+class OpenSWEBackgroundTaskMonitor:
+    """Schedules the per-thread cron that delivers background-task completions."""
+
+    async def ensure_scheduled(self, thread_id: str) -> None:
+        await ensure_background_task_cron(thread_id)
+
+
+BACKGROUND_TASK_MONITOR = OpenSWEBackgroundTaskMonitor()

@@ -1,6 +1,6 @@
 from typing import Any
 
-from agent.run_config import RunConfig
+from coding_agent.run_config import RunConfig
 from coding_agent.sandboxes.providers.langsmith import get_async_sandbox_client
 from coding_agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 

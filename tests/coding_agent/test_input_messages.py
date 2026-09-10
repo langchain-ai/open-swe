@@ -3,7 +3,7 @@ from xml.etree import ElementTree
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.input_messages import (
+from coding_agent.input_messages import (
     build_input_messages,
     build_run_input,
     human_input,

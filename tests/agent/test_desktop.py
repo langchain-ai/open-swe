@@ -11,7 +11,7 @@ from agent.desktop import (
     desktop_artifact_routes,
     resolve_desktop_project,
 )
-from agent.run_config import RunConfig
+from coding_agent.run_config import RunConfig
 
 
 @contextmanager

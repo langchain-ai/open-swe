@@ -8,7 +8,7 @@ from langchain_core.tools import InjectedToolCallId
 from langgraph.types import Command
 
 from agent.dashboard.plan_store import PLAN_STATUS_PLANNING, set_plan_status
-from agent.run_config import RunConfig
+from coding_agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 

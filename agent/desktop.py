@@ -8,8 +8,8 @@ from pathlib import Path
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
 
-from agent.run_config import RunConfig
 from coding_agent.config import ENV
+from coding_agent.run_config import RunConfig
 
 SHELL_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TMPDIR")
 

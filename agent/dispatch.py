@@ -33,7 +33,9 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
-from agent.input_messages import (
+from agent.run_config import OpenSWERunConfig
+from coding_agent.config import ENV
+from coding_agent.input_messages import (
     ChannelIdentity,
     InputMessageContext,
     PersonIdentity,
@@ -42,8 +44,6 @@ from agent.input_messages import (
     SystemIdentity,
     build_run_input,
 )
-from agent.run_config import RunConfig
-from coding_agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
     people: list[PersonIdentity] = []
     channels: list[ChannelIdentity] = []
     systems: list[SystemIdentity] = []
-    cfg = RunConfig.parse(configurable)
+    cfg = OpenSWERunConfig.parse(configurable)
     login = cfg.github_login
     email = cfg.user_email
     slack_thread = cfg.slack_thread

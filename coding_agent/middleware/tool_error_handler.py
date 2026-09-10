@@ -9,12 +9,13 @@ is notified and the error propagates.
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Protocol
 
 from langchain.agents.middleware.types import (
     AgentState,
 )
 from langchain_core.messages import ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
@@ -24,17 +25,30 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
-from agent.middleware.sandbox_circuit_breaker import (
-    extract_sandbox_id,
-    post_sandbox_unreachable_notification,
-)
-from agent.run_config import RunConfig
 from coding_agent.middleware.trace import CodingAgentMiddleware
-from coding_agent.sandboxes.retry import is_transient_sandbox_error
+from coding_agent.run_config import RunConfig
+from coding_agent.sandboxes.retry import extract_sandbox_id, is_transient_sandbox_error
 
 logger = logging.getLogger(__name__)
 
 SANDBOX_TRANSIENT = "sandbox_transient"
+
+
+class SandboxFailureNotifier(Protocol):
+    """Reaches the user on whatever channel triggered the run.
+
+    The whole ``RunnableConfig`` is passed because an implementation resolves the
+    channel from the configurable, not from anything the middleware knows.
+    """
+
+    async def sandbox_unreachable(
+        self,
+        config: RunnableConfig,
+        *,
+        sandbox_id: str | None = None,
+        sandbox_name: str | None = None,
+        replacement_attempted: bool = False,
+    ) -> None: ...
 
 
 def _get_name(candidate: object) -> str | None:
@@ -113,7 +127,7 @@ def _get_tool_call_id(request: ToolCallRequest) -> str | None:
     return None
 
 
-def _get_run_config(request: ToolCallRequest) -> Mapping[str, Any] | None:
+def _get_run_config(request: ToolCallRequest) -> RunnableConfig | None:
     runtime_config = getattr(getattr(request, "runtime", None), "config", None)
     if isinstance(runtime_config, Mapping):
         return runtime_config
@@ -123,13 +137,6 @@ def _get_run_config(request: ToolCallRequest) -> Mapping[str, Any] | None:
         logger.exception("Failed to read runnable config while handling sandbox error")
         return None
     return maybe_config if isinstance(maybe_config, Mapping) else None
-
-
-def _get_thread_id(request: ToolCallRequest) -> str | None:
-    config = _get_run_config(request)
-    if config is None:
-        return None
-    return RunConfig.from_config(config).thread_id or None
 
 
 def _transient_sandbox_tool_message(
@@ -167,6 +174,9 @@ class ToolErrorMiddleware(CodingAgentMiddleware):
 
     state_schema = AgentState
 
+    def __init__(self, *, notifier: SandboxFailureNotifier | None = None) -> None:
+        self._notifier = notifier
+
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
@@ -187,11 +197,11 @@ class ToolErrorMiddleware(CodingAgentMiddleware):
                 logger.exception("Error during tool call handling; request=%r", request)
                 return _generic_error_tool_message(e, request)
             logger.exception("Sandbox error during tool call handling; request=%r", request)
-            thread_id = _get_thread_id(request)
+            thread_id = RunConfig.from_tool_request(request).thread_id
             config = _get_run_config(request)
-            if config is not None:
+            if self._notifier is not None and config is not None:
                 try:
-                    await post_sandbox_unreachable_notification(
+                    await self._notifier.sandbox_unreachable(
                         config, sandbox_id=extract_sandbox_id(str(e))
                     )
                 except Exception:

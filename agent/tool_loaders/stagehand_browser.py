@@ -8,7 +8,7 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from coding_agent.config import ENV
 from coding_agent.sandboxes.state import get_sandbox_backend
 
@@ -44,7 +44,7 @@ def browser_tools_enabled() -> bool:
 
 
 def _thread_id() -> str:
-    thread_id = RunConfig.from_runtime().thread_id
+    thread_id = OpenSWERunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("no thread_id in run config")
     return thread_id

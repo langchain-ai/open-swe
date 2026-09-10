@@ -14,13 +14,13 @@ from typing import Any, Literal, cast
 
 from langgraph_sdk import get_client
 
-from agent.input_messages import build_run_input
 from agent.review.findings import (
     REVIEW_FINDING_CAP,
     REVIEWER_EVAL_PUBLICATION_KEY,
     Finding,
     Severity,
 )
+from coding_agent.input_messages import build_run_input
 
 logger = logging.getLogger(__name__)
 

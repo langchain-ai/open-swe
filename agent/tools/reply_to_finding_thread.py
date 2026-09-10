@@ -12,7 +12,7 @@ from agent.review.findings import (
     update_finding_fields,
 )
 from agent.review.publish import reply_to_review_comment
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 
 async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
@@ -20,7 +20,7 @@ async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
     if not body.strip():
         return {"success": False, "error": "Reply body is required"}
 
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     if not cfg.repo or cfg.pr_number is None:
         return {"success": False, "error": "Missing repo or PR info in run config"}
 

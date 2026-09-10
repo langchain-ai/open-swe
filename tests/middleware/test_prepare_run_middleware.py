@@ -10,8 +10,8 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.input_messages import human_input, system_introduction
 from agent.server import PrepareAgentRunMiddleware
+from coding_agent.input_messages import human_input, system_introduction
 from coding_agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from coding_agent.utils import ttl_cache
 

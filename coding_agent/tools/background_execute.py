@@ -6,21 +6,28 @@ import logging
 import shlex
 import textwrap
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
-from agent.run_config import RunConfig
+from coding_agent.run_config import RunConfig
 from coding_agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 
 TASK_ROOT = "/tmp/open-swe-background-tasks"
 LAUNCH_LOCK = f"{TASK_ROOT}/.launch-lock"
+MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 DEFAULT_TIMEOUT_SECONDS = 3600
 MAX_TIMEOUT_SECONDS = 86_400
 MAX_ACTIVE_TASKS = 4
 MAX_OUTPUT_BYTES = 1_048_576
 MAX_INLINE_OUTPUT_BYTES = 65_536
 TASK_TTL_SECONDS = 604_800
+
+
+class BackgroundTaskMonitor(Protocol):
+    """Delivers task completion back into the thread once a command is running."""
+
+    async def ensure_scheduled(self, thread_id: str) -> None: ...
 
 
 def encoded(value: str) -> str:
@@ -280,10 +287,9 @@ def _current_backend() -> tuple[str, Any]:
     return thread_id, backend
 
 
-async def background_execute(
-    command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS
+async def _start_background_command(
+    command: str, timeout: int, monitor: BackgroundTaskMonitor | None
 ) -> dict[str, Any]:
-    """Implement the `background_execute` tool."""
     if not command.strip():
         return {"success": False, "error": "command must not be empty"}
     if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
@@ -297,7 +303,12 @@ async def background_execute(
         active = sum(task.get("status") == "running" for task in current.get("tasks", []))
         if active >= MAX_ACTIVE_TASKS:
             return {"success": False, "error": "active task limit reached"}
-        from agent.background_tasks import MONITOR_LOCK, ensure_background_task_cron
+        if monitor is None:
+            task_id = str(uuid.uuid4())
+            return {
+                "success": True,
+                **await execute(backend, _launch_command(task_id, command, timeout)),
+            }
 
         wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
         wait = await backend.aexecute(wait_for_monitor, timeout=15)
@@ -313,7 +324,7 @@ async def background_execute(
                 "error": "command started, but automatic completion monitoring is busy",
             }
         try:
-            await ensure_background_task_cron(thread_id)
+            await monitor.ensure_scheduled(thread_id)
         except Exception:
             logger.warning("Failed to schedule background-task monitor", exc_info=True)
             return {
@@ -342,3 +353,15 @@ async def background_task(
         return {"success": True, **result}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
+
+
+def background_tools(monitor: BackgroundTaskMonitor | None) -> list[Any]:
+    """The background-command tools, bound to the platform's completion monitor."""
+
+    async def background_execute(
+        command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS
+    ) -> dict[str, Any]:
+        """Implement the `background_execute` tool."""
+        return await _start_background_command(command, timeout, monitor)
+
+    return [background_execute, background_task]

@@ -9,7 +9,10 @@ from typing import Any, cast
 import httpx2
 from langchain_core.messages.content import create_text_block
 
-from agent.input_messages import (
+from agent.source_context import SourceContext
+from agent.thread_ids import linear_issue_thread_id
+from agent.webhooks import common
+from coding_agent.input_messages import (
     PersonIdentity,
     RunInput,
     human_input,
@@ -17,9 +20,6 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.source_context import SourceContext
-from agent.thread_ids import linear_issue_thread_id
-from agent.webhooks import common
 from coding_agent.prompts import render_prompt
 
 

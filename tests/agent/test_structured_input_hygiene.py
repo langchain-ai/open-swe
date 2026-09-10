@@ -7,9 +7,10 @@ rendering the raw text — platform metadata and all — and its `<>` go unescap
 import ast
 import pathlib
 
-AGENT_ROOT = pathlib.Path(__file__).resolve().parents[2] / "agent"
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+PACKAGE_ROOTS = (REPO_ROOT / "agent", REPO_ROOT / "coding_agent")
 
-_SERIALIZER_MODULES = {"input_messages.py"}
+_SERIALIZER_MODULES = {"coding_agent/input_messages.py"}
 
 
 def _role_user_literals(tree: ast.AST) -> list[int]:
@@ -30,13 +31,15 @@ def _role_user_literals(tree: ast.AST) -> list[int]:
 
 def test_no_module_hand_rolls_a_user_message() -> None:
     offenders: dict[str, list[int]] = {}
-    for path in AGENT_ROOT.rglob("*.py"):
-        relative = path.relative_to(AGENT_ROOT).as_posix()
-        if relative in _SERIALIZER_MODULES:
-            continue
-        lines = _role_user_literals(ast.parse(path.read_text()))
-        if lines:
-            offenders[relative] = lines
+    for root in PACKAGE_ROOTS:
+        for path in root.rglob("*.py"):
+            relative = path.relative_to(REPO_ROOT).as_posix()
+            if relative in _SERIALIZER_MODULES:
+                continue
+            lines = _role_user_literals(ast.parse(path.read_text()))
+            if lines:
+                offenders[relative] = lines
     assert not offenders, (
-        f"build these through agent.input_messages.human_input/system_input instead: {offenders}"
+        "build these through coding_agent.input_messages.human_input/system_input "
+        f"instead: {offenders}"
     )

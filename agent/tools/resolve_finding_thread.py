@@ -21,7 +21,7 @@ from agent.review.publish import (
     resolve_review_thread,
 )
 from agent.review.reconcile import reconcile_findings_with_review_threads
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.utils.reviewer_outcomes import emit_finding_status_outcome
 
 
@@ -47,7 +47,7 @@ async def resolve_finding_thread(
             "error": "Resolving or dismissing a finding requires a note with the message to post.",
         }
 
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     if not cfg.repo or cfg.pr_number is None:
         return {"success": False, "error": "Missing repo or PR info in run config"}
 

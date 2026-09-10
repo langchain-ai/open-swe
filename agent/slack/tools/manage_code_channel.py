@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
@@ -36,9 +36,9 @@ from agent.slack.code_channels import (
     store_block_suggestions,
 )
 from agent.source_context import SourceContext
-from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client
+from coding_agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 
 
 async def manage_code_channel(
@@ -82,7 +82,7 @@ async def manage_code_channel(
     include_resolved: bool = False,
 ) -> dict[str, Any]:
     """Implement the `manage_code_channel` tool."""
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "Missing thread_id in config"}

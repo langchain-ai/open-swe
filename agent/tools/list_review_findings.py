@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from agent.review.findings import list_findings as list_findings_async
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 _COMPACT_FIELDS = (
     "id",
@@ -37,7 +37,7 @@ async def list_review_findings(status_filter: str | None = None) -> dict[str, An
     if status_filter is not None and status_filter not in {"open", "resolved", "dismissed"}:
         return {"findings": [], "count": 0, "error": f"Invalid status_filter: {status_filter}"}
 
-    reviewer_thread_id = RunConfig.from_runtime().reviewer_thread_id
+    reviewer_thread_id = OpenSWERunConfig.from_runtime().reviewer_thread_id
     if not reviewer_thread_id:
         return {"findings": [], "count": 0, "error": "reviewer thread unavailable"}
 

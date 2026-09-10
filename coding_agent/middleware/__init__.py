@@ -19,6 +19,9 @@ _MIDDLEWARE_MODULES = {
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
     "SanitizeToolInputsMiddleware": ".sanitize_tool_inputs",
     "StableToolResultOrderMiddleware": ".stable_tool_order",
+    "SubdirAgentsReadMiddleware": ".subdir_agents",
+    "SandboxFailureNotifier": ".tool_error_handler",
+    "ToolErrorMiddleware": ".tool_error_handler",
     "CodingAgentMiddleware": ".trace",
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
@@ -38,12 +41,15 @@ __all__ = [
     "PlanModeMiddleware",
     "PrepareRunState",
     "RepairOrphanedToolCallsMiddleware",
+    "SandboxFailureNotifier",
     "SanitizeFireworksMessagesMiddleware",
     "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
     "StableToolResultOrderMiddleware",
+    "SubdirAgentsReadMiddleware",
     "TimeoutWrapupMiddleware",
+    "ToolErrorMiddleware",
     "task_on_failure",
     "task_retry_on",
 ]
@@ -69,8 +75,13 @@ if TYPE_CHECKING:
     from coding_agent.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from coding_agent.middleware.sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from coding_agent.middleware.stable_tool_order import StableToolResultOrderMiddleware
+    from coding_agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
     from coding_agent.middleware.task_retry import task_on_failure, task_retry_on
     from coding_agent.middleware.timeout_wrapup import TimeoutWrapupMiddleware
+    from coding_agent.middleware.tool_error_handler import (
+        SandboxFailureNotifier,
+        ToolErrorMiddleware,
+    )
     from coding_agent.middleware.trace import CodingAgentMiddleware
 
 

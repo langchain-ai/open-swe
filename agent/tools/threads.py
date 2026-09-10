@@ -34,7 +34,6 @@ from agent.dashboard.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
-from agent.input_messages import input_message_text, message_sender_id
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.utils.dashboard_links import (
@@ -50,6 +49,7 @@ from agent.utils.langsmith import (
 )
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from coding_agent.input_messages import input_message_text, message_sender_id
 from coding_agent.models import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from coding_agent.utils.json_types import as_json_object, thread_metadata
 

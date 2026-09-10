@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     get_active_slack_thread,
@@ -26,7 +26,7 @@ async def slack_thread_reply(
 ) -> dict[str, Any]:
     """Implement the `slack_thread_reply` tool."""
     config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = OpenSWERunConfig.from_config(config)
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
@@ -96,11 +96,11 @@ async def slack_thread_reply(
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:
-    candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
+    candidates = [config.get("run_id"), OpenSWERunConfig.from_config(config).run_id]
     return next((str(candidate) for candidate in candidates if candidate), None)
 
 
-def _triggering_user_id(cfg: RunConfig) -> str | None:
+def _triggering_user_id(cfg: OpenSWERunConfig) -> str | None:
     return (cfg.slack_thread.triggering_user_id or None) if cfg.slack_thread else None
 
 

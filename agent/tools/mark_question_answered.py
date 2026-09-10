@@ -4,7 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.thread_feedback import mark_answered_question
 
 
@@ -19,7 +19,7 @@ async def mark_question_answered() -> dict[str, Any]:
     the conversation for five minutes. This does not send a message or end the run.
     """
     config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = OpenSWERunConfig.from_config(config)
     run_id = str(config.get("run_id") or cfg.run_id or "")
     if not cfg.thread_id or not run_id:
         return {"success": False, "error": "No active thread and run"}

@@ -12,7 +12,7 @@ from agent.dashboard.agent_usage import record_agent_pr_usage
 from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import (
     get_active_slack_thread,
     get_slack_permalink,
@@ -62,7 +62,7 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     metadata: Slack thread ids are shared across a conversation, so a cached
     token could belong to a prior triggering user.
     """
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     source = cfg.source
     github_login = cfg.github_login
 
@@ -124,11 +124,11 @@ def _effective_draft(draft: bool) -> bool:
     return preference if preference is not None else draft
 
 
-def _configurable() -> RunConfig:
+def _configurable() -> OpenSWERunConfig:
     try:
-        return RunConfig.from_runtime()
+        return OpenSWERunConfig.from_runtime()
     except Exception:
-        return RunConfig()
+        return OpenSWERunConfig()
 
 
 def _head_branch_for_repo(owner: str, head: str) -> str | None:
@@ -557,7 +557,7 @@ async def _record_pr_telemetry(
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
         config = get_config()
-        cfg = RunConfig.from_config(config)
+        cfg = OpenSWERunConfig.from_config(config)
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
@@ -703,7 +703,7 @@ async def _record_pr_telemetry(
         )
 
 
-async def _plan_reference_line(cfg: RunConfig) -> str | None:
+async def _plan_reference_line(cfg: OpenSWERunConfig) -> str | None:
     thread_id = cfg.thread_id
     if thread_id is None:
         return None
@@ -720,7 +720,7 @@ async def _plan_reference_line(cfg: RunConfig) -> str | None:
     return f"- Plan: {plan_url}"
 
 
-async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
+async def _build_source_reference_lines(cfg: OpenSWERunConfig) -> list[str]:
     """Build source reference lines for the run."""
     lines: list[str] = []
 
@@ -773,7 +773,7 @@ async def _maybe_append_references(
     try:
         if _REFERENCES_HEADING in body:
             return body
-        cfg = RunConfig.from_runtime()
+        cfg = OpenSWERunConfig.from_runtime()
         lines: list[str] = []
         plan_line = await _plan_reference_line(cfg)
         if plan_line:

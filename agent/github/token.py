@@ -18,7 +18,7 @@ from agent.github.thread_token import (
     github_token_principal,
 )
 from agent.linear.client import comment_on_linear_issue
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
@@ -246,7 +246,7 @@ async def leave_failure_comment(
     message: str,
 ) -> None:
     """Leave an auth failure comment for the appropriate source."""
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
 
     if source == "linear":
         issue_id = cfg.linear_issue.id if cfg.linear_issue else None
@@ -351,7 +351,7 @@ async def resolve_token_from_email(
     source: str,
 ) -> tuple[str, str | None]:
     """Resolve and cache a GitHub token based on user email."""
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         raise ValueError("GitHub auth failed: missing thread_id")
@@ -486,7 +486,7 @@ async def resolve_github_token(
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
-    cfg = RunConfig.from_config(config)
+    cfg = OpenSWERunConfig.from_config(config)
     source = cfg.source
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)

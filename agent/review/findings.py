@@ -22,7 +22,7 @@ from typing import Any, Literal, TypedDict, cast
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 logger = logging.getLogger(__name__)
 _FINDING_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, int], asyncio.Lock] = (
@@ -423,7 +423,7 @@ def coerce_findings(value: Any) -> list[Finding]:
 
 def get_thread_id_from_runtime() -> str:
     """Return the thread id from the current LangGraph runnable config."""
-    thread_id = RunConfig.from_runtime().thread_id
+    thread_id = OpenSWERunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         msg = "No thread_id available in runtime config"
         raise RuntimeError(msg)
@@ -457,7 +457,7 @@ async def _get_thread_metadata_strict(thread_id: str) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
-async def resolve_review_head_sha(thread_id: str, cfg: RunConfig) -> str:
+async def resolve_review_head_sha(thread_id: str, cfg: OpenSWERunConfig) -> str:
     """Return the current PR head SHA for a reviewer run.
 
     A push that lands while a reviewer run is in flight is delivered as a queued

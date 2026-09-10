@@ -17,7 +17,7 @@ from agent.review.findings import (
     thread_missing_tool_result,
     update_finding_fields,
 )
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.utils.reviewer_outcomes import emit_finding_status_outcome
 
 
@@ -83,7 +83,7 @@ async def update_finding(
         if status in {"resolved", "dismissed"}:
             updates["resolution_note"] = normalized_note
 
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
 
     if not updates:
         if suggestion_dropped:

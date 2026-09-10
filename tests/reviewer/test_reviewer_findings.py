@@ -28,7 +28,7 @@ from agent.review.findings import (
     thread_ids_for_finding,
     update_finding_fields,
 )
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 
 def _f(**overrides: Any) -> Finding:
@@ -461,7 +461,7 @@ async def test_resolve_review_head_sha_prefers_metadata_over_config() -> None:
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {"head_sha": "metahead"}}
     with patch("agent.review.findings.get_client", return_value=fake_client):
-        head = await resolve_review_head_sha("tid", RunConfig(head_sha="confighead"))
+        head = await resolve_review_head_sha("tid", OpenSWERunConfig(head_sha="confighead"))
     assert head == "metahead"
 
 
@@ -470,7 +470,7 @@ async def test_resolve_review_head_sha_falls_back_to_config_when_metadata_empty(
     fake_client = AsyncMock()
     fake_client.threads.get.return_value = {"metadata": {}}
     with patch("agent.review.findings.get_client", return_value=fake_client):
-        head = await resolve_review_head_sha("tid", RunConfig(head_sha="confighead"))
+        head = await resolve_review_head_sha("tid", OpenSWERunConfig(head_sha="confighead"))
     assert head == "confighead"
 
 
@@ -478,7 +478,7 @@ async def test_resolve_review_head_sha_falls_back_to_config_when_metadata_empty(
 async def test_resolve_review_head_sha_falls_back_without_thread_id() -> None:
     fake_client = AsyncMock()
     with patch("agent.review.findings.get_client", return_value=fake_client):
-        head = await resolve_review_head_sha("", RunConfig(head_sha="confighead"))
+        head = await resolve_review_head_sha("", OpenSWERunConfig(head_sha="confighead"))
     assert head == "confighead"
     fake_client.threads.get.assert_not_called()
 

@@ -224,7 +224,7 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     saved: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "coding_agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",
@@ -312,7 +312,7 @@ async def test_approve_plan_tool_ignores_stale_state_approver(
     saved: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "coding_agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",
@@ -382,7 +382,7 @@ async def test_approve_plan_tool_allows_non_owner_configurable_identity(
     approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
     saved: dict[str, Any] = {}
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "coding_agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",

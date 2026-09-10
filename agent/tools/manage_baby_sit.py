@@ -9,17 +9,17 @@ from agent.baby_sit import record_retry, start_watch, stop_watch, watch_key
 from agent.github.app import get_github_app_installation_id_for_repo
 from agent.github.ci import fetch_pr
 from agent.github.token import resolve_github_token
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import parse_github_pr_url
 from agent.source_context import SourceContext
 
 
-def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
+def _configurable() -> tuple[OpenSWERunConfig, Mapping[str, Any]]:
     config = get_config()
-    return RunConfig.from_config(config), config if isinstance(config, Mapping) else {}
+    return OpenSWERunConfig.from_config(config), config if isinstance(config, Mapping) else {}
 
 
-def _matches_configured_repo(cfg: RunConfig, owner: str, repo: str) -> bool:
+def _matches_configured_repo(cfg: OpenSWERunConfig, owner: str, repo: str) -> bool:
     if cfg.repo is None:
         return True
     if not cfg.repo.owner or not cfg.repo.name:
@@ -27,7 +27,7 @@ def _matches_configured_repo(cfg: RunConfig, owner: str, repo: str) -> bool:
     return cfg.repo.owner.lower() == owner.lower() and cfg.repo.name.lower() == repo.lower()
 
 
-def _run_config(cfg: RunConfig, thread_id: str) -> dict[str, Any]:
+def _run_config(cfg: OpenSWERunConfig, thread_id: str) -> dict[str, Any]:
     allowed = (
         "source",
         "slack_thread",
@@ -46,7 +46,7 @@ def _run_config(cfg: RunConfig, thread_id: str) -> dict[str, Any]:
     return result
 
 
-def _source_context(cfg: RunConfig) -> SourceContext:
+def _source_context(cfg: OpenSWERunConfig) -> SourceContext:
     dumped = cfg.dump()
     return SourceContext.parse(
         {

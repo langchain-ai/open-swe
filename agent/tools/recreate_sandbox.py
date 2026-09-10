@@ -3,14 +3,14 @@
 import logging
 from typing import Any
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 
 logger = logging.getLogger(__name__)
 
 
 async def recreate_sandbox() -> dict[str, Any]:
     """Implement the `recreate_sandbox` tool."""
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not isinstance(thread_id, str) or not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}

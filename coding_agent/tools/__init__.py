@@ -3,15 +3,35 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
+    "background_tools": ".background_execute",
+    "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
+    "create_sandbox_service_url": ".create_sandbox_service_url",
     "fetch_url": ".fetch_url",
+    "http_request": ".http_request",
+    "output_iframe": ".output_iframe",
+    "web_search": ".web_search",
 }
 
 __all__ = [
+    "background_tools",
+    "create_sandbox_file_download_url",
+    "create_sandbox_service_url",
     "fetch_url",
+    "http_request",
+    "output_iframe",
+    "web_search",
 ]
 
 if TYPE_CHECKING:
+    from coding_agent.tools.background_execute import background_tools
+    from coding_agent.tools.create_sandbox_file_download_url import (
+        create_sandbox_file_download_url,
+    )
+    from coding_agent.tools.create_sandbox_service_url import create_sandbox_service_url
     from coding_agent.tools.fetch_url import fetch_url
+    from coding_agent.tools.http_request import http_request
+    from coding_agent.tools.output_iframe import output_iframe
+    from coding_agent.tools.web_search import web_search
 
 
 def _load_export(name: str) -> Any:

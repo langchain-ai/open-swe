@@ -16,7 +16,7 @@ from langgraph.runtime import Runtime
 from agent.github.thread_token import get_github_token
 from agent.review.findings import get_thread_metadata
 from agent.review.publish import settle_review_check_run
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from coding_agent.middleware.trace import scrub_middleware_inputs
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ async def settle_review_check_on_exit(
     runtime: Runtime,
 ) -> dict[str, Any] | None:
     """Fail the tracked review check run if the run ended without publishing."""
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id or not cfg.repo:
         return None

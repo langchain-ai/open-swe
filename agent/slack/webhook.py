@@ -12,18 +12,6 @@ import httpx2
 from langchain_core.messages.content import create_text_block
 
 from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
-from agent.input_messages import (
-    InputMessageContext,
-    MessageKind,
-    PersonIdentity,
-    RunInput,
-    SystemIdentity,
-    channel_introduction,
-    human_input,
-    person_introduction,
-    system_input,
-    system_introduction,
-)
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.failures import report_slack_failure
@@ -36,6 +24,18 @@ from agent.utils.thread_ops import (
 )
 from agent.utils.thread_ops import queue_message_for_thread
 from agent.webhooks import common
+from coding_agent.input_messages import (
+    InputMessageContext,
+    MessageKind,
+    PersonIdentity,
+    RunInput,
+    SystemIdentity,
+    channel_introduction,
+    human_input,
+    person_introduction,
+    system_input,
+    system_introduction,
+)
 from coding_agent.prompts import load_prompt
 from coding_agent.utils.json_types import as_json_object
 

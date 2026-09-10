@@ -30,12 +30,6 @@ from agent.dashboard.threads.summary import (
     repo_config_from_metadata,
     thread_source,
 )
-from agent.input_messages import (
-    PersonIdentity,
-    build_input_messages,
-    dynamic_context_hashes_from_messages,
-    injected_dynamic_context_hashes_from_metadata,
-)
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -49,6 +43,12 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from coding_agent.input_messages import (
+    PersonIdentity,
+    build_input_messages,
+    dynamic_context_hashes_from_messages,
+    injected_dynamic_context_hashes_from_metadata,
+)
 from coding_agent.models import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,

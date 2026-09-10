@@ -12,7 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from langsmith.sandbox import SandboxClientError
 
 from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from coding_agent.sandboxes.providers.registry import SandboxGoneError
 from coding_agent.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
@@ -180,7 +180,7 @@ async def test_reviewer_opts_into_replacement() -> None:
     ) as ensure:
         result, github_token = await _ensure_reviewer_sandbox_for_thread(
             "thread-reviewer",
-            RunConfig.parse({"repo": {"owner": "langchain-ai", "name": "open-swe"}}),
+            OpenSWERunConfig.parse({"repo": {"owner": "langchain-ai", "name": "open-swe"}}),
         )
 
     assert result is sandbox_backend

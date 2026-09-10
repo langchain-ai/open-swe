@@ -1,17 +1,17 @@
 """Telling the user, on the channel they triggered from, that their sandbox went quiet."""
 
 import logging
-import re
 from collections.abc import Mapping
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from langgraph_sdk import get_client
 
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
 from agent.github.thread_token import get_github_token
 from agent.linear.client import comment_on_linear_issue
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
@@ -60,15 +60,7 @@ def sandbox_unreachable_message(
     )
 
 
-_SANDBOX_ID_RE = re.compile(r"\bsb-[A-Za-z0-9-]+\b")
-
-
-def extract_sandbox_id(text: str) -> str | None:
-    match = _SANDBOX_ID_RE.search(text)
-    return match.group(0) if match else None
-
-
-async def _get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
+async def _get_slack_target(cfg: OpenSWERunConfig) -> tuple[str, str] | None:
     active = await get_active_slack_thread(
         get_client(url=LANGGRAPH_URL),
         cfg.thread_id,
@@ -85,11 +77,11 @@ async def _get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     return channel_id, thread_ts
 
 
-def _get_linear_issue_id(cfg: RunConfig) -> str | None:
+def _get_linear_issue_id(cfg: OpenSWERunConfig) -> str | None:
     return cfg.linear_issue.id or None if cfg.linear_issue else None
 
 
-def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
+def _get_github_target(cfg: OpenSWERunConfig) -> tuple[dict[str, str], int] | None:
     if not cfg.repo:
         return None
     repo = {"owner": cfg.repo.owner, "name": cfg.repo.name}
@@ -116,7 +108,7 @@ async def post_sandbox_unreachable_notification(
     sandbox_name: str | None = None,
     replacement_attempted: bool = False,
 ) -> None:
-    cfg = RunConfig.from_config(config)
+    cfg = OpenSWERunConfig.from_config(config)
 
     message = sandbox_unreachable_message(
         sandbox_id=sandbox_id,
@@ -154,3 +146,25 @@ async def post_sandbox_unreachable_notification(
         return
 
     logger.info("No user-facing target found for sandbox unreachable notification")
+
+
+class OpenSWESandboxFailureNotifier:
+    """Tells the user, wherever they triggered the run from, that the sandbox went quiet."""
+
+    async def sandbox_unreachable(
+        self,
+        config: RunnableConfig,
+        *,
+        sandbox_id: str | None = None,
+        sandbox_name: str | None = None,
+        replacement_attempted: bool = False,
+    ) -> None:
+        await post_sandbox_unreachable_notification(
+            config,
+            sandbox_id=sandbox_id,
+            sandbox_name=sandbox_name,
+            replacement_attempted=replacement_attempted,
+        )
+
+
+SANDBOX_FAILURE_NOTIFIER = OpenSWESandboxFailureNotifier()

@@ -9,15 +9,11 @@ _MIDDLEWARE_MODULES = {
     "record_run_usage": ".record_run_usage",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
     "settle_review_check_on_exit": ".settle_review_check",
-    "SubdirAgentsReadMiddleware": ".subdir_agents",
-    "ToolErrorMiddleware": ".tool_error_handler",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
 }
 
 __all__ = [
     "PullRequestCreationGuardMiddleware",
-    "SubdirAgentsReadMiddleware",
-    "ToolErrorMiddleware",
     "WorkflowPushGuardMiddleware",
     "check_message_queue_before_model",
     "notify_step_limit_reached",
@@ -33,8 +29,6 @@ if TYPE_CHECKING:
     from agent.middleware.record_run_usage import record_run_usage
     from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
     from agent.middleware.settle_review_check import settle_review_check_on_exit
-    from agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
-    from agent.middleware.tool_error_handler import ToolErrorMiddleware
     from agent.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
 
 

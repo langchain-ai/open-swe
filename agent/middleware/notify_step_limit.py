@@ -7,7 +7,7 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
@@ -44,7 +44,7 @@ async def notify_step_limit_reached(
     if _LIMIT_MARKER not in content:
         return None
 
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     active = await get_active_slack_thread(
         get_client(url=LANGGRAPH_URL),
         cfg.thread_id,

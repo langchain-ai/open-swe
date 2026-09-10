@@ -12,10 +12,10 @@ from langchain_core.messages import BaseMessage
 from langgraph_sdk import get_client
 
 from agent.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
-from agent.input_messages import build_run_input
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import get_active_slack_thread
 from agent.utils.thread_ops import langgraph_url
+from coding_agent.input_messages import build_run_input
 from coding_agent.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -257,7 +257,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
     if delay_seconds > _MAX_DELAY_SECONDS:
         return {"success": False, "error": "delay must be at most 1440 minutes (24 hours)"}
 
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}

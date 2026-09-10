@@ -21,7 +21,7 @@ from agent.dashboard.workflow_approval import (
     mark_workflow_push_notified,
     workflow_push_approved,
 )
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
@@ -109,8 +109,8 @@ def _config(request: ToolCallRequest) -> Mapping[str, Any]:
     return config if isinstance(config, Mapping) else {}
 
 
-def _configurable(request: ToolCallRequest) -> RunConfig:
-    return RunConfig.from_config(_config(request))
+def _configurable(request: ToolCallRequest) -> OpenSWERunConfig:
+    return OpenSWERunConfig.from_config(_config(request))
 
 
 def _thread_id(request: ToolCallRequest) -> str | None:

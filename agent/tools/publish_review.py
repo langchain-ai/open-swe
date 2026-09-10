@@ -59,7 +59,7 @@ from agent.review.publish import (
     settle_review_check_run,
 )
 from agent.review.reconcile import reconcile_findings_with_review_threads
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import post_slack_thread_reply
 from agent.utils.dashboard_links import dashboard_review_url
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -83,7 +83,7 @@ async def publish_review(
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
 
     config = get_config()
-    cfg = RunConfig.from_config(config)
+    cfg = OpenSWERunConfig.from_config(config)
     pr_number = cfg.pr_number
     head_sha = cfg.head_sha
     is_re_review = bool(cfg.re_review)
@@ -223,7 +223,7 @@ async def _publish_review_async(
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
-    head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
+    head_sha = await resolve_review_head_sha(thread_id, OpenSWERunConfig(head_sha=head_sha))
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
@@ -735,7 +735,7 @@ async def _resolve_diff_line_set(
         state_cached = state.get("diff_line_set")
         if isinstance(state_cached, dict):
             return state_cached
-    cached = RunConfig.from_runtime().diff_line_set
+    cached = OpenSWERunConfig.from_runtime().diff_line_set
     if cached is not None:
         return cached
 
@@ -973,7 +973,7 @@ async def _resolve_threads_for_resolved_findings(
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:
-    candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
+    candidates = [config.get("run_id"), OpenSWERunConfig.from_config(config).run_id]
     for candidate in candidates:
         if isinstance(candidate, str) and candidate:
             return candidate

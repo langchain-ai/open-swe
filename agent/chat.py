@@ -38,15 +38,15 @@ from agent.dashboard.team_settings import (
     get_team_fable_enabled,
 )
 from agent.github.app import get_github_app_installation_token
-from agent.middleware import ToolErrorMiddleware
-from agent.run_config import RunConfig
+from agent.middleware.sandbox_circuit_breaker import SANDBOX_FAILURE_NOTIFIER
+from agent.run_config import OpenSWERunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     bindable_config,
     graph_loaded_for_execution,
 )
-from agent.tools import list_review_findings, read_repo_file, search_repo_code, web_search
+from agent.tools import list_review_findings, read_repo_file, search_repo_code
 from coding_agent.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
@@ -55,6 +55,7 @@ from coding_agent.middleware import (
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
+    ToolErrorMiddleware,
 )
 from coding_agent.middleware.prepare_run import PrepareRunState
 from coding_agent.models import (
@@ -64,7 +65,7 @@ from coding_agent.models import (
     model_supports_effort,
 )
 from coding_agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
-from coding_agent.tools import fetch_url
+from coding_agent.tools import fetch_url, web_search
 from coding_agent.utils import ttl_cache
 from coding_agent.utils.deferred_model import make_deferred_error_model
 from coding_agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
@@ -131,7 +132,7 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         self._config = config
 
     def _prepare_config_fingerprint(self) -> object:
-        cfg = RunConfig.from_config(self._config)
+        cfg = OpenSWERunConfig.from_config(self._config)
         return {
             "prepare_run_id": cfg.prepare_run_id,
             "repo_owner": cfg.chat_repo_owner,
@@ -141,7 +142,7 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         configurable = self._config.get("configurable") or {}
-        cfg = RunConfig.parse(configurable)
+        cfg = OpenSWERunConfig.parse(configurable)
         repo_name = cfg.chat_repo_name or ""
         token = await get_github_app_installation_token(
             repositories=[repo_name] if repo_name else None
@@ -158,7 +159,7 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         }
 
 
-async def _resolve_chat_model(cfg: RunConfig) -> tuple[str, str]:
+async def _resolve_chat_model(cfg: OpenSWERunConfig) -> tuple[str, str]:
     model_id = cfg.chat_model_id
     effort = cfg.chat_effort
     if (
@@ -181,7 +182,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     configurable = dict(config.get("configurable") or {})
     config["configurable"] = configurable
     config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
-    cfg = RunConfig.parse(configurable)
+    cfg = OpenSWERunConfig.parse(configurable)
 
     if cfg.thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
@@ -217,7 +218,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 PrepareChatRunMiddleware(config=config),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
+                ToolErrorMiddleware(notifier=SANDBOX_FAILURE_NOTIFIER),
                 ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),

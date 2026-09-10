@@ -39,7 +39,7 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
     }
     with (
         patch(
-            "agent.run_config.get_config",
+            "coding_agent.run_config.get_config",
             return_value={"configurable": {"thread_id": "thread-1", "prepare_run_id": "run-1"}},
         ),
         patch(
@@ -102,7 +102,7 @@ async def test_tags_model_responses_with_run_id() -> None:
     response = ModelResponse(result=[_message(100, 10)])
     handler = AsyncMock(return_value=response)
     with patch(
-        "agent.run_config.get_config",
+        "coding_agent.run_config.get_config",
         return_value={"configurable": {"thread_id": "thread-1", "prepare_run_id": "run-1"}},
     ):
         result = await record_run_usage.awrap_model_call(MagicMock(), handler)

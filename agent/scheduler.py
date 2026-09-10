@@ -13,7 +13,7 @@ from agent.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from agent.background_tasks import monitor_background_tasks
 from agent.dashboard.schedules import launch_scheduled_agent_run
 from agent.reconcile import reconcile_stale_runs
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.session_cost import run_session_cost_refresh
 from agent.thread_feedback import run_feedback_prompt
 
@@ -38,7 +38,7 @@ class SchedulerState(BaseModel):
 
 
 async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, Any]:
-    cfg = RunConfig.from_config(config)
+    cfg = OpenSWERunConfig.from_config(config)
     task = state.task or cfg.task
     if task == "reconcile":
         return {"result": await reconcile_stale_runs()}

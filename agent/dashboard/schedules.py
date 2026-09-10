@@ -16,7 +16,6 @@ from agent.dashboard.team_settings import get_team_fable_enabled
 from agent.dashboard.threads.access import agent_version_metadata, resolve_run_email
 from agent.dashboard.user_mappings import slack_id_for_login
 from agent.dispatch import create_durable_run
-from agent.input_messages import InputMessageContext, build_run_input
 from agent.slack.client import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
@@ -26,6 +25,7 @@ from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
+from coding_agent.input_messages import InputMessageContext, build_run_input
 from coding_agent.models import gate_fable_model, normalize_model_choice
 from coding_agent.prompts import render_prompt
 

@@ -49,12 +49,14 @@ from agent.dashboard.team_settings import (
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
 from agent.middleware import (
-    ToolErrorMiddleware,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
-from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.sandbox_circuit_breaker import (
+    SANDBOX_FAILURE_NOTIFIER,
+    post_sandbox_unreachable_notification,
+)
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -70,7 +72,7 @@ from agent.review.findings import (
 from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -83,13 +85,11 @@ from agent.runtime import (
 from agent.tools import (
     add_finding,
     fetch_review_diff,
-    http_request,
     list_findings,
     publish_review,
     reply_to_finding_thread,
     resolve_finding_thread,
     update_finding,
-    web_search,
 )
 from agent.utils.api_standards_skill import fetch_api_standards_skill
 from coding_agent.middleware import (
@@ -103,6 +103,7 @@ from coding_agent.middleware import (
     SanitizeToolInputsMiddleware,
     StableToolResultOrderMiddleware,
     TimeoutWrapupMiddleware,
+    ToolErrorMiddleware,
 )
 from coding_agent.middleware.prepare_run import PrepareRunState
 from coding_agent.models import gate_fable_model
@@ -110,7 +111,7 @@ from coding_agent.prompts import apply_tool_descriptions, load_prompt, render_pr
 from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
 from coding_agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 from coding_agent.sandboxes.state import SandboxUnreachableError
-from coding_agent.tools import fetch_url
+from coding_agent.tools import fetch_url, http_request, web_search
 from coding_agent.utils import ttl_cache
 from coding_agent.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from coding_agent.utils.deferred_model import make_deferred_error_model
@@ -578,7 +579,7 @@ def _on_background_task_done(task: asyncio.Task[None]) -> None:
         logger.warning("Background reviewer task failed: %s", exc)
 
 
-async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseChatModel:
+async def _resolve_grouping_model(cfg: OpenSWERunConfig, *, use_gateway: bool) -> BaseChatModel:
     """Resolve the model for the diff-grouping pass.
 
     Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
@@ -641,7 +642,7 @@ class PrepareReviewerRunState(PrepareRunState):
 
 async def _ensure_reviewer_sandbox_for_thread(
     thread_id: str,
-    cfg: RunConfig,
+    cfg: OpenSWERunConfig,
 ) -> tuple[SandboxBackendProtocol, str | None]:
     repo_name = cfg.repo.name if cfg.repo else ""
     github_token: str | None = None
@@ -687,7 +688,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         self._use_gateway = use_gateway
 
     def _prepare_config_fingerprint(self) -> Any:
-        cfg = RunConfig.from_config(self._config)
+        cfg = OpenSWERunConfig.from_config(self._config)
         return {
             "prepare_run_id": cfg.prepare_run_id,
             "thread_id": self._thread_id,
@@ -703,7 +704,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:
-        cfg = RunConfig.from_config(self._config)
+        cfg = OpenSWERunConfig.from_config(self._config)
         try:
             sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
                 self._thread_id, cfg
@@ -997,7 +998,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     configurable = dict(config.get("configurable") or {})
     config["configurable"] = configurable
     config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
-    cfg = RunConfig.parse(configurable)
+    cfg = OpenSWERunConfig.parse(configurable)
     thread_id = cfg.thread_id
 
     if thread_id is None or not graph_loaded_for_execution(config):
@@ -1055,7 +1056,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
-        _cfg: RunConfig = cfg,
+        _cfg: OpenSWERunConfig = cfg,
     ) -> SandboxBackendProtocol:
         sandbox_backend, _github_token = await _ensure_reviewer_sandbox_for_thread(_thread_id, _cfg)
         return sandbox_backend
@@ -1091,7 +1092,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 ),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
+                ToolErrorMiddleware(notifier=SANDBOX_FAILURE_NOTIFIER),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
                 TimeoutWrapupMiddleware(),

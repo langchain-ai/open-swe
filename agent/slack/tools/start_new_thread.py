@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
-from agent.run_config import RunConfig
+from agent.run_config import OpenSWERunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
@@ -72,7 +72,7 @@ def _validate_text(value: str, *, field: str, max_chars: int) -> str | dict[str,
     return text
 
 
-def _resolve_repo(cfg: RunConfig, default_repo: str | None) -> dict[str, str] | None:
+def _resolve_repo(cfg: OpenSWERunConfig, default_repo: str | None) -> dict[str, str] | None:
     if default_repo and default_repo.strip():
         candidate = default_repo.strip()
         if not _REPO_RE.fullmatch(candidate):
@@ -158,7 +158,7 @@ async def slack_start_new_thread(
     default_repo: str | None = None,
 ) -> dict[str, Any]:
     """Implement the `slack_start_new_thread` tool."""
-    cfg = RunConfig.from_runtime()
+    cfg = OpenSWERunConfig.from_runtime()
     if cfg.slack_thread is None:
         return {"success": False, "error": "Missing slack_thread config"}
     client = langgraph_client()

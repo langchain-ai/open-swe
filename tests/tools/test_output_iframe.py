@@ -7,7 +7,7 @@ from langchain_core.messages import ToolMessage
 
 from coding_agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 
-iframe_tool = importlib.import_module("agent.tools.output_iframe")
+iframe_tool = importlib.import_module("coding_agent.tools.output_iframe")
 
 
 class _Backend:

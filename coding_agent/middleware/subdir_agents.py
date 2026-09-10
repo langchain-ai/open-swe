@@ -8,12 +8,11 @@ from typing import Any
 
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolMessage
-from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from agent.run_config import RunConfig
 from coding_agent.middleware.trace import CodingAgentMiddleware
+from coding_agent.run_config import RunConfig
 from coding_agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
@@ -39,22 +38,6 @@ def _tool_args(request: ToolCallRequest) -> dict[str, Any]:
         if isinstance(args, Mapping):
             return dict(args)
     return {}
-
-
-def _thread_id(request: ToolCallRequest) -> str | None:
-    runtime_config = getattr(getattr(request, "runtime", None), "config", None)
-    config: Mapping[str, Any] | None = (
-        runtime_config if isinstance(runtime_config, Mapping) else None
-    )
-    if config is None:
-        try:
-            maybe_config = get_config()
-        except Exception:
-            return None
-        config = maybe_config if isinstance(maybe_config, Mapping) else None
-    if config is None:
-        return None
-    return RunConfig.from_config(config).thread_id or None
 
 
 def _file_path(args: Mapping[str, Any]) -> str | None:
@@ -143,10 +126,10 @@ class SubdirAgentsReadMiddleware(CodingAgentMiddleware):
         self._loaded: defaultdict[str, set[str]] = defaultdict(set)
 
     def _thread_key(self, request: ToolCallRequest) -> str:
-        return _thread_id(request) or "__unknown_thread__"
+        return RunConfig.from_tool_request(request).thread_id or "__unknown_thread__"
 
     def _backend(self, request: ToolCallRequest) -> Any | None:
-        thread_id = _thread_id(request)
+        thread_id = RunConfig.from_tool_request(request).thread_id
         if not thread_id:
             return None
         return SANDBOX_BACKENDS.get(thread_id)

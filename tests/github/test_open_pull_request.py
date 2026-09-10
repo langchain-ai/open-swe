@@ -99,7 +99,9 @@ def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _Rout
 
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -> None:
-    monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr(
+        "coding_agent.run_config.get_config", lambda: {"configurable": configurable}
+    )
     monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable}, raising=False)
 
 

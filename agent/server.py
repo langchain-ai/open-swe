@@ -45,6 +45,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from agent.background_tasks import BACKGROUND_TASK_MONITOR
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
     load_profile,
@@ -71,40 +72,24 @@ from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
-from agent.input_messages import (
-    SystemIdentity,
-    build_input_messages,
-    dynamic_context_hash,
-    message_sender_id,
-    system_introduction,
-    visible_dynamic_context_hashes,
-)
 from agent.middleware import (
     PullRequestCreationGuardMiddleware,
-    SubdirAgentsReadMiddleware,
-    ToolErrorMiddleware,
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
 )
-from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.sandbox_circuit_breaker import (
+    SANDBOX_FAILURE_NOTIFIER,
+    post_sandbox_unreachable_notification,
+)
 from agent.prompt import (
     construct_sender_context,
     construct_system_prompt,
     render_open_swe_shared_base,
 )
-from agent.run_config import RunConfig
-from agent.runtime.constants import (
-    DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_RECURSION_LIMIT,
-    MODEL_CALL_RECURSION_LIMIT,
-)
-from agent.runtime.constants import (
-    DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
-)
-from agent.runtime.execution import bindable_config, graph_loaded_for_execution
+from agent.run_config import OpenSWERunConfig
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
@@ -115,19 +100,14 @@ from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
 from agent.tools import (
     approve_plan,
-    background_execute,
-    background_task,
     capture_environment_snapshot,
     create_automation,
-    create_sandbox_file_download_url,
-    create_sandbox_service_url,
     delete_automation,
     delete_environment,
     delete_organization_skill,
     delete_user_skill,
     enter_plan_mode,
     get_thread,
-    http_request,
     linear_comment,
     list_automations,
     list_environments,
@@ -138,7 +118,6 @@ from agent.tools import (
     mark_question_answered,
     notify_automation_channel,
     open_pull_request,
-    output_iframe,
     read_user_settings,
     recreate_sandbox,
     report_platform_issue,
@@ -158,7 +137,6 @@ from agent.tools import (
     slack_thread_reply,
     trigger_automation,
     update_automation,
-    web_search,
 )
 from agent.utils.authorship import (
     CollaboratorIdentity,
@@ -172,6 +150,14 @@ from agent.utils.thread_settings import (
     load_thread_settings,
     normalize_thread_settings,
     store_thread_settings,
+)
+from coding_agent.input_messages import (
+    SystemIdentity,
+    build_input_messages,
+    dynamic_context_hash,
+    message_sender_id,
+    system_introduction,
+    visible_dynamic_context_hashes,
 )
 from coding_agent.middleware import (
     BasePrepareRunMiddleware,
@@ -188,7 +174,9 @@ from coding_agent.middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     StableToolResultOrderMiddleware,
+    SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
+    ToolErrorMiddleware,
     task_on_failure,
     task_retry_on,
 )
@@ -200,13 +188,30 @@ from coding_agent.models import (
     model_supports_effort,
 )
 from coding_agent.prompts import apply_tool_descriptions, load_prompt
+from coding_agent.runtime.constants import (
+    DEFAULT_LLM_MAX_TOKENS,
+    DEFAULT_RECURSION_LIMIT,
+    MODEL_CALL_RECURSION_LIMIT,
+)
+from coding_agent.runtime.constants import (
+    DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
+)
+from coding_agent.runtime.execution import bindable_config, graph_loaded_for_execution
 from coding_agent.sandboxes.paths import resolve_sandbox_work_dir
 from coding_agent.sandboxes.read_only_backend import ReadOnlyBackend
 from coding_agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
-from coding_agent.tools import fetch_url
+from coding_agent.tools import (
+    background_tools,
+    create_sandbox_file_download_url,
+    create_sandbox_service_url,
+    fetch_url,
+    http_request,
+    output_iframe,
+    web_search,
+)
 from coding_agent.utils import ttl_cache
 from coding_agent.utils.deferred_model import make_deferred_error_model
 from coding_agent.utils.gateway import gateway_env_default
@@ -266,7 +271,7 @@ def _tool_loader_timeout_seconds() -> float:
     return timeout
 
 
-async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
+async def _resolve_prompt_default_repo(cfg: OpenSWERunConfig) -> dict[str, str] | None:
     if cfg.repo:
         return {"owner": cfg.repo.owner, "name": cfg.repo.name}
 
@@ -454,13 +459,13 @@ ADMIN_TOOLS = (
 )
 
 
-def environment_slug(cfg: RunConfig) -> str | None:
+def environment_slug(cfg: OpenSWERunConfig) -> str | None:
     """The environment this thread selected, if any."""
     return (cfg.environment or "").strip() or None
 
 
 async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
-    cfg = RunConfig.from_config(config)
+    cfg = OpenSWERunConfig.from_config(config)
     login = profile_login or cfg.github_login
     if is_admin(cfg.user_email, login=login):
         return True
@@ -474,7 +479,7 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
     is re-checked here against ``CONFIGURED_ADMINS`` so a thread cannot carry the
     capability to a non-admin who later messages it.
     """
-    return RunConfig.from_config(config).admin_thread is True and await _workspace_admin(
+    return OpenSWERunConfig.from_config(config).admin_thread is True and await _workspace_admin(
         config, profile_login
     )
 
@@ -556,7 +561,7 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
-def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
+def _sandbox_file_downloads_enabled(cfg: OpenSWERunConfig) -> bool:
     """Return whether signed sandbox file downloads are available for this run."""
     return (
         ENV.SANDBOX_TYPE.get() == "langsmith"
@@ -565,7 +570,7 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
     )
 
 
-def _slack_tools_enabled(cfg: RunConfig) -> bool:
+def _slack_tools_enabled(cfg: OpenSWERunConfig) -> bool:
     """Return whether the run has trusted Slack source context."""
     if cfg.source not in {"slack", "schedule"} or cfg.slack_thread is None:
         return False
@@ -620,7 +625,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._admin_environments = admin_environments
 
     def _prepare_config_fingerprint(self) -> Any:
-        cfg = RunConfig.from_config(self._config)
+        cfg = OpenSWERunConfig.from_config(self._config)
         return {
             "prepare_run_id": cfg.prepare_run_id,
             "thread_id": self._thread_id,
@@ -687,7 +692,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
-        cfg = RunConfig.parse(configurable)
+        cfg = OpenSWERunConfig.parse(configurable)
         if is_desktop_run(cfg):
             if cfg.local_project_path:
                 schedule_worktree_branch_rename(
@@ -808,7 +813,7 @@ class DesktopAgentState(FilesystemState, DeepAgentState):
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     configurable = config.get("configurable") or {}
-    cfg = RunConfig.parse(configurable)
+    cfg = OpenSWERunConfig.parse(configurable)
     thread_id = cfg.thread_id
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
@@ -824,7 +829,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
-        _cfg: RunConfig = cfg,
+        _cfg: OpenSWERunConfig = cfg,
     ) -> SandboxBackendProtocol:
         if is_desktop_run(_cfg):
             return create_desktop_backend(_cfg)
@@ -1061,6 +1066,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_start_new_thread,
         slack_thread_reply,
     ]
+    background_execute, background_task = background_tools(BACKGROUND_TASK_MONITOR)
     static_tools = [
         http_request,
         fetch_url,
@@ -1226,7 +1232,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
+                ToolErrorMiddleware(notifier=SANDBOX_FAILURE_NOTIFIER),
                 ExcludeToolsMiddleware(
                     excluded=(
                         STOP_SUMMARY_EXCLUDED_TOOLS

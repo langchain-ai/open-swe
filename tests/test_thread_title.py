@@ -7,12 +7,12 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.input_messages import human_input, person_introduction
 from agent.thread_title import (
     _ThreadTitle,
     generate_and_store_thread_title,
     schedule_thread_title_generation,
 )
+from coding_agent.input_messages import human_input, person_introduction
 
 # Stands in for LangGraph's stream writer, which travels in a contextvar. A title
 # call that sees a non-default value here is running inside the agent run, and
