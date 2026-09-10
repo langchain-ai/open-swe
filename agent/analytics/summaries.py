@@ -1,7 +1,7 @@
 """Correctable versioned daily summaries."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -63,6 +63,8 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
     family = partition["family"]
     workspace_id = partition["workspace_id"]
     partition_date = partition["partition_date"]
+    assert isinstance(partition_date, date)
+    day = datetime.combine(partition_date, time.min, tzinfo=UTC)
     counters: dict[str, int] = {}
     sums: dict[str, float] = {}
     members: list[object] = []
@@ -74,7 +76,7 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
                 ":workspace_id AND opened_at >= :day AND opened_at < :day + interval '1 day' "
                 "GROUP BY current_state"
             ),
-            {"workspace_id": workspace_id, "day": partition_date},
+            {"workspace_id": workspace_id, "day": day},
         )
         counters = {row["current_state"]: int(row["count"]) for row in result.mappings()}
     elif family == "finding_surfaced_cohort":
@@ -84,7 +86,7 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
                 "= :workspace_id AND surfaced_at >= :day AND surfaced_at < :day + interval '1 day' "
                 "GROUP BY current_state"
             ),
-            {"workspace_id": workspace_id, "day": partition_date},
+            {"workspace_id": workspace_id, "day": day},
         )
         counters = {row["current_state"]: int(row["count"]) for row in result.mappings()}
     elif family == "cost_completeness":
@@ -95,7 +97,7 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
                 "(workspace_id, run_id) WHERE r.workspace_id = :workspace_id AND r.started_at >= "
                 ":day AND r.started_at < :day + interval '1 day'"
             ),
-            {"workspace_id": workspace_id, "day": partition_date},
+            {"workspace_id": workspace_id, "day": day},
         )
         row = result.mappings().one()
         counters = {"runs": int(row["runs"]), "known_cost_runs": int(row["known"])}
@@ -106,7 +108,7 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
                 "SELECT DISTINCT user_id FROM run_projection WHERE workspace_id = :workspace_id AND "
                 "started_at >= :day AND started_at < :day + interval '1 day' AND user_id IS NOT NULL"
             ),
-            {"workspace_id": workspace_id, "day": partition_date},
+            {"workspace_id": workspace_id, "day": day},
         )
         members = [row[0] for row in result]
     elif family == "latency_histogram":
@@ -116,7 +118,7 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
                 "finding_projection WHERE workspace_id = :workspace_id AND surfaced_at >= :day "
                 "AND surfaced_at < :day + interval '1 day' AND resolved_at >= surfaced_at"
             ),
-            {"workspace_id": workspace_id, "day": partition_date},
+            {"workspace_id": workspace_id, "day": day},
         )
         for row in result:
             latency = float(row[0])
@@ -131,7 +133,7 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
                 "SELECT event_name, count(*) AS count FROM events WHERE workspace_id = :workspace_id "
                 "AND occurred_at >= :day AND occurred_at < :day + interval '1 day' GROUP BY event_name"
             ),
-            {"workspace_id": workspace_id, "day": partition_date},
+            {"workspace_id": workspace_id, "day": day},
         )
         counters = {row["event_name"]: int(row["count"]) for row in result.mappings()}
     watermark = await conn.scalar(

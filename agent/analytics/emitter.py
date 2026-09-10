@@ -359,6 +359,7 @@ async def finding_transition(
     *,
     thread_key: str,
     finding_key: str,
+    head_sha: str,
     owner: str,
     repo: str,
     number: int,
@@ -380,6 +381,7 @@ async def finding_transition(
             FindingSurfacedPayload(severity=severity, category=category or "unknown"),
             source="github",
             finding_id=finding_id,
+            review_id=opaque_id("review", f"{thread_key}:{head_sha}"),
             pr_id=pr_id,
             repository_id=repository_id,
         )

@@ -1,10 +1,10 @@
 """Idempotent ingestion, projection, and summary invalidation."""
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import BigInteger, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.analytics.database import transaction
@@ -56,6 +56,13 @@ async def ingest(event: EventEnvelope) -> bool:
     if event.occurred_at < _epoch():
         raise ValueError("event occurred before the configured analytics epoch")
     async with transaction() as conn:
+        subject_id = event.finding_id or event.pr_id
+        if subject_id is not None:
+            # Serialize creation and outcomes even before a projection row exists.
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),
+                {"subject": f"analytics:{event.workspace_id}:{subject_id}"},
+            )
         inserted = await conn.scalar(
             _INSERT_ID, {"event_id": event.event_id, "occurred_at": event.occurred_at}
         )
@@ -126,7 +133,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
     elif name in {EventName.RUN_COMPLETED, EventName.RUN_FAILED, EventName.RUN_CANCELED}:
         await _project_run_terminal(conn, event)
     elif name == EventName.RUN_COST_RECORDED:
-        payload = event.payload.model_dump(mode="json")
+        payload = event.payload.model_dump()
         await conn.execute(
             text(
                 """
@@ -190,6 +197,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "repository_private": payload.get("repository_private"),
             },
         )
+        await _reconcile_outcomes(conn, event)
     elif name == EventName.PR_RUN_LINKED:
         await conn.execute(
             text(
@@ -292,7 +300,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "AND ((:source_version IS NOT NULL AND (source_version IS NULL OR :source_version > source_version)) "
                 "OR (:source_version IS NULL AND source_version IS NULL AND "
                 "(outcome_at IS NULL OR :occurred_at >= outcome_at)))"
-            ),
+            ).bindparams(bindparam("source_version", type_=BigInteger)),
             {
                 "state": state,
                 "occurred_at": event.occurred_at,
@@ -338,6 +346,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "occurred_at": event.occurred_at,
             },
         )
+        await _reconcile_outcomes(conn, event)
     elif name in {
         EventName.FINDING_RESOLVED,
         EventName.FINDING_DISMISSED,
@@ -359,7 +368,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "((:source_version IS NOT NULL AND (source_version IS NULL OR :source_version > source_version)) "
                 "OR (:source_version IS NULL AND source_version IS NULL AND "
                 "(latest_occurred_at IS NULL OR :occurred_at > latest_occurred_at)))"
-            ),
+            ).bindparams(bindparam("source_version", type_=BigInteger)),
             {
                 "state": state,
                 "occurred_at": event.occurred_at,
@@ -368,6 +377,33 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "finding_id": event.finding_id,
             },
         )
+
+
+async def _reconcile_outcomes(conn: AsyncConnection, event: EventEnvelope) -> None:
+    if event.event_name == EventName.PR_OPENED:
+        subject_column = "pr_id"
+        names = [EventName.PR_MERGED, EventName.PR_CLOSED_WITHOUT_MERGE, EventName.PR_REOPENED]
+    else:
+        subject_column = "finding_id"
+        names = [
+            EventName.FINDING_RESOLVED,
+            EventName.FINDING_DISMISSED,
+            EventName.FINDING_REOPENED,
+        ]
+    result = await conn.execute(
+        text(
+            f"SELECT * FROM events WHERE workspace_id = :workspace_id AND {subject_column} = "
+            ":subject_id AND event_name = ANY(:names) "
+            "ORDER BY source_version ASC NULLS FIRST, occurred_at, event_id"
+        ),
+        {
+            "workspace_id": event.workspace_id,
+            "subject_id": getattr(event, subject_column),
+            "names": [name.value for name in names],
+        },
+    )
+    for row in result.mappings():
+        await _project(conn, EventEnvelope.model_validate(dict(row)))
 
 
 async def _project_run_terminal(conn: AsyncConnection, event: EventEnvelope) -> None:
@@ -468,7 +504,7 @@ def _identity_params(event: EventEnvelope) -> dict[str, UUID | None]:
 async def _mark_dirty(conn: AsyncConnection, event: EventEnvelope) -> None:
     version = ENV.ANALYTICS_SUMMARY_VERSION.get_int(1)
     families = {"additive", "distinct_membership"}
-    dates = {event.occurred_at.date()}
+    dates = {event.occurred_at.astimezone(UTC).date()}
     if event.pr_id is not None:
         families.add("pr_open_cohort")
         opened_at = await conn.scalar(
@@ -478,7 +514,7 @@ async def _mark_dirty(conn: AsyncConnection, event: EventEnvelope) -> None:
             {"workspace_id": event.workspace_id, "pr_id": event.pr_id},
         )
         if opened_at is not None:
-            dates.add(opened_at.date())
+            dates.add(opened_at.astimezone(UTC).date())
     if event.finding_id is not None:
         families.update({"finding_surfaced_cohort", "latency_histogram"})
         surfaced_at = await conn.scalar(
@@ -489,9 +525,18 @@ async def _mark_dirty(conn: AsyncConnection, event: EventEnvelope) -> None:
             {"workspace_id": event.workspace_id, "finding_id": event.finding_id},
         )
         if surfaced_at is not None:
-            dates.add(surfaced_at.date())
+            dates.add(surfaced_at.astimezone(UTC).date())
     if event.event_name in {EventName.RUN_STARTED, EventName.RUN_COST_RECORDED}:
         families.add("cost_completeness")
+        started_at = await conn.scalar(
+            text(
+                "SELECT started_at FROM run_projection WHERE workspace_id = :workspace_id "
+                "AND run_id = :run_id"
+            ),
+            {"workspace_id": event.workspace_id, "run_id": event.run_id},
+        )
+        if started_at is not None:
+            dates.add(started_at.astimezone(UTC).date())
     for family in families:
         for partition_date in dates:
             await conn.execute(

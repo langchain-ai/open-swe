@@ -152,7 +152,9 @@ async def reviewer_stats(start: datetime) -> dict[str, Any]:
         result = await conn.execute(
             text(
                 """
-                SELECT count(DISTINCT review_id) AS reviewed_prs,
+                SELECT (SELECT count(DISTINCT pr_id) FROM review_projection
+                        WHERE workspace_id = :workspace_id AND published_at >= :start) AS reviewed_prs,
+                       count(DISTINCT pr_id) AS prs_with_findings,
                        count(*) AS surfaced_findings,
                        count(*) FILTER (WHERE current_state = 'resolved') AS resolved,
                        count(*) FILTER (WHERE current_state = 'dismissed') AS dismissed,
@@ -169,7 +171,7 @@ async def reviewer_stats(start: datetime) -> dict[str, Any]:
     return {
         "period": "custom",
         "reviewed_prs": int(row["reviewed_prs"] or 0),
-        "prs_with_findings": int(row["reviewed_prs"] or 0),
+        "prs_with_findings": int(row["prs_with_findings"] or 0),
         "findings_recorded": surfaced,
         "surfaced_findings": surfaced,
         "addressed_findings": resolved,
