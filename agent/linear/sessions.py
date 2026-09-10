@@ -44,6 +44,7 @@ from agent.linear.schema import (
     LinearUser,
     ThoughtContent,
 )
+from agent.prompts import load_prompt, render_prompt
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -68,14 +69,7 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_SENDER_ID = "system:linear-issue"
 
-_PR_CONVENTIONS = (
-    "Please analyze this issue and implement the necessary changes. "
-    "If you open a PR for this issue, make sure the PR description links back to "
-    "this Linear ticket and follows this repository's PR conventions for the title, body, "
-    "release note, and/or changelog. Inspect AGENTS.md, PR templates, "
-    ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
-    "When you're done, commit and push your changes."
-)
+_PR_CONVENTIONS = load_prompt("runs/linear-pr-conventions.md")
 
 _PICKUP_THOUGHT = "Picking this up — resolving the repository and starting a workspace."
 _FOLLOW_UP_THOUGHT = "Got it — picking that up now."
@@ -257,15 +251,16 @@ def system_text(
 
     triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
     ticket_url_line = f"## Linear Ticket URL: {issue.url}\n\n" if issue.url else ""
-    return (
-        "Please work on the following issue:\n\n"
-        f"## Repository: {repo_config['owner']}/{repo_config['name']}\n\n"
-        f"## Title: {issue.title or 'No title'}\n\n"
-        f"{triggered_by_line}"
-        f"## Linear Ticket: {issue.identifier or ''} - Ticket ID: {issue.id}\n\n"
-        f"{ticket_url_line}"
-        f"## Description:\n{issue.description or 'No description'}\n\n"
-        f"{conventions}"
+    return render_prompt(
+        "runs/linear-issue.md",
+        repository=f"{repo_config['owner']}/{repo_config['name']}",
+        title=issue.title or "No title",
+        triggered_by_line=triggered_by_line,
+        identifier=issue.identifier or "",
+        issue_id=issue.id,
+        ticket_url_line=ticket_url_line,
+        description=issue.description or "No description",
+        conventions=conventions,
     )
 
 

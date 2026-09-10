@@ -4,6 +4,7 @@ type PublicEnv = Record<string, string | boolean | undefined>
 type RumClient = {
   init: (configuration: RumInitConfiguration) => void
   getInternalContext: () => { session_id?: string } | undefined
+  addAction?: (name: string, context?: Record<string, unknown>) => void
 }
 type RumLoader = () => Promise<RumClient>
 
@@ -40,6 +41,14 @@ export function getDatadogSessionLink(): string | undefined {
   if (!sessionId) return undefined
   const query = encodeURIComponent(`@session.id:${sessionId}`)
   return `${datadogAppOrigin(initializedSite)}/rum/explorer?query=${query}&tab=session`
+}
+
+/** Record a custom RUM action; a no-op until RUM is initialized. */
+export function trackDatadogAction(
+  name: string,
+  context?: Record<string, unknown>
+): void {
+  initializedRum?.addAction?.(name, context)
 }
 
 export function isDatadogRumInitialized(): boolean {

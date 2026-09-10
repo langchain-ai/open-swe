@@ -591,7 +591,9 @@ export function AgentsSidebar({
           to: "/agents",
           search: group.repoFullName
             ? { repo: group.repoFullName }
-            : { localProject: group.localProjectPath },
+            : group.localProjectPath
+              ? { localProject: group.localProjectPath }
+              : { noProject: true },
         })
       }}
       onTogglePin={() => toggleProjectPin(group.key)}
@@ -1210,8 +1212,10 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const pinThread = usePinAgentThread()
-  const resolveThread = useResolveAgentThread()
+  // `useMutation` returns a fresh object every render; only `mutate` is stable,
+  // and an unstable command array re-registers on every commit.
+  const pinThread = usePinAgentThread().mutate
+  const resolveThread = useResolveAgentThread().mutate
   const pinnedThreads = useSidebarPinnedThreads({
     enabled: Boolean(activeThreadId),
   })
@@ -1261,7 +1265,7 @@ export function AgentsShell({
         shortcuts: ["mod+shift+p"],
         group: "Thread",
         run: () =>
-          pinThread.mutate({
+          pinThread({
             threadId: activeThread.id,
             pinned: !pinnedThreads.data?.some(
               (thread) => thread.id === activeThread.id
@@ -1275,7 +1279,7 @@ export function AgentsShell({
         shortcuts: ["mod+shift+s"],
         group: "Thread",
         run: () =>
-          resolveThread.mutate({
+          resolveThread({
             threadId: activeThread.id,
             resolved: !activeThread.resolved,
           }),

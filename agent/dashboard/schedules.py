@@ -18,6 +18,8 @@ from agent.dashboard.threads.access import agent_version_metadata, resolve_run_e
 from agent.dashboard.user_mappings import slack_id_for_login
 from agent.dispatch import create_durable_run
 from agent.input_messages import InputMessageContext, build_run_input
+from agent.invocation import new_invocation_id, with_invocation_id
+from agent.prompts import render_prompt
 from agent.slack.client import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
@@ -433,24 +435,14 @@ def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> st
 def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | None) -> str:
     prompt = str(record["prompt"])
     if slack_thread:
-        return (
-            f"{prompt}\n\n"
-            "Use `slack_thread_reply` for clarifying questions, essential progress updates, "
-            "the pull request link, and the final outcome in the connected Slack thread."
-        )
+        return render_prompt("runs/scheduled-slack-thread.md", prompt=prompt)
     slack_channel_id = record.get("slack_channel_id")
     if (
         _slack_notification_mode(record) == "on_action"
         and isinstance(slack_channel_id, str)
         and slack_channel_id
     ):
-        return (
-            f"{prompt}\n\n"
-            "This automation uses conditional Slack notifications. If and only if you perform "
-            "a concrete requested action, such as changing code or updating an external system, "
-            "call `notify_automation_channel` exactly once with a concise final outcome. Do not "
-            "call it for read-only checks or when no action was needed."
-        )
+        return render_prompt("runs/scheduled-notify-on-action.md", prompt=prompt)
     return prompt
 
 
@@ -512,15 +504,17 @@ async def _agent_run_config(
     test_run: bool = False,
     admin_thread: bool = False,
 ) -> dict[str, Any]:
-    configurable: dict[str, Any] = {
-        "thread_id": thread_id,
-        "source": "schedule",
-        "github_login": record.get("created_by"),
-        "user_email": record.get("user_email"),
-        "schedule_id": record["id"],
-        "schedule_test": test_run,
-        "prepare_run_id": str(uuid.uuid4()),
-    }
+    configurable = with_invocation_id(
+        {
+            "thread_id": thread_id,
+            "source": "schedule",
+            "github_login": record.get("created_by"),
+            "user_email": record.get("user_email"),
+            "schedule_id": record["id"],
+            "schedule_test": test_run,
+        },
+        new_invocation_id(),
+    )
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     if repo and repo.get("owner") and repo.get("name"):
         configurable["repo"] = repo

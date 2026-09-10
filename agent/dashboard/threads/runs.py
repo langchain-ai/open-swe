@@ -43,6 +43,7 @@ from agent.input_messages import (
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
 )
+from agent.invocation import new_invocation_id, with_invocation_id
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -267,7 +268,11 @@ async def _create_dashboard_thread_record(
         metadata["repo_explicitly_none"] = True
 
     client = langgraph_client()
-    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
+    await client.threads.create(
+        thread_id=thread_id,
+        metadata={**metadata, "feedback_initiator_login": login},
+        if_exists="do_nothing",
+    )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     thread = await client.threads.get(thread_id)
     return as_thread_dict(thread)
@@ -439,8 +444,8 @@ async def _enrich_run_start_command(
     plan_mode_requested = client_configurable.get("plan_mode") is True
     content = _command_message_content(params)
     command_images = _dashboard_images_from_content(content)
-    prepare_run_id = str(uuid.uuid4())
-    overrides: dict[str, Any] = {"prepare_run_id": prepare_run_id}
+    invocation_id = new_invocation_id()
+    overrides = with_invocation_id(None, invocation_id)
     run_model: str | None = None
     run_effort: str | None = None
 
@@ -577,6 +582,7 @@ async def _enrich_run_start_command(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     metadata_update["updated_at_ms"] = _now_ms()
+    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(client, thread_id):
@@ -610,11 +616,7 @@ async def _enrich_run_start_command(
     run_metadata = params.get("metadata")
     if not isinstance(run_metadata, dict):
         run_metadata = {}
-    run_metadata = {
-        **run_metadata,
-        **agent_version_metadata(),
-        "prepare_run_id": prepare_run_id,
-    }
+    run_metadata = with_invocation_id({**run_metadata, **agent_version_metadata()}, invocation_id)
 
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))

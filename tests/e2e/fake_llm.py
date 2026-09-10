@@ -568,7 +568,10 @@ ENVIRONMENT_NAME = "default"
 ENVIRONMENT_PROMPT = (
     "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
 )
-ENVIRONMENT_PROVISION_SCRIPT = "mkdir -p repos && echo provisioned > repos/.provisioned && ls repos"
+ENVIRONMENT_SETUP_SCRIPT = (
+    "set -euo pipefail\nmkdir -p repos && echo provisioned > repos/.provisioned && ls -a repos"
+)
+ENVIRONMENT_UPDATE_SCRIPT = "echo refreshed >> repos/.provisioned"
 
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
@@ -623,6 +626,23 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
     if not isinstance(thread_id, str):
         raise ValueError("get_thread did not return the target thread")
     return thread_id
+
+
+def _environment_poll_step(messages: list[BaseMessage]) -> AIMessage:
+    """Follow the reproducibility rebuild through the one poll tool."""
+    task_id = _tool_payload(messages, "refresh_environment_start").get("task_id")
+    if not isinstance(task_id, str):
+        raise ValueError("refresh_environment_start did not return a task id")
+    return AIMessage(
+        content="Following the rebuild.",
+        tool_calls=[
+            {
+                "name": "background_task",
+                "args": {"action": "status", "task_id": task_id},
+                "id": "call-env-poll",
+            }
+        ],
+    )
 
 
 def _list_threads_step(_messages: list[BaseMessage]) -> AIMessage:
@@ -1021,28 +1041,33 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         StepSpec(content="I'll wait for your review and approval before implementing."),
     ),
     "environment": (
+        # Build here, with ordinary tools, then publish this sandbox as the image.
         _tool_step(
-            "Provisioning this sandbox before capturing it.",
+            "Provisioning this sandbox.",
             "execute",
-            {"command": ENVIRONMENT_PROVISION_SCRIPT},
+            {"command": ENVIRONMENT_SETUP_SCRIPT},
             "call-env-provision",
         ),
         _tool_step(
-            "Saving the environment record.",
-            "save_environment",
+            "Publishing this sandbox as the environment.",
+            "publish_environment",
             {
                 "name": ENVIRONMENT_NAME,
                 "prompt": ENVIRONMENT_PROMPT,
+                "setup_script": ENVIRONMENT_SETUP_SCRIPT,
+                "update_script": ENVIRONMENT_UPDATE_SCRIPT,
                 "repos": [f"{OWNER}/{REPO}"],
             },
-            "call-env-save",
+            "call-env-publish",
         ),
+        # Then prove the script reproduces it, the way the nightly cron will.
         _tool_step(
-            "Capturing this sandbox as the environment snapshot.",
-            "capture_environment_snapshot",
+            "Checking the setup script reproduces the image.",
+            "refresh_environment_start",
             {"name": ENVIRONMENT_NAME},
-            "call-env-capture",
+            "call-env-refresh",
         ),
+        _dynamic_step(_environment_poll_step),
         StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
     ),
     "followup": (_dynamic_step(_followup_step),),

@@ -17,6 +17,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.prompts import load_prompt, render_prompt
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
@@ -49,22 +50,16 @@ def build_github_issue_prompt(
     formatted_body = common.format_github_comment_body_for_prompt(
         issue_author or github_login, body
     )
-    return (
-        "Please work on the following GitHub issue:\n\n"
-        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"{triggered_by_line}"
-        f"## GitHub Issue: #{issue_number} - Issue ID: {issue_id}\n\n"
-        f"{issue_url_line}"
-        f"## Title: {sanitized_title}\n\n"
-        f"## Description:\n{formatted_body}\n"
-        f"{comments_text}\n\n"
-        "Please analyze this issue and implement the necessary changes. "
-        "If you open a PR for this issue, make sure the PR description links back to "
-        "this issue and follows this repository's PR conventions for the title, body, "
-        "release note, and/or changelog. Inspect AGENTS.md, PR templates, "
-        ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
-        "When you need to communicate on GitHub, use `gh issue comment` "
-        "with the issue number."
+    return render_prompt(
+        "runs/github-issue.md",
+        repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
+        triggered_by_line=triggered_by_line,
+        issue_number=issue_number,
+        issue_id=issue_id,
+        issue_url_line=issue_url_line,
+        title=sanitized_title,
+        body=formatted_body,
+        comments=comments_text,
     )
 
 
@@ -92,10 +87,7 @@ def build_github_pr_review_prompt(
     head_sha: str,
 ) -> str:
     """Build the reviewer instruction text; PR metadata is serialized separately."""
-    return (
-        "Please review this GitHub pull request. Submit findings as inline GitHub review "
-        "comments. If there are no real issues, submit no comments."
-    )
+    return load_prompt("runs/github-pr-review.md")
 
 
 def _github_person(login: str, user_id: object = None) -> PersonIdentity:

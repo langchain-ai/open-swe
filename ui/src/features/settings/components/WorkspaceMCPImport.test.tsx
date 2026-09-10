@@ -6,6 +6,58 @@ import { parseMCPConfig, WorkspaceMCPImport } from "./WorkspaceMCPImport"
 
 afterEach(cleanup)
 
+it("imports OAuth client credentials without changing opaque secrets or scopes", () => {
+  const oauth = {
+    grant_type: "client_credentials",
+    token_url: "https://api.linear.app/oauth/token",
+    client_id: "test-app",
+    client_secret: " test-secret ",
+    scope: "read,write",
+  }
+  expect(
+    parseMCPConfig(
+      JSON.stringify({
+        mcpServers: {
+          linear: { url: "https://mcp.linear.app/mcp", oauth },
+        },
+      })
+    )[0]?.oauth
+  ).toEqual(oauth)
+})
+
+it.each([
+  {
+    client_id: "app",
+    token_url: "http://example.com/token",
+    client_secret: "test-secret",
+  },
+  {
+    client_id: "app",
+    token_url: "https://example.com/token",
+    client_secret: { value: "test-secret" },
+  },
+  {
+    client_id: "app",
+    token_url: "https://example.com/token",
+    client_secret: "${test-secret}",
+  },
+  {
+    client_id: "app",
+    token_url: "https://example.com/token",
+    grant_type: "authorization_code",
+  },
+])("rejects unsupported OAuth settings without including secrets", (oauth) => {
+  expect(() =>
+    parseMCPConfig(
+      JSON.stringify({
+        mcpServers: {
+          linear: { url: "https://mcp.linear.app/mcp", oauth },
+        },
+      })
+    )
+  ).toThrow(/OAuth/)
+})
+
 it("imports multiple remote Claude-style servers with headers and transports", () => {
   expect(
     parseMCPConfig(

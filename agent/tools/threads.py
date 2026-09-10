@@ -16,7 +16,7 @@ from langgraph.prebuilt import InjectedState
 from agent.dashboard import plan_api, workflow_approval_api
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import resolve_login_from_email_async
-from agent.dashboard.oauth import enforce_org_login_gate
+from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.plan_store import get_plan_content, list_plan_comments
 from agent.dashboard.threads.api import (
@@ -36,6 +36,7 @@ from agent.dashboard.workflow_approval import (
     workflow_push_approval_responses,
 )
 from agent.input_messages import input_message_text, message_sender_id
+from agent.invocation import resolve_invocation_id
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.utils.dashboard_links import (
@@ -122,7 +123,7 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         login = current_login
         email = None
     try:
-        await enforce_org_login_gate(login)
+        await enforce_github_login_gate(login)
     except HTTPException:
         return None
     return _Actor(login=login, email=email, name=login)
@@ -225,7 +226,7 @@ async def list_threads(
     admin_threads: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """List surfaced threads by locator, participant, admin mode, status, source, or text."""
+    """Implement the `list_threads` tool."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -492,21 +493,25 @@ def _run_history(runs: list[Any]) -> dict[str, Any]:
     }
 
 
-def _run_prepare_id(run: Any) -> str | None:
+def _run_invocation_id(run: Any) -> str | None:
     metadata = _value(run, "metadata")
-    value = metadata.get("prepare_run_id") if isinstance(metadata, Mapping) else None
-    return value if isinstance(value, str) and value else None
+    if not isinstance(metadata, Mapping):
+        return None
+    try:
+        return resolve_invocation_id(metadata)
+    except ValueError:
+        return None
 
 
 async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
     run_detail = _run_detail(run)
     if run_detail and run_detail.get("status") in {"pending", "running"}:
         return {"status": "pending", "total_usd": None}
-    prepare_run_id = _run_prepare_id(run)
-    if not prepare_run_id:
+    invocation_id = _run_invocation_id(run)
+    if not invocation_id:
         return {"status": "unavailable", "total_usd": None}
     try:
-        snapshot = await get_langsmith_thread_cost(thread_id, prepare_run_id)
+        snapshot = await get_langsmith_thread_cost(thread_id, invocation_id)
     except LangSmithCostUnavailable:
         return {"status": "unavailable", "total_usd": None}
     except Exception:
@@ -694,7 +699,7 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Inspect a thread from its ID, dashboard/Slack/LangSmith URL, or LangSmith run ID."""
+    """Implement the `get_thread` tool."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -930,7 +935,7 @@ async def manage_thread(
     plan_mode: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Perform a dashboard-equivalent action on an Open SWE thread."""
+    """Implement the `manage_thread` tool."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
