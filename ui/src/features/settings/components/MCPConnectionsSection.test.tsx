@@ -236,13 +236,14 @@ it("validates the connection name before saving and discovering tools", async ()
   client.clear()
 })
 
-it("saves generic authentication, discovers tools, and enables only selected tools", async () => {
+it("saves personal authentication, discovers tools, and enables only selected tools", async () => {
   let connection: MCPConnection | null = null
   const writes: MCPConnectionUpdate[] = []
   const discoveries: MCPConnectionUpdate[] = []
   const operations: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
+    expect(url).toContain("/my-mcps")
     let result: unknown
     if (url.endsWith("/discover")) {
       operations.push("discover")
@@ -283,7 +284,7 @@ it("saves generic authentication, discovers tools, and enables only selected too
   })
   render(
     <QueryClientProvider client={client}>
-      <MCPConnectionsSection scope="workspace" />
+      <MCPConnectionsSection scope="user" />
     </QueryClientProvider>
   )
   const add = screen.getByRole("button", { name: "Add MCP server" })
@@ -690,54 +691,4 @@ it("reviews imported connections one at a time without writing on import or skip
     )
   ).toBe(false)
   client.clear()
-})
-
-it("manages personal connections through the my-mcps endpoints", async () => {
-  let connection: MCPConnection | null = null
-  const requests: string[] = []
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    requests.push(`${init?.method ?? "GET"} ${String(input)}`)
-    if (init?.method === "PUT") {
-      const update = JSON.parse(String(init.body)) as MCPConnectionUpdate
-      connection = {
-        ...update,
-        oauth: null,
-        header_names: [],
-        revision: "v1",
-        updated_at: "now",
-      }
-      return new Response(JSON.stringify(connection))
-    }
-    return new Response(JSON.stringify(connection ? [connection] : []))
-  })
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  render(
-    <QueryClientProvider client={client}>
-      <MCPConnectionsSection scope="user" />
-    </QueryClientProvider>
-  )
-  screen.getByRole("heading", { name: "Personal MCPs" })
-  const add = screen.getByRole("button", { name: "Add MCP server" })
-  await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false))
-  fireEvent.click(add)
-  fireEvent.change(screen.getByLabelText("Connection name"), {
-    target: { value: "linear" },
-  })
-  fireEvent.change(screen.getByLabelText("Server URL"), {
-    target: { value: "https://mcp.linear.app/mcp" },
-  })
-  fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
-  await screen.findByRole("button", { name: "Edit linear" })
-  expect(requests.some((request) => request.endsWith("/my-mcps"))).toBe(true)
-  expect(
-    requests.some(
-      (request) =>
-        request.startsWith("PUT ") && request.endsWith("/my-mcps/linear")
-    )
-  ).toBe(true)
-  expect(requests.some((request) => request.includes("workspace-mcps"))).toBe(
-    false
-  )
 })

@@ -73,6 +73,7 @@ from agent.dashboard.team_settings import (
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
+from agent.dashboard.threads.summary import thread_is_owner
 from agent.dashboard.user_mappings import email_for_login
 from agent.dashboard.user_mcps import user_mcp_source
 from agent.dashboard.workspace_mcps import workspace_mcp_source
@@ -494,12 +495,7 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
 
 
 async def _personal_tools_allowed(thread_id: str | None, profile_login: str | None) -> bool:
-    """Whether this run may load the triggering user's personal integrations.
-
-    Personal credentials are confined to private threads: exactly one owner can
-    prompt them, so nobody else can steer a run that acts with those credentials.
-    Anything less than a private thread owned by the triggering user fails closed.
-    """
+    """Allow personal integrations only in the triggering user's private thread."""
     if not thread_id or not profile_login:
         return False
     try:
@@ -508,12 +504,7 @@ async def _personal_tools_allowed(thread_id: str | None, profile_login: str | No
         logger.debug("Could not read thread visibility", extra={"thread": thread_id}, exc_info=True)
         return False
     metadata = thread_metadata(thread)
-    owner = metadata.get("owner_login")
-    return (
-        metadata.get("visibility") == "private"
-        and isinstance(owner, str)
-        and owner.strip().lower() == profile_login.strip().lower()
-    )
+    return metadata.get("visibility") == "private" and thread_is_owner(metadata, profile_login)
 
 
 async def _notion_tools_for(thread_id: str | None, profile_login: str | None) -> list[Any]:
@@ -527,11 +518,7 @@ async def _notion_tools_for(thread_id: str | None, profile_login: str | None) ->
 
 
 async def _mcp_tools_for(thread_id: str | None, profile_login: str | None) -> list[Any]:
-    """Workspace MCPs for every run, plus personal MCPs inside the owner's private thread.
-
-    A personal connection with the same name as a workspace one replaces it entirely
-    for that user's runs.
-    """
+    """Load workspace MCPs with personal overrides only in the owner's private thread."""
     sources = [workspace_mcp_source]
     if profile_login and await _personal_tools_allowed(thread_id, profile_login):
         sources.append(user_mcp_source(profile_login))
