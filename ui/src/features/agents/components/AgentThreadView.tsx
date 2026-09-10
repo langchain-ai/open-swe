@@ -336,6 +336,7 @@ export function AgentThreadView({
               streamIsLoading={stream.isLoading}
               scrollControlRef={scrollControlRef}
               isThinking={isThinking}
+              isOffloading={stream.isOffloading}
               settingUpSandbox={settingUpSandbox}
               pollWorkflowApprovalsWhileActive={isStreaming}
               contentWidthClass="max-w-3xl"
@@ -371,6 +372,7 @@ export function AgentThreadView({
                     : "Only workspace admins can send messages in this thread"
                 }
                 autoFocus={autoFocusComposer}
+                canOffload={!isStreaming}
                 compact
                 disabled={!canPost}
                 busy={isStreaming}

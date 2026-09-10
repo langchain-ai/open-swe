@@ -112,6 +112,7 @@ from agent.middleware import (
     task_on_failure,
     task_retry_on,
 )
+from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
@@ -406,6 +407,7 @@ def _general_purpose_subagent(
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
     sandbox_file_downloads: bool = False,
+    offloading: ConversationOffloadingMiddleware | None = None,
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -421,7 +423,10 @@ def _general_purpose_subagent(
         + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
-        "middleware": _subagent_middleware(dynamic_tools),
+        "middleware": [
+            *_subagent_middleware(dynamic_tools),
+            *([offloading] if offloading else []),
+        ],
     }
     if skills:
         subagent["skills"] = skills
@@ -1197,6 +1202,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 skills=skill_sources,
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
+                offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
             ),
         ],
         skills=skill_sources,
@@ -1205,6 +1211,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                ConversationOffloadingMiddleware(
+                    main_model, agent_backend, manual=cfg.offload_conversation is True
+                ),
                 PrepareAgentRunMiddleware(
                     thread_id=thread_id,
                     config=config,
