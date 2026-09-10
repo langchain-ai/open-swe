@@ -69,7 +69,7 @@ from agent.dashboard.oauth import (
     decode_terminal_ticket,
     desktop_callback_url,
     desktop_handoff_from_state,
-    enforce_org_login_gate,
+    enforce_github_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
@@ -553,7 +553,7 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
-    await enforce_org_login_gate(login)
+    await enforce_github_login_gate(login)
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
@@ -2449,7 +2449,7 @@ async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"])
+    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"], email=_admin.get("email"))
 
 
 @router.delete("/threads/{thread_id}")

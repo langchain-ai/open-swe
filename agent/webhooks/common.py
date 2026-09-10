@@ -675,8 +675,11 @@ async def upsert_agent_thread_metadata(
     environment: str | None = None,
     visibility: str = "public",
     owner_login: str = "",
-) -> None:
+) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
+
+    Returns whether the write succeeded; callers creating private threads must
+    not dispatch a run when it did not.
 
     Webhook-triggered runs only pass ``source``/``github_login`` through the run
     config; the Agents UI lists threads by thread *metadata*, so we mirror the
@@ -771,8 +774,10 @@ async def upsert_agent_thread_metadata(
                 await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
         else:
             await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+        return True
     except Exception:  # noqa: BLE001
         logger.exception("Failed to persist owner metadata for thread %s", thread_id)
+        return False
 
 
 async def get_slack_repo_config(
