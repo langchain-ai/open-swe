@@ -215,7 +215,6 @@ __all__ = [
     "store_current_reviewer_run_id",
     "thread_exists",
     "trigger_or_queue_run",
-    "upsert_slack_thread_repo_metadata",
     "append_finding_interaction",
     "build_pr_prompt",
     "claim_slack_event",
@@ -479,32 +478,6 @@ async def enforce_public_repo_org_gate(
     return _PUBLIC_REPO_GATE_REJECTION
 
 
-async def upsert_slack_thread_repo_metadata(
-    thread_id: str, repo_config: dict[str, str], langgraph_client: LangGraphClient
-) -> None:
-    """Persist the selected repo config on the thread metadata."""
-    try:
-        await langgraph_client.threads.update(thread_id=thread_id, metadata={"repo": repo_config})
-    except Exception as exc:  # noqa: BLE001
-        if is_not_found_error(exc):
-            try:
-                await langgraph_client.threads.create(
-                    thread_id=thread_id,
-                    if_exists="do_nothing",
-                    metadata={"repo": repo_config},
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Failed to create Slack thread %s while persisting repo metadata",
-                    thread_id,
-                )
-            return
-        logger.exception(
-            "Failed to persist Slack thread repo metadata for thread %s",
-            thread_id,
-        )
-
-
 def _existing_slack_permalink(
     existing_metadata: dict[str, Any], channel_id: str, thread_ts: str
 ) -> str | None:
@@ -554,12 +527,17 @@ async def upsert_agent_thread_metadata(
     title: str = "",
     source_context: SourceContext | None = None,
     environment: str | None = None,
-) -> None:
+    visibility: str = "public",
+    owner_login: str = "",
+) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
+
+    Returns whether the write succeeded so private-thread callers can fail closed.
 
     Webhook-triggered runs only pass ``source``/``github_login`` through the run
     config; the Agents UI lists threads by thread *metadata*, so we mirror the
-    sender onto the thread's participants here.
+    sender onto the thread's participants here. ``visibility`` and ``owner_login``
+    are stamped once, when the thread is created, and never changed afterwards.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
     category = "interactive"
@@ -621,6 +599,15 @@ async def upsert_agent_thread_metadata(
     elif source == "slack" and "title" in metadata:
         metadata["title_seed"] = metadata["title"]
 
+    # A helper may have pre-created a bare stub this request; it still needs the
+    # creation stamps. Legacy threads carry created_at_ms and are left alone.
+    if existing is None or (
+        "visibility" not in existing_meta and existing_meta.get("created_at_ms") is None
+    ):
+        metadata["visibility"] = visibility
+        if owner_login.strip():
+            metadata["owner_login"] = owner_login.strip().lower()
+
     try:
         if existing is None:
             await langgraph_client.threads.create(
@@ -640,8 +627,10 @@ async def upsert_agent_thread_metadata(
                 await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
         else:
             await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+        return True
     except Exception:  # noqa: BLE001
         logger.exception("Failed to persist owner metadata for thread %s", thread_id)
+        return False
 
 
 async def get_slack_repo_config(

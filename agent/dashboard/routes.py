@@ -69,7 +69,7 @@ from agent.dashboard.oauth import (
     decode_terminal_ticket,
     desktop_callback_url,
     desktop_handoff_from_state,
-    enforce_org_login_gate,
+    enforce_github_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
@@ -168,6 +168,7 @@ from agent.dashboard.team_settings import (
 from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
+    continue_thread_privately,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
@@ -219,6 +220,11 @@ from agent.dashboard.user_mappings import (
     get_mapping,
     list_mappings,
     upsert_mapping,
+)
+from agent.dashboard.user_preferences import (
+    UserPreferencesUpdate,
+    get_user_preferences,
+    set_user_preferences,
 )
 from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
@@ -535,7 +541,7 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
-    await enforce_org_login_gate(login)
+    await enforce_github_login_gate(login)
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
@@ -617,6 +623,21 @@ async def api_delete_my_instructions(
 ) -> Response:
     await delete_user_instructions(session["sub"])
     return Response(status_code=204)
+
+
+@router.get("/me/preferences")
+async def api_get_my_preferences(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_user_preferences(session["sub"])
+
+
+@router.put("/me/preferences")
+async def api_put_my_preferences(
+    body: UserPreferencesUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await set_user_preferences(session["sub"], body)
 
 
 @router.get("/options")
@@ -2309,6 +2330,14 @@ async def api_rename_thread(
     )
 
 
+@router.post("/threads/{thread_id}/continue-private")
+async def api_continue_thread_privately(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await continue_thread_privately(thread_id, session["sub"], email=session.get("email"))
+
+
 @router.post("/threads/{thread_id}/resolve")
 async def api_resolve_thread(
     thread_id: str,
@@ -2355,7 +2384,7 @@ async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await admin_cancel_dashboard_thread(thread_id)
+    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"], email=_admin.get("email"))
 
 
 @router.delete("/threads/{thread_id}")

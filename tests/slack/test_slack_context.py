@@ -165,6 +165,62 @@ def test_upsert_accumulates_participants_and_pins_source_context(
     assert metadata["title"] == metadata["title_seed"] == "first-gh"
 
 
+def test_upsert_stamps_visibility_and_owner_only_on_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(raise_not_found=True)
+    created: dict = {}
+
+    async def create(*, thread_id: str, if_exists: str, metadata: dict) -> None:
+        created.update(metadata)
+        threads.thread = {"metadata": dict(metadata)}
+        threads.raise_not_found = False
+
+    threads.create = create  # type: ignore[attr-defined]
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    assert asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="slack", visibility="private", owner_login="Alice"
+        )
+    )
+    assert created["visibility"] == "private"
+    assert created["owner_login"] == "alice"
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="slack", visibility="public", owner_login="bob"
+        )
+    )
+    metadata = cast(dict, threads.thread)["metadata"]
+    assert metadata["visibility"] == "private"
+    assert metadata["owner_login"] == "alice"
+
+
+def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub = _FakeThreadsClient(thread={"metadata": {"plan_mode": True}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(stub))
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="slack", visibility="private", owner_login="alice"
+        )
+    )
+
+    metadata = cast(dict, stub.thread)["metadata"]
+    assert metadata["visibility"] == "private"
+    assert metadata["owner_login"] == "alice"
+
+    legacy = _FakeThreadsClient(thread={"metadata": {"created_at_ms": 1, "source": "slack"}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(legacy))
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="slack", visibility="private", owner_login="alice"
+        )
+    )
+    assert "visibility" not in cast(dict, legacy.thread)["metadata"]
+
+
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
     bot_user_id = "UBOT"
     messages = [
@@ -491,31 +547,6 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
         {"type": "context", "elements": [{"type": "mrkdwn", "text": expected_footer}]},
     ]
 
-    async def trace_url(thread_id: str) -> str:
-        assert thread_id == "mapped-thread"
-        return "https://smith.example/trace"
-
-    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", trace_url)
-    captured.clear()
-    asyncio.run(
-        slack_utils.post_slack_thread_reply_with_ts(
-            "C123",
-            "1.0",
-            "Failed",
-            agent_thread_id="mapped-thread",
-            include_trace_link=True,
-        )
-    )
-    expected_error_footer = f"{expected_footer} • <https://smith.example/trace|View trace>"
-    assert captured["text"] == f"Failed {expected_error_footer}"
-    assert captured["blocks"] == [
-        {"type": "section", "text": {"type": "mrkdwn", "text": "Failed"}},
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": expected_error_footer}],
-        },
-    ]
-
     captured.clear()
     asyncio.run(
         slack_utils.post_slack_thread_reply_with_ts(
@@ -665,6 +696,17 @@ def test_format_slack_web_link_footer_prefers_session_cost() -> None:
     footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
 
     assert footer == "<https://app.example/agents/t1|Open in Web> • model-a • $0.42"
+
+
+def test_format_slack_run_usage_shortens_model_paths() -> None:
+    usage = RunUsageSummary(
+        models=("accounts/fireworks/models/glm-5p3-flash", "openai:gpt-5.6-sol"),
+        total_tokens=12_345,
+    )
+
+    footer = slack_utils.format_slack_run_usage(usage)
+
+    assert footer == "glm-5p3-flash + openai:gpt-5.6-sol • 12.3K main-agent tokens"
 
 
 def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
@@ -1498,47 +1540,6 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     # resolve to a mapping (login_for_email returns None in this harness).
     assert owner_meta["github_login"] == "mason-gh"
     assert "use_installation_token_fallback" not in configurable
-    assert "prompt" not in captured
-
-
-def test_process_slack_mention_bot_only_mode_runs_without_user_token(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """In bot-token-only mode an unmapped user still gets a run (no blocking)."""
-    captured: dict[str, object] = {}
-    _setup_slack_mention_fakes(monkeypatch, captured)
-
-    async def fake_thread_exists(thread_id: str) -> bool:
-        return False
-
-    async def fake_login_for_slack_id(slack_user_id):
-        return None
-
-    async def fake_login_for_email(email):
-        return None
-
-    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
-    monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
-    monkeypatch.setattr(webhook_common, "login_for_email", fake_login_for_email)
-    monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: True)
-
-    asyncio.run(
-        slack_webhooks.process_slack_mention(
-            SlackRequest.model_validate(
-                {
-                    "channel_id": "C123",
-                    "thread_ts": "1700000000.000100",
-                    "event_ts": "1700000000.000200",
-                    "user_id": "U123",
-                    "text": "<@UBOT> do the thing",
-                    "bot_user_id": "UBOT",
-                }
-            ),
-            Repo(owner="langchain-ai", name="open-swe"),
-        )
-    )
-
-    assert "run_create" in captured
     assert "prompt" not in captured
 
 

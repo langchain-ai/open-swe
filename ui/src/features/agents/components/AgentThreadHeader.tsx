@@ -1,6 +1,6 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
-import { DotsThreeIcon } from "@phosphor-icons/react"
+import { DotsThreeIcon, LockIcon } from "@phosphor-icons/react"
 import { Folder } from "lucide-react"
 import { useRef, useState } from "react"
 
@@ -16,6 +16,7 @@ import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDia
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import type { AgentThread } from "@/features/agents/lib/types"
 import {
+  useContinueThreadPrivately,
   useDeleteAgentThread,
   usePinAgentThread,
   useResolveAgentThread,
@@ -94,6 +95,7 @@ export function AgentThreadHeader({
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
   const deleteThread = useDeleteAgentThread()
+  const continuePrivately = useContinueThreadPrivately()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const pinned = localThread
     ? prefs.pinnedLocalIds.includes(localThread.id)
@@ -188,6 +190,22 @@ export function AgentThreadHeader({
         }
       }}
       onDelete={() => setDeleteOpen(true)}
+      onContinuePrivately={
+        thread && !localThread
+          ? () => {
+              if (continuePrivately.isPending) return
+              setRenameError(null)
+              continuePrivately.mutate(thread.id, {
+                onError: (error) =>
+                  setRenameError(
+                    error instanceof Error
+                      ? error.message
+                      : "Could not continue privately"
+                  ),
+              })
+            }
+          : undefined
+      }
     />
   )
 
@@ -251,6 +269,15 @@ export function AgentThreadHeader({
             ) : (
               <span className="min-w-0 truncate" title={title}>
                 {title}
+              </span>
+            )}
+            {thread?.visibility === "private" && (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs"
+                title="Only you can prompt this thread. Visibility is fixed for the life of a thread."
+              >
+                <LockIcon className="size-3" />
+                Private
               </span>
             )}
             {(thread || localThread) && (
