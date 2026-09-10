@@ -13,6 +13,8 @@ import type { AgentSchedule } from "@/features/agents/lib/types"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { AutomationTemplates } from "@/features/automations/components/AutomationTemplates"
 import { buttonVariants } from "@/components/ui/button"
+import { PageHeader } from "@/components/patterns/page-header"
+import { EmptyState } from "@/components/patterns/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { describeCron } from "@/features/automations/lib/cron"
 import {
@@ -56,11 +58,17 @@ export function AutomationsList({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
-        <h1 className="text-base font-medium text-foreground">Automations</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Run Open SWE on a recurring schedule. Each run starts a fresh agent
-          thread. {!canManage && "Workspace admins manage automation setup."}
-        </p>
+        <PageHeader
+          title="Automations"
+          size="compact"
+          description={
+            <>
+              Run Open SWE on a recurring schedule. Each run starts a fresh
+              agent thread.{" "}
+              {!canManage && "Workspace admins manage automation setup."}
+            </>
+          }
+        />
         <div className="mt-4 flex w-fit rounded-md border border-border bg-card p-0.5">
           {(["overview", "runs"] as const).map((value) => (
             <button
@@ -115,7 +123,7 @@ export function AutomationsList({
                   <Skeleton className="h-16 w-full rounded-xl" />
                 </div>
               ) : total === 0 ? (
-                <EmptyState canManage={canManage} />
+                <AutomationsEmptyState canManage={canManage} />
               ) : (
                 <div className="space-y-2">
                   {schedules.map((schedule) => (
@@ -161,29 +169,22 @@ function StatCard({
   )
 }
 
-function EmptyState({ canManage }: { canManage: boolean }) {
+function AutomationsEmptyState({ canManage }: { canManage: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center">
-      <div className="rounded-full bg-accent p-3 text-muted-foreground">
-        <LightningIcon className="size-5" />
-      </div>
-      <h3 className="mt-4 text-sm font-medium text-foreground">
-        No automations yet
-      </h3>
-      <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-        Schedule Open SWE to run on a recurring cadence — review code, triage
-        issues, or keep docs up to date.
-      </p>
-      {canManage && (
-        <Link
-          to="/agents/automations/new"
-          className={cn(buttonVariants(), "mt-4")}
-        >
-          <PlusIcon className="size-4" />
-          New Automation
-        </Link>
-      )}
-    </div>
+    <EmptyState
+      className="bg-card py-14"
+      icon={<LightningIcon className="size-5" />}
+      title="No automations yet"
+      description="Schedule Open SWE to run on a recurring cadence — review code, triage issues, or keep docs up to date."
+      action={
+        canManage && (
+          <Link to="/agents/automations/new" className={buttonVariants()}>
+            <PlusIcon className="size-4" />
+            New Automation
+          </Link>
+        )
+      }
+    />
   )
 }
 

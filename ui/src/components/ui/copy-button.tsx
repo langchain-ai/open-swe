@@ -1,19 +1,29 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { Check, Copy } from "lucide-react"
+import type { ComponentProps } from "react"
 
-import { Button } from "@/components/ui/button"
+import { IconButton } from "@/components/ui/button"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
-const COPIED_RESET_MS = 1500
-
-export const MessageCopyButton = memo(function MessageCopyButton({
-  text,
-  className,
-}: {
+type CopyButtonProps = Omit<
+  ComponentProps<typeof IconButton>,
+  "children" | "onClick" | "aria-label" | "render"
+> & {
   text: string
-  className?: string
-}) {
+  label?: string
+  iconClassName?: string
+}
+
+export const CopyButton = memo(function CopyButton({
+  text,
+  label = "Copy to clipboard",
+  iconClassName = "size-3",
+  className,
+  size = "icon-xs",
+  variant = "ghost",
+  ...props
+}: CopyButtonProps) {
   const [copied, setCopied] = useState(false)
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -28,33 +38,39 @@ export const MessageCopyButton = memo(function MessageCopyButton({
     try {
       await navigator.clipboard.writeText(text)
     } catch {
+      setCopied(false)
       return
     }
     setCopied(true)
     if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
-    resetTimerRef.current = setTimeout(() => setCopied(false), COPIED_RESET_MS)
+    resetTimerRef.current = setTimeout(() => setCopied(false), 1500)
   }, [text])
 
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button
-            aria-label="Copy message"
+          <IconButton
+            {...props}
+            aria-label={copied ? "Copied" : label}
             className={cn(
               "text-muted-foreground hover:text-foreground",
               className
             )}
             onClick={copy}
-            size="icon-xs"
+            size={size}
             type="button"
-            variant="ghost"
+            variant={variant}
           />
         }
       >
-        {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+        {copied ? (
+          <Check className={iconClassName} />
+        ) : (
+          <Copy className={iconClassName} />
+        )}
       </TooltipTrigger>
-      <TooltipPopup>{copied ? "Copied!" : "Copy to clipboard"}</TooltipPopup>
+      <TooltipPopup>{copied ? "Copied!" : label}</TooltipPopup>
     </Tooltip>
   )
 })

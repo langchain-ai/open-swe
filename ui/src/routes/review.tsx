@@ -5,12 +5,12 @@ import { useEffect, useMemo, useState } from "react"
 import { IoLogoGithub } from "react-icons/io5"
 
 import type { TeamSettings } from "@/lib/api"
+import { AppShell } from "@/components/AppShell"
 import {
-  AppShell,
   SettingsNavRow,
   SettingsRow,
   SettingsSection,
-} from "@/components/AppShell"
+} from "@/components/patterns/settings"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"

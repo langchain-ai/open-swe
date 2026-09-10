@@ -2,7 +2,7 @@ import { useId, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
-import { SettingsSection } from "@/components/AppShell"
+import { SettingsSection } from "@/components/patterns/settings"
 import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
