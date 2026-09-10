@@ -257,7 +257,9 @@ export interface UsageLeaderboardRow {
     email: string | null
   }
   favorite_model: string
-  agent_runs: number
+  invocations: number
+  /** @deprecated Rolling compatibility with older clients. */
+  agent_runs?: number
   prs_opened: number
   merged_prs: number
   agent_loc: number
@@ -265,7 +267,9 @@ export interface UsageLeaderboardRow {
   deletions: number
   total_tokens: number
   total_cost_usd: number
-  avg_run_seconds: number
+  avg_invocation_seconds: number
+  /** @deprecated Rolling compatibility with older clients. */
+  avg_run_seconds?: number
 }
 
 export interface ReviewerStatsCounterRow {

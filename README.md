@@ -42,7 +42,7 @@ flowchart LR
     E -->|Follow-up work| B
 ```
 
-Each cloud coding thread is bound to its own persistent sandbox, so the agent can continue from prior work when you reply. Independent tasks run in parallel, and the same thread carries context from request through delivery and follow-up. Read-only PR chat does not need a sandbox, while desktop tasks can run directly against an allowlisted local project.
+Each cloud coding session is bound to its own persistent sandbox, so the agent can continue from prior work when you reply. A session is one durable conversation and can contain multiple invocations—individual agent executions triggered by messages or automation. Each invocation can produce one or more LangSmith traces, whose nested LangSmith runs record model and tool activity. Independent sessions run in parallel, and the same session carries context from request through delivery and follow-up. Read-only PR chat does not need a sandbox, while desktop work can run directly against an allowlisted local project.
 
 ## What Open SWE does
 
@@ -65,7 +65,7 @@ Each cloud coding thread is bound to its own persistent sandbox, so the agent ca
 - Runs tasks from the web dashboard, GitHub, Slack, and Linear
 - Schedules recurring work through deterministic automations
 - Monitors opted-in pull requests with `/baby-sit`, diagnoses CI failures, and reruns only evidence-backed flaky jobs
-- Routes follow-up messages to the original thread and sandbox
+- Routes follow-up messages to the original session and sandbox
 
 ### Customize
 
@@ -73,6 +73,8 @@ Each cloud coding thread is bound to its own persistent sandbox, so the agent ca
 - Configure supported integrations and extend the curated toolset without forking Deep Agents
 - Define personal and repository coding instructions plus organization-wide review guidelines
 - Swap sandbox providers, middleware, skills, triggers, and delivery policies
+
+See [Terminology and identifiers](docs/TERMINOLOGY.md) for the application-to-LangGraph/LangSmith identity mapping and compatibility rules.
 
 ## API contract
 
@@ -90,7 +92,7 @@ This composition keeps the system extensible while allowing it to inherit improv
 
 ### LangGraph is the runtime
 
-[LangGraph](https://github.com/langchain-ai/langgraph) provides durable execution and thread state. Open SWE currently ships five graph entrypoints:
+[LangGraph](https://github.com/langchain-ai/langgraph) provides durable execution and thread state. Open SWE currently ships five graph entrypoints. At runtime, an Open SWE session is persisted as a LangGraph thread, while each Open SWE invocation is executed as a LangGraph run. These qualified native terms remain unchanged at SDK and storage boundaries:
 
 | Graph | Role |
 |---|---|
@@ -102,7 +104,7 @@ This composition keeps the system extensible while allowing it to inherit improv
 
 ### Sandboxes contain the work
 
-Cloud tasks run in isolated Linux sandboxes with the development tooling supplied by the configured environment or snapshot. A sandbox persists with its thread, but an unreachable coding sandbox is not silently replaced—Open SWE fails safely rather than risk discarding uncommitted work.
+Cloud work runs in isolated Linux sandboxes with the development tooling supplied by the configured environment or snapshot. A sandbox persists with its session, but an unreachable coding sandbox is not silently replaced—Open SWE fails safely rather than risk discarding uncommitted work.
 
 [LangSmith](https://smith.langchain.com/) is the default sandbox and tracing provider. Open SWE also supports [Modal](https://modal.com/), [Daytona](https://www.daytona.io/), [Runloop](https://www.runloop.ai/), [E2B](https://e2b.dev/), and local execution, with a pluggable interface for additional providers.
 

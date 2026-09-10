@@ -72,7 +72,10 @@ async def test_usage_records_runs_and_reads_every_page(monkeypatch):
         period="all", limit=10, current_login="octo", current_email="octo@example.com"
     )
 
+    assert payload["rows"][0]["invocations"] == 2
     assert payload["rows"][0]["agent_runs"] == 2
+    records = await agent_usage._all(agent_usage.AGENT_INVOCATION_NAMESPACE)
+    assert all(record["invocation_id"] == record["run_id"] for record in records)
     assert (tuple(agent_usage.AGENT_RUN_NAMESPACE), 1) in store.search_calls
 
 
@@ -188,7 +191,9 @@ async def test_leaderboard_aggregates_run_usage_with_partial_data(monkeypatch):
     row = payload["rows"][0]
     assert row["total_tokens"] == 400
     assert row["total_cost_usd"] == 2.25
+    assert row["avg_invocation_seconds"] == 20
     assert row["avg_run_seconds"] == 20
+    assert row["agent_runs"] == row["invocations"] == 3
 
 
 @pytest.mark.asyncio
@@ -310,7 +315,7 @@ async def test_legacy_records_are_backfilled_once(monkeypatch):
     payload = await agent_usage.list_agent_usage_leaderboard(
         period="all", limit=10, current_login="octo", current_email=None
     )
-    assert payload["rows"][0]["agent_runs"] == 1
+    assert payload["rows"][0]["invocations"] == 1
     assert payload["rows"][0]["merged_prs"] == 1
     assert payload["reviewer_stats"]["reviewed_prs"] == 1
     assert payload["reviewer_stats"]["surfaced_findings"] == 1

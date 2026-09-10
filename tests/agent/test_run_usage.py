@@ -64,6 +64,15 @@ def test_summarize_run_usage_uses_run_id_across_human_messages() -> None:
     assert summary.total_tokens == 330
 
 
+def test_summarize_run_usage_rejects_conflicting_message_identifiers() -> None:
+    message = _message(model="model-a", input_tokens=100, output_tokens=10)
+    message.response_metadata.update(
+        {"open_swe_invocation_id": "inv-1", "open_swe_run_id": "inv-2"}
+    )
+
+    assert summarize_run_usage({"messages": [message]}, invocation_id="inv-1") is None
+
+
 def test_summarize_run_usage_excludes_cached_input_tokens() -> None:
     summary = summarize_run_usage(
         {

@@ -28,6 +28,7 @@ class SchedulerState(BaseModel):
     thread_id: str | None = None
     agent_thread_id: str | None = None
     run_id: str | None = None
+    invocation_id: str | None = None
     prepare_run_id: str | None = None
     channel_id: str | None = None
     thread_ts: str | None = None

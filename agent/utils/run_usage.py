@@ -4,6 +4,16 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 
 
+def _message_invocation_id(message: AIMessage) -> str | None:
+    metadata = message.response_metadata
+    values = {
+        value
+        for key in ("open_swe_invocation_id", "open_swe_run_id")
+        if isinstance((value := metadata.get(key)), str) and value
+    }
+    return next(iter(values)) if len(values) == 1 else None
+
+
 @dataclass(frozen=True)
 class RunUsageSummary:
     models: tuple[str, ...]
@@ -55,20 +65,25 @@ def _message_model(message: AIMessage) -> str | None:
 
 
 def summarize_run_usage(
-    state: dict[str, Any] | None, *, run_id: str | None = None
+    state: dict[str, Any] | None,
+    *,
+    invocation_id: str | None = None,
+    run_id: str | None = None,
 ) -> RunUsageSummary | None:
-    """Summarize main-agent usage for one run or the latest human turn."""
+    """Summarize main-agent usage for one invocation or the latest human turn."""
+    if invocation_id is not None and run_id is not None and invocation_id != run_id:
+        return None
+    invocation_id = invocation_id or run_id
     if not isinstance(state, dict):
         return None
     messages = state.get("messages")
     if not isinstance(messages, list):
         return None
-    if run_id is not None:
+    if invocation_id is not None:
         ai_messages = [
             message
             for message in messages
-            if isinstance(message, AIMessage)
-            and message.response_metadata.get("open_swe_run_id") == run_id
+            if isinstance(message, AIMessage) and _message_invocation_id(message) == invocation_id
         ]
     else:
         start = 0

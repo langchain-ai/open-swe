@@ -268,6 +268,14 @@ def _langsmith_metadata_filter(key: str, value: str) -> str:
     return f'and(eq(metadata_key, "{escaped_key}"), eq(metadata_value, "{escaped_value}"))'
 
 
+def _langsmith_invocation_filter(invocation_id: str) -> str:
+    filters = [
+        _langsmith_metadata_filter(key, invocation_id)
+        for key in ("invocation_id", "prepare_run_id")
+    ]
+    return f"or({', '.join(filters)})"
+
+
 def _langsmith_trace_filter(trace_ids: list[str]) -> str:
     filters = [f'eq(trace_id, "{trace_id}")' for trace_id in trace_ids]
     return filters[0] if len(filters) == 1 else f"or({', '.join(filters)})"
@@ -275,11 +283,11 @@ def _langsmith_trace_filter(trace_ids: list[str]) -> str:
 
 async def get_langsmith_thread_cost(
     thread_id: str,
-    prepare_run_id: str,
+    invocation_id: str,
     *,
     run_only: bool = False,
 ) -> LangSmithThreadCost | None:
-    """Return a fresh thread or run cost correlated to a completed agent run."""
+    """Return fresh trace cost correlated to one completed invocation."""
     client = _build_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
@@ -290,7 +298,7 @@ async def get_langsmith_thread_cost(
         roots = client.list_runs(
             project_id=project_id,
             is_root=True,
-            filter=_langsmith_metadata_filter("prepare_run_id", prepare_run_id),
+            filter=_langsmith_invocation_filter(invocation_id),
             select=["id", "end_time"],
         )
         matched_roots = [
