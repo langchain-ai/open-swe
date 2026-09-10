@@ -21,6 +21,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from agent.config import ENV
@@ -50,6 +51,7 @@ from agent.dashboard.environments import (
     list_environment_options,
     slugify,
 )
+from agent.dashboard.feedback import feedback_router
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -59,6 +61,7 @@ from agent.dashboard.notion_oauth import (
 )
 from agent.dashboard.oauth import (
     COOKIE_NAME,
+    SESSION_COOKIE,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
@@ -107,7 +110,6 @@ from agent.dashboard.repo_cache import (
 )
 from agent.dashboard.review_api import (
     create_review_comment,
-    dry_run_trace_resolution,
     get_review,
     get_review_diff,
     list_review_comments,
@@ -152,15 +154,6 @@ from agent.dashboard.skills import (
     list_skills,
     update_organization_skill,
     update_skill,
-)
-from agent.dashboard.team_credentials import (
-    DatadogCredentialsUpdate,
-    LangSmithCredentialsUpdate,
-    connect_datadog,
-    connect_langsmith,
-    disconnect_datadog,
-    disconnect_langsmith,
-    get_team_credentials_status,
 )
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
@@ -211,23 +204,9 @@ from agent.dashboard.threads.runs import (
     ThreadResolveBody,
 )
 from agent.dashboard.user_credentials import (
-    CurrentsCredentialsUpdate,
-    UserLangSmithCredentialsUpdate,
-    connect_currents,
     connect_notion,
-    disconnect_currents,
     disconnect_notion,
-    get_currents_status,
     get_notion_status,
-)
-from agent.dashboard.user_credentials import (
-    connect_langsmith as connect_user_langsmith,
-)
-from agent.dashboard.user_credentials import (
-    disconnect_langsmith as disconnect_user_langsmith,
-)
-from agent.dashboard.user_credentials import (
-    get_langsmith_status as get_user_langsmith_status,
 )
 from agent.dashboard.user_instructions import (
     UserInstructionsUpdate,
@@ -244,7 +223,6 @@ from agent.dashboard.user_mappings import (
 from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
     WorkspaceMCPRoute,
-    WorkspaceMCPUpdate,
     delete_workspace_mcp,
     get_workspace_mcp,
     list_workspace_mcps,
@@ -252,6 +230,7 @@ from agent.dashboard.workspace_mcps import (
 )
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.mcp import MCPConnectionUpdate
 from agent.review.analyzer_cron import remove_continual_cron
 from agent.review.eval_jobs import (
     get_reviewer_eval_status,
@@ -292,6 +271,7 @@ router = APIRouter(
     tags=["dashboard"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
+router.include_router(feedback_router)
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
@@ -319,9 +299,20 @@ def _admin_session(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
 
 
 _ADMIN_DEP = Depends(_admin_session)
+_ADMIN_BEARER_DEP = Depends(
+    HTTPBearer(
+        scheme_name="AdminBearer",
+        description="An admin's GitHub user token or an allowlisted GitHub Actions OIDC token.",
+        auto_error=False,
+    )
+)
 
 
-async def _admin_session_or_ci_token(request: Request) -> dict[str, Any]:
+async def _admin_session_or_ci_token(
+    request: Request,
+    _cookie: str | None = Depends(SESSION_COOKIE),
+    _bearer: HTTPAuthorizationCredentials | None = _ADMIN_BEARER_DEP,
+) -> dict[str, Any]:
     """Admin gate that also accepts CI credentials: an Actions OIDC token, or an
     admin's GitHub personal access token."""
     token = bearer_github_token(request)
@@ -684,56 +675,6 @@ async def get_my_mapping(
     return mapping or {}
 
 
-@router.get("/my-credentials/currents")
-async def get_my_currents_status(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await get_currents_status(session["sub"])
-    return status.get("currents", {"connected": False})
-
-
-@router.put("/my-credentials/currents")
-async def connect_my_currents(
-    update: CurrentsCredentialsUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await connect_currents(session["sub"], update)
-    return status.get("currents", {"connected": False})
-
-
-@router.delete("/my-credentials/currents")
-async def disconnect_my_currents(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await disconnect_currents(session["sub"])
-    return status.get("currents", {"connected": False})
-
-
-@router.get("/my-credentials/langsmith")
-async def get_my_langsmith_status(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await get_user_langsmith_status(session["sub"])
-    return status.get("langsmith", {"connected": False})
-
-
-@router.put("/my-credentials/langsmith")
-async def connect_my_langsmith(
-    update: UserLangSmithCredentialsUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await connect_user_langsmith(session["sub"], update)
-    return status.get("langsmith", {"connected": False})
-
-
-@router.delete("/my-credentials/langsmith")
-async def disconnect_my_langsmith(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await disconnect_user_langsmith(session["sub"])
-    return status.get("langsmith", {"connected": False})
-
-
 @router.get("/my-credentials/notion")
 async def get_my_notion_status(
     session: dict[str, Any] = _SESSION_DEP,
@@ -993,13 +934,6 @@ async def api_put_team_settings(
     return await upsert_team_settings(update)
 
 
-@router.get("/team-credentials")
-async def api_get_team_credentials(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await get_team_credentials_status()
-
-
 workspace_mcp_router = APIRouter(route_class=WorkspaceMCPRoute)
 
 
@@ -1011,7 +945,7 @@ async def api_list_workspace_mcps(_admin: dict[str, Any] = _ADMIN_DEP) -> list[d
 @workspace_mcp_router.put("/workspace-mcps/{name}")
 async def api_save_workspace_mcp(
     name: str,
-    update: WorkspaceMCPUpdate,
+    update: MCPConnectionUpdate,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
     try:
@@ -1043,7 +977,7 @@ async def api_reveal_workspace_mcp_headers(
 @workspace_mcp_router.post("/workspace-mcps/{name}/discover")
 async def api_discover_workspace_mcp(
     name: str,
-    update: WorkspaceMCPUpdate | None = None,
+    update: MCPConnectionUpdate | None = None,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> list[dict[str, str]]:
     try:
@@ -1053,36 +987,6 @@ async def api_discover_workspace_mcp(
 
 
 router.include_router(workspace_mcp_router)
-
-
-@router.put("/team-credentials/datadog")
-async def api_connect_datadog(
-    update: DatadogCredentialsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await connect_datadog(update)
-
-
-@router.delete("/team-credentials/datadog")
-async def api_disconnect_datadog(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await disconnect_datadog()
-
-
-@router.put("/team-credentials/langsmith")
-async def api_connect_langsmith(
-    update: LangSmithCredentialsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await connect_langsmith(update)
-
-
-@router.delete("/team-credentials/langsmith")
-async def api_disconnect_langsmith(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await disconnect_langsmith()
 
 
 class EnabledReviewRepoUpdate(BaseModel):
@@ -1528,17 +1432,6 @@ async def api_re_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await trigger_re_review(owner, repo, pr_number, session["sub"])
-
-
-@router.post("/reviews/{owner}/{repo}/{pr_number}/resolve-trace")
-async def api_resolve_trace(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await dry_run_trace_resolution(owner, repo, pr_number)
 
 
 class ReviewCommentCreate(BaseModel):

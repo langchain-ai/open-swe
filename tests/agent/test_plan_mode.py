@@ -52,9 +52,6 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         "delete_user_skill",
         "slack_move_thread",
         "slack_start_new_thread",
-        "linear_create_issue",
-        "linear_update_issue",
-        "linear_delete_issue",
     ):
         assert tool in excluded
     # Read-only tools, plan-file editing tools, and explicit plan approval stay available.

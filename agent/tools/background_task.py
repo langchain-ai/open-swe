@@ -64,15 +64,7 @@ def _providers() -> tuple[_Provider, ...]:
 async def background_task(
     action: Literal["status", "list", "stop"], task_id: str | None = None
 ) -> dict[str, Any]:
-    """Inspect or stop background work: sandbox commands and environment refreshes.
-
-    `status` and `stop` require `task_id`; `list` does not. A refresh's status carries
-    `steps` — which stage it reached — and, while a script is running, a tail of that
-    script's live `bash -x` trace read off the builder sandbox; environment refreshes
-    are visible only to workspace admins. Status reads are for explicit user requests,
-    for following a long rebuild, or when completion needs inspection — not for
-    polling loops.
-    """
+    """Implement the `background_task` tool."""
     if action in {"status", "stop"} and not task_id:
         return {"success": False, "error": f"task_id is required for {action}"}
     try:

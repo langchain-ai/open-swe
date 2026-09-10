@@ -63,9 +63,11 @@ const NEW_AGENT_PANEL_REF = {
 export function AgentsHome({
   initialRepo,
   initialLocalProject,
+  initialNoProject,
 }: {
   initialRepo?: string
   initialLocalProject?: string
+  initialNoProject?: boolean
 }) {
   const stream = useAgentStream()
   const queryClient = useQueryClient()
@@ -109,7 +111,11 @@ export function AgentsHome({
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
   const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
-    initialLocalProject ? "local" : initialRepo ? "cloud" : null
+    initialLocalProject
+      ? "local"
+      : initialRepo || initialNoProject
+        ? "cloud"
+        : null
   )
   const runTarget: RunTarget = isDesktop
     ? cloudEnabled
@@ -149,7 +155,7 @@ export function AgentsHome({
   const skills = useAgentSkills({ enabled: cloudEnabled })
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
-    initialRepo
+    initialNoProject ? null : initialRepo
   )
   const repo =
     repoOverride === undefined

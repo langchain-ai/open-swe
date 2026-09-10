@@ -36,7 +36,7 @@ def test_sandbox_api_endpoint_appends_v2_sandboxes() -> None:
 def test_sandbox_api_endpoint_no_double_suffix() -> None:
     with patch.dict(
         "os.environ",
-        {"SANDBOX_LANGSMITH_ENDPOINT": "https://x.smith.langchain.com/v2/sandboxes"},
+        {"LANGSMITH_ENDPOINT": "https://x.smith.langchain.com/v2/sandboxes"},
     ):
         assert _get_sandbox_api_endpoint() == "https://x.smith.langchain.com/v2/sandboxes"
 
@@ -304,7 +304,19 @@ async def test_create_from_params_forwards_public_and_hidden_options() -> None:
     client.wait_for_sandbox = AsyncMock(return_value=sandbox)
 
     with (
-        patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client),
+        patch.dict(
+            "os.environ",
+            {
+                "LANGSMITH_API_KEY": "shared-key",
+                "LANGSMITH_ENDPOINT": "https://shared.smith.langchain.com",
+                "SANDBOX_LANGSMITH_API_KEY": "retired-key",
+                "SANDBOX_LANGSMITH_ENDPOINT": "https://retired.smith.langchain.com",
+            },
+            clear=True,
+        ),
+        patch(
+            "agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client
+        ) as client_factory,
         patch("agent.sandboxes.providers.langsmith._install_create_extra_fields") as install,
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_create_extra_fields",
@@ -321,6 +333,9 @@ async def test_create_from_params_forwards_public_and_hidden_options() -> None:
             }
         )
 
+    client_factory.assert_called_once_with(
+        api_key="shared-key", api_endpoint="https://shared.smith.langchain.com/v2/sandboxes"
+    )
     client.create_sandbox.assert_awaited_once_with(
         snapshot_name="python:latest",
         wait_for_ready=False,
