@@ -453,15 +453,12 @@ async def _enrich_run_start_command(
         client_configurable.get("agent_effort"),
     )
     plan_mode_requested = client_configurable.get("plan_mode") is True
-    model_selection = (
-        "explicit"
-        if client_configurable.get("model_selection") == "explicit"
-        or (
-            client_configurable.get("model_selection") is None
-            and bool(client_configurable.get("agent_model_id"))
-        )
-        else "auto"
-    )
+    model_selection = client_configurable.get("model_selection")
+    if model_selection not in {"auto", "explicit"}:
+        if client_configurable.get("agent_model_id"):
+            model_selection = "explicit"
+        else:
+            model_selection = "auto" if creating else metadata.get("model_selection")
     offload_requested = client_configurable.get("offload_conversation") is True
     content = _command_message_content(params)
     if isinstance(content, str) and content.strip() == "/offload":
