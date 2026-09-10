@@ -347,60 +347,65 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "occurred_at": event.occurred_at,
             },
         )
-        await _reconcile_outcomes(conn, event)
+        await _reconcile_finding(conn, event)
     elif name in {
         EventName.FINDING_RESOLVED,
         EventName.FINDING_DISMISSED,
         EventName.FINDING_REOPENED,
     }:
-        state = {
-            EventName.FINDING_RESOLVED: "resolved",
-            EventName.FINDING_DISMISSED: "dismissed",
-            EventName.FINDING_REOPENED: "open",
-        }[name]
-        await conn.execute(
-            text(
-                "UPDATE finding_projection SET current_state = :state, resolved_at = CASE WHEN "
-                ":state = 'resolved' THEN :occurred_at ELSE resolved_at END, dismissed_at = CASE "
-                "WHEN :state = 'dismissed' THEN :occurred_at ELSE dismissed_at END, reopened_count = "
-                "reopened_count + CASE WHEN :state = 'open' THEN 1 ELSE 0 END, source_version = "
-                ":source_version, latest_occurred_at = :occurred_at, updated_at = clock_timestamp() "
-                "WHERE workspace_id = :workspace_id AND finding_id = :finding_id AND "
-                "((:source_version IS NOT NULL AND (source_version IS NULL OR :source_version > source_version)) "
-                "OR (:source_version IS NULL AND source_version IS NULL AND "
-                "(latest_occurred_at IS NULL OR :occurred_at > latest_occurred_at)))"
-            ).bindparams(bindparam("source_version", type_=BigInteger)),
-            {
-                "state": state,
-                "occurred_at": event.occurred_at,
-                "source_version": event.source_version,
-                "workspace_id": event.workspace_id,
-                "finding_id": event.finding_id,
-            },
-        )
+        await _reconcile_finding(conn, event)
+
+
+async def _reconcile_finding(conn: AsyncConnection, event: EventEnvelope) -> None:
+    await conn.execute(
+        text(
+            """
+            WITH transitions AS (
+                SELECT event_name, occurred_at, source_version, event_id FROM events
+                WHERE workspace_id = :workspace_id AND finding_id = :finding_id
+                  AND event_name IN ('finding.resolved', 'finding.dismissed', 'finding.reopened')
+            ), latest AS (
+                SELECT * FROM transitions
+                ORDER BY source_version DESC NULLS LAST, occurred_at DESC, event_id DESC LIMIT 1
+            ), history AS (
+                SELECT max(occurred_at) FILTER (WHERE event_name = 'finding.resolved') AS resolved_at,
+                       max(occurred_at) FILTER (WHERE event_name = 'finding.dismissed') AS dismissed_at,
+                       count(*) FILTER (WHERE event_name = 'finding.reopened') AS reopened_count
+                FROM transitions
+            )
+            UPDATE finding_projection SET
+                current_state = CASE latest.event_name
+                    WHEN 'finding.resolved' THEN 'resolved'
+                    WHEN 'finding.dismissed' THEN 'dismissed' ELSE 'open' END,
+                source_version = latest.source_version,
+                latest_occurred_at = latest.occurred_at,
+                resolved_at = history.resolved_at,
+                dismissed_at = history.dismissed_at,
+                reopened_count = history.reopened_count,
+                updated_at = clock_timestamp()
+            FROM latest, history
+            WHERE workspace_id = :workspace_id AND finding_id = :finding_id
+            """
+        ),
+        {"workspace_id": event.workspace_id, "finding_id": event.finding_id},
+    )
 
 
 async def _reconcile_outcomes(conn: AsyncConnection, event: EventEnvelope) -> None:
-    if event.event_name == EventName.PR_OPENED:
-        subject_column = "pr_id"
-        names = [EventName.PR_MERGED, EventName.PR_CLOSED_WITHOUT_MERGE, EventName.PR_REOPENED]
-    else:
-        subject_column = "finding_id"
-        names = [
-            EventName.FINDING_RESOLVED,
-            EventName.FINDING_DISMISSED,
-            EventName.FINDING_REOPENED,
-        ]
     result = await conn.execute(
         text(
-            f"SELECT * FROM events WHERE workspace_id = :workspace_id AND {subject_column} = "
-            ":subject_id AND event_name = ANY(:names) "
+            "SELECT * FROM events WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
+            "AND event_name = ANY(:names) "
             "ORDER BY source_version ASC NULLS FIRST, occurred_at, event_id"
         ),
         {
             "workspace_id": event.workspace_id,
-            "subject_id": getattr(event, subject_column),
-            "names": [name.value for name in names],
+            "pr_id": event.pr_id,
+            "names": [
+                EventName.PR_MERGED.value,
+                EventName.PR_CLOSED_WITHOUT_MERGE.value,
+                EventName.PR_REOPENED.value,
+            ],
         },
     )
     for row in result.mappings():

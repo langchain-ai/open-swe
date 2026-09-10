@@ -569,3 +569,75 @@ async def test_pr_timestamp_migration_preserves_existing_reopen(analytics_db):
         assert row["current_state"] == "open"
         assert row["outcome_at"] is None
         assert row["latest_transition_at"] == DAY + timedelta(days=2)
+
+
+@pytest.mark.parametrize("delivery", [*permutations(range(3)), "concurrent"])
+@pytest.mark.parametrize("versioned", [False, True])
+@pytest.mark.parametrize("surface_first", [False, True])
+async def test_finding_history_survives_late_transitions(
+    analytics_db, delivery, versioned, surface_first
+):
+    workspace, transaction = analytics_db
+    finding_id = uuid4()
+    surfaced = event(
+        workspace,
+        EventName.FINDING_SURFACED,
+        FindingSurfacedPayload(severity="high", category="correctness"),
+        finding_id=finding_id,
+    )
+    transitions = [
+        event(
+            workspace,
+            name,
+            FindingStatePayload(),
+            finding_id=finding_id,
+            day=day,
+            source_version=day if versioned else None,
+        )
+        for day, name in [
+            (1, EventName.FINDING_RESOLVED),
+            (2, EventName.FINDING_REOPENED),
+            (3, EventName.FINDING_DISMISSED),
+        ]
+    ]
+    if surface_first:
+        await ingestion.ingest(surfaced)
+    if delivery == "concurrent":
+        await asyncio.gather(*(ingestion.ingest(item) for item in transitions))
+    else:
+        for index in delivery:
+            await ingestion.ingest(transitions[index])
+            await flush_summaries()
+    if not surface_first:
+        await ingestion.ingest(surfaced)
+    for item in transitions:
+        assert not await ingestion.ingest(item)
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.FINDING_SURFACED,
+            surfaced.payload,
+            finding_id=finding_id,
+            day=4,
+        )
+    )
+    await flush_summaries()
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM finding_projection"))).mappings().one()
+        assert row["current_state"] == "dismissed"
+        assert row["resolved_at"] == DAY + timedelta(days=1)
+        assert row["dismissed_at"] == DAY + timedelta(days=3)
+        assert row["latest_occurred_at"] == DAY + timedelta(days=3)
+        assert row["reopened_count"] == 1
+        counts = await conn.scalar(
+            text(
+                "SELECT histogram_counts FROM daily_summaries WHERE family = 'latency_histogram' "
+                "AND partition_date = :day"
+            ),
+            {"day": DAY.date()},
+        )
+        assert sum(counts) == 1
+    stats = await queries.reviewer_stats(DAY)
+    assert stats["reopened_findings"] == 1
+    assert stats["dismissed_findings"] == 1
+    assert stats["unresolved_surfaced_findings"] == 0
