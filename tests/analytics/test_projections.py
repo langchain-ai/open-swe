@@ -4,6 +4,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from itertools import permutations
 from pathlib import Path
 from uuid import uuid4
 
@@ -38,13 +39,9 @@ async def analytics_db(monkeypatch):
     monkeypatch.setenv("ANALYTICS_WORKSPACE_ID", str(workspace))
     monkeypatch.setenv("ANALYTICS_EPOCH", DAY.isoformat())
     monkeypatch.setenv("ANALYTICS_SUMMARY_VERSION", "1")
-    migration = (
-        (Path(database.__file__).with_name("migrations") / "0001_analytics.sql")
-        .read_text()
-        .replace("open_swe_analytics", schema)
-    )
     async with engine.begin() as conn:
-        await database._run_script(conn, migration)
+        for path in sorted(Path(database.__file__).with_name("migrations").glob("*.sql")):
+            await database._run_script(conn, path.read_text().replace("open_swe_analytics", schema))
 
     @asynccontextmanager
     async def transaction():
@@ -461,3 +458,114 @@ async def test_leaderboard_resolves_immutable_identity_after_login_change(
     )
     assert result["current_user_rank"] is None
     assert result["rows"] == []
+
+
+@pytest.mark.parametrize("delivery", list(permutations(range(3))))
+@pytest.mark.parametrize("versioned", [False, True])
+async def test_pr_reopening_rejects_delayed_close(analytics_db, delivery, versioned):
+    workspace, transaction = analytics_db
+    pr_id = uuid4()
+    events = [
+        event(
+            workspace,
+            EventName.PR_OPENED,
+            PROpenedPayload(opening_run_id=uuid4(), model_attribution_quality="unavailable"),
+            pr_id=pr_id,
+            repository_id=uuid4(),
+            source_version=0 if versioned else None,
+        ),
+        event(
+            workspace,
+            EventName.PR_CLOSED_WITHOUT_MERGE,
+            PRStatePayload(),
+            pr_id=pr_id,
+            day=1,
+            source_version=1 if versioned else None,
+        ),
+        event(
+            workspace,
+            EventName.PR_REOPENED,
+            PRStatePayload(),
+            pr_id=pr_id,
+            day=2,
+            source_version=2 if versioned else None,
+        ),
+    ]
+    for index in delivery:
+        assert await ingestion.ingest(events[index])
+    for item in events:
+        assert not await ingestion.ingest(item)
+    await flush_summaries()
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
+        assert row["current_state"] == "open"
+        assert row["outcome_at"] is None
+        assert row["latest_transition_at"] == DAY + timedelta(days=2)
+        assert await conn.scalar(
+            text(
+                "SELECT counters FROM daily_summaries WHERE family = 'pr_open_cohort' "
+                "AND partition_date = :day"
+            ),
+            {"day": DAY.date()},
+        ) == {"open": 1}
+
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.PR_MERGED,
+            PRStatePayload(),
+            pr_id=pr_id,
+            day=3,
+            source_version=3 if versioned else None,
+        )
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
+        assert row["current_state"] == "merged"
+        assert row["outcome_at"] == DAY + timedelta(days=3)
+
+
+async def test_pr_timestamp_migration_preserves_existing_reopen(analytics_db):
+    workspace, transaction = analytics_db
+    pr_id = uuid4()
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.PR_OPENED,
+            PROpenedPayload(opening_run_id=uuid4(), model_attribution_quality="unavailable"),
+            pr_id=pr_id,
+            repository_id=uuid4(),
+        )
+    )
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.PR_REOPENED,
+            PRStatePayload(),
+            pr_id=pr_id,
+            day=2,
+        )
+    )
+    async with transaction() as conn:
+        schema = await conn.scalar(text("SELECT current_schema()"))
+        await conn.execute(text("ALTER TABLE pr_projection DROP COLUMN latest_transition_at"))
+        migration = (
+            Path(database.__file__).with_name("migrations") / "0002_pr_transition_timestamp.sql"
+        )
+        await database._run_script(
+            conn, migration.read_text().replace("open_swe_analytics", schema)
+        )
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.PR_CLOSED_WITHOUT_MERGE,
+            PRStatePayload(),
+            pr_id=pr_id,
+            day=1,
+        )
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
+        assert row["current_state"] == "open"
+        assert row["outcome_at"] is None
+        assert row["latest_transition_at"] == DAY + timedelta(days=2)

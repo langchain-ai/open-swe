@@ -177,11 +177,11 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 """
                 INSERT INTO pr_projection (
                     workspace_id, pr_id, repository_id, opening_run_id, originating_model_id,
-                    model_attribution_quality, opened_at, current_state, source_version,
+                    model_attribution_quality, opened_at, latest_transition_at, current_state, source_version,
                     repository_private
                 ) VALUES (
                     :workspace_id, :pr_id, :repository_id, :opening_run_id, :model_id,
-                    :quality, :occurred_at, 'open', :source_version, :repository_private
+                    :quality, :occurred_at, :occurred_at, 'open', :source_version, :repository_private
                 ) ON CONFLICT (workspace_id, pr_id) DO NOTHING
                 """
             ),
@@ -296,10 +296,11 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
             text(
                 "UPDATE pr_projection SET current_state = :state, outcome_at = CASE WHEN "
                 ":state = 'open' THEN NULL ELSE :occurred_at END, source_version = :source_version, "
-                "updated_at = clock_timestamp() WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
+                "latest_transition_at = :occurred_at, updated_at = clock_timestamp() "
+                "WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
                 "AND ((:source_version IS NOT NULL AND (source_version IS NULL OR :source_version > source_version)) "
                 "OR (:source_version IS NULL AND source_version IS NULL AND "
-                "(outcome_at IS NULL OR :occurred_at >= outcome_at)))"
+                "(latest_transition_at IS NULL OR :occurred_at >= latest_transition_at)))"
             ).bindparams(bindparam("source_version", type_=BigInteger)),
             {
                 "state": state,
