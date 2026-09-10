@@ -24,6 +24,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.failures import report_slack_failure
@@ -40,34 +41,10 @@ from agent.webhooks import common
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
-_MENTION_PREAMBLE = "You were mentioned in Slack.\n\n"
-
-_UNTAGGED_REPLY_PREAMBLE = (
-    "A message arrived in a Slack thread you are part of. You were NOT tagged in it — "
-    "you are seeing it because you and the sender are the only active participants.\n\n"
-    "Decide first whether the message is actually addressed to you. Continuations of your "
-    "conversation, answers to your questions, and follow-up instructions are addressed to you. "
-    "Someone thinking out loud, talking to another person, or commenting on the thread without "
-    "expecting you to act is not.\n\n"
-    "If it is not addressed to you, end your turn without calling any tool and post nothing, "
-    "including no reaction. Staying silent is the right outcome; an unwanted reply or reaction "
-    "from an untagged message is worse than no reply. If it is "
-    "addressed to you, handle it exactly as you would a direct mention.\n\n"
-)
-
-_CODE_CHANNEL_CONTEXT = (
-    "## Slack Code Channel\n"
-    "The whole channel is one session. Treat messages as addressed to you unless clearly aimed "
-    "at someone else; replies post top-level unless the user started a Slack thread. Use "
-    "`manage_code_channel` for session "
-    "status, title, context, runtime commands, HTML/diff/Block Kit/canvas views, and archival."
-)
-
-_MESSAGE_UPDATE_PREAMBLE = (
-    "A Slack message previously delivered to this thread was edited. Treat the updated text "
-    "below as the current version and as an explicit correction to the earlier message. Do not "
-    "repeat completed work unless the update requires it.\n\n"
-)
+_MENTION_PREAMBLE = f"{load_prompt('runs/slack-mentioned.md')}\n\n"
+_UNTAGGED_REPLY_PREAMBLE = f"{load_prompt('runs/slack-untagged-reply.md')}\n\n"
+_CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
+_MESSAGE_UPDATE_PREAMBLE = f"{load_prompt('runs/slack-message-update.md')}\n\n"
 
 
 def _slack_prompt_preamble(untagged_reply: bool, message_update: bool = False) -> str:
@@ -223,7 +200,7 @@ async def slack_user_can_reply_to_ready_plan(
 ) -> bool:
     if not channel_id or not thread_ts or not slack_user_id:
         return False
-    from agent.dashboard.plan_api import _thread_metadata
+    from agent.dashboard.plan_api import fetch_thread_metadata
 
     try:
         thread_id = await common.lookup_slack_thread_id(
@@ -234,9 +211,9 @@ async def slack_user_can_reply_to_ready_plan(
     if not thread_id:
         return False
     try:
-        metadata = await _thread_metadata(thread_id)
+        metadata = await fetch_thread_metadata(thread_id)
     except Exception:  # noqa: BLE001
-        # A brand-new thread has no metadata (_thread_metadata raises 404); an
+        # A brand-new thread has no metadata (fetch_thread_metadata raises 404); an
         # untagged message there simply isn't a plan reply — don't abort the gate.
         return False
     return metadata.get("plan_mode") is True and metadata.get("plan_status") == "ready"

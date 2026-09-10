@@ -12,14 +12,14 @@ from agent.github.comments import (
     sanitize_github_comment_body,
 )
 from agent.github.http import GITHUB_GRAPHQL, github_client, github_request
-from agent.github.pull_request_status import _pull_request_identity
+from agent.github.pull_request_status import pull_request_identity
 
 _CONTEXT_LIMIT = 100
 _FIELD_LIMIT = 4_000
 _SCAN_LIMIT = 40_000
 _TRUNCATED = "… [truncated]"
 _FAILURE_CONCLUSIONS = frozenset({"ACTION_REQUIRED", "FAILURE", "STARTUP_FAILURE", "TIMED_OUT"})
-_REVIEWS_QUERY = """
+REVIEWS_QUERY = """
 query PullRequestFixReviews(
   $owner: String!, $repo: String!, $number: Int!, $cursor: String
 ) {
@@ -48,7 +48,7 @@ query PullRequestFixReviews(
   }
 }
 """
-_CHECKS_QUERY = """
+CHECKS_QUERY = """
 query PullRequestFixChecks(
   $owner: String!, $repo: String!, $number: Int!, $cursor: String
 ) {
@@ -134,7 +134,7 @@ async def _fetch_reviews(
     while True:
         pull = await _graphql(
             client,
-            _REVIEWS_QUERY,
+            REVIEWS_QUERY,
             {"owner": owner, "repo": repo, "number": number, "cursor": cursor},
         )
         if pull is None:
@@ -235,7 +235,7 @@ async def _fetch_reviews(
         cursor = next_cursor
 
 
-def _actionable_check(node: Mapping[str, Any]) -> dict[str, Any] | None:
+def actionable_check(node: Mapping[str, Any]) -> dict[str, Any] | None:
     required = node.get("isRequired")
     required_value = required if isinstance(required, bool) else None
     typename = node.get("__typename")
@@ -280,7 +280,7 @@ async def _fetch_checks(
     while True:
         pull = await _graphql(
             client,
-            _CHECKS_QUERY,
+            CHECKS_QUERY,
             {"owner": owner, "repo": repo, "number": number, "cursor": cursor},
         )
         if pull is None:
@@ -307,7 +307,7 @@ async def _fetch_checks(
         checks.extend(
             check
             for node in nodes
-            if isinstance(node, dict) and (check := _actionable_check(node)) is not None
+            if isinstance(node, dict) and (check := actionable_check(node)) is not None
         )
         if len(checks) > _CONTEXT_LIMIT:
             return {"headSha": head_sha, "checks": checks[:_CONTEXT_LIMIT], "truncated": True}
@@ -446,7 +446,7 @@ def build_fix_prompt(context: Mapping[str, Any]) -> str:
 
 async def get_pull_request_context(record: object, token: str) -> dict[str, Any] | None:
     """Fetch fresh actionable context for one validated pull-request record."""
-    identity = _pull_request_identity(record)
+    identity = pull_request_identity(record)
     if identity is None:
         return None
     owner, repo, number = identity

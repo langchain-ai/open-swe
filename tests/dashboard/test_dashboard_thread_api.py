@@ -99,7 +99,7 @@ def test_user_message_content_allows_images_for_vision_model() -> None:
 def test_langgraph_proxy_headers_include_api_key(monkeypatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
 
-    headers = thread_proxy._langgraph_proxy_headers(accept="text/event-stream")
+    headers = thread_proxy.langgraph_proxy_headers(accept="text/event-stream")
 
     assert headers["X-API-Key"] == "ls-key"
     assert headers["Accept"] == "text/event-stream"
@@ -241,7 +241,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     patch_thread_module(monkeypatch, "get_profile", fake_profile)
     patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
-    patch_thread_module(monkeypatch, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
 
 async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatch) -> None:
@@ -293,8 +293,10 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
-    assert configurable["prepare_run_id"] == enriched["params"]["metadata"]["prepare_run_id"]
-    assert configurable["prepare_run_id"]
+    assert configurable["invocation_id"] == enriched["params"]["metadata"]["invocation_id"]
+    assert configurable["prepare_run_id"] == configurable["invocation_id"]
+    assert enriched["params"]["metadata"]["prepare_run_id"] == configurable["invocation_id"]
+    assert enriched["params"]["metadata"]["open_swe.invocation_id"] == configurable["invocation_id"]
     assert enriched["params"]["metadata"]["open_swe.graph"] == "agent"
     assert enriched["params"]["metadata"]["open_swe.trigger_surface"] == "web"
     assert enriched["params"]["metadata"]["open_swe.client"] == "web"
@@ -795,7 +797,7 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
-    patch_thread_module(monkeypatch, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
@@ -842,7 +844,7 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
-    patch_thread_module(monkeypatch, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
@@ -896,7 +898,7 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
-    patch_thread_module(monkeypatch, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
@@ -949,7 +951,7 @@ async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeyp
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
-    patch_thread_module(monkeypatch, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
@@ -994,7 +996,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
-    patch_thread_module(monkeypatch, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
     command = {
         "method": "run.start",
@@ -1103,7 +1105,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
-    patch_thread_module(monkeypatch, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
     patch_thread_module(monkeypatch, "_now_ms", lambda: 123_456)
     monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", FakeAsyncClient)
     patch_thread_module(
@@ -1956,6 +1958,28 @@ def test_metadata_matches_filters() -> None:
         scope="automation",
         automation_id="schedule-2",
     )
+    assert not thread_listing._metadata_matches_filters(
+        metadata, resolved=None, source=None, query=None, admin_threads=True
+    )
+    assert thread_listing._metadata_matches_filters(
+        {**metadata, "admin_thread": True},
+        resolved=None,
+        source=None,
+        query=None,
+        admin_threads=True,
+    )
+    assert not thread_listing._metadata_matches_filters(
+        {**metadata, "admin_thread": True},
+        resolved=None,
+        source=None,
+        query=None,
+        admin_threads=False,
+    )
+
+
+def test_search_metadata_filter_includes_admin_threads() -> None:
+    assert thread_listing._search_metadata_filter({}, admin_threads=True) == {"admin_thread": True}
+    assert thread_listing._search_metadata_filter({}, admin_threads=False) == {}
 
 
 def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]]:

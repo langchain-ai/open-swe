@@ -56,7 +56,7 @@ def searchable_trace_metadata(
     _put(result, "graph", graph)
     _put(result, "thread_id", cfg.thread_id)
     _put(result, "run_id", cfg.run_id)
-    _put(result, "prepare_run_id", cfg.prepare_run_id)
+    _put(result, "invocation_id", cfg.invocation_id)
     _put(result, "source", run_source)
     _put(result, "trigger_surface", client)
     _put(result, "client", client)

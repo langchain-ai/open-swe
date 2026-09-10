@@ -25,7 +25,6 @@ busy-check and the custom store-queue) with one function that uses:
 """
 
 import logging
-import uuid
 from typing import Any
 from urllib.parse import urlparse
 
@@ -43,6 +42,7 @@ from agent.input_messages import (
     SystemIdentity,
     build_run_input,
 )
+from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from agent.run_config import RunConfig
 from agent.utils.trace_metadata import searchable_trace_metadata
 
@@ -209,15 +209,17 @@ def prepare_run_config(
     run_config = dict(config or {})
     configurable = run_config.get("configurable")
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
-    configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
-    configurable[V3_STREAMING_CONFIG_KEY] = True
-    run_config["configurable"] = configurable
     existing_metadata = run_config.get("metadata")
     merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
     if metadata is not None:
         merged_metadata.update(metadata)
-    merged_metadata["prepare_run_id"] = configurable["prepare_run_id"]
-    run_config["metadata"] = searchable_trace_metadata(configurable, merged_metadata)
+    invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
+    configurable = with_invocation_id(configurable, invocation_id)
+    configurable[V3_STREAMING_CONFIG_KEY] = True
+    run_config["configurable"] = configurable
+    run_config["metadata"] = searchable_trace_metadata(
+        configurable, with_invocation_id(merged_metadata, invocation_id)
+    )
     return run_config
 
 
@@ -309,6 +311,11 @@ async def dispatch_agent_run(
             if context is not None
             else _dispatch_input(content, source, configurable)
         )
+    client = client or dispatch_client()
+    if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:
+        from agent.thread_feedback import note_feedback_activity
+
+        await note_feedback_activity(thread_id, client=client)
     return await create_durable_run(
         thread_id,
         assistant_id,
@@ -316,6 +323,6 @@ async def dispatch_agent_run(
         config={"configurable": configurable},
         metadata=metadata or {},
         source=source,
-        client=client or dispatch_client(),
+        client=client,
         multitask_strategy=multitask_strategy,
     )

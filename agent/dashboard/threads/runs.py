@@ -24,9 +24,9 @@ from agent.dashboard.options import (
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
 from agent.dashboard.threads.access import (
-    _agent_version_metadata,
     _ensure_dashboard_github_token,
-    _resolve_run_email,
+    agent_version_metadata,
+    resolve_run_email,
 )
 from agent.dashboard.threads.summary import (
     _DASHBOARD_SOURCE,
@@ -34,8 +34,8 @@ from agent.dashboard.threads.summary import (
     _metadata_model_id,
     _now_ms,
     _parse_repo,
-    _repo_config_from_metadata,
-    _thread_source,
+    repo_config_from_metadata,
+    thread_source,
 )
 from agent.input_messages import (
     PersonIdentity,
@@ -43,6 +43,7 @@ from agent.input_messages import (
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
 )
+from agent.invocation import new_invocation_id, with_invocation_id
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -63,7 +64,7 @@ logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "agent"
 # Modes required for the v3 event-stream protocol (`POST …/stream/events`).
-_DASHBOARD_STREAM_MODES: tuple[str, ...] = (
+DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "values",
     "updates",
     "messages",
@@ -268,7 +269,11 @@ async def _create_dashboard_thread_record(
         metadata["repo_explicitly_none"] = True
 
     client = langgraph_client()
-    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
+    await client.threads.create(
+        thread_id=thread_id,
+        metadata={**metadata, "feedback_initiator_login": login},
+        if_exists="do_nothing",
+    )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     thread = await client.threads.get(thread_id)
     return as_thread_dict(thread)
@@ -283,18 +288,18 @@ async def _build_dashboard_configurable(
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     profile = profile if profile is not None else await get_profile(login) or {}
-    thread_source = _thread_source(metadata)
+    source = thread_source(metadata)
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
-        "source": thread_source,
+        "source": source,
         "github_login": login,
-        "user_email": await _resolve_run_email(login, profile),
+        "user_email": await resolve_run_email(login, profile),
     }
     for key in ("origin", "thread_category", "trigger_kind", "client", "execution"):
         value = metadata.get(key)
         if isinstance(value, str) and value:
             configurable[key] = value
-    repo_config = _repo_config_from_metadata(metadata)
+    repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
     elif metadata.get("repo_explicitly_none") is True:
@@ -444,9 +449,9 @@ async def _enrich_run_start_command(
     plan_mode_requested = client_configurable.get("plan_mode") is True
     content = _command_message_content(params)
     command_images = _dashboard_images_from_content(content)
-    prepare_run_id = str(uuid.uuid4())
+    invocation_id = new_invocation_id()
     overrides: dict[str, Any] = {
-        "prepare_run_id": prepare_run_id,
+        **with_invocation_id(None, invocation_id),
         "client": client_configurable.get("client") or "web",
         "execution": client_configurable.get("execution") or "cloud",
     }
@@ -586,6 +591,7 @@ async def _enrich_run_start_command(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     metadata_update["updated_at_ms"] = _now_ms()
+    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(client, thread_id):
@@ -621,17 +627,13 @@ async def _enrich_run_start_command(
         run_metadata = {}
     run_metadata = searchable_trace_metadata(
         merged_configurable,
-        {
-            **run_metadata,
-            **_agent_version_metadata(),
-            "prepare_run_id": prepare_run_id,
-        },
+        with_invocation_id({**run_metadata, **agent_version_metadata()}, invocation_id),
         source=_DASHBOARD_SOURCE,
         graph=_ASSISTANT_ID,
     )
 
     params["assistant_id"] = _ASSISTANT_ID
-    params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
+    params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
     params["config"] = {**client_config, "configurable": merged_configurable}
     params["metadata"] = run_metadata

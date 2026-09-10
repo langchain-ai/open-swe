@@ -47,7 +47,7 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
 """
 
 
-def _pull_request_identity(record: object) -> tuple[str, str, int] | None:
+def pull_request_identity(record: object) -> tuple[str, str, int] | None:
     if not isinstance(record, Mapping):
         return None
     full_name = record.get("repo_full_name")
@@ -298,7 +298,7 @@ async def _fetch_unresolved_review_threads(
 
 
 async def _pull_request_status(client: httpx2.AsyncClient, record: object) -> dict[str, Any]:
-    identity = _pull_request_identity(record)
+    identity = pull_request_identity(record)
     if identity is None:
         return _unavailable_pull_request(record)
     owner, repo, number = identity

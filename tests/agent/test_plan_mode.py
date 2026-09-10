@@ -52,9 +52,6 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         "delete_user_skill",
         "slack_move_thread",
         "slack_start_new_thread",
-        "linear_create_issue",
-        "linear_update_issue",
-        "linear_delete_issue",
     ):
         assert tool in excluded
     # Read-only tools, plan-file editing tools, and explicit plan approval stay available.
@@ -122,7 +119,7 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
-    patch_thread_module(monkeypatch, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
     return client
 
 

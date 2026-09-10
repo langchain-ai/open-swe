@@ -106,7 +106,7 @@ async def test_dashboard_followup_on_slack_thread_uses_dashboard_source(
     patch_thread_module(monkeypatch, "get_thread_active_status", _inactive_thread)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", _noop_token_check)
     patch_thread_module(monkeypatch, "get_profile", _empty_profile)
-    patch_thread_module(monkeypatch, "_resolve_run_email", _run_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", _run_email)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
@@ -135,7 +135,7 @@ async def test_dashboard_followup_sends_image_content_blocks(
     patch_thread_module(monkeypatch, "get_thread_active_status", _inactive_thread)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", _noop_token_check)
     patch_thread_module(monkeypatch, "get_profile", _empty_profile)
-    patch_thread_module(monkeypatch, "_resolve_run_email", _run_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", _run_email)
     patch_thread_module(
         monkeypatch,
         "create_image_block",
@@ -441,7 +441,7 @@ async def test_dashboard_followup_preserves_explicit_repo_less_thread(
     patch_thread_module(monkeypatch, "get_thread_active_status", _inactive_thread)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", _noop_token_check)
     patch_thread_module(monkeypatch, "get_profile", _empty_profile)
-    patch_thread_module(monkeypatch, "_resolve_run_email", _run_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", _run_email)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
@@ -467,7 +467,7 @@ async def test_dashboard_followup_without_repo_metadata_allows_team_default(
     patch_thread_module(monkeypatch, "get_thread_active_status", _inactive_thread)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", _noop_token_check)
     patch_thread_module(monkeypatch, "get_profile", _empty_profile)
-    patch_thread_module(monkeypatch, "_resolve_run_email", _run_email)
+    patch_thread_module(monkeypatch, "resolve_run_email", _run_email)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(

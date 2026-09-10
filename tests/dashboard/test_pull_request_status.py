@@ -24,21 +24,21 @@ async def _client(**kwargs):
 
 
 def test_pull_request_identity_rejects_untrusted_path_components() -> None:
-    assert pull_request_status._pull_request_identity(
+    assert pull_request_status.pull_request_identity(
         {"repo_full_name": "owner/repo", "number": 7}
     ) == ("owner", "repo", 7)
     assert (
-        pull_request_status._pull_request_identity(
+        pull_request_status.pull_request_identity(
             {"repo_full_name": "owner/repo/../../users", "number": 7}
         )
         is None
     )
     assert (
-        pull_request_status._pull_request_identity({"repo_full_name": "owner/repo", "number": True})
+        pull_request_status.pull_request_identity({"repo_full_name": "owner/repo", "number": True})
         is None
     )
     assert (
-        pull_request_status._pull_request_identity({"repo_full_name": "owner/..", "number": 7})
+        pull_request_status.pull_request_identity({"repo_full_name": "owner/..", "number": 7})
         is None
     )
 

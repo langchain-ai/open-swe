@@ -12,12 +12,12 @@ from agent.utils.json_types import ThreadLike, thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
 
-def _agent_version_metadata() -> dict[str, str]:
+def agent_version_metadata() -> dict[str, str]:
     revision = ENV.LANGCHAIN_REVISION_ID.optional()
     return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
 
 
-async def _resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
+async def resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
     """Email used for GitHub/LangSmith auth on a run.
 
     Prefers the admin/self GitHub→email mapping (the work email known to
@@ -66,7 +66,7 @@ async def _readable_thread(
 ) -> ThreadLike:
     """Fetch a thread and assert it is readable by the requesting user.
 
-    Read access is granted to any authenticated org member for surfaced-source
+    Read access is granted to any authenticated allowed user for surfaced-source
     threads; ``login``/``email`` are accepted for API parity but not required.
     """
     try:

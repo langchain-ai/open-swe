@@ -31,7 +31,7 @@ async def github_webhook(
         },
     )
 
-    if event_type not in common._SUPPORTED_GH_EVENTS:
+    if event_type not in common.SUPPORTED_GH_EVENTS:
         common.logger.info("Ignoring unsupported GitHub event type: %s", event_type)
         return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
@@ -55,34 +55,34 @@ async def github_webhook(
 
     if is_pull_request_event:
         action = payload.get("action", "")
-        if action not in common._SUPPORTED_GH_PULL_REQUEST_ACTIONS:
+        if action not in common.SUPPORTED_GH_PULL_REQUEST_ACTIONS:
             common.logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
             return {
                 "status": "ignored",
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
-        if action in common._GH_PR_AGENT_STATE_ACTIONS:
+        if action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
             try:
                 await common.update_agent_pr_usage_from_webhook(payload)
             except Exception:  # noqa: BLE001
                 common.logger.debug("Failed to update Agent PR usage", exc_info=True)
-        if action in common._GH_PR_WATCH_TOGGLE_ACTIONS:
+        if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action
             )
             background_tasks.add_task(service.process_github_pr_close, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for reviewer watch"}
-        if action in common._GH_PR_FIRST_REVIEW_ACTIONS:
-            if not await common._is_repo_auto_review_enabled(webhook_repo_config):
+        if action in common.GH_PR_FIRST_REVIEW_ACTIONS:
+            if not await common.is_repo_auto_review_enabled(webhook_repo_config):
                 return {"status": "ignored", "reason": "Automatic review disabled for repository"}
-            gate_rejection = await common._enforce_public_repo_org_gate(payload, "pull_request")
+            gate_rejection = await common.enforce_public_repo_org_gate(payload, "pull_request")
             if gate_rejection is not None:
                 return gate_rejection
             common.logger.info("Accepted GitHub PR %s webhook, scheduling auto-review task", action)
             background_tasks.add_task(service.process_github_pr_ready, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for auto-review"}
-        if action in common._GH_PR_AGENT_STATE_ACTIONS:
+        if action in common.GH_PR_AGENT_STATE_ACTIONS:
             return {"status": "accepted", "message": f"Processing PR {action} state"}
         common.logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
         return {
@@ -91,13 +91,13 @@ async def github_webhook(
         }
 
     if event_type == "push":
-        if not await common._is_repo_auto_review_enabled(webhook_repo_config):
+        if not await common.is_repo_auto_review_enabled(webhook_repo_config):
             return {"status": "ignored", "reason": "Automatic review disabled for repository"}
         common.logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")
         background_tasks.add_task(service.process_github_push_event, payload)
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
 
-    if not common._is_repo_allowed(webhook_repo_config):
+    if not common.is_repo_allowed(webhook_repo_config):
         common.logger.debug(
             "Rejecting GitHub webhook: repo '%s/%s' not in allowlist",
             webhook_repo_config.get("owner"),
@@ -105,7 +105,7 @@ async def github_webhook(
         )
         return {"status": "ignored", "reason": "Repository not in allowlist"}
 
-    if event_type in common._GITHUB_CI_EVENTS:
+    if event_type in common.GITHUB_CI_EVENTS:
         background_tasks.add_task(
             service.process_github_ci_event,
             payload,
@@ -116,7 +116,7 @@ async def github_webhook(
 
     if is_issue_event:
         action = payload.get("action", "")
-        if action not in common._SUPPORTED_GH_ISSUE_ACTIONS:
+        if action not in common.SUPPORTED_GH_ISSUE_ACTIONS:
             common.logger.info("Ignoring unsupported GitHub issue action: %s", action)
             return {"status": "ignored", "reason": f"Unsupported GitHub issue action: {action}"}
         if action == "edited":
@@ -131,7 +131,7 @@ async def github_webhook(
             common.logger.info("Ignoring issue that does not mention %s", tags)
             return {"status": "ignored", "reason": f"Issue does not mention {tags}"}
 
-        gate_rejection = await common._enforce_public_repo_org_gate(payload, event_type)
+        gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
         if gate_rejection is not None:
             return gate_rejection
 
@@ -140,7 +140,7 @@ async def github_webhook(
         return {"status": "accepted", "message": "Processing GitHub issue event"}
 
     action = payload.get("action", "")
-    supported_comment_actions = common._SUPPORTED_GH_COMMENT_ACTIONS.get(event_type)
+    supported_comment_actions = common.SUPPORTED_GH_COMMENT_ACTIONS.get(event_type)
     if supported_comment_actions is None:
         common.logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
         return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
@@ -153,9 +153,9 @@ async def github_webhook(
 
     if (
         event_type == "pull_request_review_comment"
-        and common._review_comment_reply_parent_id(payload) is not None
+        and common.review_comment_reply_parent_id(payload) is not None
     ):
-        gate_rejection = await common._enforce_public_repo_org_gate(payload, event_type)
+        gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
         if gate_rejection is not None:
             return gate_rejection
         background_tasks.add_task(service.process_github_review_finding_reply, payload)
@@ -171,7 +171,7 @@ async def github_webhook(
         )
         return {"status": "ignored", "reason": f"Comment does not mention {tags}"}
 
-    gate_rejection = await common._enforce_public_repo_org_gate(payload, event_type)
+    gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
     if gate_rejection is not None:
         return gate_rejection
 

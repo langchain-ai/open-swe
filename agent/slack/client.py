@@ -62,7 +62,7 @@ class GitHubPrRef:
     url: str
 
 
-def _slack_headers() -> dict[str, str]:
+def slack_headers() -> dict[str, str]:
     if not SLACK_BOT_TOKEN:
         return {}
     return {
@@ -418,7 +418,7 @@ async def _post_slack_message_with_ts(
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/chat.postMessage",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json=payload,
             )
             if response.status_code == 429:
@@ -705,7 +705,7 @@ async def _slack_stream_call(method: str, payload: dict[str, Any]) -> dict[str, 
     async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/{method}", headers=_slack_headers(), json=payload
+                f"{SLACK_API_BASE_URL}/{method}", headers=slack_headers(), json=payload
             )
             if response.status_code == 429:
                 raw_retry_after = response.headers.get("Retry-After")
@@ -816,7 +816,7 @@ async def update_slack_message(
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/chat.update",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json=payload,
             )
             if response.status_code == 429:
@@ -957,25 +957,32 @@ async def post_slack_thread_reply(
 
 
 async def post_slack_ephemeral_message(
-    channel_id: str, user_id: str, text: str, thread_ts: str | None = None
+    channel_id: str,
+    user_id: str,
+    text: str,
+    thread_ts: str | None = None,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Post an ephemeral message visible only to one user."""
     if not SLACK_BOT_TOKEN:
         return False
 
-    payload: dict[str, str] = {
+    payload: dict[str, Any] = {
         "channel": channel_id,
         "user": user_id,
         "text": text,
     }
     if thread_ts:
         payload["thread_ts"] = thread_ts
+    if blocks is not None:
+        payload["blocks"] = blocks
 
     async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/chat.postEphemeral",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json=payload,
             )
             response.raise_for_status()
@@ -986,6 +993,64 @@ async def post_slack_ephemeral_message(
             return True
         except httpx2.HTTPError:
             logger.exception("Slack chat.postEphemeral request failed")
+            return False
+
+
+async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any]) -> bool:
+    """Update or delete an interaction's source message, including ephemeral messages."""
+    try:
+        parsed = urlparse(response_url)
+    except ValueError:
+        return False
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc not in {"hooks.slack.com", "hooks.slack-gov.com"}
+        or not parsed.path.startswith("/actions/")
+    ):
+        return False
+    request = httpx2.Request(
+        "POST",
+        response_url,
+        json=payload,
+        extensions={"timeout": httpx2.Timeout(5.0).as_dict()},
+    )
+    try:
+        # AsyncClient logs request URLs, which contain credentials for these callbacks.
+        async with httpx2.AsyncHTTPTransport() as transport:
+            response = await transport.handle_async_request(request)
+            try:
+                if not response.is_success:
+                    return False
+                await response.aread()
+                if response.text == "ok":
+                    return True
+                data = response.json()
+                return isinstance(data, dict) and data.get("ok") is True
+            finally:
+                await response.aclose()
+    except httpx2.HTTPError, ValueError:
+        logger.warning("Slack interaction response failed")
+        return False
+
+
+async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:
+    """Open a modal before Slack's short-lived interaction trigger expires."""
+    if not SLACK_BOT_TOKEN:
+        return False
+    async with httpx2.AsyncClient(timeout=2.0) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/views.open",
+                headers=slack_headers(),
+                json={"trigger_id": trigger_id, "view": view},
+            )
+            error = _slack_response_error(response)
+            if error:
+                logger.warning("Slack modal open failed", extra={"slack_error": error})
+                return False
+            return True
+        except httpx2.HTTPError:
+            logger.warning("Slack modal request failed", exc_info=True)
             return False
 
 
@@ -1004,7 +1069,7 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/reactions.add",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json=payload,
             )
             response.raise_for_status()
@@ -1029,7 +1094,7 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/users.info",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params={"user": user_id},
             )
             response.raise_for_status()
@@ -1082,7 +1147,7 @@ async def get_slack_channel_info(
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/conversations.info",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params={"channel": channel_id},
             )
             if getattr(response, "status_code", None) == 429:
@@ -1267,7 +1332,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
             try:
                 response = await http_client.get(
                     f"{SLACK_API_BASE_URL}/{method}",
-                    headers=_slack_headers(),
+                    headers=slack_headers(),
                     params=params,
                 )
                 response.raise_for_status()
@@ -1314,12 +1379,14 @@ async def slack_thread_mutation_lock(
     thread_ts: str,
     *,
     thread_id: str | None = None,
+    purpose: str | None = None,
 ) -> AsyncIterator[dict[str, Any] | None]:
     """Lock a Slack thread and optionally return its current active location."""
     channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
-    lock_id = str(
-        uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-thread-lock:{channel}:{timestamp}")
-    )
+    lock_key = f"open-swe:slack-thread-lock:{channel}:{timestamp}"
+    if purpose:
+        lock_key += f":{purpose}"
+    lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, lock_key))
     deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
     while True:
         try:
@@ -1372,7 +1439,7 @@ async def fetch_slack_thread_message_by_ts(
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/{method}",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params=params,
             )
             response.raise_for_status()
@@ -1409,7 +1476,7 @@ async def fetch_slack_thread_message_by_ts(
 
 
 SLACK_MESSAGE_URL_RE = re.compile(
-    r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(?:\?[^\s>]*)?"
+    r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(?:\?[^\s>|]*)?"
 )
 
 
@@ -1426,6 +1493,17 @@ def parse_slack_message_url(url: str) -> tuple[str, str] | None:
     raw_ts = match.group(2)
     message_ts = f"{raw_ts[:10]}.{raw_ts[10:]}"
     return channel_id, message_ts
+
+
+def parse_slack_thread_url(url: str) -> tuple[str, str] | None:
+    """Parse a Slack permalink into its channel and root thread timestamp."""
+    match = SLACK_MESSAGE_URL_RE.search(url)
+    if not match:
+        return None
+    channel_id, message_ts = parse_slack_message_url(match.group(0)) or ("", "")
+    query = httpx2.QueryParams(urlparse(match.group(0)).query)
+    thread_ts = query.get("thread_ts", "").strip()
+    return channel_id, thread_ts if _SLACK_MESSAGE_TS_RE.fullmatch(thread_ts) else message_ts
 
 
 def extract_slack_message_urls(text: str) -> list[tuple[str, str, str]]:
@@ -1451,7 +1529,7 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/conversations.history",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params={
                     "channel": channel_id,
                     "latest": message_ts,
@@ -1496,7 +1574,7 @@ async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
         try:
             response = await http_client.get(
                 f"{SLACK_API_BASE_URL}/chat.getPermalink",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 params={"channel": channel_id, "message_ts": message_ts},
             )
             response.raise_for_status()
@@ -1934,6 +2012,7 @@ async def store_slack_message_run_mapping(
     *,
     run_id: str | None = None,
     triggering_user_id: str | None = None,
+    should_ask_for_feedback: bool = False,
 ) -> None:
     """Persist an exact run-to-Slack-message mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
@@ -1963,6 +2042,10 @@ async def store_slack_message_run_mapping(
             "thread_ts": thread_ts,
             "message_ts": message_ts,
         }
+        if should_ask_for_feedback:
+            value["should_ask_for_feedback"] = True
+        else:
+            value.pop("should_ask_for_feedback", None)
         if triggering_user_id:
             value["triggering_user_id"] = triggering_user_id
         await langgraph_client.store.put_item(

@@ -20,11 +20,11 @@ from fastapi import HTTPException
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.review_api import classify_finding, get_pr_head_sha, get_review
 from agent.dashboard.threads.proxy import (
-    _langgraph_proxy_headers,
-    _require_json_content_type,
-    _stream_thread_events,
+    langgraph_proxy_headers,
+    require_json_content_type,
+    stream_thread_events,
 )
-from agent.dashboard.threads.runs import _DASHBOARD_STREAM_MODES
+from agent.dashboard.threads.runs import DASHBOARD_STREAM_MODES
 from agent.github.app import get_github_app_installation_token
 from agent.review.diff import fetch_pr_diff
 from agent.review.findings import REVIEWER_THREAD_KIND
@@ -432,7 +432,7 @@ async def _enrich_chat_command(
         configurable["chat_head_sha"] = stored_head
 
     params["assistant_id"] = _CHAT_ASSISTANT_ID
-    params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
+    params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
     params["config"] = {**client_config, "configurable": configurable}
     command["params"] = params
@@ -453,7 +453,7 @@ async def proxy_review_chat_commands(
     # below on the first `run.start` (with the caller as owner). Reuse the
     # fetched metadata to avoid a second thread read during enrichment.
     metadata = await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -471,7 +471,7 @@ async def proxy_review_chat_commands(
         thread_metadata=metadata,
     )
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
-    headers = _langgraph_proxy_headers(content_type=content_type)
+    headers = langgraph_proxy_headers(content_type=content_type)
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=json.dumps(enriched).encode(), headers=headers)
     return response.status_code, response.content, response.headers.get("content-type")
@@ -488,15 +488,15 @@ async def proxy_review_chat_stream_events(
     content_type: str = "application/json",
 ) -> AsyncIterator[bytes]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    _require_json_content_type(content_type)
-    return _stream_thread_events(thread_id, body, content_type)
+    require_json_content_type(content_type)
+    return stream_thread_events(thread_id, body, content_type)
 
 
 async def _proxy_passthrough(
     method: str, thread_id: str, suffix: str, body: bytes | None, content_type: str
 ) -> tuple[int, bytes, str | None]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/{suffix}"
-    headers = _langgraph_proxy_headers(content_type=content_type)
+    headers = langgraph_proxy_headers(content_type=content_type)
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         if method == "GET":
             response = await client.get(url, headers=headers)
@@ -532,7 +532,7 @@ async def proxy_review_chat_history(
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     status_code, content, media_type = await _proxy_passthrough(
         "POST", thread_id, "history", body, content_type
     )

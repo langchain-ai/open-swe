@@ -24,6 +24,7 @@ export interface MessagesProps extends ApprovalCallbacks {
   scrollKey?: string
   showPlanArtifact?: boolean
   emptyState?: React.ReactNode
+  footer?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
   isStreaming: boolean

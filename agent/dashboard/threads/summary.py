@@ -65,7 +65,7 @@ def _thread_metadata(thread: ThreadLike) -> JsonObject:
     return thread_metadata(thread)
 
 
-def _thread_source(metadata: Mapping[str, Any]) -> str:
+def thread_source(metadata: Mapping[str, Any]) -> str:
     source = metadata.get("source")
     return source if isinstance(source, str) and source else _DASHBOARD_SOURCE
 
@@ -81,19 +81,19 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _thread_is_readable(metadata: Mapping[str, Any]) -> bool:
+def thread_is_readable(metadata: Mapping[str, Any]) -> bool:
     """Any surfaced-source thread is readable by authenticated users.
 
-    Dashboard login is already gated by ``ALLOWED_GITHUB_ORGS`` (see
-    ``oauth.enforce_org_login_gate``), so any logged-in user is a trusted
-    org member. This lets teammates open "Open in Web" links shared in Slack
-    threads with read-only access.
+    Dashboard login is already gated by ``ALLOWED_GITHUB_ORGS`` or
+    ``ALLOWED_GITHUB_USERS`` (see ``oauth.enforce_github_login_gate``), so any
+    logged-in user is trusted. This lets teammates open "Open in Web" links
+    shared in Slack threads with read-only access.
     """
-    return _thread_source(metadata) in _SURFACED_SOURCES
+    return thread_source(metadata) in _SURFACED_SOURCES
 
 
 def _assert_thread_readable(metadata: Mapping[str, Any]) -> None:
-    if not _thread_is_readable(metadata):
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
 
 
@@ -121,7 +121,7 @@ def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     return "", "", ""
 
 
-def _repo_config_from_metadata(metadata: Mapping[str, Any]) -> dict[str, str]:
+def repo_config_from_metadata(metadata: Mapping[str, Any]) -> dict[str, str]:
     owner, name, _ = _metadata_repo(metadata)
     if owner and name:
         return {"owner": owner, "name": name}
@@ -165,14 +165,14 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("resolved") is True
 
 
-def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
+def thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     if slack_thread is None:
         return None
     return slack_thread.permalink.strip() or None
 
 
-def _thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
+def thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     team_id = SLACK_TEAM_ID.strip()
     if (
@@ -204,13 +204,13 @@ def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
 def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
     return (
         _metadata_string(metadata, "thread_category") == "automation"
-        or _thread_source(metadata) == "schedule"
+        or thread_source(metadata) == "schedule"
         or _metadata_string(metadata, "schedule_id") is not None
     )
 
 
 def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
-    source = _thread_source(metadata)
+    source = thread_source(metadata)
     origin = _metadata_string(metadata, "origin") or source
     trigger_kind = _metadata_string(metadata, "trigger_kind") or (
         "schedule_test"
@@ -349,7 +349,7 @@ async def _thread_summary(
         "adminThread": metadata.get("admin_thread") is True,
         "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
-        "source": _thread_source(metadata),
+        "source": thread_source(metadata),
         "origin": origin,
         "threadCategory": thread_category,
         "triggerKind": trigger_kind,
@@ -376,8 +376,8 @@ async def _thread_summary(
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
-        "sourceUrl": _thread_source_url(metadata),
-        "sourceAppUrl": _thread_source_app_url(metadata),
+        "sourceUrl": thread_source_url(metadata),
+        "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
     }

@@ -2,15 +2,54 @@ import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import type { WorkspaceMCPUpdate } from "@/lib/api"
+import type { WorkspaceMCPUpdate, WorkspaceMCPOAuthUpdate } from "@/lib/api"
 
 export type ImportedMCP = Pick<
   WorkspaceMCPUpdate,
-  "name" | "url" | "transport" | "headers"
+  "name" | "url" | "transport" | "headers" | "oauth"
 >
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function parseOAuth(
+  value: unknown,
+  label: string
+): WorkspaceMCPOAuthUpdate | null {
+  if (value === null) return null
+  if (
+    !isObject(value) ||
+    Object.keys(value).some(
+      (key) =>
+        ![
+          "grant_type",
+          "token_url",
+          "client_id",
+          "client_secret",
+          "scope",
+          "token_endpoint_auth_method",
+        ].includes(key)
+    ) ||
+    Object.values(value).some((item) => typeof item !== "string") ||
+    typeof value.token_url !== "string" ||
+    !value.token_url.startsWith("https://") ||
+    typeof value.client_id !== "string" ||
+    !value.client_id.trim() ||
+    (value.grant_type !== undefined &&
+      value.grant_type !== "client_credentials") ||
+    (value.token_endpoint_auth_method !== undefined &&
+      !["client_secret_post", "client_secret_basic"].includes(
+        String(value.token_endpoint_auth_method)
+      )) ||
+    Object.values(value).some(
+      (item) => typeof item === "string" && /\$\{[^}]+\}/.test(item)
+    )
+  )
+    throw new Error(
+      `${label}: OAuth requires an HTTPS token_url and client_id, supports only client_credentials, and does not resolve environment-variable placeholders.`
+    )
+  return { ...value, token_url: value.token_url, client_id: value.client_id }
 }
 
 export function parseMCPConfig(text: string): ImportedMCP[] {
@@ -39,11 +78,11 @@ export function parseMCPConfig(text: string): ImportedMCP[] {
       )
     if (
       Object.keys(server).some(
-        (key) => !["url", "type", "headers"].includes(key)
+        (key) => !["url", "type", "headers", "oauth"].includes(key)
       )
     )
       throw new Error(
-        `${label}: supported settings are url, type, and headers.`
+        `${label}: supported settings are url, type, headers, and oauth.`
       )
     if (
       typeof server.url !== "string" ||
@@ -76,6 +115,9 @@ export function parseMCPConfig(text: string): ImportedMCP[] {
       url: server.url.trim(),
       transport: server.type === "sse" ? "sse" : "streamable_http",
       headers,
+      ...(server.oauth !== undefined
+        ? { oauth: parseOAuth(server.oauth, label) }
+        : {}),
     }
   })
 }
