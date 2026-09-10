@@ -2,8 +2,9 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
-Slack runs enqueue deferred session-cost enrichment; failures (``error`` /
-``timeout``) post a short reply so a run that died never leaves the user silent.
+Slack runs enqueue deferred session-cost enrichment and offer private feedback
+when a question was answered. Failures (``error`` / ``timeout``) post a short reply
+so a run that died never leaves the user silent.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -13,24 +14,28 @@ missing ids degrade dedupe instead of silencing failure replies.
 
 import hmac
 import logging
-import os
 from typing import Any
 
+from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
-from agent.auth.github_app import get_github_app_installation_token
+from agent.agent_cost import finalize_agent_invocation_usage
+from agent.config import ENV
+from agent.github.app import get_github_app_installation_token
+from agent.github.comments import post_github_comment
+from agent.invocation import resolve_invocation_id, with_invocation_id
+from agent.linear.client import comment_on_linear_issue
+from agent.review.findings import REVIEWER_THREAD_KIND
+from agent.review.publish import settle_review_check_run
+from agent.session_cost import schedule_session_cost_refresh
+from agent.slack.client import post_slack_thread_reply
+from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
-
-from .review.findings import REVIEWER_THREAD_KIND
-from .review.publish import settle_review_check_run
-from .session_cost import schedule_session_cost_refresh
-from .utils.dashboard_links import dashboard_thread_url
-from .utils.github_comments import post_github_comment
-from .utils.linear import comment_on_linear_issue
-from .utils.slack import post_slack_thread_reply
-from .utils.slack_code_channels import is_code_channel_session, set_session_status
-from .utils.thread_ops import langgraph_client
-from .utils.user_messages import warning
+from agent.thread_feedback import schedule_answer_feedback
+from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
+from agent.utils.thread_ops import langgraph_client
+from agent.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +44,7 @@ logger = logging.getLogger(__name__)
 # follow-up halts the prior run (status "interrupted") while its replacement
 # carries on — that's healthy, not a failure worth a "couldn't finish" reply.
 _TERMINAL_FAILURE_STATUSES = frozenset({"error", "timeout"})
+_TERMINAL_RUN_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 _FAILURE_REPLY_FLAG = "failure_reply_posted"
 _FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
 _FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
@@ -46,12 +52,13 @@ _MAX_FAILURE_REPLY_RUN_IDS = 20
 _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
 _SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
 _MAX_SESSION_COST_REFRESH_RUN_IDS = 20
+_MESSAGE_CONVERSION_ERRORS = (NotImplementedError, TypeError, ValueError)
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
 # own dispatch (which appends ?token= when this is set) rather than from an
 # attacker hitting the public route. Fail closed when unset: the route rejects
 # every call, so completion replies stay off until the secret is configured.
-RUN_COMPLETE_WEBHOOK_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
+RUN_COMPLETE_WEBHOOK_SECRET = ENV.RUN_COMPLETE_WEBHOOK_SECRET.optional()
 if not RUN_COMPLETE_WEBHOOK_SECRET:
     logger.warning(
         "RUN_COMPLETE_WEBHOOK_SECRET is not set; /webhooks/run-complete is fail-closed "
@@ -71,20 +78,57 @@ def verify_run_complete_token(token: str | None) -> bool:
     return token is not None and hmac.compare_digest(token, secret)
 
 
-def _failure_text(status: str, dashboard_url: str | None = None) -> str:
-    if status == "timeout":
-        reason = "timed out"
-    elif status == "interrupted":
-        reason = "was interrupted before it could finish"
-    else:
-        reason = "hit an unexpected error"
-    text = warning(
-        f"Open SWE wasn't able to finish that — the run {reason}. "
-        "Send another message and it will pick this back up."
-    )
+_REASON_TEXT = {
+    "provider_overloaded": "the model provider was overloaded and never recovered",
+    "provider_rate_limited": "the model provider rate-limited it",
+    "provider_unavailable": "the model provider kept returning errors",
+    "provider_timeout": "a model call timed out",
+    "context_too_long": "the conversation outgrew the model's context window",
+    "model_unavailable": "the selected model isn't available to this workspace",
+    "sandbox_unreachable": "the run lost its sandbox",
+    "step_limit": "the run hit its step limit",
+}
+_DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
+_REASON_FOLLOW_UP = {
+    "context_too_long": "Start a new thread to continue.",
+    "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
+}
+
+
+def _failure_text(
+    status: str, dashboard_url: str | None = None, reason_code: str | None = None
+) -> str:
+    reason = _REASON_TEXT.get(reason_code or "")
+    if reason is None:
+        if status == "timeout":
+            reason = "the run timed out"
+        elif status == "interrupted":
+            reason = "the run was interrupted before it could finish"
+        else:
+            reason = "the run hit an unexpected error"
+    follow_up = _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
+    text = warning(f"Open SWE wasn't able to finish that — {reason}. {follow_up}")
     if dashboard_url:
         text += f" You can view the error in <{dashboard_url}|Open SWE Web>."
     return text
+
+
+def _failure_reason_code(error: Any, metadata: dict[str, Any], run_id: str | None) -> str | None:
+    """Classify the failure, preferring the in-run record over the class name alone.
+
+    The recorded classification is only trusted when it names the same exception
+    the run actually died with — a run can log a transient error, recover from it,
+    and then fail for an unrelated reason.
+    """
+    error_type = error.get("error") if isinstance(error, dict) else None
+    error_type = error_type if isinstance(error_type, str) else None
+    recorded = metadata.get(LAST_MODEL_ERROR_KEY)
+    if isinstance(recorded, dict) and recorded.get("error_type") == error_type:
+        recorded_run = recorded.get("run_id")
+        code = recorded.get("code")
+        if isinstance(code, str) and (recorded_run is None or recorded_run == run_id):
+            return code
+    return code_for_error_type(error_type)
 
 
 async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]) -> None:
@@ -136,18 +180,24 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
         )
 
 
-async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: str) -> bool:
+async def _post_failure_reply(
+    thread_id: str, metadata: dict[str, Any], status: str, reason_code: str | None = None
+) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
     ctx = SourceContext.from_metadata(metadata)
-    text = _failure_text(status)
+    text = _failure_text(status, reason_code=reason_code)
 
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            slack_text = _failure_text(status, dashboard_thread_url(thread_id))
+            slack_text = _failure_text(status, dashboard_thread_url(thread_id), reason_code)
             return await post_slack_thread_reply(
-                location[0], location[1], slack_text, agent_thread_id=thread_id
+                location[0],
+                location[1],
+                slack_text,
+                agent_thread_id=thread_id,
+                include_trace_link=True,
             )
         return False
 
@@ -209,10 +259,38 @@ def _cost_refresh_metadata(metadata: dict[str, Any], run_id: str) -> dict[str, A
     }
 
 
-def _prepare_run_id(payload: dict[str, Any]) -> str | None:
+def _invocation_id(payload: dict[str, Any]) -> str | None:
     metadata = payload.get("metadata")
-    value = metadata.get("prepare_run_id") if isinstance(metadata, dict) else None
-    return value if isinstance(value, str) and value else None
+    if not isinstance(metadata, dict):
+        return None
+    try:
+        return resolve_invocation_id(metadata)
+    except ValueError:
+        logger.warning("run-complete: conflicting invocation identifiers")
+        return None
+
+
+async def _finalize_agent_usage_telemetry(
+    thread_id: str, status: object, payload: dict[str, Any]
+) -> None:
+    """Finalize Agent telemetry from the platform's terminal webhook payload."""
+    if status not in _TERMINAL_RUN_STATUSES:
+        return
+    invocation_id = _invocation_id(payload)
+    if invocation_id is None:
+        return
+    values = payload.get("values")
+    state = dict(values) if isinstance(values, dict) else None
+    if state is not None and isinstance(state.get("messages"), list):
+        try:
+            state["messages"] = convert_to_messages(state["messages"])
+        except _MESSAGE_CONVERSION_ERRORS:
+            state = None
+    await finalize_agent_invocation_usage(
+        invocation_id=invocation_id,
+        thread_id=thread_id,
+        state=state,
+    )
 
 
 async def _settle_code_channel_session(
@@ -235,7 +313,7 @@ async def _settle_code_channel_session(
     await set_session_status(slack_thread.channel_id, "active")
 
 
-async def _schedule_success_cost_refresh(
+async def _handle_successful_run(
     thread_id: str, run_id: str | None, payload: dict[str, Any]
 ) -> dict[str, str]:
     if run_id is None:
@@ -252,9 +330,18 @@ async def _schedule_success_cost_refresh(
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
-    prepare_run_id = _prepare_run_id(payload)
-    if prepare_run_id is None:
-        return {"status": "ignored", "reason": "missing prepare_run_id"}
+    payload_metadata = payload.get("metadata")
+    automated = (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
+    )
+    if not automated:
+        try:
+            await schedule_answer_feedback(thread_id, run_id, metadata)
+        except Exception:
+            logger.warning("Could not schedule completion feedback", extra={"thread_id": thread_id})
+    invocation_id = _invocation_id(payload)
+    if invocation_id is None:
+        return {"status": "ignored", "reason": "missing or conflicting invocation_id"}
     if run_id in _scheduled_cost_run_ids(metadata):
         return {"status": "ignored", "reason": "cost refresh already scheduled for run"}
 
@@ -270,7 +357,7 @@ async def _schedule_success_cost_refresh(
         {
             "agent_thread_id": thread_id,
             "run_id": run_id,
-            "prepare_run_id": prepare_run_id,
+            **with_invocation_id(None, invocation_id),
             "channel_id": channel_id,
             "thread_ts": thread_ts,
         },
@@ -291,7 +378,7 @@ async def _schedule_success_cost_refresh(
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
-    Enqueues successful Slack cost refreshes and posts failure replies idempotently.
+    Prompts for Slack feedback, enqueues cost refreshes, and posts failure replies.
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")
@@ -299,8 +386,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    await _finalize_agent_usage_telemetry(thread_id, status, payload)
     if status == "success":
-        return await _schedule_success_cost_refresh(thread_id, run_id, payload)
+        return await _handle_successful_run(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
     if (
         status in _TERMINAL_FAILURE_STATUSES
@@ -310,6 +398,27 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "automated wakeup failure"}
     if status not in _TERMINAL_FAILURE_STATUSES:
         return {"status": "ignored", "reason": f"non-failure status: {status}"}
+
+    error = payload.get("error")
+    # The platform serializes the exception (class name, and the message when its
+    # type is allowlisted) — there is no traceback to attach on this side.
+    error_attributes = (
+        {"error": {"kind": error.get("error"), "message": error.get("message")}}
+        if isinstance(error, dict)
+        else {}
+    )
+    logger.error(
+        "Run failed",
+        extra={
+            **error_attributes,
+            "run_failure": {
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "status": status,
+                "error": error,
+            },
+        },
+    )
 
     client = langgraph_client()
     try:
@@ -330,7 +439,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
 
-    posted = await _post_failure_reply(thread_id, metadata, status)
+    reason_code = _failure_reason_code(error, metadata, run_id)
+    posted = await _post_failure_reply(thread_id, metadata, status, reason_code)
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
 
@@ -341,5 +451,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
-    logger.info("Posted failure reply for thread %s (status=%s)", thread_id, status)
+    logger.info(
+        "Posted failure reply",
+        extra={"failure_reply": {"thread_id": thread_id, "status": status, "code": reason_code}},
+    )
     return {"status": "ok", "reason": "failure reply posted"}

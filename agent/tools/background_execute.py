@@ -6,15 +6,18 @@ import logging
 import shlex
 import textwrap
 import uuid
-from typing import Any, Literal
+from typing import Any
 
-from langgraph.config import get_config
-
+from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 
 TASK_ROOT = "/tmp/open-swe-background-tasks"
+# Task ids are prefixed so the one poll tool can route an id to the thing that
+# knows how to read it, without the caller having to say which kind it is.
+TASK_PREFIX = "cmd"
+TASK_KIND = "sandbox_command"
 LAUNCH_LOCK = f"{TASK_ROOT}/.launch-lock"
 DEFAULT_TIMEOUT_SECONDS = 3600
 MAX_TIMEOUT_SECONDS = 86_400
@@ -24,7 +27,7 @@ MAX_INLINE_OUTPUT_BYTES = 65_536
 TASK_TTL_SECONDS = 604_800
 
 
-def _encoded(value: str) -> str:
+def encoded(value: str) -> str:
     return base64.b64encode(value.encode()).decode()
 
 
@@ -39,7 +42,7 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
         state_path = os.path.join(task_dir, "state.json")
         output_path = os.path.join(task_dir, "output.log")
         stop_path = os.path.join(task_dir, "stop")
-        command = base64.b64decode({_encoded(command)!r}).decode()
+        command = base64.b64decode({encoded(command)!r}).decode()
         try:
             os.remove(__file__)
         except OSError:
@@ -143,7 +146,7 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
 
 def _launch_command(task_id: str, command: str, timeout: int) -> str:
     task_dir = f"{TASK_ROOT}/{task_id}"
-    runner = _encoded(_runner(task_id, command, timeout))
+    runner = encoded(_runner(task_id, command, timeout))
     lock = shlex.quote(LAUNCH_LOCK)
     return (
         "command -v setsid >/dev/null || { echo 'background execution requires setsid' >&2; exit 69; }; "
@@ -162,7 +165,7 @@ def _launch_command(task_id: str, command: str, timeout: int) -> str:
     )
 
 
-def _control_script(action: str, task_id: str | None) -> str:
+def control_script(action: str, task_id: str | None) -> str:
     return textwrap.dedent(
         f"""
         import json, os, shutil, signal, sys, time
@@ -262,7 +265,7 @@ def _control_script(action: str, task_id: str | None) -> str:
     ).strip()
 
 
-async def _execute(backend: Any, command: str, *, timeout: int = 15) -> Any:
+async def execute(backend: Any, command: str, *, timeout: int = 15) -> Any:
     response = await backend.aexecute(command, timeout=timeout)
     output = getattr(response, "output", "")
     exit_code = getattr(response, "exit_code", None)
@@ -272,9 +275,7 @@ async def _execute(backend: Any, command: str, *, timeout: int = 15) -> Any:
 
 
 def _current_backend() -> tuple[str, Any]:
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id")
+    thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("No thread_id in current run config")
     backend = SANDBOX_BACKENDS.get(thread_id)
@@ -286,33 +287,28 @@ def _current_backend() -> tuple[str, Any]:
 async def background_execute(
     command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS
 ) -> dict[str, Any]:
-    """Start a long-running, non-interactive sandbox command and return immediately.
-
-    Use this for tests, builds, and waits while useful foreground work remains. Do not use it
-    for commands that edit files concurrently with the agent, installs, commits, or pushes.
-    Completion is delivered automatically; do not poll. Output is capped and saved in the sandbox.
-    """
+    """Implement the `background_execute` tool."""
     if not command.strip():
         return {"success": False, "error": "command must not be empty"}
     if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
         return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
     try:
         thread_id, backend = _current_backend()
-        script = _control_script("list", None)
-        current = await _execute(
-            backend, f"printf %s {shlex.quote(_encoded(script))} | base64 -d | python3"
+        script = control_script("list", None)
+        current = await execute(
+            backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
         )
         active = sum(task.get("status") == "running" for task in current.get("tasks", []))
         if active >= MAX_ACTIVE_TASKS:
             return {"success": False, "error": "active task limit reached"}
-        from ..background_tasks import MONITOR_LOCK, ensure_background_task_cron
+        from agent.background_tasks import MONITOR_LOCK, ensure_background_task_cron
 
         wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
         wait = await backend.aexecute(wait_for_monitor, timeout=15)
         if getattr(wait, "exit_code", None) != 0:
             raise RuntimeError("background-task monitor is busy")
-        task_id = str(uuid.uuid4())
-        state = await _execute(backend, _launch_command(task_id, command, timeout))
+        task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
+        state = await execute(backend, _launch_command(task_id, command, timeout))
         wait = await backend.aexecute(wait_for_monitor, timeout=15)
         if getattr(wait, "exit_code", None) != 0:
             return {
@@ -335,22 +331,35 @@ async def background_execute(
         return {"success": False, "error": str(exc)}
 
 
-async def background_task(
-    action: Literal["status", "list", "stop"], task_id: str | None = None
-) -> dict[str, Any]:
-    """Inspect or stop background sandbox commands.
+def owns_task(task_id: str) -> bool:
+    """Whether this id names a sandbox command.
 
-    `status` and `stop` require `task_id`; `list` does not. Status reads are for explicit user
-    requests or when completion needs inspection, not polling loops.
+    Unprefixed ids are ours too: they are what `background_execute` minted
+    before task kinds existed, and such a task can still be running in a
+    sandbox that predates this code.
     """
-    if action in {"status", "stop"} and not task_id:
-        return {"success": False, "error": f"task_id is required for {action}"}
-    try:
-        _, backend = _current_backend()
-        script = _control_script(action, task_id)
-        result = await _execute(
-            backend, f"printf %s {shlex.quote(_encoded(script))} | base64 -d | python3"
-        )
-        return {"success": True, **result}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+    from agent.dashboard.environment_refresh import owns_task as refresh_owns_task
+
+    return not refresh_owns_task(task_id)
+
+
+async def _control(action: str, task_id: str | None) -> dict[str, Any]:
+    _, backend = _current_backend()
+    script = control_script(action, task_id)
+    return await execute(backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3")
+
+
+async def task_status(task_id: str) -> dict[str, Any]:
+    state = await _control("status", task_id)
+    return {"kind": TASK_KIND, "output_source": "sandbox", **state}
+
+
+async def task_stop(task_id: str) -> dict[str, Any]:
+    state = await _control("stop", task_id)
+    return {"kind": TASK_KIND, **state}
+
+
+async def task_list() -> list[dict[str, Any]]:
+    result = await _control("list", None)
+    tasks = result.get("tasks")
+    return [{"kind": TASK_KIND, **task} for task in tasks] if isinstance(tasks, list) else []

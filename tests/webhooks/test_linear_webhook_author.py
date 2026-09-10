@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from agent.webhooks import linear as linear_webhook
+from agent.linear import webhook as linear_webhook
 
 
 def _full_issue(*, user_email: str | None = "zhen@example.com", user_name: str = "Zhen") -> dict:

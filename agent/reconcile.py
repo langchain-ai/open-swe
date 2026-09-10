@@ -11,7 +11,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from .utils.thread_ops import langgraph_client
+from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 

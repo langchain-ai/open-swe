@@ -28,9 +28,10 @@ def apply() -> None:
     import importlib
 
     from agent import server
-    from agent.auth import resolve as auth
-    from agent.utils import authorship, slack_code_channels
-    from agent.utils import slack as slack_utils
+    from agent.github import token as auth
+    from agent.slack import client as slack_utils
+    from agent.slack import code_channels as slack_code_channels
+    from agent.utils import authorship
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
     # *function* (the tools package __init__ shadows the submodule), so patch the
@@ -74,13 +75,15 @@ def apply() -> None:
     # OAuth-token store is an external credential boundary. Stub it so a web
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
-    from agent.dashboard import profiles, pull_request_context, pull_request_status, thread_api
+    from agent.dashboard import profiles
+    from agent.dashboard.threads import access as thread_access
+    from agent.github import pull_request_context, pull_request_status
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
         return "dummy-user-oauth-token"
 
     profiles.get_valid_access_token = _dummy_user_token
-    thread_api.get_valid_access_token = _dummy_user_token
+    thread_access.get_valid_access_token = _dummy_user_token
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
@@ -90,14 +93,33 @@ def apply() -> None:
     # fake store instead. The environment tools, store writes, name/tag scheme
     # and status transitions all still run for real.
     from agent.dashboard import environments as environments_store
-    from agent.integrations import langsmith as langsmith_integration
+    from agent.sandboxes.providers import langsmith as langsmith_integration
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
     # The capture path refuses to run off the langsmith provider; with that
     # provider's snapshot API faked above, the E2E's local sandbox is capturable.
-    environments_store._require_capture_support = lambda: None
+    environments_store.require_capture_support = lambda: None
+
+    # A refresh boots its own builder to run the scripts in. There is no platform
+    # to boot one from here, so the local provider stands in and nothing is
+    # reclaimed afterwards; the scripts, the capture and the record all run for real.
+    from agent.dashboard import environment_refresh
+
+    environment_refresh.require_capture_support = lambda: None
+    environment_refresh._create_builder_sandbox = _fake_builder_sandbox
+    environment_refresh._release_builder_sandbox = _release_nothing
 
     _applied = True
+
+
+async def _fake_builder_sandbox(_record: object, _snapshot_id: object = None) -> object:
+    from agent.sandboxes.providers.registry import create_sandbox
+
+    return await create_sandbox()
+
+
+async def _release_nothing(_sandbox_id: str) -> None:
+    return None
 
 
 class _FakeSnapshot:
@@ -107,10 +129,25 @@ class _FakeSnapshot:
         self.status = "ready"
 
 
+class _FakeSandboxHttp:
+    """The SDK's HTTP client, which the capture path wraps to add the tag."""
+
+    def __init__(self) -> None:
+        self.body: dict[str, object] = {}
+
+    async def post(self, url: str, **kwargs: object) -> object:  # noqa: ARG002
+        payload = kwargs.get("json")
+        self.body = dict(payload) if isinstance(payload, dict) else {}
+        return None
+
+
 class _FakeSandboxClient:
     """Stands in for ``AsyncSandboxClient`` for snapshot calls only."""
 
-    async def __aenter__(self) -> "_FakeSandboxClient":
+    def __init__(self) -> None:
+        self._http = _FakeSandboxHttp()
+
+    async def __aenter__(self) -> _FakeSandboxClient:
         return self
 
     async def __aexit__(self, *_exc: object) -> bool:
@@ -126,7 +163,14 @@ class _FakeSandboxClient:
     ) -> _FakeSnapshot:
         import fakes
 
-        return _FakeSnapshot(fakes.record_snapshot_capture(sandbox_name, name), name)
+        await self._http.post(f"/v2/sandboxes/boxes/{sandbox_name}/snapshot", json={"name": name})
+        tag = self._http.body.get("tag")
+        return _FakeSnapshot(
+            fakes.record_snapshot_capture(
+                sandbox_name, name, tag if isinstance(tag, str) else None
+            ),
+            name,
+        )
 
     async def delete_snapshot(self, snapshot_id: str) -> None:
         import fakes

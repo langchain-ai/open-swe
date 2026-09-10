@@ -1,12 +1,18 @@
 import { useEffect } from "react"
-import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
+import {
+  Outlet,
+  createFileRoute,
+  useMatch,
+  useRouterState,
+} from "@tanstack/react-router"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { AgentStreamProvider } from "@/features/agents/lib/stream/AgentStreamProvider"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
+import { rememberAppLocation } from "@/lib/appLocation"
 
 export const Route = createFileRoute("/agents")({
   component: AgentsLayout,
@@ -30,28 +36,33 @@ function AgentsLayout() {
   useAgentsTheme()
   const session = useSession()
   const navigate = Route.useNavigate()
-  const pathname = useRouterState({
-    select: (state) => state.location.pathname,
+  const threadMatch = useMatch({
+    from: "/agents/$threadId",
+    shouldThrow: false,
   })
-  const [, section, threadId, nestedRoute] = pathname.split("/")
-  const activeThreadId =
-    section === "agents" &&
-    threadId &&
-    nestedRoute !== "plan" &&
-    threadId !== "automations" &&
-    threadId !== "skills" &&
-    threadId !== "threads" &&
-    threadId !== "reviews" &&
-    threadId !== "local"
-      ? threadId
-      : undefined
-  const activeLocalSessionId =
-    section === "agents" && threadId === "local" ? nestedRoute : undefined
+  const localMatch = useMatch({
+    from: "/agents/local/$sessionId",
+    shouldThrow: false,
+  })
+  const planMatch = useMatch({
+    from: "/agents/$threadId_/plan",
+    shouldThrow: false,
+  })
+  const activeThreadId = threadMatch?.params.threadId
+  const activeLocalSessionId = localMatch?.params.sessionId
+  const location = useRouterState({
+    select: (state) => state.location,
+  })
+  const pathname = location.pathname
   const localOnly = !session.data && isDesktopLocalModeEnabled()
   const isLocalRoute =
     pathname === "/agents" ||
     pathname === "/agents/" ||
-    pathname.startsWith("/agents/local/")
+    Boolean(activeLocalSessionId)
+
+  useEffect(() => {
+    rememberAppLocation(location.href)
+  }, [location.href])
 
   if (session.isLoading) {
     return (
@@ -69,9 +80,9 @@ function AgentsLayout() {
       localOnly={localOnly}
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
-      hideSidebar={nestedRoute === "plan"}
+      hideSidebar={Boolean(planMatch)}
     >
-      <AgentThreadStreamProvider
+      <AgentStreamProvider
         threadId={activeLocalSessionId ?? activeThreadId ?? null}
         transport={activeLocalSessionId ? "local" : "cloud"}
         onThreadCreated={(id) => {
@@ -81,7 +92,7 @@ function AgentsLayout() {
         }}
       >
         <Outlet />
-      </AgentThreadStreamProvider>
+      </AgentStreamProvider>
     </AgentsShell>
   )
 }

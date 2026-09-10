@@ -7,15 +7,14 @@ from typing import Any
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.auth.thread_token import get_github_token
+from agent.dashboard.agent_overrides import resolve_github_login
+from agent.dashboard.user_mappings import get_mapping, login_for_email, login_for_slack_id
+from agent.github.comments import fetch_github_thread_participants
+from agent.github.thread_token import get_github_token
+from agent.linear.client import fetch_linear_issue_participant_emails
+from agent.slack.client import fetch_slack_thread_messages
 from agent.source_context import SourceContext
-
-from ..dashboard.agent_overrides import resolve_github_login
-from ..dashboard.user_mappings import get_mapping, login_for_email, login_for_slack_id
-from .github_comments import fetch_github_thread_participants
-from .json_types import as_json_object, thread_metadata
-from .linear import fetch_linear_issue_participant_emails
-from .slack import fetch_slack_thread_messages
+from agent.utils.json_types import as_json_object, thread_metadata
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
 # Slack and Linear senders who have no GitHub mapping are still participants;

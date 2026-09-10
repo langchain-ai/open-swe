@@ -1,10 +1,10 @@
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 
+from agent.github import checks as github_checks
 from agent.review import publish as reviewer_publish
-from agent.utils import github_checks
 
 
 class _FakeResponse:
@@ -21,7 +21,7 @@ class _FakeResponse:
 
     def raise_for_status(self) -> None:
         if self._error:
-            raise httpx.HTTPStatusError("forbidden", request=None, response=None)  # type: ignore[arg-type]
+            raise httpx2.HTTPStatusError("forbidden", request=None, response=None)  # type: ignore[arg-type]
 
     def json(self) -> dict[str, Any]:
         return self._payload
@@ -36,7 +36,7 @@ class _FakeAsyncClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> "_FakeAsyncClient":
+    async def __aenter__(self) -> _FakeAsyncClient:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
@@ -62,7 +62,7 @@ def _reset_fake_client() -> None:
 async def test_create_review_check_run_posts_in_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_checks.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(github_checks.httpx2, "AsyncClient", _FakeAsyncClient)
 
     check_run_id = await github_checks.create_review_check_run(
         owner="acme",
@@ -85,7 +85,7 @@ async def test_create_review_check_run_posts_in_progress(
 async def test_create_review_check_run_returns_none_on_http_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_checks.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(github_checks.httpx2, "AsyncClient", _FakeAsyncClient)
     _FakeAsyncClient.post_response = _FakeResponse(error=True)
 
     check_run_id = await github_checks.create_review_check_run(
@@ -98,7 +98,7 @@ async def test_create_review_check_run_returns_none_on_http_error(
 async def test_complete_review_check_run_patches_completed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_checks.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(github_checks.httpx2, "AsyncClient", _FakeAsyncClient)
 
     ok = await github_checks.complete_review_check_run(
         owner="acme",
@@ -122,7 +122,7 @@ async def test_complete_review_check_run_patches_completed(
 async def test_post_autofix_status_check_completes_neutral(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_checks.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(github_checks.httpx2, "AsyncClient", _FakeAsyncClient)
 
     ok = await github_checks.post_autofix_status_check(
         owner="acme",

@@ -1,25 +1,20 @@
-import os
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import BaseMessage, SystemMessage
 
-from ..input_messages import wrap_system_prompt
+from agent.config import ENV
+from agent.middleware.trace import OpenSWEMiddleware
+from agent.prompts import load_prompt
 
 _DEFAULT_TIMEOUT_SECONDS = 45 * 60
-_WRAPUP_INSTRUCTION = """
-<time_limit_warning>
-You have been running for a long time. Wrap up immediately: finish the current
-step, save or report useful state, avoid starting new investigations, and end
-your turn with the best available result.
-</time_limit_warning>
-"""
+_WRAPUP_INSTRUCTION = load_prompt("timeout-wrapup.md")
 
 
 def _configured_timeout_seconds() -> int:
-    raw = os.environ.get("OPEN_SWE_WRAPUP_TIMEOUT_SECONDS")
+    raw = ENV.OPEN_SWE_WRAPUP_TIMEOUT_SECONDS.optional()
     if not raw:
         return _DEFAULT_TIMEOUT_SECONDS
     try:
@@ -36,11 +31,18 @@ def _content_with_instruction(
         return instruction
     content = message.content
     if isinstance(content, list):
+        if any(
+            instruction in (block if isinstance(block, str) else str(block.get("text", "")))
+            for block in content
+        ):
+            return content
         return [*content, {"type": "text", "text": instruction}]
+    if instruction in content:
+        return content
     return f"{content}\n\n{instruction}" if content else instruction
 
 
-class TimeoutWrapupMiddleware(AgentMiddleware):
+class TimeoutWrapupMiddleware(OpenSWEMiddleware):
     def __init__(self, timeout_seconds: int | None = None) -> None:
         super().__init__()
         self._timeout_seconds = timeout_seconds or _configured_timeout_seconds()
@@ -56,14 +58,7 @@ class TimeoutWrapupMiddleware(AgentMiddleware):
     def _apply(self, request: ModelRequest) -> ModelRequest:
         if not self._should_wrapup():
             return request
-        if request.system_message is None:
-            content = wrap_system_prompt("", additions=[_WRAPUP_INSTRUCTION.strip()])
-        elif isinstance(request.system_message.content, str):
-            content = wrap_system_prompt(
-                request.system_message.content, additions=[_WRAPUP_INSTRUCTION.strip()]
-            )
-        else:
-            content = _content_with_instruction(request.system_message, _WRAPUP_INSTRUCTION)
+        content = _content_with_instruction(request.system_message, _WRAPUP_INSTRUCTION.strip())
         return request.override(system_message=SystemMessage(content=content))
 
     async def awrap_model_call(

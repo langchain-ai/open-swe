@@ -1,6 +1,6 @@
 from typing import cast
 
-import agent.integrations.local as local_mod
+import agent.sandboxes.providers.local as local_mod
 
 
 class _StubLocalShellBackend:

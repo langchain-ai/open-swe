@@ -6,8 +6,7 @@ reset/recreate rebinds. The registry itself lives in ``state``.
 
 import asyncio
 import logging
-import os
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,16 +14,24 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
-from agent.auth.github_app import get_github_app_installation_token_with_expiry
-from agent.auth.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
-from agent.dashboard.environments import SandboxResources, resolve_environment
-from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
-from agent.integrations.langsmith import (
-    _configure_github_proxy,
-    _get_sandbox_proxy_config,
-    create_langsmith_sandbox_from_params,
+from agent.config import ENV
+from agent.dashboard.environment_refresh import is_snapshot_stale, maybe_start_update
+from agent.dashboard.environments import (
+    Environment,
+    SandboxResources,
+    resolve_environment,
+    sandbox_update_timeout,
+    script_command,
 )
-from agent.sandboxes.providers import SandboxGoneError, create_sandbox
+from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
+from agent.github.app import get_github_app_installation_token_with_expiry
+from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
+from agent.sandboxes.providers.langsmith import (
+    configure_github_proxy,
+    create_langsmith_sandbox_from_params,
+    get_sandbox_proxy_config,
+)
+from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
     SandboxBackendProxy,
@@ -62,9 +69,10 @@ class SandboxCreateConfig:
     snapshot_id: str | None
     resources: SandboxResources = field(default_factory=SandboxResources)
     create_params: dict[str, Any] = field(default_factory=dict)
+    environment: Environment | None = None
 
     @classmethod
-    async def resolve(cls, environment_slug: str | None = None) -> "SandboxCreateConfig":
+    async def resolve(cls, environment_slug: str | None = None) -> SandboxCreateConfig:
         environment = await resolve_environment(environment_slug)
         if environment is None:
             return cls(snapshot_id=await get_admin_base_snapshot_id())
@@ -72,11 +80,58 @@ class SandboxCreateConfig:
             snapshot_id=environment.ready_snapshot_id or await get_admin_base_snapshot_id(),
             resources=environment.sandbox_resources(),
             create_params=environment.sandbox_create_params(),
+            environment=environment,
         )
 
     @property
     def proxy_config(self) -> dict[str, Any] | None:
-        return _get_sandbox_proxy_config(self.create_params)
+        return get_sandbox_proxy_config(self.create_params)
+
+    async def run_update_script(
+        self, sandbox_backend: SandboxBackendProtocol, thread_id: str | None
+    ) -> None:
+        """Freshen this box's checkouts when the snapshot it booted from has aged out.
+
+        Awaited before the first model call, on purpose: refreshing only the
+        snapshot in the background never helps the run that triggered it, and
+        with sparse traffic every run is a triggering run — so the first run
+        after a quiet spell would otherwise work against a checkout as old as
+        the last nightly rebuild. Bounded by a short timeout, and never fatal:
+        the image is already usable, so a failed pull costs freshness, not the
+        run.
+        """
+        environment = self.environment
+        if environment is None or not is_snapshot_stale(environment):
+            return
+        try:
+            async with aphase(thread_id, "sandbox.update_script"):
+                result = await sandbox_backend.aexecute(
+                    script_command(environment.update_script, "update"),
+                    timeout=sandbox_update_timeout(),
+                )
+        except Exception:
+            # "Never fatal" has to cover the execute itself: it can raise past
+            # its own retries when a freshly booted box is briefly unreachable,
+            # and losing the whole sandbox over a skipped `git pull` is worse
+            # than starting from the snapshot as captured.
+            logger.warning(
+                "Environment update script could not run in sandbox %s",
+                sandbox_backend.id,
+                exc_info=True,
+                extra={"environment": environment.slug},
+            )
+            return
+        if result.exit_code != 0:
+            logger.warning(
+                "Environment update script exited %s in sandbox %s",
+                result.exit_code,
+                sandbox_backend.id,
+                extra={
+                    "environment": environment.slug,
+                    "exit_code": result.exit_code,
+                    "log_tail": (result.output or "")[-2000:],
+                },
+            )
 
     async def boot(self) -> SandboxBackendProtocol:
         if self.create_params:
@@ -102,7 +157,7 @@ async def _create_sandbox_with_proxy(
         sandbox_backend = await config.boot()
 
     async with git_identity(thread_id, sandbox_backend):
-        if os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith":
+        if ENV.SANDBOX_TYPE.get() == "langsmith":
             async with aphase(thread_id, "sandbox.proxy_token"):
                 token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
             if not token:
@@ -111,7 +166,11 @@ async def _create_sandbox_with_proxy(
                 raise ValueError(msg)
             proxy_config = config.proxy_config
             async with aphase(thread_id, "sandbox.proxy_configure"):
-                await _configure_proxy(sandbox_backend.id, token, proxy_config)
+                await _configure_proxy(
+                    sandbox_backend.id,
+                    token,
+                    proxy_config,
+                )
             record_proxy_token_expiry(
                 thread_id,
                 expires_at,
@@ -120,16 +179,37 @@ async def _create_sandbox_with_proxy(
                 base_proxy_config=proxy_config,
             )
 
+    # This run gets fresh checkouts now; the background capture makes the *next*
+    # creation skip the step entirely.
+    await config.run_update_script(sandbox_backend, thread_id)
+    _fire_and_forget(maybe_start_update(config.environment), "environment update trigger")
     return sandbox_backend
 
 
+def _fire_and_forget(coro: Coroutine[Any, Any, Any], what: str) -> None:
+    task = asyncio.ensure_future(coro)
+    _BACKGROUND.add(task)
+
+    def _done(t: asyncio.Task[Any]) -> None:
+        _BACKGROUND.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            logger.warning("%s failed", what, exc_info=t.exception())
+
+    task.add_done_callback(_done)
+
+
+_BACKGROUND: set[asyncio.Task[Any]] = set()
+
+
 async def _configure_proxy(
-    sandbox_id: str, token: str, base_proxy_config: dict[str, Any] | None
+    sandbox_id: str,
+    token: str,
+    base_proxy_config: dict[str, Any] | None,
 ) -> None:
+    kwargs: dict[str, Any] = {}
     if base_proxy_config is not None:
-        await _configure_github_proxy(sandbox_id, token, base_proxy_config=base_proxy_config)
-    else:
-        await _configure_github_proxy(sandbox_id, token)
+        kwargs["base_proxy_config"] = base_proxy_config
+    await configure_github_proxy(sandbox_id, token, **kwargs)
 
 
 async def _refresh_github_proxy(
@@ -140,22 +220,22 @@ async def _refresh_github_proxy(
     github_proxy_repositories: Sequence[str] | None = None,
     base_proxy_config: dict[str, Any] | None = None,
 ) -> None:
-    """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+    """Refresh managed proxy credentials for reused LangSmith sandboxes."""
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         return
 
     async with aphase(thread_id, "sandbox.proxy_token"):
         token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
     if not token:
-        logger.warning(
-            "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
-            sandbox_backend.id,
-        )
-        return
+        raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     async with aphase(thread_id, "sandbox.proxy_refresh"):
-        await _configure_proxy(current_backend.id, token, base_proxy_config)
+        await _configure_proxy(
+            current_backend.id,
+            token,
+            base_proxy_config,
+        )
     record_proxy_token_expiry(
         thread_id,
         expires_at,
@@ -393,7 +473,7 @@ async def reset_sandbox_for_thread(
     create_params: dict[str, Any],
 ) -> tuple[str, str]:
     """Bind a thread to a fresh sandbox created from raw provider options."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         raise ValueError("sandbox_reset is only supported by the LangSmith sandbox provider")
 
     cached = SANDBOX_BACKENDS.get(thread_id)
@@ -406,11 +486,15 @@ async def reset_sandbox_for_thread(
     if new_sandbox.id == old_sandbox_id:
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")
 
-    proxy_config = _get_sandbox_proxy_config(create_params)
+    proxy_config = get_sandbox_proxy_config(create_params)
     token, expires_at, permissions = await _resolve_proxy_token(None)
     if not token:
         raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
-    await _configure_proxy(new_sandbox.id, token, proxy_config)
+    await _configure_proxy(
+        new_sandbox.id,
+        token,
+        proxy_config,
+    )
     await configure_git_identity(new_sandbox)
     sandbox_metadata: dict[str, Any] = {
         "sandbox_id": new_sandbox.id,

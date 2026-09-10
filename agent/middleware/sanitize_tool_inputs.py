@@ -11,10 +11,12 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
+from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+
+from agent.middleware.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,7 @@ def _sanitize_read_file_args(args: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-class SanitizeToolInputsMiddleware(AgentMiddleware):
+class SanitizeToolInputsMiddleware(OpenSWEMiddleware):
     """Intercept read_file calls and coerce malformed integer parameters.
 
     When the LLM produces a string value for an integer field (e.g.
