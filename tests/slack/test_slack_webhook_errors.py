@@ -244,7 +244,7 @@ async def test_untagged_reply_blocked_when_only_third_party_bot_present(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_or_queue_enqueues_untagged_follow_up(
+async def test_dispatch_or_queue_enqueues_non_interrupting_follow_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
@@ -256,7 +256,7 @@ async def test_dispatch_or_queue_enqueues_untagged_follow_up(
         "t1",
         blocks,
         {},
-        explicitly_tagged=False,
+        interrupt_active_run=False,
     )
 
     assert run == {"run_id": "run-1"}
@@ -279,7 +279,7 @@ async def test_dispatch_or_queue_interrupts_for_explicit_mention(
         "t1",
         [{"type": "text", "text": "<@BOT> stop and do this instead"}],
         {},
-        explicitly_tagged=True,
+        interrupt_active_run=True,
     )
 
     assert run == {"run_id": "run-1"}
@@ -524,7 +524,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     assert "new corrected text" in serialized
     assert "old text" not in serialized
     assert "## Conversation Context" not in serialized
-    assert await_args.kwargs["explicitly_tagged"] is False
+    assert await_args.kwargs["interrupt_active_run"] is False
     thinking.assert_not_awaited()
     store_args = store_mapping.await_args
     assert store_args is not None

@@ -174,6 +174,7 @@ def test_untagged_code_channel_message_does_not_interrupt_active_work() -> None:
         code_channel=True,
         message_update=False,
         explicit_request=False,
+        untagged_reply=False,
     )
     assert slack_service._interrupts_active_run(
         "<@BOT> stop and do this",
@@ -182,6 +183,7 @@ def test_untagged_code_channel_message_does_not_interrupt_active_work() -> None:
         code_channel=True,
         message_update=False,
         explicit_request=False,
+        untagged_reply=False,
     )
     assert slack_service._interrupts_active_run(
         "/run-tests",
@@ -190,6 +192,19 @@ def test_untagged_code_channel_message_does_not_interrupt_active_work() -> None:
         code_channel=True,
         message_update=False,
         explicit_request=True,
+        untagged_reply=False,
+    )
+
+
+def test_untagged_two_party_follow_up_interrupts_active_work() -> None:
+    assert slack_service._interrupts_active_run(
+        "follow-up in a two-party thread",
+        "BOT",
+        treat_all_messages_as_mentions=False,
+        code_channel=False,
+        message_update=False,
+        explicit_request=False,
+        untagged_reply=True,
     )
 
 

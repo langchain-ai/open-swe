@@ -81,12 +81,17 @@ def _interrupts_active_run(
     code_channel: bool,
     message_update: bool,
     explicit_request: bool,
+    untagged_reply: bool,
 ) -> bool:
-    return explicit_request or _is_explicit_slack_request(
-        text,
-        bot_user_id,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions and not code_channel,
-        message_update=message_update,
+    return (
+        explicit_request
+        or untagged_reply
+        or _is_explicit_slack_request(
+            text,
+            bot_user_id,
+            treat_all_messages_as_mentions=treat_all_messages_as_mentions and not code_channel,
+            message_update=message_update,
+        )
     )
 
 
@@ -176,9 +181,9 @@ async def _dispatch_or_queue_slack_run(
     run_input: RunInput | list[dict[str, Any]],
     configurable: dict[str, Any],
     *,
-    explicitly_tagged: bool,
+    interrupt_active_run: bool,
 ) -> dict[str, Any]:
-    """Dispatch explicit requests immediately and enqueue other Slack follow-ups."""
+    """Dispatch active requests immediately and enqueue other Slack follow-ups."""
     if isinstance(run_input, list):
         run_input = {"messages": cast(list[Any], run_input)}
     return as_json_object(
@@ -190,7 +195,7 @@ async def _dispatch_or_queue_slack_run(
             input=run_input,
             metadata=common.AGENT_VERSION_METADATA,
             client=client,
-            multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
+            multitask_strategy="interrupt" if interrupt_active_run else "enqueue",
         )
     )
 
@@ -833,13 +838,14 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         common.logger.info("Queued Slack message edit for thread %s", thread_id)
         return
 
-    explicitly_tagged = _interrupts_active_run(
+    interrupt_active_run = _interrupts_active_run(
         text,
         bot_user_id,
         treat_all_messages_as_mentions=treat_all_messages_as_mentions,
         code_channel=code_channel,
         message_update=message_update,
         explicit_request=request.explicit_request,
+        untagged_reply=untagged_reply,
     )
     run_input = _slack_context_input(
         context_messages,
@@ -869,7 +875,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             thread_id,
             run_input,
             configurable,
-            explicitly_tagged=explicitly_tagged,
+            interrupt_active_run=interrupt_active_run,
         )
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear
