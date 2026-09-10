@@ -43,7 +43,7 @@ const scopes: Record<MCPScope, MCPScopeConfig> = {
   user: {
     title: "Personal MCPs",
     description:
-      "Connect remote MCP servers with your own credentials for the cloud runs you trigger. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+      "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
     queryKey: ["myMCPs"],
     list: api.getMyMCPs,
     save: api.saveMyMCP,

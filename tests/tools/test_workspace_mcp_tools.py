@@ -227,26 +227,53 @@ async def test_remote_arguments_survive_langchain_invocation(fake_store, monkeyp
     assert json.loads(result.content[0]["text"]) == {argument: "remote-value"}
 
 
-async def test_workspace_tools_are_gated_while_personal_tools_follow_the_user(monkeypatch):
+async def test_workspace_tools_are_gated_while_personal_tools_need_a_private_thread(monkeypatch):
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
     monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "")
     monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
     load = AsyncMock(return_value=["mcp_example_search"])
     monkeypatch.setattr(server, "load_mcp_tools", load)
+    threads = {
+        "private": {"metadata": {"visibility": "private", "owner_login": "outsider"}},
+        "shared": {"metadata": {"visibility": "public", "owner_login": "outsider"}},
+    }
+
+    async def get_thread(*, thread_id):
+        return threads[thread_id]
+
+    monkeypatch.setattr(server.client.threads, "get", get_thread)
     authorized = {"configurable": {"user_email": "admin@example.com"}}
     outsider = {"configurable": {"user_email": "outsider@example.com"}}
 
     def namespaces():
         return [source.namespace for source in load.call_args.args]
 
-    assert await server._mcp_tools_for(authorized, None) == ["mcp_example_search"]
+    assert await server._mcp_tools_for(authorized, "shared", None) == ["mcp_example_search"]
     assert namespaces() == [("workspace_mcps",)]
-    assert await server._mcp_tools_for(authorized, "admin") == ["mcp_example_search"]
-    assert namespaces() == [("workspace_mcps",), ("user_mcps", "admin")]
-    assert await server._mcp_tools_for(outsider, "outsider") == ["mcp_example_search"]
+    assert await server._mcp_tools_for(outsider, "private", "outsider") == ["mcp_example_search"]
     assert namespaces() == [("user_mcps", "outsider")]
-    await server._mcp_tools_for(outsider, None)
+    await server._mcp_tools_for(outsider, "private", "OUTSIDER")
+    assert namespaces() == [("user_mcps", "OUTSIDER")]
+    # A collaborative thread, another user's private thread, or an unreadable
+    # thread never loads personal credentials.
+    for thread_id, login in (
+        ("shared", "outsider"),
+        ("private", "someone-else"),
+        ("missing", "outsider"),
+    ):
+        await server._mcp_tools_for(outsider, thread_id, login)
+        assert namespaces() == []
+    await server._mcp_tools_for(outsider, "private", None)
     assert namespaces() == []
+
+
+async def test_personal_integrations_follow_the_same_private_thread_gate(monkeypatch):
+    monkeypatch.setattr(server, "_personal_tools_allowed", AsyncMock(return_value=False))
+    monkeypatch.setattr(server, "load_currents_tools", AsyncMock(return_value=["currents"]))
+    monkeypatch.setattr(server, "load_notion_tools", AsyncMock(return_value=["notion"]))
+    assert await server._load_integration_tools("shared", "outsider") == ([], [])
+    server._personal_tools_allowed.return_value = True
+    assert await server._load_integration_tools("private", "outsider") == (["currents"], ["notion"])
 
 
 def test_connection_tool_pairs_cannot_collide():

@@ -591,8 +591,33 @@ async def _observability_tools_for(config: RunnableConfig, profile_login: str | 
     return await _cached_langsmith_tools(profile_login, allow_team=False)
 
 
-async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any], list[Any]]:
-    if not profile_login:
+async def _personal_tools_allowed(thread_id: str | None, profile_login: str | None) -> bool:
+    """Whether this run may load the triggering user's personal integrations.
+
+    Personal credentials are confined to private threads: exactly one owner can
+    prompt them, so nobody else can steer a run that acts with those credentials.
+    Anything less than a private thread owned by the triggering user fails closed.
+    """
+    if not thread_id or not profile_login:
+        return False
+    try:
+        thread = await client.threads.get(thread_id=thread_id)
+    except Exception:
+        logger.debug("Could not read thread visibility", extra={"thread": thread_id}, exc_info=True)
+        return False
+    metadata = thread_metadata(thread)
+    owner = metadata.get("owner_login")
+    return (
+        metadata.get("visibility") == "private"
+        and isinstance(owner, str)
+        and owner.strip().lower() == profile_login.strip().lower()
+    )
+
+
+async def _load_integration_tools(
+    thread_id: str | None, profile_login: str | None
+) -> tuple[list[Any], list[Any]]:
+    if not await _personal_tools_allowed(thread_id, profile_login):
         return [], []
     currents_tools, notion_tools = await asyncio.gather(
         _cached_tool_loader(
@@ -609,8 +634,10 @@ async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any],
     return currents_tools, notion_tools
 
 
-async def _mcp_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
-    """Workspace MCPs for authorized users plus the triggering user's personal MCPs.
+async def _mcp_tools_for(
+    config: RunnableConfig, thread_id: str | None, profile_login: str | None
+) -> list[Any]:
+    """Workspace MCPs for authorized users, plus personal MCPs in the owner's private thread.
 
     A personal connection with the same name as a workspace one replaces it entirely
     for that user's runs.
@@ -618,7 +645,7 @@ async def _mcp_tools_for(config: RunnableConfig, profile_login: str | None) -> l
     sources = []
     if await _observability_authorized(config, profile_login):
         sources.append(workspace_mcp_source)
-    if profile_login:
+    if profile_login and await _personal_tools_allowed(thread_id, profile_login):
         sources.append(user_mcp_source(profile_login))
     return await load_mcp_tools(*sources)
 
@@ -1189,12 +1216,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             _phase_result(
                 thread_id,
                 "factory.mcp_tools",
-                lambda: _mcp_tools_for(config, profile_login),
+                lambda: _mcp_tools_for(config, thread_id, profile_login),
             ),
             _phase_result(
                 thread_id,
                 "factory.integration_tools",
-                lambda: _load_integration_tools(profile_login),
+                lambda: _load_integration_tools(thread_id, profile_login),
             ),
         )
 
