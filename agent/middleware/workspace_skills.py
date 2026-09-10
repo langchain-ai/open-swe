@@ -1,4 +1,4 @@
-"""Exclude personal skill context retained by legacy public checkpoints."""
+"""Exclude personal skill context retained by public thread checkpoints."""
 
 from collections.abc import Awaitable, Callable
 from typing import Any, cast

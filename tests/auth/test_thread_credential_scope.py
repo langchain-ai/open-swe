@@ -53,7 +53,7 @@ def config(source="dashboard", login="alice"):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["dashboard", "slack", "linear", "github", "schedule"])
 @pytest.mark.parametrize("visibility", ["public", None])
-async def test_public_and_legacy_threads_never_resolve_personal_github_auth(
+async def test_public_threads_never_resolve_personal_github_auth(
     source,
     visibility,
     thread_metadata,

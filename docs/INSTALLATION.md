@@ -350,7 +350,7 @@ Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `
 
 ### Thread credential scope
 
-Public threads, including legacy threads without visibility metadata, use the
+Public threads, including threads without visibility metadata, use the
 GitHub App installation identity for GitHub operations and PR creation. They load
 workspace MCP connections and organization skills. Personal Notion connections,
 user skills, and user custom instructions are available only in a private thread
