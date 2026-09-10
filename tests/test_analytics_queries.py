@@ -16,9 +16,9 @@ class _Result:
 
 
 class _Connection:
-    def __init__(self, rows: list[dict[str, object]]) -> None:
+    def __init__(self, rows: list[dict[str, object]], current_person: object) -> None:
         self._rows = rows
-        self._scalars = iter([len(rows), None])
+        self._scalars = iter([current_person, len(rows), None])
 
     async def execute(self, *_args: object, **_kwargs: object) -> _Result:
         return _Result(self._rows)
@@ -55,11 +55,10 @@ async def test_usage_leaderboard_removes_internal_current_marker(monkeypatch) ->
 
     @asynccontextmanager
     async def connection():
-        yield _Connection(rows)
+        yield _Connection(rows, current_person)
 
     monkeypatch.setattr(queries, "connection", connection)
     monkeypatch.setattr(queries, "workspace_id", uuid4)
-    monkeypatch.setattr(queries, "opaque_person", lambda *_args: current_person)
     monkeypatch.setattr(queries, "reviewer_stats", AsyncMock(return_value={}))
 
     result = await queries.usage_leaderboard(

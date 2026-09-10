@@ -397,3 +397,67 @@ async def test_emitted_finding_links_to_published_review(analytics_db, monkeypat
             )
             == 1
         )
+
+
+async def test_leaderboard_resolves_immutable_identity_after_login_change(
+    analytics_db, monkeypatch
+):
+    from agent.analytics import directory
+
+    workspace, transaction = analytics_db
+    monkeypatch.setenv("ANALYTICS_POSTGRES_URI", "postgresql://localhost/analytics_test")
+    monkeypatch.setattr(directory, "transaction", transaction)
+    current_person = emitter.opaque_person("github", 123)
+    other_person = emitter.opaque_person("github", 456)
+    await directory.upsert_person(
+        provider="github",
+        immutable_person_key=123,
+        github_login="old-login",
+        email="self@example.com",
+    )
+    await directory.upsert_person(
+        provider="github", immutable_person_key=456, github_login="other", email="other@example.com"
+    )
+    for person in (current_person, other_person, other_person):
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_STARTED,
+                RunStartedPayload(model_attribution_quality="unavailable"),
+                run_id=uuid4(),
+                user_id=person,
+            )
+        )
+    await directory.upsert_person(
+        provider="github", immutable_person_key=123, github_login="new-login"
+    )
+    result = await queries.usage_leaderboard(
+        period="all", limit=1, current_login="NEW-LOGIN", admin=False
+    )
+    assert result["current_user_rank"] == 2
+    assert len(result["rows"]) == 2
+    assert result["rows"][0]["user"] == {
+        "name": "Open SWE user",
+        "github_login": None,
+        "email": None,
+    }
+    assert result["rows"][1]["user"] == {
+        "name": "new-login",
+        "github_login": "new-login",
+        "email": "self@example.com",
+    }
+    assert all("is_current" not in row for row in result["rows"])
+    for login in ("old-login", "unknown", None):
+        result = await queries.usage_leaderboard(
+            period="all", limit=1, current_login=login, admin=False
+        )
+        assert result["current_user_rank"] is None
+        assert len(result["rows"]) == 1
+        assert result["rows"][0]["user"]["github_login"] is None
+
+    monkeypatch.setenv("ANALYTICS_WORKSPACE_ID", str(uuid4()))
+    result = await queries.usage_leaderboard(
+        period="all", limit=1, current_login="new-login", admin=False
+    )
+    assert result["current_user_rank"] is None
+    assert result["rows"] == []

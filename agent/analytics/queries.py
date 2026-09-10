@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import text
 
 from agent.analytics.database import connection
-from agent.analytics.emitter import opaque_person, workspace_id
+from agent.analytics.emitter import workspace_id
 from agent.analytics.summaries import summary_metadata
 from agent.config import ENV
 
@@ -24,7 +24,6 @@ async def usage_leaderboard(
 ) -> dict[str, Any]:
     start = period_start(period)
     max_rows = min(max(limit, 1), 100)
-    current_person = opaque_person("github", current_login)
     sql = text(
         """
         WITH run_stats AS (
@@ -73,6 +72,13 @@ async def usage_leaderboard(
         """
     )
     async with connection() as conn:
+        current_person = await conn.scalar(
+            text(
+                "SELECT person_id FROM identity_directory WHERE workspace_id = :workspace_id "
+                "AND lower(github_login) = lower(:current_login)"
+            ),
+            {"workspace_id": workspace_id(), "current_login": current_login},
+        )
         result = await conn.execute(
             sql,
             {
