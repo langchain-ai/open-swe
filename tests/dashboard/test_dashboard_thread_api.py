@@ -1023,6 +1023,18 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     assert configurable["agent_effort"] == "medium"
     assert updates[-1]["model"] == _VISION_MODEL
 
+    offloaded = await thread_runs._enrich_run_start_command(
+        "tid",
+        "octocat",
+        {
+            "method": "run.start",
+            "params": {"config": {"configurable": {"offload_conversation": True}}},
+        },
+        metadata=updates[-1],
+    )
+    assert offloaded["params"]["config"]["configurable"]["model_selection"] == "explicit"
+    assert updates[-1]["model_selection"] == "explicit"
+
 
 async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch) -> None:
     captured: dict[str, object] = {}
