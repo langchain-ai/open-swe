@@ -38,7 +38,7 @@ from agent.slack.code_channels import (
     store_block_suggestions,
 )
 from agent.source_context import SourceContext
-from agent.tools.create_sandbox_file_download_url import _resolve_sandbox_file
+from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client
 
@@ -84,25 +84,7 @@ async def manage_code_channel(
     csp: dict[str, list[str]] | None = None,
     include_resolved: bool = False,
 ) -> dict[str, Any]:
-    """Manage the complete Slack code-channel surface for this session.
-
-    Use `create` to promote the current Slack thread using its generated title.
-    `invite` names who else should be in that channel, as Slack user ids: whoever
-    the work is for, plus anyone they named. The person whose message opened the
-    channel is already in it. User ids appear in the conversation context (e.g.
-    @Name(U06KD8BFY95)). Use
-    `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
-    upserts an `html`, `diff`, `block_kit`, or `canvas` tab; HTML and diff content
-    can be passed directly or read from `file_path`, while Block Kit uses `blocks`
-    plus optional external-select `suggestions`, and canvas uses `canvas_id`. Use
-    `list_views` and `remove_view` to reconcile
-    tabs. Use `get_canvas` to read markdown and comments and `set_canvas` to
-    replace its markdown while preserving comment anchors. Post a closing summary
-    before `archive` and pass its timestamp as `summary_message_ts`.
-
-    Files must be inside the active sandbox work directory, valid UTF-8, and at
-    most 1 MB. Never publish secrets or credentials in a view.
-    """
+    """Implement the `manage_code_channel` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
@@ -267,7 +249,7 @@ async def _resolve_content(content: str, file_path: str) -> tuple[str, str | Non
     if not file_path:
         return content, None
     try:
-        backend, path, _ = await _resolve_sandbox_file(file_path)
+        backend, path, _ = await resolve_sandbox_file(file_path)
         downloads = await backend.adownload_files([path])
     except Exception as exc:  # noqa: BLE001
         return "", f"Could not read file_path: {exc}"

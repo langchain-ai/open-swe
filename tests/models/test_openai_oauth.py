@@ -119,7 +119,7 @@ async def test_token_provider_authenticates_to_broker(
             return Response()
 
     oauth_model = openai_oauth.build_desktop_openai_oauth_model("gpt-5.6-sol")
-    monkeypatch.setattr(openai_oauth.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(openai_oauth.httpx2, "AsyncClient", Client)
     provider = oauth_model.token_provider  # type: ignore[attr-defined]
     first_token = await provider.aget_token()
     second_token = await provider.aget_token()

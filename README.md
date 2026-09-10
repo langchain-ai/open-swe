@@ -9,7 +9,7 @@
 </div>
 
 <div align="center">
-  <h3>An open source software factory built on Deep Agents by LangChain.</h3>
+  <h3>An open-source software factory built on Deep Agents by LangChain.</h3>
 </div>
 
 <div align="center">
@@ -42,7 +42,7 @@ flowchart LR
     E -->|Follow-up work| B
 ```
 
-Each cloud coding thread is bound to its own persistent sandbox, so the agent can continue from prior work when you reply. Independent tasks run in parallel, and the same thread carries context from request through delivery and follow-up. Read-only PR chat does not need a sandbox, while desktop tasks can run directly against an allowlisted local project.
+Each cloud coding thread is bound to its own persistent sandbox, so the agent can continue from prior work when you reply. A thread is a durable conversation and work context. It can contain multiple invocations, each an agent execution triggered by a message or automation. An initial request and a follow-up belong to one thread and produce two invocations, each with its own usage. Independent threads run in parallel, and the same thread carries context from request through delivery and follow-up. Read-only PR chat does not need a sandbox, while desktop work can run directly against an allowlisted local project.
 
 ## What Open SWE does
 
@@ -74,6 +74,12 @@ Each cloud coding thread is bound to its own persistent sandbox, so the agent ca
 - Define personal and repository coding instructions plus organization-wide review guidelines
 - Swap sandbox providers, middleware, skills, triggers, and delivery policies
 
+## API contract
+
+[`swagger.json`](swagger.json) is the generated OpenAPI 3.1 contract for the custom FastAPI backend (`agent.webapp:app`). Import it into an OpenAPI 3.1-compatible viewer, or run `make run` and open `http://localhost:8000/docs` for interactive API documentation (`/openapi.json` serves the live schema).
+
+Regenerate the file with `make swagger` after changing backend routes or models. It reflects the current route declarations: some request/response schemas and authentication requirements are not yet documented. LangGraph runtime endpoints (such as `/runs`, `/threads`, and `/assistants`) are not included.
+
 ## How it works
 
 ### Deep Agents is the harness
@@ -84,7 +90,7 @@ This composition keeps the system extensible while allowing it to inherit improv
 
 ### LangGraph is the runtime
 
-[LangGraph](https://github.com/langchain-ai/langgraph) provides durable execution and thread state. Open SWE currently ships five graph entrypoints:
+[LangGraph](https://github.com/langchain-ai/langgraph) provides durable execution and thread state. Each Open SWE invocation executes as a LangGraph run within a thread. Open SWE currently ships five graph entrypoints:
 
 | Graph | Role |
 |---|---|
@@ -96,13 +102,13 @@ This composition keeps the system extensible while allowing it to inherit improv
 
 ### Sandboxes contain the work
 
-Cloud tasks run in isolated Linux sandboxes with the development tooling supplied by the configured environment or snapshot. A sandbox persists with its thread, but an unreachable coding sandbox is not silently replaced—Open SWE fails safely rather than risk discarding uncommitted work.
+Cloud work runs in isolated Linux sandboxes with the development tooling supplied by the configured environment or snapshot. A sandbox persists with its thread, but an unreachable coding sandbox is not silently replaced—Open SWE fails safely rather than risk discarding uncommitted work.
 
 [LangSmith](https://smith.langchain.com/) is the default sandbox and tracing provider. Open SWE also supports [Modal](https://modal.com/), [Daytona](https://www.daytona.io/), [Runloop](https://www.runloop.ai/), [E2B](https://e2b.dev/), and local execution, with a pluggable interface for additional providers.
 
 ### Tools stay curated
 
-Deep Agents supplies the core filesystem, shell, and subagent tools. Open SWE adds focused capabilities for GitHub delivery, Linear, Slack, thread management, web research, browser-based application verification, planning, review, CI monitoring, and connected services. Supported observability and MCP integrations are loaded only when configured and authorized.
+Deep Agents supplies the core filesystem, shell, and subagent tools. Open SWE adds focused capabilities for GitHub delivery, Linear, Slack, thread management, web research, browser-based application verification, planning, review, CI monitoring, and connected services. Personal integrations load using the user's connections. Admin-configured workspace MCP tools are available to all coding-agent users.
 
 ## Work where your team works
 
@@ -131,10 +137,12 @@ Sandboxes can have network access and powerful tools. Deployments should use lea
 
 Open SWE includes a LangGraph backend, a web dashboard, and an experimental desktop client.
 
-- **[Installation Guide](docs/INSTALLATION.md)** — Set up local development, the GitHub App, LangSmith, integrations, and production deployment
+- **[Installation Guide](docs/INSTALLATION.md)** — Deploy Open SWE for a team: LangGraph Platform or Docker, the GitHub and Slack apps, model providers, environment variables, and the optional Linear trigger
+- **[Development Guide](docs/DEVELOPMENT.md)** — Run it on your machine, with hot reload for the dashboard and an ngrok tunnel for webhooks
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
+- **[Open SWE Enhancement Proposals](oeps/README.md)** — Review consequential product, architecture, security, and process decisions
 
-Complete the required `.env`, GitHub App, and sandbox setup in the [Installation Guide](docs/INSTALLATION.md), then install the backend and dashboard dependencies:
+One deployment serves the API, the webhooks, and the dashboard from a single URL. Locally:
 
 ```bash
 git clone https://github.com/langchain-ai/open-swe.git
@@ -142,15 +150,11 @@ cd open-swe
 uv venv
 source .venv/bin/activate
 uv sync --all-extras
-pnpm install
+make build-dashboard   # pnpm install + Vite build of the dashboard
+make dev               # http://localhost:2024 serves the API and the dashboard
 ```
 
-Run the services in separate terminals:
-
-```bash
-make dev  # terminal 1: backend
-make web  # terminal 2: dashboard
-```
+Create a GitHub App and a Slack app for your machine and fill in `.env` as described in the [development guide](docs/DEVELOPMENT.md), then sign in at `http://localhost:2024`. For UI work, `make dev-ui` starts Vite and the backend fronting it, so the same URL hot-reloads. GitHub and Slack deliver to a public webhook URL: locally the static domain of a free ngrok account (`make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev`, which exposes only `/webhooks/*`, since the dev server's LangGraph API has no authentication), on LangGraph Platform the deployment URL.
 
 Production self-hosting uses the standalone LangGraph Agent Server and requires its license key.
 

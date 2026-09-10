@@ -52,6 +52,7 @@ async def ensure_workflow_push_pending(
     diff_stats: Mapping[str, Any] | None = None,
     diff_preview: str | None = None,
     diff_preview_truncated: bool = False,
+    inherited_from: str | None = None,
     approval_url: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Store a pending approval unless a terminal record already exists."""
@@ -69,6 +70,7 @@ async def ensure_workflow_push_pending(
         "diff_stats": _normalize_diff_stats(diff_stats, len(files)),
         "diff_preview": diff_preview or "",
         "diff_preview_truncated": diff_preview_truncated,
+        "inherited_from": inherited_from,
         "approval_url": approval_url,
     }
     if existing and existing.get("status") == WORKFLOW_APPROVAL_PENDING:
@@ -113,6 +115,7 @@ def workflow_push_approval_response(record: Mapping[str, Any]) -> dict[str, Any]
     decided_at = record.get("decided_at")
     decided_by = record.get("decided_by")
     approval_url = record.get("approval_url")
+    inherited_from = record.get("inherited_from")
     return {
         "fingerprint": str(record.get("fingerprint") or ""),
         "status": str(record.get("status") or WORKFLOW_APPROVAL_PENDING),
@@ -127,6 +130,9 @@ def workflow_push_approval_response(record: Mapping[str, Any]) -> dict[str, Any]
         ),
         "diffPreview": str(record.get("diff_preview") or ""),
         "diffPreviewTruncated": record.get("diff_preview_truncated") is True,
+        "inheritedFrom": (
+            inherited_from if isinstance(inherited_from, str) and inherited_from else None
+        ),
         "approvalUrl": approval_url if isinstance(approval_url, str) and approval_url else None,
         "requestedAt": requested_at if isinstance(requested_at, str) else None,
         "decidedAt": decided_at if isinstance(decided_at, str) else None,

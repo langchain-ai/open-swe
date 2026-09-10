@@ -10,9 +10,10 @@ first model call of every new run.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+
+from agent.middleware.trace import OpenSWEMiddleware
 
 
 def _call_positions(message: AIMessage) -> dict[str, int]:
@@ -56,7 +57,7 @@ def _order_messages(messages: list[AnyMessage]) -> list[AnyMessage] | None:
     return ordered if changed else None
 
 
-class StableToolResultOrderMiddleware(AgentMiddleware):
+class StableToolResultOrderMiddleware(OpenSWEMiddleware):
     """Sort each parallel tool batch's results into their tool call order."""
 
     async def awrap_model_call(

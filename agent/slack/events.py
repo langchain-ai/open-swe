@@ -2,17 +2,16 @@
 
 import asyncio
 import logging
-import os
 import uuid
 from collections import OrderedDict
 
 from langgraph_sdk import get_client
 
+from agent.config import ENV
+
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 
 _LOCAL_CLAIM_LIMIT = 2048
 _claimed_keys: OrderedDict[str, None] = OrderedDict()

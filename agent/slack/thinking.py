@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePath
 from time import monotonic
@@ -17,6 +18,7 @@ from agent.slack.client import (
     stop_slack_stream,
     store_slack_run_mapping,
 )
+from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -93,23 +95,17 @@ def _step_id(run_id: str, namespace: tuple[str, ...], call_id: str) -> str:
     return f"step-{hashlib.sha256(value.encode()).hexdigest()[:24]}"
 
 
-def _part_value(part: Any, key: str) -> Any:
-    return part.get(key) if isinstance(part, dict) else getattr(part, key, None)
-
-
-def _event_data(part: Any) -> tuple[tuple[str, ...], dict[str, Any]] | None:
-    event = _part_value(part, "event")
-    raw = _part_value(part, "data")
-    if not isinstance(event, str) or not event.startswith("tools") or not isinstance(raw, dict):
+def _event_data(event: Mapping[str, Any]) -> tuple[tuple[str, ...], Mapping[str, Any]] | None:
+    if event.get("method") != "tools":
         return None
-    namespace = tuple(segment for segment in event.split("|")[1:] if segment)
-    params = raw.get("params")
-    if isinstance(params, dict):
-        nested_namespace = params.get("namespace")
-        if isinstance(nested_namespace, list):
-            namespace = tuple(str(value) for value in nested_namespace)
-        raw = params.get("data")
-    return (namespace, raw) if isinstance(raw, dict) else None
+    params = event.get("params")
+    if not isinstance(params, dict):
+        return None
+    namespace = params.get("namespace")
+    data = params.get("data")
+    if not isinstance(namespace, list) or not isinstance(data, dict):
+        return None
+    return tuple(str(segment) for segment in namespace), data
 
 
 class SlackThinkingStream:
@@ -170,17 +166,17 @@ class SlackThinkingStream:
         )
         return True
 
-    def consume(self, part: Any) -> None:
-        parsed = _event_data(part)
+    def consume(self, stream_event: Mapping[str, Any]) -> None:
+        parsed = _event_data(stream_event)
         if parsed is None:
             return
         namespace, data = parsed
-        event = data.get("event")
+        tool_event = data.get("event")
         call_id = data.get("tool_call_id")
         if not isinstance(call_id, str) or not call_id:
             return
         key = (namespace, call_id)
-        if event == "tool-started":
+        if tool_event == "tool-started":
             name = data.get("tool_name")
             if not isinstance(name, str):
                 return
@@ -197,12 +193,12 @@ class SlackThinkingStream:
             )
             self.steps[key] = step
             self.pending[step.task_id] = step
-        elif event in {"tool-finished", "tool-error"}:
+        elif tool_event in {"tool-finished", "tool-error"}:
             step = self.steps.get(key)
             if step is None:
                 step = Step(_step_id(self.run_id, namespace, call_id), "Agent step", "complete")
                 self.steps[key] = step
-            step.failed = event == "tool-error"
+            step.failed = tool_event == "tool-error"
             step.status = "complete"
             step.output = "Failed" if step.failed else "Completed"
             self.pending[step.task_id] = step
@@ -279,12 +275,19 @@ async def stream_slack_thinking_steps(
         return
     status = "error"
     try:
-        async for part in client.runs.join_stream(thread_id, run_id):
-            stream.consume(part)
-            await stream.flush()
-        run = await client.runs.get(thread_id, run_id)
-        run_status = run.get("status") if isinstance(run, dict) else None
-        status = "success" if run_status == "success" else str(run_status or "error")
+        active = False
+        async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
+            async for event in thread_stream.subscribe(["lifecycle", "tools"]):
+                lifecycle = root_lifecycle(event)
+                if lifecycle is not None and lifecycle[0] == run_id:
+                    if lifecycle[1] == "running":
+                        active = True
+                    elif lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS:
+                        status = "success" if lifecycle[1] == "completed" else lifecycle[1]
+                        break
+                if active:
+                    stream.consume(event)
+                    await stream.flush()
     except asyncio.CancelledError:
         status = "interrupted"
         raise

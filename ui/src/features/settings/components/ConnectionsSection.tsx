@@ -3,11 +3,10 @@ import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 import { SiNotion } from "react-icons/si"
 
-import type { ApiKeyCredentialStatus, SessionUser } from "@/lib/api"
+import type { SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { api, notionConnectUrl, slackConnectUrl } from "@/lib/api"
+import { api, connectService } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type SetError = (message: string | null) => void
@@ -40,7 +39,10 @@ function SlackRow({ user }: { user: SessionUser }) {
     setConnecting(true)
     // Refresh the cached mapping when the user returns from the OAuth redirect.
     void qc.invalidateQueries({ queryKey: ["myMapping"] })
-    window.location.assign(slackConnectUrl())
+    void connectService("slack")?.finally(() => {
+      setConnecting(false)
+      void qc.invalidateQueries({ queryKey: ["myMapping"] })
+    })
   }
 
   return (
@@ -100,7 +102,10 @@ function NotionRow({ setError }: { setError: SetError }) {
   const connect = () => {
     setConnecting(true)
     void qc.invalidateQueries({ queryKey: ["myNotion"] })
-    window.location.assign(notionConnectUrl())
+    void connectService("notion")?.finally(() => {
+      setConnecting(false)
+      void qc.invalidateQueries({ queryKey: ["myNotion"] })
+    })
   }
 
   return (
@@ -135,120 +140,16 @@ function NotionRow({ setError }: { setError: SetError }) {
   )
 }
 
-interface ApiKeyRowProps {
-  queryKey: string
-  label: string
-  description: string
-  placeholder: string
-  load: () => Promise<ApiKeyCredentialStatus>
-  connect: (apiKey: string) => Promise<ApiKeyCredentialStatus>
-  disconnect: () => Promise<ApiKeyCredentialStatus>
-  setError: SetError
-}
-
-function ApiKeyRow({
-  queryKey,
-  label,
-  description,
-  placeholder,
-  load,
-  connect: save,
-  disconnect: remove,
-  setError,
-}: ApiKeyRowProps) {
-  const qc = useQueryClient()
-  const creds = useQuery({ queryKey: [queryKey], queryFn: load })
-  const [apiKey, setApiKey] = useState("")
-
-  const onSuccess = () => {
-    void qc.invalidateQueries({ queryKey: [queryKey] })
-    setApiKey("")
-    setError(null)
-  }
-  const onError = (e: Error) => setError(e.message)
-  const connect = useMutation({
-    mutationFn: () => save(apiKey.trim()),
-    onSuccess,
-    onError,
-  })
-  const disconnect = useMutation({ mutationFn: remove, onSuccess, onError })
-  const connected = !!creds.data?.connected
-
-  return (
-    <SettingsRow
-      label={label}
-      description={
-        connected
-          ? `Connected · key ••••${creds.data?.api_key_last4 ?? ""}`
-          : description
-      }
-      control={
-        connected ? (
-          <div className="flex items-center gap-2">
-            <StatusPill connected />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => disconnect.mutate()}
-              disabled={disconnect.isPending}
-            >
-              Disconnect
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <Input
-              className="w-48"
-              placeholder={placeholder}
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              disabled={creds.isLoading}
-            />
-            <Button
-              size="sm"
-              onClick={() => connect.mutate()}
-              disabled={connect.isPending || !apiKey.trim()}
-            >
-              Connect
-            </Button>
-          </div>
-        )
-      }
-    />
-  )
-}
-
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   const [error, setError] = useState<string | null>(null)
 
   return (
     <SettingsSection
-      title="Connections"
-      description="Accounts and credentials Open SWE can use on your behalf."
+      title="Personal connections"
+      description="Accounts and credentials Open SWE can use on your behalf. Workspace MCP tools configured by an admin are shared with everyone."
     >
       <SlackRow user={user} />
       <NotionRow setError={setError} />
-      <ApiKeyRow
-        queryKey="myLangSmith"
-        label="LangSmith"
-        description="Add your API key to let runs inspect LangSmith traces. Encrypted at rest and scoped to your account."
-        placeholder="LangSmith API key"
-        load={api.getMyLangSmithStatus}
-        connect={(apiKey) => api.connectMyLangSmith({ api_key: apiKey })}
-        disconnect={api.disconnectMyLangSmith}
-        setError={setError}
-      />
-      <ApiKeyRow
-        queryKey="myCurrents"
-        label="Currents.dev"
-        description="Add your API key (Currents → Organization → API & Record Keys) to let runs inspect e2e test results. Encrypted at rest and scoped to your account."
-        placeholder="Currents API key"
-        load={api.getMyCurrentsStatus}
-        connect={(apiKey) => api.connectCurrents({ api_key: apiKey })}
-        disconnect={api.disconnectCurrents}
-        setError={setError}
-      />
       {error && <p className="px-4 py-2 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )
