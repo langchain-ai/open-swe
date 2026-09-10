@@ -106,7 +106,7 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> object:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
             "full_name": cfg.review_style_full_name,
             "mode": cfg.analyzer_mode,
