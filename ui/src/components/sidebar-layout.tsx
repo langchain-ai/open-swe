@@ -146,9 +146,7 @@ export function SidebarFrame({
       )}
     >
       {children}
-      <div className="max-md:hidden">
-        <ResizeHandle width={width} onResize={setWidth} />
-      </div>
+      <ResizeHandle width={width} onResize={setWidth} />
     </aside>
   )
 }
@@ -202,7 +200,7 @@ function ResizeHandle({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       className={cn(
-        "absolute top-0 right-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
+        "absolute top-0 -right-1 z-20 h-full w-2 cursor-col-resize touch-none select-none max-md:hidden",
         "after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-transparent after:transition-colors",
         "hover:after:bg-border",
         dragging && "after:bg-border"

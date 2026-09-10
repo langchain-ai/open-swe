@@ -18,6 +18,37 @@ import {
 // Drives the REAL built ui/ app (served same-origin from the harness) for the
 // Slack → web handoff. Only the LLM/GitHub/Slack/token boundaries are faked.
 test.describe("Slack → web handoff (real dashboard UI)", () => {
+  test("resizes the sidebar from its visible edge", async ({
+    page,
+  }, testInfo) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
+
+    const sidebar = page.locator("[data-sidebar-frame]");
+    await expect(sidebar).toBeVisible();
+    const box = await sidebar.boundingBox();
+    expect(box).not.toBeNull();
+    const initialWidth = box!.width;
+    const edge = box!.x + box!.width;
+    await page.mouse.move(edge + 2, box!.y + 100);
+    await page.mouse.down();
+    await page.mouse.move(edge + 82, box!.y + 100, { steps: 5 });
+    await page.mouse.up();
+
+    await expect
+      .poll(() =>
+        sidebar.evaluate((element) => element.getBoundingClientRect().width),
+      )
+      .toBeGreaterThan(initialWidth + 70);
+    const screenshotPath = testInfo.outputPath("resized-sidebar.png");
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach("resized-sidebar", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+  });
+
   test("the SAME user continues the conversation in the web app", async ({
     page,
   }) => {
