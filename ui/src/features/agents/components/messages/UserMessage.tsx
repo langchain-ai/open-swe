@@ -1,11 +1,13 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
-import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
+
+const COLLAPSED_MAX_HEIGHT_PX = 250
 
 export function UserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
@@ -17,29 +19,19 @@ export function UserMessage({ message }: { message: Message }) {
 
   const images = message.chunks.filter((c) => c.kind === "image")
   const [expanded, setExpanded] = useState(false)
+  const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
-  const [scrolledFromTop, setScrolledFromTop] = useState(false)
-  const [scrolledFromBottom, setScrolledFromBottom] = useState(false)
 
-  const updateScrollIndicators = useCallback(() => {
+  useEffect(() => {
     const el = textRef.current
     if (!el) return
-    setScrolledFromTop(el.scrollTop > 0)
-    setScrolledFromBottom(el.scrollTop < el.scrollHeight - el.clientHeight - 1)
-  }, [])
-
-  useLayoutEffect(() => {
-    updateScrollIndicators()
-  }, [text, updateScrollIndicators])
-
-  const topStop = scrolledFromTop ? "transparent 0, black 24px" : "black 0"
-  const bottomStop = scrolledFromBottom
-    ? "black calc(100% - 24px), transparent 100%"
-    : "black 100%"
-  const textEdgeMask =
-    scrolledFromTop || scrolledFromBottom
-      ? `linear-gradient(to bottom, ${topStop}, ${bottomStop})`
-      : undefined
+    const measure = () =>
+      setIsTruncated(el.scrollHeight > COLLAPSED_MAX_HEIGHT_PX + 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [text])
 
   return (
     <div
@@ -114,12 +106,12 @@ export function UserMessage({ message }: { message: Message }) {
             {text && (
               <div
                 ref={textRef}
-                onScroll={updateScrollIndicators}
-                className="max-h-[250px] overflow-auto text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground"
-                style={{
-                  maskImage: textEdgeMask,
-                  WebkitMaskImage: textEdgeMask,
-                }}
+                className={`text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground ${
+                  !expanded ? "overflow-hidden" : ""
+                }`}
+                style={
+                  !expanded ? { maxHeight: COLLAPSED_MAX_HEIGHT_PX } : undefined
+                }
               >
                 {isSlack ? (
                   <SlackMrkdwn text={text} />
@@ -127,6 +119,17 @@ export function UserMessage({ message }: { message: Message }) {
                   <SkillPromptText text={text} />
                 )}
               </div>
+            )}
+            {isTruncated && (
+              <button
+                type="button"
+                onClick={() => setExpanded((value) => !value)}
+                aria-expanded={expanded}
+                data-testid="user-message-show-more"
+                className="mt-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {expanded ? "Show less" : "Show more"}
+              </button>
             )}
           </div>
         )}
