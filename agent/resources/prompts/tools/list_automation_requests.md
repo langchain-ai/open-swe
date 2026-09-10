@@ -1,0 +1,1 @@
+List workspace automation-creation requests for admin review. Defaults to pending requests; pass ``all`` or another status to inspect resolved requests.

@@ -1,0 +1,1 @@
+Deny a pending automation request. An optional message is included in the Slack DM sent to the requester.
