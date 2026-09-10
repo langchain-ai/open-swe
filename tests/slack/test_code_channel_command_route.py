@@ -5,7 +5,9 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, HTTPException, Request
 
+from agent.run_config import Repo
 from agent.slack import routes as slack_routes
+from agent.slack.request import CodeChannelCommand
 
 FORM = {
     "channel_id": "C-origin",
@@ -38,11 +40,11 @@ def _request(form: dict[str, str]) -> Request:
 def route(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     calls: dict[str, Any] = {
         "verify_slack_signature": lambda **_: True,
-        "_get_slack_channel_context": AsyncMock(
+        "resolve_slack_channel_context": AsyncMock(
             return_value={"id": "C-origin", "is_ext_shared": False, "is_pending_ext_shared": False}
         ),
         "slack_channel_allows_operations": lambda _context: True,
-        "get_slack_repo_config": AsyncMock(return_value={"owner": "acme", "name": "billing"}),
+        "get_slack_repo_config": AsyncMock(return_value=Repo(owner="acme", name="billing")),
     }
     for name, mock in calls.items():
         monkeypatch.setattr(slack_routes.common, name, mock)
@@ -57,23 +59,18 @@ async def _post(form: dict[str, str] | None = None) -> tuple[dict[str, str], Bac
     return response, tasks
 
 
-def _queued_command(tasks: BackgroundTasks) -> dict[str, Any]:
-    queued = tasks.tasks[0].args[0]
-    assert isinstance(queued, dict)
-    return queued
-
-
 async def test_the_command_is_acknowledged_before_the_work_starts(route: dict[str, Any]) -> None:
     """Slack gives a command three seconds, and opening a channel takes longer."""
     response, tasks = await _post()
 
     assert response == {"response_type": "ephemeral", "text": "Opening a code channel…"}
     assert len(tasks.tasks) == 1
-    command = _queued_command(tasks)
-    assert command["channel_id"] == "C-origin"
-    assert command["text"] == "fix the flaky login test"
-    assert command["repo"] == {"owner": "acme", "name": "billing"}
-    assert command["response_url"] == FORM["response_url"]
+    command, repo = tasks.tasks[0].args
+    assert isinstance(command, CodeChannelCommand)
+    assert command.channel_id == "C-origin"
+    assert command.text == "fix the flaky login test"
+    assert command.response_url == FORM["response_url"]
+    assert repo == Repo(owner="acme", name="billing")
 
 
 async def test_an_unsigned_command_is_refused(

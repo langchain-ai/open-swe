@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import Response
+from httpx2 import Response
 
 from agent.api.app import app
 from agent.github import webhook as github_webhooks
@@ -399,7 +399,7 @@ def _patch_membership_http(monkeypatch, response: _FakeResponse) -> dict[str, An
     def factory(*_args, **_kwargs) -> _FakeAsyncClient:
         return _FakeAsyncClient(response)
 
-    monkeypatch.setattr(github_org_membership.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(github_org_membership.httpx2, "AsyncClient", factory)
     return seen
 
 

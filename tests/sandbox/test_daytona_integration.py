@@ -58,13 +58,10 @@ def test_daytona_params_use_env_snapshot(monkeypatch):
     assert params.snapshot == "custom/snapshot:1.0"
 
 
-def test_daytona_params_reject_empty_snapshot(monkeypatch):
+def test_daytona_params_treat_blank_snapshot_as_unset(monkeypatch):
     monkeypatch.setenv("DAYTONA_SANDBOX_SNAPSHOT", "  ")
     module = _load_daytona_module(monkeypatch)
 
-    try:
-        module._get_daytona_sandbox_params()
-    except ValueError as exc:
-        assert "DAYTONA_SANDBOX_SNAPSHOT must not be empty" in str(exc)
-    else:
-        raise AssertionError("expected empty Daytona snapshot to fail")
+    params = module._get_daytona_sandbox_params()
+
+    assert params.snapshot == "daytonaio/sandbox:0.6.0"

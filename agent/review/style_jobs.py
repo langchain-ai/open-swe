@@ -1,14 +1,14 @@
 """Kick off and sync per-repo review style analysis runs."""
 
 import logging
-import os
-import uuid
 from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.config import ENV
 from agent.dispatch import create_durable_run
 from agent.input_messages import RunInput, build_run_input
+from agent.invocation import new_invocation_id, with_invocation_id
 from agent.review.style_collector import (
     collect_review_samples,
     format_samples_for_analyzer,
@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "analyzer"
 
 
-def _client():
+def langgraph_client():
     """LangGraph SDK client for the current deployment (same resolution as webapp)."""
-    url = os.environ.get("LANGGRAPH_URL") or os.environ.get("LANGGRAPH_URL_PROD")
+    url = ENV.LANGGRAPH_URL.optional()
     if url:
         return get_client(url=url)
     return get_client()
@@ -95,7 +95,7 @@ async def start_bootstrap_analysis(
     samples_text = format_samples_for_analyzer(samples)
     thread_id = review_style_thread_id(owner, repo)
 
-    client = _client()
+    client = langgraph_client()
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "review_style_full_name": full_name,
@@ -148,7 +148,7 @@ async def start_bootstrap_analysis(
                 files=build_skill_files(),
             ),
             source="review-style-bootstrap",
-            config={"configurable": {**configurable, "prepare_run_id": str(uuid.uuid4())}},
+            config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             client=client,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
@@ -171,13 +171,13 @@ async def start_continual_run(
     configurable = build_continual_run_configurable(full_name)
     thread_id = configurable["thread_id"]
     try:
-        client = _client()
+        client = langgraph_client()
         run = await create_durable_run(
             thread_id,
             _ASSISTANT_ID,
             input=build_continual_run_input(full_name),
             source="review-style-continual",
-            config={"configurable": {**configurable, "prepare_run_id": str(uuid.uuid4())}},
+            config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             client=client,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
@@ -200,7 +200,7 @@ async def sync_review_style_run_status(full_name: str) -> ReviewStyle:
     if not thread_id:
         return record
 
-    client = _client()
+    client = langgraph_client()
     run_status: str | None = None
     run_missing = False
     try:
@@ -232,7 +232,7 @@ async def cancel_review_style_analysis(full_name: str) -> ReviewStyle:
 
     if record.analysis_thread_id and record.analysis_run_id:
         try:
-            await _client().runs.cancel(
+            await langgraph_client().runs.cancel(
                 record.analysis_thread_id, record.analysis_run_id, wait=False
             )
         except Exception:

@@ -132,6 +132,7 @@ async def post_session_message(
     agent_thread_id: str | None = None,
     run_id: str | None = None,
     triggering_user: str | None = None,
+    should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
     """Post one message into a Slack session and map it to the run behind it."""
     client = get_langgraph_client()
@@ -153,6 +154,7 @@ async def post_session_message(
                 message_ts,
                 run_id=run_id,
                 triggering_user_id=triggering_user,
+                should_ask_for_feedback=should_ask_for_feedback,
             )
     if message_ts is None:
         return {

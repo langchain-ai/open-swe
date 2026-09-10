@@ -4,17 +4,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.run_config import Repo
 from agent.slack import spawn
 from agent.slack import webhook as slack_webhook
+from agent.slack.request import CodeChannelCommand
 
-COMMAND = {
-    "channel_id": "C-origin",
-    "user_id": "U1",
-    "text": "fix the flaky login test",
-    "response_url": "https://hooks.slack.com/commands/T1/1/abc",
-    "team_id": "T1",
-    "repo": {"owner": "acme", "name": "billing"},
-}
+COMMAND = CodeChannelCommand(
+    channel_id="C-origin",
+    user_id="U1",
+    text="fix the flaky login test",
+    response_url="https://hooks.slack.com/commands/T1/1/abc",
+    team_id="T1",
+)
+REPO = Repo(owner="acme", name="billing")
 
 
 @pytest.fixture
@@ -44,14 +46,14 @@ def command(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 async def test_a_command_opens_a_channel_and_says_where(command: dict[str, Any]) -> None:
-    await slack_webhook.process_code_channel_command(dict(COMMAND))
+    await slack_webhook.process_code_channel_command(COMMAND, REPO)
 
     opened = command["open_code_channel"].await_args.kwargs
     assert opened["title"] == "fix the flaky login test"
     assert opened["repo"] == {"owner": "acme", "name": "billing"}
     assert opened["team_id"] == "T1"
     command["respond_to_slack_command"].assert_awaited_once_with(
-        COMMAND["response_url"], "Working on it in <#C-code>."
+        COMMAND.response_url, "Working on it in <#C-code>."
     )
 
 
@@ -59,7 +61,7 @@ async def test_the_command_leaves_nothing_behind_in_the_channel_it_came_from(
     command: dict[str, Any],
 ) -> None:
     """No message means no origin pair, so the caller is invited directly."""
-    await slack_webhook.process_code_channel_command(dict(COMMAND))
+    await slack_webhook.process_code_channel_command(COMMAND, REPO)
 
     opened = command["open_code_channel"].await_args.kwargs
     assert "origin_channel_id" not in opened
@@ -75,7 +77,7 @@ async def test_the_command_leaves_nothing_behind_in_the_channel_it_came_from(
 async def test_the_new_session_is_told_the_task_and_that_it_starts_clean(
     command: dict[str, Any],
 ) -> None:
-    await slack_webhook.process_code_channel_command(dict(COMMAND))
+    await slack_webhook.process_code_channel_command(COMMAND, REPO)
 
     content = command["open_code_channel"].await_args.kwargs["content"]
     assert "fix the flaky login test" in content
@@ -86,7 +88,7 @@ async def test_the_new_session_is_told_the_task_and_that_it_starts_clean(
 
 
 async def test_the_caller_inherits_their_github_identity(command: dict[str, Any]) -> None:
-    await slack_webhook.process_code_channel_command(dict(COMMAND))
+    await slack_webhook.process_code_channel_command(COMMAND, REPO)
 
     origin = command["open_code_channel"].await_args.kwargs["origin"]
     assert origin.config.github_login == "octocat"
@@ -115,17 +117,17 @@ async def test_a_channel_that_cannot_be_opened_is_reported_to_the_caller(
 ) -> None:
     command["open_code_channel"].side_effect = spawn.CodeChannelError("feature_disabled")
 
-    await slack_webhook.process_code_channel_command(dict(COMMAND))
+    await slack_webhook.process_code_channel_command(COMMAND, REPO)
 
     command["respond_to_slack_command"].assert_awaited_once_with(
-        COMMAND["response_url"], "Could not open a code channel: feature_disabled"
+        COMMAND.response_url, "Could not open a code channel: feature_disabled"
     )
 
 
 async def test_an_unexpected_failure_still_answers_the_caller(command: dict[str, Any]) -> None:
     command["open_code_channel"].side_effect = RuntimeError("boom")
 
-    await slack_webhook.process_code_channel_command(dict(COMMAND))
+    await slack_webhook.process_code_channel_command(COMMAND, REPO)
 
     text = command["respond_to_slack_command"].await_args.args[1]
     assert "Could not open a code channel" in text
@@ -133,7 +135,7 @@ async def test_an_unexpected_failure_still_answers_the_caller(command: dict[str,
 
 async def test_the_command_invites_anyone_it_names(command: dict[str, Any]) -> None:
     await slack_webhook.process_code_channel_command(
-        {**COMMAND, "text": "pair with <@U2> and <@U3> on the login test"}
+        COMMAND.model_copy(update={"text": "pair with <@U2> and <@U3> on the login test"}), REPO
     )
 
     assert command["open_code_channel"].await_args.kwargs["invite"] == ["U1", "U2", "U3"]

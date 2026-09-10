@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.2.5",
+  "version": "0.2.8",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
@@ -42,6 +42,10 @@
     ],
     "extraResources": [
       {
+        "from": "resources/app-update.yml",
+        "to": "app-update.yml"
+      },
+      {
         "from": "resources/icon.png",
         "to": "icon.png"
       },
@@ -74,6 +78,7 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "artifactName": "Open-SWE-${version}-${arch}-mac.${ext}",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Open SWE uses the microphone for message dictation."
       },

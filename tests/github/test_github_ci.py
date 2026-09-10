@@ -2,7 +2,7 @@
 
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 
 from agent.github import ci as github_ci
@@ -17,7 +17,7 @@ class _FakeResponse:
 
     def raise_for_status(self) -> None:
         if self._error:
-            raise httpx.HTTPError("boom")
+            raise httpx2.HTTPError("boom")
 
     def json(self) -> Any:
         return self._payload
@@ -41,7 +41,7 @@ class _FakeClient:
 
 def _patch(monkeypatch: pytest.MonkeyPatch, payload: Any, error: bool = False) -> None:
     _FakeClient.response = _FakeResponse(payload, error=error)
-    monkeypatch.setattr(github_ci.httpx, "AsyncClient", _FakeClient)
+    monkeypatch.setattr(github_ci.httpx2, "AsyncClient", _FakeClient)
 
 
 def test_branch_and_sha_from_check_run() -> None:

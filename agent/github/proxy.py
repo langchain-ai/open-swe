@@ -8,11 +8,11 @@ before-model middleware re-configure the proxy before it goes stale.
 """
 
 import logging
-import os
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from agent.config import ENV
 from agent.github.app import (
     PermissionKey,
     PermissionMap,
@@ -130,7 +130,7 @@ async def refresh_proxy_token(
     permissions: PermissionMap | None = None,
 ) -> bool:
     """Re-configure a LangSmith sandbox proxy with a freshly minted token."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith" or not thread_id:
+    if ENV.SANDBOX_TYPE.get() != "langsmith" or not thread_id:
         return False
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
@@ -152,18 +152,18 @@ async def refresh_proxy_token(
         logger.warning("Proxy token refresh for thread %s failed: no installation token", thread_id)
         return False
 
-    from agent.sandboxes.providers.langsmith import _configure_github_proxy
+    from agent.sandboxes.providers.langsmith import configure_github_proxy
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     base_proxy_config = _PROXY_BASE_CONFIGS.get(thread_id)
     if base_proxy_config is not None:
-        await _configure_github_proxy(
+        await configure_github_proxy(
             current_backend.id,
             token,
             base_proxy_config=base_proxy_config,
         )
     else:
-        await _configure_github_proxy(current_backend.id, token)
+        await configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
         thread_id,
         expires_at,

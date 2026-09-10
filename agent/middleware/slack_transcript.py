@@ -13,7 +13,7 @@ so a step that dies before its checkpoint has said nothing that needs taking
 back. Which message the transcript is being written into, and which message ids
 have gone out, live in the store for the same reason.
 
-The run is identified by ``prepare_run_id``: it is minted per dispatch, stored
+The run is identified by its invocation id: it is minted per dispatch, stored
 in the run's own config, and therefore survives a resume — unlike a
 callback-scoped id, and unlike anything held in memory.
 """

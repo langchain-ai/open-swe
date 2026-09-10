@@ -1,7 +1,6 @@
 """Slack emergency-stop reaction handling."""
 
 import logging
-import os
 from collections.abc import Mapping
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -10,7 +9,9 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from agent.config import ENV
 from agent.dispatch import dispatch_agent_run
+from agent.prompts import render_prompt
 from agent.slack.client import (
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
@@ -23,9 +24,7 @@ from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
+LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
 _QUEUE_RECORDS = (
     (("queue",), "pending_messages"),
     (("autofix",), "pending_event"),
@@ -146,15 +145,11 @@ def _stop_summary_prompt(had_active_runs: bool) -> str:
         if had_active_runs
         else "No active run was present when the stop reaction was processed."
     )
-    return f"""This is an internal stop-summary turn triggered by a Slack :x: reaction, not a new task request. {observed_state}
-
-Do not resume or continue the prior task. Do not modify files, run mutating commands, commit, push, open or update a pull request, or take any other implementation action. Inspect only the existing conversation and current sandbox state with read-only tools as needed.
-
-Your first and only user-facing action must be one concise `slack_thread_reply` that factually summarizes what was completed, what was in progress when interrupted, and what remains. If no active run existed, say so. Do not post an acknowledgement before the summary. End immediately after posting it."""
+    return render_prompt("runs/slack-stop-summary.md", observed_state=observed_state)
 
 
 def _agent_version_metadata() -> dict[str, str]:
-    revision = os.environ.get("LANGCHAIN_REVISION_ID")
+    revision = ENV.LANGCHAIN_REVISION_ID.optional()
     return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
 
 

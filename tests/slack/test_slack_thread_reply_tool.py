@@ -128,6 +128,26 @@ async def test_slack_thread_reply_passes_the_executing_run_and_user(
     assert posted["triggering_user"] == "active-user"
 
 
+@pytest.mark.parametrize(
+    "should_ask_for_feedback,options,expected",
+    [
+        (True, None, True),
+        (False, None, False),
+        (True, ["Yes", "No"], False),
+    ],
+)
+async def test_reply_records_answer_completion_only_without_pending_choices(
+    posted: dict[str, Any],
+    should_ask_for_feedback: bool,
+    options: list[str] | None,
+    expected: bool,
+) -> None:
+    assert await slack_reply_tool.slack_thread_reply(
+        "The answer", should_ask_for_feedback=should_ask_for_feedback, options=options
+    ) == {"success": True}
+    assert posted["should_ask_for_feedback"] is expected
+
+
 async def test_slack_thread_reply_passes_model_reported_usage(posted: dict[str, Any]) -> None:
     state = {
         "messages": [
@@ -142,4 +162,4 @@ async def test_slack_thread_reply_passes_model_reported_usage(posted: dict[str, 
 
     assert await slack_reply_tool.slack_thread_reply("Done", state=state) == {"success": True}
     assert posted["usage"].models == ("model-a",)
-    assert posted["usage"].main_agent_tokens == 110
+    assert posted["usage"].total_tokens == 110
