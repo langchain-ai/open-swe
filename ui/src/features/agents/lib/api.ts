@@ -262,15 +262,16 @@ export interface PullRequestSnapshot {
   state: PullRequestLiveState | null
 }
 
-export type ThreadFeedbackRating = "bad" | "good" | "other"
+export type ThreadFeedbackRating = "bad" | "good"
 
 export type ThreadFeedbackSubmission =
-  | { action?: "submit"; rating: ThreadFeedbackRating; comment: string }
+  | { action?: "submit"; rating: ThreadFeedbackRating; comment?: string }
+  | { action: "comment"; comment: string }
   | { action: "dismiss" }
 
 export interface ThreadFeedback {
   status: "unavailable" | "ready" | "completed" | "dismissed"
-  rating: ThreadFeedbackRating | null
+  rating: ThreadFeedbackRating | "other" | null
   comment: string
 }
 
@@ -300,6 +301,11 @@ export const agentsApi = {
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  continueThreadPrivately: (threadId: string) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/continue-private`,
+      { method: "POST" }
+    ),
   renameThread: (threadId: string, title: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`, {
       method: "PATCH",

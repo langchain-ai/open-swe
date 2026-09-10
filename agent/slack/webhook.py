@@ -476,30 +476,55 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
+async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
+    """GitHub login for a Slack user: by Slack id first, then by profile email."""
+    if login := await common.login_for_slack_id(user_id):
+        return login
+    if user_email is None and user_id:
+        slack_user = await common.get_slack_user_info(user_id)
+        profile = slack_user.get("profile") if isinstance(slack_user, dict) else None
+        user_email = profile.get("email") if isinstance(profile, dict) else None
+    return await common.login_for_email(user_email) if user_email else None
+
+
+def _slack_thread_visibility(channel_context: dict[str, Any] | None) -> str:
+    """Bot DMs are private to the person; anything in a channel is collaborative."""
+    if isinstance(channel_context, dict) and channel_context.get("is_im") is True:
+        return "private"
+    return "public"
+
+
 async def _mark_slack_thread_errored(
     thread_id: str, request: SlackRequest, repo: Repo | None
 ) -> None:
     try:
-        clean_text = (
-            common.strip_bot_mention(
-                request.text, request.bot_user_id, bot_username=common.SLACK_BOT_USERNAME
-            )
-            or "Slack request"
-        )
-        await common.upsert_agent_thread_metadata(
-            thread_id,
-            source="slack",
-            repo_config=repo.model_dump() if repo else None,
-            title=clean_text,
-            source_context=SourceContext(
-                slack_thread=SlackThreadRef(
-                    channel_id=request.channel_id,
-                    thread_ts=request.thread_ts,
-                    triggering_user_id=request.user_id,
-                    triggering_event_ts=request.event_ts,
+        owner_login = await _slack_login(request.user_id)
+        visibility = _slack_thread_visibility(request.channel_context)
+        # An unlinked sender is turned away at the account gate; a private thread
+        # nobody owns would be unreachable, so persist nothing for them.
+        if visibility == "public" or owner_login:
+            clean_text = (
+                common.strip_bot_mention(
+                    request.text, request.bot_user_id, bot_username=common.SLACK_BOT_USERNAME
                 )
-            ),
-        )
+                or "Slack request"
+            )
+            await common.upsert_agent_thread_metadata(
+                thread_id,
+                source="slack",
+                repo_config=repo.model_dump() if repo else None,
+                title=clean_text,
+                source_context=SourceContext(
+                    slack_thread=SlackThreadRef(
+                        channel_id=request.channel_id,
+                        thread_ts=request.thread_ts,
+                        triggering_user_id=request.user_id,
+                        triggering_event_ts=request.event_ts,
+                    )
+                ),
+                visibility=visibility,
+                owner_login=owner_login or "",
+            )
     except Exception:  # noqa: BLE001
         common.logger.warning(
             "Could not persist Slack error metadata for thread %s", thread_id, exc_info=True
@@ -693,9 +718,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         + image_urls_from_links
     )
 
-    mapped_login = await common.login_for_slack_id(user_id)
-    if not mapped_login and user_email:
-        mapped_login = await common.login_for_email(user_email)
+    mapped_login = await _slack_login(user_id, user_email)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
@@ -736,7 +759,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             user_token = None
     has_valid_user_token = bool(user_token)
 
-    if not has_valid_user_token and not common.is_bot_token_only_mode():
+    if not has_valid_user_token:
         # A stored-but-unusable token means "sign in again"; no record at all
         # means the user has never connected GitHub + Slack via the dashboard.
         # Guard the store read like token resolution above so a transient
@@ -807,12 +830,11 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
 
     is_first_mention = not await common.thread_exists(thread_id)
     langgraph_client = get_langgraph_client()
-    if repo_dict:
-        await common.upsert_slack_thread_repo_metadata(thread_id, repo_dict, langgraph_client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
-    await common.upsert_agent_thread_metadata(
+    visibility = _slack_thread_visibility(channel_context)
+    persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
         repo_config=repo_dict,
@@ -821,7 +843,12 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         title=clean_text if is_first_mention else "",
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         environment=environment_slug,
+        visibility=visibility,
+        owner_login=mapped_login or "",
     )
+    if visibility == "private" and not persisted:
+        # Dispatch would create the thread itself, with no metadata and so public.
+        raise RuntimeError("could not persist private thread metadata")
 
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that

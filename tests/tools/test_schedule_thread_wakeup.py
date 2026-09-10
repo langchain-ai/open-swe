@@ -238,9 +238,11 @@ async def test_wakeup_cron_includes_trace_correlation_and_completion_webhook(
         configurable={"thread_id": "thread-1"},
     )
 
-    prepare_run_id = captured["config"]["configurable"]["prepare_run_id"]
+    invocation_id = captured["config"]["configurable"]["invocation_id"]
     assert result["success"] is True
-    assert captured["metadata"]["prepare_run_id"] == prepare_run_id
+    assert captured["config"]["configurable"]["prepare_run_id"] == invocation_id
+    assert captured["metadata"]["invocation_id"] == invocation_id
+    assert captured["metadata"]["prepare_run_id"] == invocation_id
     assert captured["config"]["metadata"] == captured["metadata"]
     assert captured["webhook"] == "https://app/webhooks/run-complete"
 

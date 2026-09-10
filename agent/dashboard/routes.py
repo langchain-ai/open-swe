@@ -37,6 +37,11 @@ from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
 )
+from agent.dashboard.environment_refresh import (
+    ensure_refresh_cron,
+    is_refresh_in_flight,
+    start_refresh_run,
+)
 from agent.dashboard.environments import (
     DEFAULT_ENVIRONMENT_SLUG,
     ENVIRONMENTS,
@@ -64,7 +69,7 @@ from agent.dashboard.oauth import (
     decode_terminal_ticket,
     desktop_callback_url,
     desktop_handoff_from_state,
-    enforce_org_login_gate,
+    enforce_github_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
@@ -170,6 +175,7 @@ from agent.dashboard.team_settings import (
 from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
+    continue_thread_privately,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
@@ -222,6 +228,11 @@ from agent.dashboard.user_mappings import (
     get_mapping,
     list_mappings,
     upsert_mapping,
+)
+from agent.dashboard.user_preferences import (
+    UserPreferencesUpdate,
+    get_user_preferences,
+    set_user_preferences,
 )
 from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
@@ -538,7 +549,7 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
-    await enforce_org_login_gate(login)
+    await enforce_github_login_gate(login)
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
@@ -620,6 +631,21 @@ async def api_delete_my_instructions(
 ) -> Response:
     await delete_user_instructions(session["sub"])
     return Response(status_code=204)
+
+
+@router.get("/me/preferences")
+async def api_get_my_preferences(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_user_preferences(session["sub"])
+
+
+@router.put("/me/preferences")
+async def api_put_my_preferences(
+    body: UserPreferencesUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await set_user_preferences(session["sub"], body)
 
 
 @router.get("/options")
@@ -1051,18 +1077,21 @@ async def api_create_environment(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Environment:
     try:
-        return await ENVIRONMENTS.create(body, _admin["sub"])
+        record = await ENVIRONMENTS.create(body, _admin["sub"])
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
+    if record.setup_script:
+        await ensure_refresh_cron(record.slug)
+    return record
 
 
 @router.get("/environments/options")
 async def api_environment_options(
-    _session: dict[str, Any] = _SESSION_DEP,
+    session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    """Pickable environments for any signed-in user: names only, no prompts."""
+    """Pickable environments for any signed-in user; refresh logs only for admins."""
     return {
-        "environments": await list_environment_options(),
+        "environments": await list_environment_options(include_logs=_session_is_admin(session)),
         "default_slug": DEFAULT_ENVIRONMENT_SLUG,
     }
 
@@ -1085,9 +1114,36 @@ async def api_update_environment(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Environment:
     try:
-        return await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
+        record = await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    if record.setup_script:
+        await ensure_refresh_cron(record.slug)
+    return record
+
+
+@router.post("/environments/{slug}/refresh")
+async def api_refresh_environment(
+    slug: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    """Start a snapshot rebuild from the environment's scripts.
+
+    Started in the background rather than awaited: a rebuild takes minutes, and
+    the outcome lands on the record for the dashboard to poll.
+    """
+    normalized = _normalized_slug(slug)
+    record = await ENVIRONMENTS.get(normalized)
+    if not record:
+        raise HTTPException(404, "environment not found")
+    if not record.setup_script:
+        raise HTTPException(400, "environment has no setup script to run")
+    if is_refresh_in_flight(record):
+        raise HTTPException(409, "a refresh of this environment is already running")
+    run_id = await start_refresh_run(normalized)
+    if run_id is None:
+        raise HTTPException(502, "could not start the refresh job")
+    return {"started": True, "run_id": run_id}
 
 
 @router.delete("/environments/{slug}")
@@ -2304,6 +2360,14 @@ async def api_rename_thread(
     )
 
 
+@router.post("/threads/{thread_id}/continue-private")
+async def api_continue_thread_privately(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await continue_thread_privately(thread_id, session["sub"], email=session.get("email"))
+
+
 @router.post("/threads/{thread_id}/resolve")
 async def api_resolve_thread(
     thread_id: str,
@@ -2350,7 +2414,7 @@ async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await admin_cancel_dashboard_thread(thread_id)
+    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"], email=_admin.get("email"))
 
 
 @router.delete("/threads/{thread_id}")

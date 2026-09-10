@@ -54,7 +54,7 @@ from agent.dashboard.agent_overrides import (
     profile_model_routing_enabled,
     resolve_github_login,
 )
-from agent.dashboard.agent_usage import record_agent_run_usage
+from agent.dashboard.agent_usage import record_agent_invocation_usage
 from agent.dashboard.environments import (
     resolve_environment,
 )
@@ -112,6 +112,7 @@ from agent.middleware import (
     task_on_failure,
     task_retry_on,
 )
+from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
@@ -148,7 +149,6 @@ from agent.tools import (
     approve_plan,
     background_execute,
     background_task,
-    capture_environment_snapshot,
     create_automation,
     create_sandbox_file_download_url,
     create_sandbox_service_url,
@@ -171,12 +171,13 @@ from agent.tools import (
     notify_automation_channel,
     open_pull_request,
     output_iframe,
+    publish_environment,
     read_user_settings,
     recreate_sandbox,
+    refresh_environment_start,
     report_platform_issue,
     request_pr_review,
     sandbox_reset,
-    save_environment,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -348,8 +349,8 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_start_new_thread",
-        "save_environment",
-        "capture_environment_snapshot",
+        "publish_environment",
+        "refresh_environment_start",
         "delete_environment",
         "create_automation",
         "update_automation",
@@ -406,6 +407,7 @@ def _general_purpose_subagent(
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
     sandbox_file_downloads: bool = False,
+    offloading: ConversationOffloadingMiddleware | None = None,
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -421,7 +423,10 @@ def _general_purpose_subagent(
         + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
-        "middleware": _subagent_middleware(dynamic_tools),
+        "middleware": [
+            *_subagent_middleware(dynamic_tools),
+            *([offloading] if offloading else []),
+        ],
     }
     if skills:
         subagent["skills"] = skills
@@ -444,8 +449,8 @@ ADMIN_TOOLS = (
     trigger_automation,
     delete_automation,
     list_environments,
-    save_environment,
-    capture_environment_snapshot,
+    publish_environment,
+    refresh_environment_start,
     delete_environment,
     save_organization_skill,
     delete_organization_skill,
@@ -620,7 +625,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
@@ -762,9 +767,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "plan_mode": self._plan_mode,
                     },
                 )
-                if cfg.prepare_run_id:
-                    await record_agent_run_usage(
-                        run_id=cfg.prepare_run_id,
+                if cfg.invocation_id:
+                    await record_agent_invocation_usage(
+                        invocation_id=cfg.invocation_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
                         user_email=self._user_email,
@@ -795,6 +800,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
+                continued_from_collaborative=bool(cfg.continued_from_thread_id),
             ),
         }
 
@@ -1197,6 +1203,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 skills=skill_sources,
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
+                offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
             ),
         ],
         skills=skill_sources,
@@ -1205,6 +1212,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                ConversationOffloadingMiddleware(
+                    main_model, agent_backend, manual=cfg.offload_conversation is True
+                ),
                 PrepareAgentRunMiddleware(
                     thread_id=thread_id,
                     config=config,

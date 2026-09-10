@@ -556,6 +556,7 @@
             "default": "submit",
             "enum": [
               "submit",
+              "comment",
               "dismiss"
             ],
             "title": "Action",
@@ -572,8 +573,7 @@
               {
                 "enum": [
                   "bad",
-                  "good",
-                  "other"
+                  "good"
                 ],
                 "type": "string"
               },
@@ -1987,6 +1987,23 @@
         "title": "UserInstructionsUpdate",
         "type": "object"
       },
+      "UserPreferencesUpdate": {
+        "properties": {
+          "default_visibility": {
+            "enum": [
+              "public",
+              "private"
+            ],
+            "title": "Default Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "default_visibility"
+        ],
+        "title": "UserPreferencesUpdate",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -3203,6 +3220,80 @@
           }
         ],
         "summary": "Api Put My Instructions",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/me/preferences": {
+      "get": {
+        "operationId": "api_get_my_preferences_dashboard_api_me_preferences_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get My Preferences Dashboard Api Me Preferences Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get My Preferences",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "api_put_my_preferences_dashboard_api_me_preferences_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPreferencesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Put My Preferences Dashboard Api Me Preferences Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Put My Preferences",
         "tags": [
           "dashboard"
         ]
@@ -7153,6 +7244,55 @@
           }
         ],
         "summary": "Api Thread Commands",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/continue-private": {
+      "post": {
+        "operationId": "api_continue_thread_privately_dashboard_api_threads__thread_id__continue_private_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Continue Thread Privately Dashboard Api Threads  Thread Id  Continue Private Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Continue Thread Privately",
         "tags": [
           "dashboard"
         ]

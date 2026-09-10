@@ -28,6 +28,7 @@ from typing import Annotated, Any, Self
 from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
 
+from agent.invocation import resolve_invocation_id
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,9 @@ class RunConfig(BaseModel):
     # Identity and provenance
     thread_id: str | None = None
     run_id: str | None = None
+    invocation_id: str | None = None
     prepare_run_id: str | None = None
+    offload_conversation: bool = False
     source: str | None = None
     task: str | None = None
     environment: str | None = None
@@ -152,6 +155,8 @@ class RunConfig(BaseModel):
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     stop_summary: bool | None = None
+    # Set on a private thread whose transcript was copied from a collaborative one.
+    continued_from_thread_id: str | None = None
 
     # Dashboard review chat
     chat_repo_owner: str | None = None
@@ -191,6 +196,15 @@ class RunConfig(BaseModel):
         if not isinstance(raw, Mapping):
             return cls()
         data = dict(raw)
+        try:
+            invocation_id = resolve_invocation_id(data)
+        except ValueError:
+            logger.warning("Conflicting invocation identifiers, ignoring both")
+            data.pop("invocation_id", None)
+            data.pop("prepare_run_id", None)
+        else:
+            if invocation_id is not None:
+                data["invocation_id"] = invocation_id
         for _ in range(len(cls.model_fields) + 1):
             try:
                 return cls.model_validate(data)

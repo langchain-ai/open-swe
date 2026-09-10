@@ -288,8 +288,9 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
-    assert configurable["prepare_run_id"] == enriched["params"]["metadata"]["prepare_run_id"]
-    assert configurable["prepare_run_id"]
+    assert configurable["invocation_id"] == enriched["params"]["metadata"]["invocation_id"]
+    assert configurable["prepare_run_id"] == configurable["invocation_id"]
+    assert enriched["params"]["metadata"]["prepare_run_id"] == configurable["invocation_id"]
     messages = enriched["params"]["input"]["messages"]
     assert messages[-1]["content"].startswith(
         '<input-message sender="github:octocat" surface="web" kind="human">'
@@ -2860,14 +2861,14 @@ async def test_admin_cancel_dashboard_thread_does_not_update_on_cancel_failure(m
     assert updated is False
 
 
-async def test_admin_cancel_thread_route_delegates_without_owner_identity(monkeypatch) -> None:
+async def test_admin_cancel_thread_route_preserves_actor_identity(monkeypatch) -> None:
     cancel = AsyncMock(return_value={"id": "thread-1", "status": "interrupted"})
     monkeypatch.setattr(routes, "admin_cancel_dashboard_thread", cancel)
 
     result = await routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
 
     assert result == {"id": "thread-1", "status": "interrupted"}
-    cancel.assert_awaited_once_with("thread-1")
+    cancel.assert_awaited_once_with("thread-1", "admin", email=None)
 
 
 def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
