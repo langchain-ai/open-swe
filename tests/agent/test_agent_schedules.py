@@ -123,7 +123,7 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(schedules, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(schedules, "get_profile", fake_get_profile)
-    monkeypatch.setattr(schedules, "_resolve_run_email", fake_resolve_run_email)
+    monkeypatch.setattr(schedules, "resolve_run_email", fake_resolve_run_email)
     monkeypatch.setattr(schedules, "repo_config_for_user", fake_repo_config_for_user)
     monkeypatch.setattr(
         schedules, "require_repo_access_for_user", fake_require_repo_access_for_user

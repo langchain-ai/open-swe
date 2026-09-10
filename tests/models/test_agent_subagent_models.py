@@ -7,7 +7,7 @@ from agent.server import get_agent
 
 
 class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> "_DummyAgent":
+    def with_config(self, config: RunnableConfig) -> _DummyAgent:
         self.config = config
         return self
 
@@ -43,7 +43,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -116,7 +116,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -181,7 +181,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -195,7 +195,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
             "agent.server.load_profile",
             new_callable=AsyncMock,
             return_value={
-                "default_model": "anthropic:claude-fable-5",
+                "default_model": "anthropic:claude-fable-5-1",
                 "reasoning_effort": "high",
             },
         ),

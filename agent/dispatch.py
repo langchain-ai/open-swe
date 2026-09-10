@@ -13,20 +13,18 @@ busy-check and the custom store-queue) with one function that uses:
   failure so every run ends with a signal even if the agent died.
 - ``stream_resumable=True`` — the run's event stream is retained so a client that
   attaches later can replay it. Without this the dashboard cannot observe a run
-  it did not start: the v2 protocol only synthesizes the ``lifecycle: running``
+  it did not start: the v3 protocol only synthesizes the ``lifecycle: running``
   event that drives ``stream.isLoading`` when it can replay the run's events, so
   a Slack/Linear/GitHub-triggered run looked idle in the web UI (no stop button)
   until it happened to emit its next event.
-- the Protocol v2 run shape — the same ``stream_mode`` set, ``stream_subgraphs``
-  and ``configurable`` marker that ``langgraph_api``'s ``run.start`` command
-  applies when the dashboard submits a run. The server fixes a run's streaming
-  protocol at creation: without the marker a run streams ``values`` only, so
-  the dashboard saw no ``tools`` events and no subagent namespaces for runs
-  triggered outside it (subagent cards never showed nested activity).
+- the v3 run shape — the same ``stream_mode`` set, ``stream_subgraphs`` and
+  compatibility marker that ``langgraph_api``'s ``run.start`` command applies
+  when the dashboard submits a run. The server fixes a run's streaming protocol
+  at creation: without the marker a run streams ``values`` only, so the dashboard
+  sees no ``tools`` events or subagent namespaces for externally triggered runs.
 """
 
 import logging
-import os
 import uuid
 from typing import Any
 from urllib.parse import urlparse
@@ -35,7 +33,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
-from .input_messages import (
+from agent.config import ENV
+from agent.input_messages import (
     ChannelIdentity,
     InputMessageContext,
     PersonIdentity,
@@ -44,21 +43,18 @@ from .input_messages import (
     SystemIdentity,
     build_run_input,
 )
+from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
-RunConfig = dict[str, Any]
+LangGraphRunConfig = dict[str, Any]
 
-# Mirrors ``langgraph_api.event_streaming``'s ``EVENT_STREAMING_V2_CONFIG_KEY``.
-# Not imported: ``langgraph-api`` is the serving runtime, not a dependency of
-# this package. The marker alone selects the v3 stream path, which emits every
-# protocol channel (``tools``, ``lifecycle``, namespaced subagent events)
-# regardless of ``stream_mode``.
-EVENT_STREAMING_V2_CONFIG_KEY = "__event_streaming_v2"
-# The dashboard's ``run.start`` defaults, minus ``tools`` / ``lifecycle``: those
-# are protocol channels the REST ``POST /runs`` schema does not accept.
-V2_RUN_STREAM_MODES: tuple[str, ...] = (
+# The server's legacy-named compatibility marker selects the v3 stream path.
+V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
+# The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
+# the REST ``POST /runs`` schema.
+V3_RUN_STREAM_MODES: tuple[str, ...] = (
     "values",
     "updates",
     "messages",
@@ -77,32 +73,29 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
     people: list[PersonIdentity] = []
     channels: list[ChannelIdentity] = []
     systems: list[SystemIdentity] = []
-    login = configurable.get("github_login")
-    email = configurable.get("user_email")
-    slack_thread = configurable.get("slack_thread")
+    cfg = RunConfig.parse(configurable)
+    login = cfg.github_login
+    email = cfg.user_email
+    slack_thread = cfg.slack_thread
     sender_id = ""
     channel_id: str | None = None
-    if surface == "slack" and isinstance(slack_thread, dict):
-        user_id = slack_thread.get("triggering_user_id")
-        slack_channel_id = slack_thread.get("channel_id")
-        if isinstance(user_id, str) and user_id:
-            sender_id = f"slack:{user_id}"
+    if surface == "slack" and slack_thread is not None:
+        if slack_thread.triggering_user_id:
+            sender_id = f"slack:{slack_thread.triggering_user_id}"
             person: PersonIdentity = {"id": sender_id, "platform": "slack"}
-            display_name = slack_thread.get("triggering_user_name")
-            timezone = slack_thread.get("triggering_user_timezone")
-            if isinstance(display_name, str) and display_name:
-                person["display_name"] = display_name
-            if isinstance(timezone, str) and timezone:
-                person["timezone"] = timezone
-            if isinstance(login, str) and login:
+            if slack_thread.triggering_user_name:
+                person["display_name"] = slack_thread.triggering_user_name
+            if slack_thread.triggering_user_timezone:
+                person["timezone"] = slack_thread.triggering_user_timezone
+            if login:
                 person["github_login"] = login
-            if isinstance(email, str) and email:
+            if email:
                 person["email"] = email
             people.append(person)
-        if isinstance(slack_channel_id, str) and slack_channel_id:
-            channel_id = f"slack:{slack_channel_id}"
+        if slack_thread.channel_id:
+            channel_id = f"slack:{slack_thread.channel_id}"
             channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
-            channel_context = slack_thread.get("channel_context")
+            channel_context = slack_thread.channel_context
             if isinstance(channel_context, dict):
                 name = channel_context.get("name") or channel_context.get("name_normalized")
                 topic = channel_context.get("topic")
@@ -113,17 +106,16 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
                     channel["topic"] = topic
                 if isinstance(purpose, str) and purpose:
                     channel["purpose"] = purpose
-            thread_ts = slack_thread.get("thread_ts")
-            if isinstance(thread_ts, str) and thread_ts:
-                channel["thread_id"] = thread_ts
+            if slack_thread.thread_ts:
+                channel["thread_id"] = slack_thread.thread_ts
             channels.append(channel)
-    if not sender_id and isinstance(login, str) and login:
+    if not sender_id and login:
         sender_id = f"github:{login}"
         person = {"id": sender_id, "platform": "github", "github_login": login}
-        if isinstance(email, str) and email:
+        if email:
             person["email"] = email
         people.append(person)
-    if not sender_id and surface == "linear" and isinstance(email, str) and email:
+    if not sender_id and surface == "linear" and email:
         sender_id = f"linear:{email.lower()}"
         people.append({"id": sender_id, "platform": "linear", "email": email})
     kind = "human" if sender_id else "system"
@@ -162,8 +154,8 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
 # (completion.verify_run_complete_token). Secret unset, or URL relative/loopback
 # → no webhook attached (the completion reply is best-effort; it must never
 # break run creation).
-_COMPLETION_WEBHOOK_BASE = os.environ.get("COMPLETION_WEBHOOK_URL") or "/webhooks/run-complete"
-_RUN_COMPLETE_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
+_COMPLETION_WEBHOOK_BASE = ENV.COMPLETION_WEBHOOK_URL.optional() or "/webhooks/run-complete"
+_RUN_COMPLETE_SECRET = ENV.RUN_COMPLETE_WEBHOOK_SECRET.optional()
 
 
 def _is_loopback_webhook(url: str) -> bool:
@@ -202,9 +194,7 @@ COMPLETION_WEBHOOK_URL: str | None = _resolve_completion_webhook_url(
 
 
 def _langgraph_url() -> str:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get(
-        "LANGGRAPH_URL_PROD", "http://localhost:2024"
-    )
+    return ENV.LANGGRAPH_URL.get()
 
 
 def dispatch_client() -> LangGraphClient:
@@ -212,14 +202,14 @@ def dispatch_client() -> LangGraphClient:
 
 
 def prepare_run_config(
-    config: RunConfig | None,
+    config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
-) -> RunConfig:
+) -> LangGraphRunConfig:
     run_config = dict(config or {})
     configurable = run_config.get("configurable")
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
-    configurable[EVENT_STREAMING_V2_CONFIG_KEY] = True
+    configurable[V3_STREAMING_CONFIG_KEY] = True
     run_config["configurable"] = configurable
     existing_metadata = run_config.get("metadata")
     merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
@@ -236,7 +226,7 @@ async def create_durable_run(
     *,
     input: RunInput,
     source: str,
-    config: RunConfig | None = None,
+    config: LangGraphRunConfig | None = None,
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
@@ -255,7 +245,7 @@ async def create_durable_run(
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
-        "stream_mode": list(V2_RUN_STREAM_MODES),
+        "stream_mode": list(V3_RUN_STREAM_MODES),
         "stream_subgraphs": True,
         "stream_resumable": stream_resumable,
     }
@@ -315,6 +305,11 @@ async def dispatch_agent_run(
             if context is not None
             else _dispatch_input(content, source, configurable)
         )
+    client = client or dispatch_client()
+    if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:
+        from agent.thread_feedback import note_feedback_activity
+
+        await note_feedback_activity(thread_id, client=client)
     return await create_durable_run(
         thread_id,
         assistant_id,
@@ -322,6 +317,6 @@ async def dispatch_agent_run(
         config={"configurable": configurable},
         metadata=metadata or {},
         source=source,
-        client=client or dispatch_client(),
+        client=client,
         multitask_strategy=multitask_strategy,
     )

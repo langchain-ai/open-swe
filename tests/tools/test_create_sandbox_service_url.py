@@ -12,7 +12,7 @@ class _AsyncClient:
         self.calls: list[tuple[str, int, dict[str, Any]]] = []
         self.closed = False
 
-    async def __aenter__(self) -> "_AsyncClient":
+    async def __aenter__(self) -> _AsyncClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -34,9 +34,7 @@ class _Backend:
 
 def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, _AsyncClient]:
     monkeypatch.setattr(
-        service_tool,
-        "get_config",
-        lambda: {"configurable": {"thread_id": "thread-1"}},
+        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
     backend = _Backend()
 

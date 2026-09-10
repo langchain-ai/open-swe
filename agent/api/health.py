@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ..completion import handle_run_completion, verify_run_complete_token
+from agent.completion import handle_run_completion, verify_run_complete_token
 
 router = APIRouter()
 

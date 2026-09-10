@@ -4,13 +4,13 @@ from typing import Any, cast
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.utils import github_feedback
-from agent.utils.github_feedback import (
+from agent.github import feedback as github_feedback
+from agent.github import routes as github_routes
+from agent.github.feedback import (
     process_github_reaction_added,
     process_github_reaction_removed,
 )
 from agent.webhooks import common as webhook_common
-from agent.webhooks import github_routes
 
 
 class _FakeStore:

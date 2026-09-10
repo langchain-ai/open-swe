@@ -7,11 +7,7 @@ import type {
   DesktopLocalPromptInput,
   DesktopLocalThreadSummary,
 } from "@/desktop"
-import type {
-  ImageChunk,
-  Message,
-  QueuedThreadMessage,
-} from "@/features/agents/lib/types"
+import type { ImageChunk, Message } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -20,6 +16,7 @@ import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeade
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
+import type { MessagesScrollControl } from "@/features/agents/components/messages"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
@@ -37,6 +34,7 @@ import {
   ensureDesktopModelCredential,
   localThreadKeys,
   useDesktopLocalThread,
+  useLocalProjectRefs,
   useLocalThreadActivity,
   useLocalThreadDiff,
   useLocalThreadPrDiff,
@@ -46,50 +44,16 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import {
+  modelConfigurable,
+  promptMessage,
+} from "@/features/agents/lib/stream/promptMessage"
+import { useLocalPromptQueue } from "@/features/agents/lib/stream/useLocalPromptQueue"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
-import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
-
-function imageBlocks(images: Array<ImageChunk>) {
-  return images.map((image) => ({
-    type: "image",
-    base64: image.base64,
-    mime_type: image.mimeType,
-    ...(image.fileName ? { file_name: image.fileName } : {}),
-  }))
-}
-
-const QUEUE_KEY = "pending_messages"
-
-type QueuedPayload = {
-  text?: string
-  images?: Array<{ base64?: string; mime_type?: string; file_name?: string }>
-}
-
-function payloadImages(payload: QueuedPayload): Array<ImageChunk> {
-  return (payload.images ?? []).flatMap((block) =>
-    block.base64 && block.mime_type
-      ? [
-          {
-            kind: "image" as const,
-            base64: block.base64,
-            mimeType: block.mime_type,
-            ...(block.file_name ? { fileName: block.file_name } : {}),
-          },
-        ]
-      : []
-  )
-}
-
-function promptContent(text: string, images: Array<ImageChunk>) {
-  const trimmed = text.trim()
-  return [
-    ...imageBlocks(images),
-    ...(trimmed ? [{ type: "text", text: trimmed }] : []),
-  ]
-}
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
 
 function skillFiles(skills: DesktopLocalPromptInput["skills"]) {
   return Object.fromEntries(
@@ -110,7 +74,7 @@ function errorMessage(error: unknown): string {
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
   const login = session.data?.login
-  const stream = useAgentThreadRuntime()
+  const stream = useAgentStream()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()
@@ -141,16 +105,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   }, [models, threadEffort, threadModelId])
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const initialPromptRef = useRef<string | null>(null)
+  const scrollControlRef = useRef<MessagesScrollControl | null>(null)
+  const streamRef = useRef(stream)
+  useEffect(() => {
+    streamRef.current = stream
+  }, [stream])
   const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [queuedState, setQueuedState] = useState<{
-    sessionId: string
-    items: Array<QueuedThreadMessage>
-  }>({ sessionId, items: [] })
-  const queued = queuedState.sessionId === sessionId ? queuedState.items : []
-  const queueNamespace = useMemo(() => ["queue", sessionId], [sessionId])
-  const stoppedRef = useRef(false)
-  const handoffRef = useRef(false)
   const isMobile = useIsMobile()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
@@ -166,7 +127,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const terminals = useTerminalGroups(
     { kind: "local", sessionId },
-    thread?.cwd ?? ""
+    thread?.worktreePath ?? thread?.cwd ?? ""
   )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
@@ -184,6 +145,35 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange, openSurface, threadRef]
+  )
+
+  const worktreePath = thread?.worktreePath ?? null
+  const refsQuery = useLocalProjectRefs(thread?.cwd)
+  const projectRefs = refsQuery.data
+  const refetchProjectRefs = refsQuery.refetch
+  // The thread's branch is wherever its working tree is: the ref checked out in
+  // its worktree, or the project's own checkout when it has none.
+  const threadBranch =
+    projectRefs.find((candidate) =>
+      worktreePath ? candidate.worktreePath === worktreePath : candidate.current
+    )?.name ?? null
+
+  const selectBranch = useCallback(
+    async (branch: string) => {
+      setError(null)
+      try {
+        const updated = await window.openSweDesktop?.setLocalBranch({
+          threadId: sessionId,
+          branch,
+        })
+        if (updated)
+          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+        await refetchProjectRefs()
+      } catch (cause) {
+        setError(errorMessage(cause))
+      }
+    },
+    [queryClient, refetchProjectRefs, sessionId]
   )
 
   const activity = useLocalThreadActivity()[sessionId]
@@ -284,7 +274,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     ) => {
       if (!thread) return false
       setError(null)
-      stoppedRef.current = false
       const credentialError = await ensureDesktopModelCredential(
         activeSelection?.modelId
       )
@@ -296,20 +285,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         await rememberSelection(activeSelection)
         await stream.submit(
           {
-            messages: [
-              { type: "human", content: promptContent(prompt, images) },
-            ],
+            messages: [promptMessage(prompt, images)],
             ...(promptSkills.length ? { files: skillFiles(promptSkills) } : {}),
           },
           {
             config: {
               configurable: {
                 source: "desktop",
-                local_project_path: thread.cwd,
-                ...(activeSelection && {
-                  agent_model_id: activeSelection.modelId,
-                  agent_effort: activeSelection.effort,
-                }),
+                local_project_path: thread.worktreePath ?? thread.cwd,
+                ...modelConfigurable(activeSelection),
               },
             },
           }
@@ -323,80 +307,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [activeSelection, rememberSelection, stream, thread]
   )
 
-  // Mid-run follow-ups go to the thread's store queue, which
-  // `check_message_queue_before_model` drains into the running agent, rather
-  // than starting a second run on a busy thread.
-  const enqueue = useCallback(
-    async (prompt: string, images: Array<ImageChunk>) => {
-      const text = prompt.trim()
-      const existing = await stream.client.store.getItem(
-        queueNamespace,
-        QUEUE_KEY
-      )
-      const pending = existing?.value?.messages
-      await stream.client.store.putItem(queueNamespace, QUEUE_KEY, {
-        messages: [
-          ...(Array.isArray(pending) ? pending : []),
-          {
-            content: {
-              text,
-              images: imageBlocks(images),
-              ...(login && {
-                sender: {
-                  id: `github:${login}`,
-                  platform: "github",
-                  github_login: login,
-                },
-              }),
-            },
-          },
-        ],
-      })
-      const createdAt = Date.now()
-      setQueuedState((current) => ({
-        sessionId,
-        items: [
-          ...(current.sessionId === sessionId ? current.items : []),
-          { id: `queued-${createdAt}`, content: text, images, createdAt },
-        ],
-      }))
-    },
-    [login, queueNamespace, sessionId, stream.client]
-  )
-
-  // A live run does not guarantee another queue check: a follow-up written
-  // after its last model call is never read. Once the run ends, take back
-  // whatever the agent left behind and send it as a fresh run — unless the
-  // user stopped the run, in which case the pending work is discarded.
-  const flushUndrainedQueue = useCallback(async () => {
-    const item = await stream.client.store.getItem(queueNamespace, QUEUE_KEY)
-    if (!item) return
-    await stream.client.store.deleteItem(queueNamespace, QUEUE_KEY)
-    const pending = item.value?.messages
-    if (stoppedRef.current || !Array.isArray(pending)) return
-    const payloads = pending.map(
-      (entry) =>
-        ((entry as { content?: QueuedPayload }).content ?? {}) as QueuedPayload
-    )
-    const text = payloads
-      .map((payload) => payload.text?.trim())
-      .filter(Boolean)
-      .join("\n\n")
-    const images = payloads.flatMap(payloadImages)
-    if (text || images.length > 0) await submit(text, images)
-  }, [queueNamespace, stream.client, submit])
-
-  useEffect(() => {
-    if (isRunning || queued.length === 0 || handoffRef.current) return
-    handoffRef.current = true
-    // oxlint-disable-next-line react/set-state-in-effect
-    setQueuedState({ sessionId, items: [] })
-    void flushUndrainedQueue()
-      .catch((cause) => setError(errorMessage(cause)))
-      .finally(() => {
-        handoffRef.current = false
-      })
-  }, [flushUndrainedQueue, isRunning, queued.length, sessionId])
+  const queue = useLocalPromptQueue({
+    client: stream.client,
+    sessionId,
+    login,
+    isRunning,
+    submit,
+  })
+  const shownError = error ?? (queue.error ? errorMessage(queue.error) : null)
 
   useEffect(() => {
     if (modelsLoading || !thread || initialPromptRef.current === sessionId)
@@ -406,14 +324,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
       .then(async (pending) => {
         if (!pending) return
-        if (await submit(pending.prompt, pending.images, pending.skills)) {
-          const updated =
-            await window.openSweDesktop?.clearLocalPrompt(sessionId)
-          if (updated)
-            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-        } else {
+        // The pending prompt is only cleared once its run finishes, so a
+        // remount mid-run would otherwise submit it a second time. A thread
+        // that already has a run is past its initial prompt.
+        const started =
+          streamRef.current.isLoading || streamRef.current.messages.length > 0
+        if (
+          !started &&
+          !(await submit(pending.prompt, pending.images, pending.skills))
+        ) {
           initialPromptRef.current = null
+          return
         }
+        const updated = await window.openSweDesktop?.clearLocalPrompt(sessionId)
+        if (updated)
+          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
       })
       .catch((cause) => {
         initialPromptRef.current = null
@@ -460,16 +385,33 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
-          project={thread.cwd}
+          key={sessionId}
+          title={thread.title}
+          localThread={thread}
+          onRename={async (title) => {
+            const updated = await window.openSweDesktop?.updateLocalThread({
+              threadId: sessionId,
+              title,
+            })
+            if (!updated) throw new Error("Could not rename local thread")
+            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+            queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
+              localThreadKeys.all,
+              (threads = []) =>
+                threads.map((entry) =>
+                  entry.id === sessionId ? updated : entry
+                )
+            )
+          }}
           target="This Mac"
           panelCollapsed={panelCollapsed}
         />
-        {(error || activity === "error") && (
+        {(shownError || activity === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
               <CircleAlert />
               <AlertDescription>
-                {error || "The local Open SWE agent stopped unexpectedly."}
+                {shownError || "The local Open SWE agent stopped unexpectedly."}
               </AlertDescription>
             </Alert>
           </div>
@@ -480,11 +422,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             isStreaming={isRunning}
             isThinking={isRunning}
             messages={messages}
+            scrollKey={sessionId}
             onOpenFile={handleOpenFile}
             queuedMessages={
-              isRunning ? visibleQueuedMessages(queued, messages) : []
+              isRunning ? visibleQueuedMessages(queue.queued, messages) : []
             }
             streamIsLoading={stream.isLoading}
+            scrollControlRef={scrollControlRef}
           />
           <AgentComposerDock>
             {terminalContexts.length > 0 && (
@@ -522,13 +466,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               onSelectionChange={setSelection}
               onStop={async () => {
                 try {
-                  stoppedRef.current = true
                   await stream.stop()
                 } catch (cause) {
                   setError(errorMessage(cause))
                 }
               }}
               onSubmit={async (prompt, images) => {
+                scrollControlRef.current?.scrollToBottom()
                 const terminalContext = terminalContexts.join("\n\n")
                 setTerminalContexts([])
                 const text = terminalContext
@@ -539,13 +483,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   return
                 }
                 try {
-                  await enqueue(text, images)
+                  await queue.enqueue(text, images)
                 } catch (cause) {
                   setError(errorMessage(cause))
                 }
               }}
               placeholder="Add a follow up"
               skills={skills.data}
+              runTarget="local"
+              selectedLocalProjectPath={thread.cwd}
+              localProjectBranches={projectRefs}
+              selectedLocalProjectBranch={threadBranch}
+              onRefreshLocalProjectBranch={() => void refetchProjectRefs()}
+              onSelectLocalProjectBranch={(branch) => void selectBranch(branch)}
+              localWorkspaceMode={thread.worktreePath ? "worktree" : "local"}
+              localWorktreeLabel="Worktree"
             />
           </AgentComposerDock>
         </div>
@@ -554,7 +506,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         threadRef={threadRef}
         terminals={terminals}
         terminalTarget={{ kind: "local", sessionId: thread.id }}
-        cwd={thread.cwd}
+        cwd={thread.worktreePath ?? thread.cwd}
         terminalAvailable
         diffAvailable
         collapsed={panelCollapsed}

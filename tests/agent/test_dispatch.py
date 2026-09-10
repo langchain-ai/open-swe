@@ -4,6 +4,8 @@ from xml.etree import ElementTree
 
 import pytest
 
+from agent import thread_feedback
+
 dispatch = importlib.import_module("agent.dispatch")
 
 _ABSOLUTE = "https://open-swe-v3-abc.us.langgraph.app/webhooks/run-complete"
@@ -103,7 +105,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["webhook"] == "https://app/webhooks/run-complete"
     # Resumable by default so the dashboard can join (and stop) a run it did not start.
     assert created["stream_resumable"] is True
-    # The Protocol v2 run shape, so the dashboard gets `tools` events and subagent
+    # The v3 run shape, so the dashboard gets `tools` events and subagent
     # namespaces from runs it did not start — exactly what its own `run.start` sends.
     assert created["stream_mode"] == [
         "values",
@@ -149,9 +151,9 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_op
     assert created["config"]["configurable"]["__event_streaming_v2"] is True
 
 
-def test_prepare_run_config_marks_every_run_as_protocol_v2() -> None:
+def test_prepare_run_config_marks_every_run_as_protocol_v3() -> None:
     # The marker is fixed per run by the server: a caller cannot opt a run out of
-    # v2 by passing its own `configurable`, or the dashboard silently loses `tools`.
+    # v3 by passing its own `configurable`, or the dashboard silently loses `tools`.
     run_config = dispatch.prepare_run_config(
         {"configurable": {"__event_streaming_v2": False, "thread_id": "t"}}, None
     )
@@ -175,6 +177,22 @@ async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) 
     )
 
     assert client.runs.created[0]["input"] == run_input
+
+
+@pytest.mark.asyncio
+async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    client.runs.fail_next = True
+    monkeypatch.setattr(thread_feedback, "now_ms", lambda: 123000)
+
+    with pytest.raises(RuntimeError, match="dispatch failed"):
+        await dispatch.dispatch_agent_run(
+            "thread-1", "Please revise the plan.", {}, source="dashboard", client=client
+        )
+
+    assert client.threads.metadata[thread_feedback.ACTIVITY_KEY] == 123000
 
 
 def test_dispatch_slack_identity_includes_verified_context() -> None:

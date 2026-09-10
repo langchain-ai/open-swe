@@ -32,18 +32,19 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from .dashboard.options import (
+from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
-from .dashboard.team_settings import (
+from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model,
     get_team_fable_enabled,
 )
-from .middleware import (
+from agent.github.app import get_github_app_installation_token
+from agent.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
@@ -53,24 +54,25 @@ from .middleware import (
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
 )
-from .middleware.prepare_run import PrepareRunState
-from .runtime import (
+from agent.middleware.prepare_run import PrepareRunState
+from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.run_config import RunConfig
+from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
+    bindable_config,
     graph_loaded_for_execution,
 )
-from .tools import (
+from agent.tools import (
     fetch_url,
     list_review_findings,
     read_repo_file,
     search_repo_code,
     web_search,
 )
-from .utils import ttl_cache
-from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token
-from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
+from agent.utils import ttl_cache
+from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -102,33 +104,7 @@ def _chat_general_purpose_subagent() -> SubAgent:
     }
 
 
-CHAT_PROMPT = """You are a code-review chat assistant. You help the author and reviewers \
-understand one GitHub pull request: `{repo_owner}/{repo_name}` #{pr_number}.
-
-You have NO sandbox and cannot run code, execute tests, commit, or open PRs. You \
-reason from the PR's diff, the published review findings, and read-only access to \
-the repository.
-
-Context already loaded as virtual files (use `read_file`, `ls`, `grep`):
-- `/pr/overview.md` — title, description, author, branches, head commit, change stats.
-- `/pr/diff.patch` — the unified diff under review.
-- `/pr/findings.md` — the reviewer's published findings, rendered for reading.
-
-Tools:
-- `read_repo_file(path, ref)` — read any repo file/dir at a commit (defaults to the \
-PR head). Use it to inspect callers, definitions, and neighboring code beyond the diff.
-- `search_repo_code(query)` — find a symbol or phrase across the repository.
-- `list_review_findings(status_filter)` — the live findings (open/resolved/dismissed) \
-with severity, confidence, and resolution notes.
-- `web_search`, `fetch_url` — for external docs or standards.
-
-Guidance:
-- Be concrete and cite specific files and line numbers from the diff.
-- Ground claims about the review in the actual findings; don't invent issues.
-- If repository access fails, disclose it and qualify claims that require unread source.
-- When you propose a change, describe it precisely — you cannot apply it yourself.
-- Keep answers focused and skimmable. Match the depth of the question.
-"""
+CHAT_PROMPT = load_prompt("chat/main.md")
 
 
 async def _cached_gateway_enabled() -> bool:
@@ -160,48 +136,40 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         self._config = config
 
     def _prepare_config_fingerprint(self) -> object:
-        configurable = self._config.get("configurable", {})
+        cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": configurable.get("prepare_run_id")
-            if isinstance(configurable, dict)
-            else None,
-            "repo_owner": configurable.get("chat_repo_owner")
-            if isinstance(configurable, dict)
-            else None,
-            "repo_name": configurable.get("chat_repo_name")
-            if isinstance(configurable, dict)
-            else None,
-            "pr_number": configurable.get("chat_pr_number")
-            if isinstance(configurable, dict)
-            else None,
+            "prepare_run_id": cfg.prepare_run_id,
+            "repo_owner": cfg.chat_repo_owner,
+            "repo_name": cfg.chat_repo_name,
+            "pr_number": cfg.chat_pr_number,
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         configurable = self._config.get("configurable") or {}
-        repo_owner = str(configurable.get("chat_repo_owner") or "")
-        repo_name = str(configurable.get("chat_repo_name") or "")
-        pr_number = configurable.get("chat_pr_number")
+        cfg = RunConfig.parse(configurable)
+        repo_name = cfg.chat_repo_name or ""
         token = await get_github_app_installation_token(
             repositories=[repo_name] if repo_name else None
         )
         if isinstance(token, str) and token:
             configurable["chat_github_token"] = token
         return {
-            "rendered_system_prompt": CHAT_PROMPT.format(
-                repo_owner=repo_owner or "<owner>",
+            "rendered_system_prompt": render_prompt(
+                "chat/main.md",
+                repo_owner=cfg.chat_repo_owner or "<owner>",
                 repo_name=repo_name or "<repo>",
-                pr_number=pr_number if isinstance(pr_number, int) else "?",
+                pr_number=cfg.chat_pr_number if cfg.chat_pr_number is not None else "?",
             )
         }
 
 
-async def _resolve_chat_model(configurable: dict[str, Any]) -> tuple[str, str]:
-    model_id = configurable.get("chat_model_id")
-    effort = configurable.get("chat_effort")
+async def _resolve_chat_model(cfg: RunConfig) -> tuple[str, str]:
+    model_id = cfg.chat_model_id
+    effort = cfg.chat_effort
     if (
-        isinstance(model_id, str)
+        model_id is not None
         and model_id in SUPPORTED_MODEL_IDS
-        and isinstance(effort, str)
+        and effort is not None
         and model_supports_effort(model_id, effort)
     ):
         return model_id, effort
@@ -218,12 +186,12 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     configurable = dict(config.get("configurable") or {})
     config["configurable"] = configurable
     config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
-    thread_id = configurable.get("thread_id")
+    cfg = RunConfig.parse(configurable)
 
-    if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+    if cfg.thread_id is None or not graph_loaded_for_execution(config):
+        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
-    model_id, effort = await _resolve_chat_model(configurable)
+    model_id, effort = await _resolve_chat_model(cfg)
     model_id, effort = gate_fable_model(
         model_id, effort, fable_enabled=await get_team_fable_enabled()
     )
@@ -238,13 +206,15 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt="",
-        tools=[
-            read_repo_file,
-            search_repo_code,
-            list_review_findings,
-            web_search,
-            fetch_url,
-        ],
+        tools=apply_tool_descriptions(
+            [
+                read_repo_file,
+                search_repo_code,
+                list_review_findings,
+                web_search,
+                fetch_url,
+            ]
+        ),
         subagents=[_chat_general_purpose_subagent()],
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
@@ -260,7 +230,8 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 ModelCallTimeoutMiddleware(),
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
-traced_chat_agent = traced_graph_factory(get_chat_agent, AGENT_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_chat_agent = get_chat_agent

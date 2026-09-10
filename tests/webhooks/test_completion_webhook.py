@@ -2,6 +2,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from agent import completion
 
@@ -31,6 +32,44 @@ def _slack_metadata() -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["error", "timeout", "interrupted"])
+async def test_terminal_status_finalizes_agent_usage(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    client = _FakeClient({"source": "schedule"})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    finalize = AsyncMock()
+    monkeypatch.setattr(completion, "finalize_agent_run_usage", finalize)
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-1",
+            "status": status,
+            "metadata": {"prepare_run_id": "prepare-1"},
+            "values": {
+                "messages": [
+                    {
+                        "type": "ai",
+                        "content": "partial work",
+                        "usage_metadata": {
+                            "input_tokens": 100,
+                            "output_tokens": 10,
+                            "total_tokens": 110,
+                        },
+                    }
+                ]
+            },
+        }
+    )
+
+    finalize.assert_awaited_once()
+    assert finalize.await_args.kwargs["run_id"] == "prepare-1"
+    assert finalize.await_args.kwargs["thread_id"] == "t1"
+    assert isinstance(finalize.await_args.kwargs["state"]["messages"][0], AIMessage)
+
+
+@pytest.mark.asyncio
 async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
@@ -52,6 +91,7 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
     assert args[0] == "C1"
     assert args[1] == "123.45"
     assert "<https://ui/t1|Open SWE Web>" in args[2]
+    assert await_args.kwargs == {"agent_thread_id": "t1", "include_trace_link": True}
     assert client.threads.updates == [
         {"failure_reply_posted_run_id": "run-1", "failure_reply_posted_run_ids": ["run-1"]}
     ]
@@ -251,11 +291,15 @@ async def test_success_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("feedback_error", [None, RuntimeError("Feedback unavailable")])
 async def test_success_status_schedules_session_cost_refresh(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, feedback_error: Exception | None
 ) -> None:
     client = _FakeClient(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        completion, "schedule_answer_feedback", AsyncMock(side_effect=feedback_error)
+    )
     schedule = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "schedule_session_cost_refresh", schedule)
 
