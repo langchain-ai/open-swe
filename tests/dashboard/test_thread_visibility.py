@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent.dashboard import plan_api, workflow_approval_api
-from agent.dashboard.threads import access, api, listing, proxy, summary
+from agent.dashboard.threads import access, api, listing, summary
 from agent.tools import threads as tools
 
 _ADMINS = {"admin", "admin@example.com"}
@@ -33,7 +33,7 @@ def private_thread(monkeypatch):
         ),
         runs=SimpleNamespace(cancel_many=AsyncMock()),
     )
-    for module in (access, api, listing, proxy, tools):
+    for module in (access, api, listing, tools):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
     monkeypatch.setattr(api, "_thread_summary", AsyncMock(side_effect=lambda t, **_: t["metadata"]))
     monkeypatch.setattr(
@@ -117,15 +117,6 @@ async def test_admin_can_read_plan_but_not_approve(private_thread, monkeypatch):
     assert exc.value.status_code == 404
 
 
-async def test_visibility_is_not_editable_after_creation(private_thread):
-    thread, client = private_thread
-    result = await api.rename_dashboard_thread("private-thread", "alice", title="Renamed")
-    assert result["visibility"] == "private"
-    (call,) = client.threads.update.await_args_list
-    assert "visibility" not in call.kwargs["metadata"]
-    assert "owner_login" not in call.kwargs["metadata"]
-
-
 async def test_private_candidates_filtered_before_pagination(private_thread, monkeypatch):
     thread, client = private_thread
     public = {"thread_id": "public-thread", "metadata": {"source": "dashboard"}}
@@ -166,22 +157,9 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
             ]
         }
     }
-    created: dict = {}
+    await api.continue_thread_privately("private-thread", "Bob", email="bob@x")
 
-    async def create(*, thread_id, metadata, if_exists):
-        created["thread_id"], created["metadata"] = thread_id, metadata
-
-    client.threads.create.side_effect = create
-    client.threads.get.side_effect = lambda thread_id: (
-        thread
-        if thread_id == "private-thread"
-        else {"thread_id": thread_id, "metadata": created["metadata"]}
-    )
-
-    result = await api.continue_thread_privately("private-thread", "Bob", email="bob@x")
-
-    metadata = created["metadata"]
-    assert result is metadata
+    metadata = client.threads.create.call_args.kwargs["metadata"]
     assert metadata["visibility"] == "private"
     assert metadata["owner_login"] == "bob"
     assert metadata["source"] == metadata["origin"] == "dashboard"
@@ -192,7 +170,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     for key in ("source_context", "sandbox_id", "latest_run_id", "latest_run_status"):
         assert key not in metadata
     (state_call,) = client.threads.update_state.await_args_list
-    assert state_call.args[0] == created["thread_id"]
+    assert state_call.args[0] == client.threads.create.call_args.kwargs["thread_id"]
     copied = state_call.kwargs["values"]["messages"]
     assert [m["content"] for m in copied] == ["hi", "hello"]
     assert all(

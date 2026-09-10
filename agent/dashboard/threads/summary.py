@@ -108,7 +108,7 @@ def thread_is_readable(
 
 def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool:
     """Only the owner may prompt, approve, or open a shell into a private thread."""
-    return thread_is_readable(metadata, login) and (
+    return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata) or thread_is_owner(metadata, login)
     )
 

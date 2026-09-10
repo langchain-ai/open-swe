@@ -37,7 +37,7 @@ from agent.dashboard.threads.summary import (
     repo_config_from_metadata,
     thread_source,
 )
-from agent.dashboard.user_preferences import default_thread_visibility
+from agent.dashboard.user_preferences import get_user_preferences
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -461,7 +461,10 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
-        visibility = client_configurable.get("visibility") or await default_thread_visibility(login)
+        visibility = (
+            client_configurable.get("visibility")
+            or (await get_user_preferences(login))["default_visibility"]
+        )
         if visibility not in ("public", "private"):
             raise HTTPException(422, "visibility must be public or private")
         thread = await _create_dashboard_thread_record(

@@ -438,7 +438,6 @@ async def rename_dashboard_thread(
     return await _thread_summary(thread)
 
 
-_CONTINUED_ORIGIN_KEY = "collaborative_origin_thread_id"
 # Thread settings that carry over into a private continuation. Source linkage
 # (Slack, Linear, GitHub, schedules), participants, sandbox, and run state do not.
 _CONTINUED_METADATA_KEYS = (
@@ -461,12 +460,7 @@ _CONTINUED_METADATA_KEYS = (
 async def continue_thread_privately(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
-    """Copy a collaborative thread's transcript into a new private thread owned by the caller.
-
-    Visibility never changes in place: the source thread keeps its participants
-    and any Slack or issue linkage, and the copy starts no run until the owner
-    posts, so personal credentials only ever act on the owner's own prompt.
-    """
+    """Copy a collaborative transcript into a new private thread owned by the caller."""
     client = langgraph_client()
     thread = await _readable_thread(thread_id, login=login, email=email)
     metadata = thread_metadata(thread)
@@ -485,7 +479,7 @@ async def continue_thread_privately(
                 **message,
                 "additional_kwargs": {
                     **(extra if isinstance(extra, dict) else {}),
-                    _CONTINUED_ORIGIN_KEY: thread_id,
+                    "collaborative_origin_thread_id": thread_id,
                 },
             }
         )

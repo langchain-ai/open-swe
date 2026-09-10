@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 USER_PREFERENCES_NAMESPACE: list[str] = ["user_preferences"]
 
 ThreadVisibility = Literal["public", "private"]
-DEFAULT_THREAD_VISIBILITY: ThreadVisibility = "private"
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -23,9 +22,7 @@ def _normalize(login: str, record: dict[str, Any] | None) -> dict[str, Any]:
     visibility = (record or {}).get("default_visibility")
     return {
         "login": login,
-        "default_visibility": (
-            visibility if visibility in ("public", "private") else DEFAULT_THREAD_VISIBILITY
-        ),
+        "default_visibility": (visibility if visibility in ("public", "private") else "private"),
     }
 
 
@@ -50,8 +47,3 @@ async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dic
     }
     await put_value(USER_PREFERENCES_NAMESPACE, login, value)
     return _normalize(login, value)
-
-
-async def default_thread_visibility(login: str) -> ThreadVisibility:
-    """The visibility a new dashboard thread gets when the client does not choose one."""
-    return (await get_user_preferences(login))["default_visibility"]
