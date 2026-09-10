@@ -2,14 +2,34 @@
 
 from collections.abc import Iterator, Sequence
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
-import httpx
 import pytest
 
 from agent import store as agent_store
+from agent.api.threads import access, api, diffs, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
+
+_THREAD_MODULES: tuple[ModuleType, ...] = (access, api, diffs, listing, proxy, runs, summary)
+
+
+def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) -> None:
+    """Rebind ``name`` in every dashboard thread module that imports it.
+
+    The thread endpoints are split across modules that each hold their own
+    binding, so patching one would leave the others pointing at the real thing.
+    """
+    modules = [module for module in _THREAD_MODULES if hasattr(module, name)]
+    if not modules:
+        raise AttributeError(f"no dashboard thread module defines {name!r}")
+    for module in modules:
+        monkeypatch.setattr(module, name, value)
+
+
+class _FakeStoreNotFoundError(Exception):
+    status_code = 404
 
 
 class FakeStore:
@@ -31,11 +51,7 @@ class FakeStore:
     async def get_item(self, namespace: Sequence[str], key: str) -> dict[str, Any]:
         value = self.values(namespace).get(key)
         if value is None:
-            raise httpx.HTTPStatusError(
-                "not found",
-                request=httpx.Request("GET", "http://test"),
-                response=httpx.Response(404),
-            )
+            raise _FakeStoreNotFoundError
         return {"value": dict(value)}
 
     async def put_item(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
@@ -71,6 +87,11 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     client = FakeStoreClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client.store
+
+
+@pytest.fixture(autouse=True)
+def _default_github_login_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "test-user,trusted-user,reviewer")
 
 
 @pytest.fixture(autouse=True)

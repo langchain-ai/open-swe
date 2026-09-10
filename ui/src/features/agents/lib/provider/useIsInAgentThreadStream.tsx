@@ -2,16 +2,9 @@ import { createContext, useContext } from "react"
 import type { ReactNode } from "react"
 
 /**
- * Lightweight marker for whether the current subtree is rendering inside an
- * *active* thread (the `/agents/$threadId` route), as opposed to elsewhere
- * under the shared `/agents` stream provider (e.g. `AgentsHome`, automations).
- *
- * The `AgentThreadStreamProvider` now spans the whole `/agents` layout, so
- * `useAgentThreadRuntime()` is callable everywhere underneath it — but shared UI
- * such as `CloudPromptBar` must still distinguish "in a live thread" (show the
- * stop button, mount nested subagent activity) from the home prompt. The
- * boundary is wrapped only around the thread view, so this stays `false` on
- * the home page where there is no thread to act on.
+ * Whether the subtree renders an active thread (`/agents/$threadId`). The
+ * stream provider spans the whole `/agents` layout, so shared UI such as the
+ * prompt bar needs this to tell a live thread from the home page.
  */
 const AgentThreadStreamBoundaryContext = createContext(false)
 

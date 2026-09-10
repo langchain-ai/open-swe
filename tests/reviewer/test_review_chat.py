@@ -19,7 +19,7 @@ web_search = importlib.import_module("agent.tools.web_search")
 
 
 def _fake_async_client(handler):
-    """Build a fake ``httpx.AsyncClient`` factory whose ``get`` calls ``handler``.
+    """Build a fake ``httpx2.AsyncClient`` factory whose ``get`` calls ``handler``.
 
     ``handler(url, headers=..., params=...)`` returns the response object.
     """
@@ -271,7 +271,7 @@ async def test_read_repo_file_decodes_file(monkeypatch) -> None:
             json=lambda: {"type": "file", "content": base64.b64encode(b"hello\nworld").decode()},
         )
 
-    monkeypatch.setattr(read_repo_file.httpx, "AsyncClient", _fake_async_client(fake_get))
+    monkeypatch.setattr(read_repo_file.httpx2, "AsyncClient", _fake_async_client(fake_get))
 
     result = await read_repo_file.read_repo_file("src/app.py")
     assert result["success"] is True
@@ -302,7 +302,7 @@ async def test_read_repo_file_lists_directory(monkeypatch) -> None:
             ],
         )
 
-    monkeypatch.setattr(read_repo_file.httpx, "AsyncClient", _fake_async_client(fake_get))
+    monkeypatch.setattr(read_repo_file.httpx2, "AsyncClient", _fake_async_client(fake_get))
     result = await read_repo_file.read_repo_file("src")
     assert result["success"] is True
     assert {e["name"] for e in result["entries"]} == {"a.py", "sub"}
@@ -348,7 +348,7 @@ async def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
             },
         )
 
-    monkeypatch.setattr(search_repo_code.httpx, "AsyncClient", _fake_async_client(fake_get))
+    monkeypatch.setattr(search_repo_code.httpx2, "AsyncClient", _fake_async_client(fake_get))
     result = await search_repo_code.search_repo_code("foo")
     assert result["success"] is True
     assert "repo:acme/repo" in captured["params"]["q"]

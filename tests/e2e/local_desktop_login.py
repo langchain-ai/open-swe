@@ -23,13 +23,13 @@ os.environ.setdefault("GITHUB_APP_CLIENT_SECRET", "local-client-secret")
 os.environ.setdefault("DASHBOARD_BASE_URL", BASE_URL)
 os.environ.setdefault("DASHBOARD_API_BASE_URL", BASE_URL)
 os.environ.setdefault("DASHBOARD_ALLOWED_ORIGINS", BASE_URL)
-os.environ.setdefault("ALLOWED_GITHUB_ORGS", "")
+os.environ.setdefault("ALLOWED_GITHUB_USERS", os.environ.get("FAKE_GITHUB_LOGIN", "local-tester"))
 
 import uvicorn  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
 
-from agent.dashboard import routes  # noqa: E402
+from agent.api import routes  # noqa: E402
 
 LOGIN = os.environ.get("FAKE_GITHUB_LOGIN", "local-tester")
 EMAIL = os.environ.get("FAKE_GITHUB_EMAIL", "local-tester@example.com")
@@ -45,7 +45,7 @@ async def fake_fetch_github_user(access_token: str) -> tuple[dict[str, Any], str
     return {"login": LOGIN, "avatar_url": None}, EMAIL
 
 
-async def fake_enforce_org_login_gate(login: str) -> None:
+async def fake_enforce_github_login_gate(login: str) -> None:
     return None
 
 
@@ -55,7 +55,7 @@ async def fake_upsert(login: str, email: str, data: dict[str, Any]) -> None:
 
 routes.exchange_code = fake_exchange_code
 routes.fetch_github_user = fake_fetch_github_user
-routes.enforce_org_login_gate = fake_enforce_org_login_gate
+routes.enforce_github_login_gate = fake_enforce_github_login_gate
 routes.upsert_access_token_from_github_response = fake_upsert
 
 app = FastAPI()

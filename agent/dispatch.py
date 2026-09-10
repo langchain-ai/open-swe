@@ -13,20 +13,18 @@ busy-check and the custom store-queue) with one function that uses:
   failure so every run ends with a signal even if the agent died.
 - ``stream_resumable=True`` — the run's event stream is retained so a client that
   attaches later can replay it. Without this the dashboard cannot observe a run
-  it did not start: the v2 protocol only synthesizes the ``lifecycle: running``
+  it did not start: the v3 protocol only synthesizes the ``lifecycle: running``
   event that drives ``stream.isLoading`` when it can replay the run's events, so
   a Slack/Linear/GitHub-triggered run looked idle in the web UI (no stop button)
   until it happened to emit its next event.
-- the Protocol v2 run shape — the same ``stream_mode`` set, ``stream_subgraphs``
-  and ``configurable`` marker that ``langgraph_api``'s ``run.start`` command
-  applies when the dashboard submits a run. The server fixes a run's streaming
-  protocol at creation: without the marker a run streams ``values`` only, so
-  the dashboard saw no ``tools`` events and no subagent namespaces for runs
-  triggered outside it (subagent cards never showed nested activity).
+- the v3 run shape — the same ``stream_mode`` set, ``stream_subgraphs`` and
+  compatibility marker that ``langgraph_api``'s ``run.start`` command applies
+  when the dashboard submits a run. The server fixes a run's streaming protocol
+  at creation: without the marker a run streams ``values`` only, so the dashboard
+  sees no ``tools`` events or subagent namespaces for externally triggered runs.
 """
 
 import logging
-import uuid
 from typing import Any
 from urllib.parse import urlparse
 
@@ -44,6 +42,7 @@ from agent.input_messages import (
     SystemIdentity,
     build_run_input,
 )
+from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -51,15 +50,11 @@ logger = logging.getLogger(__name__)
 ContentBlocks = str | list[dict[str, Any]]
 LangGraphRunConfig = dict[str, Any]
 
-# Mirrors ``langgraph_api.event_streaming``'s ``EVENT_STREAMING_V2_CONFIG_KEY``.
-# Not imported: ``langgraph-api`` is the serving runtime, not a dependency of
-# this package. The marker alone selects the v3 stream path, which emits every
-# protocol channel (``tools``, ``lifecycle``, namespaced subagent events)
-# regardless of ``stream_mode``.
-EVENT_STREAMING_V2_CONFIG_KEY = "__event_streaming_v2"
-# The dashboard's ``run.start`` defaults, minus ``tools`` / ``lifecycle``: those
-# are protocol channels the REST ``POST /runs`` schema does not accept.
-V2_RUN_STREAM_MODES: tuple[str, ...] = (
+# The server's legacy-named compatibility marker selects the v3 stream path.
+V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
+# The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
+# the REST ``POST /runs`` schema.
+V3_RUN_STREAM_MODES: tuple[str, ...] = (
     "values",
     "updates",
     "messages",
@@ -213,15 +208,15 @@ def prepare_run_config(
     run_config = dict(config or {})
     configurable = run_config.get("configurable")
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
-    configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
-    configurable[EVENT_STREAMING_V2_CONFIG_KEY] = True
-    run_config["configurable"] = configurable
     existing_metadata = run_config.get("metadata")
     merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
     if metadata is not None:
         merged_metadata.update(metadata)
-    merged_metadata["prepare_run_id"] = configurable["prepare_run_id"]
-    run_config["metadata"] = merged_metadata
+    invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
+    configurable = with_invocation_id(configurable, invocation_id)
+    configurable[V3_STREAMING_CONFIG_KEY] = True
+    run_config["configurable"] = configurable
+    run_config["metadata"] = with_invocation_id(merged_metadata, invocation_id)
     return run_config
 
 
@@ -250,7 +245,7 @@ async def create_durable_run(
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
-        "stream_mode": list(V2_RUN_STREAM_MODES),
+        "stream_mode": list(V3_RUN_STREAM_MODES),
         "stream_subgraphs": True,
         "stream_resumable": stream_resumable,
     }
@@ -310,6 +305,11 @@ async def dispatch_agent_run(
             if context is not None
             else _dispatch_input(content, source, configurable)
         )
+    client = client or dispatch_client()
+    if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:
+        from agent.thread_feedback import note_feedback_activity
+
+        await note_feedback_activity(thread_id, client=client)
     return await create_durable_run(
         thread_id,
         assistant_id,
@@ -317,6 +317,6 @@ async def dispatch_agent_run(
         config={"configurable": configurable},
         metadata=metadata or {},
         source=source,
-        client=client or dispatch_client(),
+        client=client,
         multitask_strategy=multitask_strategy,
     )

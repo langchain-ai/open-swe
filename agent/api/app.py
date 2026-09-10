@@ -24,10 +24,12 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from agent.api.oauth import validate_github_login_allowlist
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
 
     pin_single_event_loop()
+    validate_github_login_allowlist()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
     try:

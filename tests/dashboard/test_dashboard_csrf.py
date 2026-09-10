@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from agent.api import oauth, routes
-from agent.api import threads as thread_api
+from agent.api.threads import proxy as thread_proxy
 
 
 def _request(
@@ -200,7 +200,7 @@ def test_router_allows_allowed_origin_post(dashboard_client: TestClient) -> None
 async def test_proxy_commands_rejects_non_json_content_type() -> None:
     for content_type in ("text/plain", "application/x-www-form-urlencoded", "multipart/form-data"):
         with pytest.raises(HTTPException) as exc:
-            await thread_api.proxy_dashboard_thread_commands(
+            await thread_proxy.proxy_dashboard_thread_commands(
                 "tid",
                 "octocat",
                 b'{"method": "run.start"}',
@@ -212,7 +212,7 @@ async def test_proxy_commands_rejects_non_json_content_type() -> None:
 
 async def test_proxy_commands_accepts_json_content_type_with_charset() -> None:
     with pytest.raises(HTTPException) as exc:
-        await thread_api.proxy_dashboard_thread_commands(
+        await thread_proxy.proxy_dashboard_thread_commands(
             "tid",
             "octocat",
             b"not-json",

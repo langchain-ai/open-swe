@@ -27,7 +27,7 @@ def main() -> None:
     parser.add_argument(
         "--api-key",
         default=ENV.LANGSMITH_API_KEY.optional(),
-        help="LangSmith API key (default: LANGSMITH_API_KEY, or its deprecated _PROD alias)",
+        help="LangSmith API key (default: LANGSMITH_API_KEY)",
     )
     args = parser.parse_args()
 

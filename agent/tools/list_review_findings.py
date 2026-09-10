@@ -33,19 +33,7 @@ def _compact(finding: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def list_review_findings(status_filter: str | None = None) -> dict[str, Any]:
-    """List the findings the reviewer published for this PR.
-
-    Use this to ground answers about the review — what was flagged, the
-    severity/confidence, and any resolution notes. Prefer quoting these over
-    re-deriving issues from the diff.
-
-    Args:
-        status_filter: One of ``open``, ``resolved``, ``dismissed``. ``None``
-            (default) returns findings of every status.
-
-    Returns:
-        ``{findings, count}``; ``{findings: [], count: 0, error}`` on failure.
-    """
+    """Implement the `list_review_findings` tool."""
     if status_filter is not None and status_filter not in {"open", "resolved", "dismissed"}:
         return {"findings": [], "count": 0, "error": f"Invalid status_filter: {status_filter}"}
 
