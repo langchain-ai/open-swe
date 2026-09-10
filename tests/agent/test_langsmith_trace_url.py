@@ -120,8 +120,10 @@ async def test_resolve_project_id_retries_transient_failure(
     assert calls == ["my-deployment", "my-deployment"]
 
 
+@pytest.mark.parametrize("score", [1.0, None])
 async def test_create_thread_feedback_posts_thread_scope(
     monkeypatch: pytest.MonkeyPatch,
+    score: float | None,
 ) -> None:
     requests: list[tuple[str, str, dict[str, object]]] = []
     monkeypatch.setenv("LANGSMITH_PROJECT", "my-deployment")
@@ -142,7 +144,7 @@ async def test_create_thread_feedback_posts_thread_scope(
     result = await ls_utils.create_langsmith_thread_feedback(
         "thread-1",
         "github_pr_merged:https://github.com/lc/repo/pull/7",
-        score=1.0,
+        score=score,
         comment="merged",
         source_info={"source": "github_pr_merged"},
     )
@@ -161,7 +163,7 @@ async def test_create_thread_feedback_posts_thread_scope(
                         )
                     ),
                     "key": "github_pr_merged:https://github.com/lc/repo/pull/7",
-                    "score": 1.0,
+                    "score": score,
                     "comment": "merged",
                     "session_id": "project-id",
                     "feedback_thread_id": "thread-1",

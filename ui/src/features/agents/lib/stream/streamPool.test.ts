@@ -73,6 +73,18 @@ describe("streamPool", () => {
     expect(activeEntry()?.threadId).toBe("minted")
   })
 
+  it("kicks a thread by bumping its generation without dropping the handle", () => {
+    pool().activate("cloud", "stuck")
+    const entry = activeEntry()
+    if (!entry) throw new Error("no active entry")
+    pool().publish(entry.id, handle(true))
+
+    pool().kick("cloud", "stuck")
+
+    expect(activeEntry()?.generation).toBe(entry.generation + 1)
+    expect(pool().handles[entry.id]).toBeDefined()
+  })
+
   it("drops idle instances after the TTL but never a running one", () => {
     pool().activate("cloud", "running")
     const running = activeEntry()

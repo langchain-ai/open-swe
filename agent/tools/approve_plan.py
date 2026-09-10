@@ -33,11 +33,7 @@ async def approve_plan(
     state: Annotated[ApprovePlanState | None, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command | dict[str, Any]:
-    """Approve the current plan and exit plan mode.
-
-    Call this when the user approves the plan, asks to leave plan mode, or asks to
-    start implementing the approved plan.
-    """
+    """Implement the `approve_plan` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:

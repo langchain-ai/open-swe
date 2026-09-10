@@ -65,7 +65,7 @@ async def manage_baby_sit(
     evidence: str = "",
     details_url: str = "",
 ) -> dict[str, Any]:
-    """Start, stop, or record a flaky rerun for a `/baby-sit` PR watch."""
+    """Implement the `manage_baby_sit` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
         return {"success": False, "error": "pr_url must be a canonical GitHub pull request URL"}

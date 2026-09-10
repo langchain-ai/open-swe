@@ -11,7 +11,6 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
-from agent.input_messages import wrap_system_prompt
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.utils.startup_trace import flush_phases
 
@@ -97,13 +96,5 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
         if isinstance(rendered, str) and rendered:
             existing = request.system_message.text if request.system_message is not None else ""
             content = f"{rendered}\n\n{existing}" if existing else rendered
-            request = request.override(
-                system_message=SystemMessage(content=wrap_system_prompt(content))
-            )
-        elif request.system_message is not None:
-            request = request.override(
-                system_message=SystemMessage(
-                    content=wrap_system_prompt(request.system_message.text)
-                )
-            )
+            request = request.override(system_message=SystemMessage(content=content))
         return await handler(request)

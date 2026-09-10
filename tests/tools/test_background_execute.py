@@ -13,9 +13,9 @@ from agent import background_tasks
 from agent.background_tasks import monitor_background_tasks
 from agent.tools.background_execute import (
     TASK_ROOT,
-    _control_script,
     _launch_command,
     background_execute,
+    control_script,
 )
 
 # _launch_command refuses to run without setsid, which macOS does not ship; the
@@ -27,7 +27,7 @@ requires_setsid = pytest.mark.skipif(
 
 def _run_control(action: str, task_id: str) -> dict:
     result = subprocess.run(
-        ["python3", "-c", _control_script(action, task_id)],
+        ["python3", "-c", control_script(action, task_id)],
         capture_output=True,
         check=True,
         text=True,
@@ -135,7 +135,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
             "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
         ),
         patch(
-            "agent.tools.background_execute._execute",
+            "agent.tools.background_execute.execute",
             AsyncMock(
                 side_effect=[
                     {"tasks": []},

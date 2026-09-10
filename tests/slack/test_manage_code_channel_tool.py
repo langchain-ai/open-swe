@@ -46,7 +46,7 @@ async def test_sandbox_content_reader_enforces_source_and_size(
     backend.adownload_files.return_value = [SimpleNamespace(content=b"# Plan")]
     monkeypatch.setattr(
         manage_tool,
-        "_resolve_sandbox_file",
+        "resolve_sandbox_file",
         AsyncMock(return_value=(backend, "/workspace/plan.md", "/workspace")),
     )
 

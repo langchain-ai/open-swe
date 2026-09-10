@@ -25,6 +25,11 @@ class BlockSuggestionResponse(TypedDict):
     options: list[JsonObject]
 
 
+class FeedbackResponse(TypedDict, total=False):
+    response_action: Literal["errors"]
+    errors: dict[str, str]
+
+
 class HealthResponse(TypedDict):
     status: Literal["ok"]
     message: str

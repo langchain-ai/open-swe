@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
+from agent.prompts import render_prompt
 from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
@@ -19,7 +20,7 @@ from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
-from agent.webhooks.common import _is_repo_allowed
+from agent.webhooks.common import is_repo_allowed
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
@@ -124,18 +125,14 @@ async def _run_prompt(
     repo_text = f"{repo['owner']}/{repo['name']}" if repo else "(no repository specified)"
     channel_id = original_slack_thread.get("channel_id", "")
     thread_ts = original_slack_thread.get("thread_ts", "")
-    return (
-        "You were started from another Open SWE Slack thread as a breakout task.\n\n"
-        f"## Breakout Title\n{title}\n\n"
-        f"## Default Repository Hint\n{repo_text}\n"
-        "Use this repository unless the instructions below clearly identify a different repository.\n\n"
-        "## Source Slack Thread\n"
-        f"- Channel: {channel_id}\n"
-        f"- Thread TS: {thread_ts}\n"
-        "- Thread version: 0\n\n"
-        f"{await _run_links_section(thread_id)}\n\n"
-        "## Breakout Instructions\n"
-        f"{instructions}"
+    return render_prompt(
+        "runs/slack-breakout.md",
+        title=title,
+        repo=repo_text,
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+        run_links=await _run_links_section(thread_id),
+        instructions=instructions,
     )
 
 
@@ -160,7 +157,7 @@ async def slack_start_new_thread(
     instructions: str,
     default_repo: str | None = None,
 ) -> dict[str, Any]:
-    """Start a Slack thread with a headline root and instructions as the first reply."""
+    """Implement the `slack_start_new_thread` tool."""
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread is None:
         return {"success": False, "error": "Missing slack_thread config"}
@@ -195,7 +192,7 @@ async def slack_start_new_thread(
         }
 
     if default_repo and default_repo.strip() and repo is not None:
-        if not _is_repo_allowed(repo):
+        if not is_repo_allowed(repo):
             return {
                 "success": False,
                 "error": (

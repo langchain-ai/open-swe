@@ -37,12 +37,7 @@ async def resolve_finding_thread(
     note: str,
     status: str = "dismissed",
 ) -> dict[str, Any]:
-    """Resolve the GitHub review thread for a tracked Open SWE finding.
-
-    Use ``status="resolved"`` when the code now fixes the issue. Use
-    ``status="dismissed"`` when analysis shows the original review comment was
-    not valid. ``note`` is required and is posted verbatim as the full GitHub reply body.
-    """
+    """Implement the `resolve_finding_thread` tool."""
     if status not in {"resolved", "dismissed"}:
         return {"success": False, "error": f"Invalid status: {status}"}
     normalized_note = _normalize_note(note)

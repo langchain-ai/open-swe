@@ -27,6 +27,7 @@ from agent.slack.request import SlackRequest
 from agent.slack.responses import (
     BlockSuggestionResponse,
     ChallengeResponse,
+    FeedbackResponse,
     HealthResponse,
     SlashCommandResponse,
     WebhookResponse,
@@ -34,6 +35,7 @@ from agent.slack.responses import (
     ephemeral,
     ignored,
 )
+from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
@@ -507,7 +509,7 @@ async def slack_code_channel_command(
 @router.post("/webhooks/slack/interactivity")
 async def slack_interactivity(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> WebhookResponse | BlockSuggestionResponse:
+) -> WebhookResponse | BlockSuggestionResponse | FeedbackResponse:
     """Handle Slack Block Kit interactions."""
     body = await request.body()
     _verify_signature(request, body, "interactivity")
@@ -518,6 +520,9 @@ async def slack_interactivity(
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
+    if is_slack_feedback_payload(payload):
+        return await handle_slack_feedback_interaction(payload, background_tasks)
+
     interaction = SlackInteraction.parse(payload)
     if interaction is None:
         return ignored("Invalid Slack interaction")

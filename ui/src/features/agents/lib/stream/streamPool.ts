@@ -13,6 +13,8 @@ export interface StreamPoolEntry {
   threadId: string | null
   /** Created without a thread; its first accepted run is the thread's creation. */
   awaitingCreation: boolean
+  /** Bumped by `kick` to remount the SDK instance; the handle stays published until the replacement publishes. */
+  generation: number
   lastActiveAt: number
 }
 
@@ -40,6 +42,8 @@ export interface StreamPoolState {
   /** The server accepted a run on this instance. */
   runAccepted(id: string): void
   consumeCreatedThread(): void
+  /** Remount a thread's instance so it re-hydrates and reopens its event stream. */
+  kick(transport: AgentThreadTransport, threadId: string): void
   /** Drop idle instances past the TTL or cap; active and running ones stay. */
   sweep(now: number): void
 }
@@ -91,6 +95,7 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
       transport,
       threadId,
       awaitingCreation: threadId === null,
+      generation: 0,
       lastActiveAt: now,
     }
     set((state) => ({
@@ -144,6 +149,16 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
 
   consumeCreatedThread() {
     set({ createdThreadId: null })
+  },
+
+  kick(transport, threadId) {
+    set((state) => ({
+      entries: state.entries.map((entry) =>
+        entry.transport === transport && entry.threadId === threadId
+          ? { ...entry, generation: entry.generation + 1 }
+          : entry
+      ),
+    }))
   },
 
   sweep(now) {

@@ -2,27 +2,15 @@
 
 ## Project
 
-Open SWE is a LangGraph + Deep Agents coding-agent framework. Each thread uses an isolated sandbox. A separate read-only reviewer graph reviews pull requests, and a review-style analyzer learns repository-specific review preferences.
+Open SWE is an asynchronous coding agent and software factory.
 
-## Commands
+Each thread uses an isolated sandbox. A separate read-only reviewer graph reviews pull requests, and a review-style analyzer learns repository-specific review preferences.
 
-Dependencies are managed with `uv`. Tests use pytest, lint/format use Ruff, and type checking uses ty. Python 3.14 is required.
-
-```bash
-make install
-make dev
-make run
-make test TEST_FILE=tests/github/test_open_pull_request.py
-make format
-make lint
-make typecheck
-```
-
-Never run the full test suite locally; run only tests related to the change.
+`ui`, `desktop`, and `tests/e2e` form a pnpm/turbo workspace (`pnpm-workspace.yaml`). Use pnpm for them.
 
 ## Architecture
 
-`langgraph.json` declares the graphs and FastAPI app:
+`langgraph.json`:
 
 | Graph | Entrypoint | Implementation |
 |---|---|---|
@@ -34,26 +22,27 @@ Never run the full test suite locally; run only tests related to the change.
 
 The FastAPI app is `agent.webapp:app`; dashboard routes live in `agent/dashboard/`.
 
-Sandbox creation and reconnection live in `agent/sandboxes/`. An unreachable existing sandbox must raise rather than be replaced because replacement would lose work. Only the read-only reviewer may opt into replacement. Provider registration is in `agent/sandboxes/providers/registry.py`.
-
-The main agent and middleware stack are assembled in `agent/server.py`. Middleware order is significant. Tools are exported from `agent/tools/__init__.py` and explicitly added to the relevant graph; do not accumulate tools without wiring and authorization review.
+The main agent is assembled in `agent/server.py` from the middleware in `agent/middleware/`, with tools from `agent/tools/` and sandboxes from `agent/sandboxes/`.
 
 ## Conventions
 
-- Read relevant code and tests before editing. Fix root causes and keep diffs focused.
 - Use async-only implementations. Add a sync method only when an interface requires it, and then raise `NotImplementedError`.
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - Keep comments minimal and only explain non-obvious reasons.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
-- Add tools to `agent/tools/`, export them, and wire them into `agent/server.py` or `agent/reviewer.py`.
-- Add middleware to `agent/middleware/`, export it, and place it deliberately in the stack.
-- Add sandbox providers under `agent/sandboxes/providers/` and register them in `registry.py`.
-- Add dashboard endpoints through `agent/dashboard/routes.py` and graph entrypoints through `langgraph.json`.
 - Every new API write operation exposed through UI controls must also be available as an appropriately authorized agent tool. Prefer display-only UI with modifications performed through agent tools unless direct UI controls are explicitly required.
 
 ## Testing
 
+Never run the full test suite locally; run only tests related to the change.
+
 Add tests only when they meaningfully protect observable behavior. Do not add change-detector tests that merely restate constants, mappings, prompt text, source structure, or incidental interactions such as internal call order. Refactors that preserve behavior should not require mechanical test updates; rewrite or remove tests that do. Cover meaningful edge cases and keep tests deterministic.
+
+## Pull Requests
+
+Titles are linted as Conventional Commits by `.github/workflows/pr_lint.yml`: `<type>: <description>`, or `<type>(<scope>): <description>` since the scope is optional. The type must be one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`, `release`. The `ignore-lint-pr-title` label bypasses the check.
+
+Do not include test-running or validation sections in descriptions.
 
 <!-- OPENWIKI:START -->
 
