@@ -10,7 +10,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.input_messages import human_input, system_introduction
+from agent.input_messages import human_input, system_input, system_introduction
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from agent.server import PrepareAgentRunMiddleware
 from agent.utils import ttl_cache
@@ -220,6 +220,32 @@ def test_sender_context_skipped_without_a_human_message():
         )
         == []
     )
+
+
+@pytest.mark.parametrize("has_human_history", [False, True])
+def test_bot_sender_context_uses_bot_identity(has_human_history: bool):
+    bot_id = "system:slack-bot-B123"
+    bot_request = HumanMessage(
+        content=cast(
+            str,
+            system_input(
+                "Open a PR",
+                {"sender_id": bot_id, "surface": "slack", "kind": "system"},
+            )["content"],
+        )
+    )
+    history = [_sender_message("github:someone-else")] if has_human_history else []
+    state = cast(PrepareRunState, {"messages": [*history, bot_request]})
+
+    messages = PrepareAgentRunMiddleware._sender_context_messages(
+        state, "bot owner's context", sender_id=bot_id
+    )
+
+    assert len(messages) == 2
+    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
+    assert introduction.findtext("subject_id") == bot_id
+    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
+    assert envelope.findtext("content") == "bot owner's context"
 
 
 @pytest.mark.asyncio

@@ -242,6 +242,12 @@ from agent.review.styles import (
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
 )
+from agent.slack.allowed_bots import (
+    ALLOWED_SLACK_BOTS,
+    AllowedSlackBot,
+    AllowSlackBot,
+    allow_slack_bot,
+)
 from agent.slack.oauth import (
     SLACK_STATE_COOKIE_NAME,
     build_authorize_url,
@@ -904,6 +910,31 @@ async def slack_desktop_exchange(
         status="active",
     )
     return {"connected": True}
+
+
+@router.get("/slack/allowed-bots")
+async def api_list_allowed_slack_bots(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[AllowedSlackBot]:
+    return await ALLOWED_SLACK_BOTS.search_all()
+
+
+@router.post("/slack/allowed-bots")
+async def api_allow_slack_bot(
+    body: AllowSlackBot,
+    admin: dict[str, Any] = _ADMIN_DEP,
+) -> AllowedSlackBot:
+    return await allow_slack_bot(body, admin)
+
+
+@router.delete("/slack/allowed-bots/{team_id}/{bot_id}")
+async def api_remove_allowed_slack_bot(
+    team_id: str,
+    bot_id: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, bool]:
+    await ALLOWED_SLACK_BOTS.delete(f"{team_id}:{bot_id}")
+    return {"ok": True}
 
 
 @router.get("/team-settings")

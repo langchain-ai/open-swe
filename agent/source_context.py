@@ -39,6 +39,10 @@ class SlackThreadRef(BaseModel):
     triggering_user_email: str = ""
     triggering_user_timezone: str = ""
     triggering_event_ts: str = ""
+    triggering_bot_id: str = ""
+    triggering_bot_app_id: str = ""
+    bot_owner_github_login: str = ""
+    team_id: str = ""
     permalink: str = ""
     channel_context: dict[str, Any] | None = None
 

@@ -200,6 +200,48 @@ def test_resolve_github_token_slack_no_token_falls_back_to_bot_in_bot_only_mode(
     assert (token, expires_at) == ("bot-tok", None)
 
 
+@pytest.mark.parametrize("state", ["allowed", "removed", "revoked", "wrong-owner"])
+async def test_slack_bot_runtime_requires_current_owner_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store,
+    state: str,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "mason-gh")
+    _stub_dashboard_store(monkeypatch, token=None if state == "revoked" else "owner-token")
+    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
+
+    async def installation_token(thread_id: str):
+        return "installation-token", None
+
+    monkeypatch.setattr(auth, "_resolve_bot_installation_token", installation_token)
+    if state != "removed":
+        fake_store.seed(
+            ["allowed_slack_bots"],
+            "T123:B123",
+            {
+                "team_id": "T123",
+                "bot_id": "B123",
+                "user_id": "U123",
+                "app_id": "A123",
+                "name": "Release bot",
+                "github_login": "mason-gh",
+                "created_at": "2026-09-09",
+            },
+        )
+    config = _slack_config("someone-else" if state == "wrong-owner" else "mason-gh")
+    config["configurable"]["slack_thread"] = {
+        "team_id": "T123",
+        "triggering_bot_id": "B123",
+        "triggering_user_id": "U123",
+        "triggering_bot_app_id": "A123",
+    }
+    if state == "allowed":
+        assert (await auth.resolve_github_token(config, "t1"))[0] == "owner-token"
+    else:
+        with pytest.raises(auth.GitHubUserAuthRequired):
+            await auth.resolve_github_token(config, "t1")
+
+
 def _linear_config(github_login: str | None = "mason-gh") -> dict:
     configurable: dict = {
         "source": "linear",

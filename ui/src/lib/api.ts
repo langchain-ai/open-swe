@@ -157,6 +157,16 @@ export interface ProfileUpdate {
   review_draft_prs?: boolean | null
 }
 
+export interface AllowedSlackBot {
+  team_id: string
+  bot_id: string
+  user_id: string
+  app_id: string
+  name: string
+  github_login: string
+  created_at: string
+}
+
 export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
@@ -744,6 +754,17 @@ export const api = {
   listEnvironmentOptions: () =>
     request<EnvironmentOptionList>("/environments/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
+  allowSlackBot: (botId: string) =>
+    request<AllowedSlackBot>("/slack/allowed-bots", {
+      method: "POST",
+      body: JSON.stringify({ bot_id: botId }),
+    }),
+  removeAllowedSlackBot: (teamId: string, botId: string) =>
+    request<{ ok: boolean }>(
+      `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
+      { method: "DELETE" }
+    ),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {
       method: "PUT",

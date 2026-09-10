@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from langgraph_sdk.client import LangGraphClient
 
 from agent.slack import webhook as service
+from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.client import SlackChannelContext
 from agent.slack.failures import (
     SlackRequestError,
@@ -322,9 +323,30 @@ async def slack_webhook(
     user_id = updated_message.user if isinstance(updated_message.user, str) else ""
     text = updated_message.text
     attachments = updated_message.attachments
-    if not (channel_id and event_ts and original_message_ts and thread_ts and user_id) or (
-        text is None
-    ):
+    allowed_bot = None
+    if event.is_from_bot or updated_message.is_from_bot:
+        if (
+            is_message_update
+            or event.type not in {"message", "app_mention"}
+            or event.subtype not in {"", "bot_message"}
+            or text is None
+            or not bot_user_id
+            or f"<@{bot_user_id}>" not in text
+            or user_id == bot_user_id
+            or (event.app_id and event.app_id == envelope.api_app_id)
+        ):
+            return ignored("Event from a bot")
+        allowed_bot = await resolve_allowed_slack_bot(
+            team_id,
+            updated_message.bot_id,
+            user_id=user_id,
+            app_id=updated_message.app_id,
+        )
+        if allowed_bot is None:
+            return ignored("Event from a bot")
+    if not (
+        channel_id and event_ts and original_message_ts and thread_ts and (user_id or allowed_bot)
+    ) or (text is None):
         return ignored("Missing channel/message fields")
     if is_message_update:
         previous_message = event.previous_message
@@ -350,7 +372,12 @@ async def slack_webhook(
 
     is_direct_message = not is_message_update and event.channel_type == "im" and bool(user_id)
     is_untagged_two_party_reply = False
-    if event.type != "app_mention" and not is_message_update and not in_code_channel:
+    if (
+        event.type != "app_mention"
+        and not is_message_update
+        and not in_code_channel
+        and allowed_bot is None
+    ):
         has_username_mention = bool(
             common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text
         )
@@ -386,9 +413,6 @@ async def slack_webhook(
         )
         if not should_handle_message:
             return ignored("Not an app mention, DM, or plan reply")
-
-    if event.is_from_bot or updated_message.is_from_bot:
-        return ignored("Event from a bot")
 
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
@@ -458,6 +482,8 @@ async def slack_webhook(
                     code_channel=in_code_channel,
                     reply_thread_ts=reply_thread_ts if in_code_channel else "",
                     team_id=team_id,
+                    triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
+                    triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
                 ),
                 repo,
             )

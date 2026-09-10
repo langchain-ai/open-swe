@@ -494,6 +494,23 @@ async def resolve_github_token(
 
     github_login = cfg.github_login
 
+    slack_thread = cfg.slack_thread
+    if source == "slack" and slack_thread and slack_thread.triggering_bot_id:
+        from agent.slack.allowed_bots import resolve_allowed_slack_bot
+
+        bot = await resolve_allowed_slack_bot(
+            slack_thread.team_id,
+            slack_thread.triggering_bot_id,
+            user_id=slack_thread.triggering_user_id,
+            app_id=slack_thread.triggering_bot_app_id,
+        )
+        if bot is None or bot.github_login.lower() != (github_login or "").lower():
+            raise GitHubUserAuthRequired(source, github_login)
+        user_token = await _resolve_dashboard_user_token(thread_id, bot.github_login)
+        if user_token is None:
+            raise GitHubUserAuthRequired(source, github_login)
+        return user_token
+
     # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
     # for sources that carry a mapped GitHub login (Slack, Linear, dashboard).
     # This is what lets the agent open PRs as the triggering user.
