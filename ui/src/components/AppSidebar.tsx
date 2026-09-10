@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router"
 import {
   IoArrowBackOutline,
   IoCloudOutline,
+  IoCubeOutline,
   IoGitPullRequestOutline,
   IoOptionsOutline,
   IoSettingsOutline,
@@ -45,6 +46,7 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
         label: "Open SWE Review",
         icon: IoGitPullRequestOutline,
       },
+      { to: "/environments", label: "Environments", icon: IoCubeOutline },
       {
         to: "/admin",
         label: "Admin",
