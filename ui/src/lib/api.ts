@@ -152,7 +152,7 @@ export interface ProfileUpdate {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean
+  model_routing_enabled?: boolean | null
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
@@ -161,6 +161,8 @@ export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  /** Tri-state adaptive model routing toggle; user preference overrides this org default. */
+  model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   transcription_model?: string

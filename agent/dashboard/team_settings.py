@@ -61,6 +61,9 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     review_trace_links: bool = True
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
+    # Tri-state adaptive model routing toggle: True/False is authoritative,
+    # None is off (routing is opt-in until an admin enables it org-wide).
+    model_routing_enabled: bool | None = None
     gateway_enabled: bool | None = None
     transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
     fable_enabled: bool = False
@@ -304,6 +307,7 @@ def _default_settings() -> dict[str, Any]:
         "review_draft_prs": False,
         "pr_summaries": True,
         "review_trace_links": True,
+        "model_routing_enabled": None,
         "gateway_enabled": None,
         "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
         "fable_enabled": False,
@@ -372,6 +376,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
+        "model_routing_enabled": update.model_routing_enabled,
         "gateway_enabled": update.gateway_enabled,
         "transcription_model": update.transcription_model,
         "fable_enabled": update.fable_enabled,
@@ -571,6 +576,13 @@ async def update_team_transcription_model(model: str) -> dict[str, Any]:
     ).transcription_model
     settings.pop("updated_at", None)
     return await upsert_team_settings(TeamSettingsUpdate.model_validate(settings))
+
+
+async def get_team_model_routing_enabled() -> bool:
+    """Return whether adaptive model routing is enabled org-wide."""
+    settings = await get_team_settings()
+    value = settings.get("model_routing_enabled")
+    return value if isinstance(value, bool) else False
 
 
 async def get_team_gateway_enabled() -> bool | None:
