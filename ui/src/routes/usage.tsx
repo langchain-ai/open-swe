@@ -65,7 +65,7 @@ function UsagePage() {
     <AppShell user={session.data} title="Usage" className="max-w-5xl">
       <SettingsSection
         title="Agent leaderboard"
-        description="Ranked by merged PRs, then agent lines of code, PRs opened, and invocations. A session can contain multiple invocations."
+        description="Ranked by merged PRs, then agent lines of code, PRs opened, and invocations. A thread can contain multiple invocations."
         action={
           <Select
             value={activePeriod}
