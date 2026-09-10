@@ -48,6 +48,7 @@ class SandboxUnreachableError(RuntimeError):
 
 
 _SYNC_UNSUPPORTED = "SandboxBackendProxy is async-only; use the a-prefixed method instead."
+_DEFAULT_EXECUTE_TIMEOUT_SECONDS = 300
 
 
 class SandboxBackendProxy(BaseSandbox):
@@ -271,7 +272,8 @@ class SandboxBackendProxy(BaseSandbox):
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return await (await self._aget_backend()).aexecute(command, timeout=timeout)
+        effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
+        return await (await self._aget_backend()).aexecute(command, timeout=effective_timeout)
 
     def execute_with_offload(
         self,
@@ -294,17 +296,19 @@ class SandboxBackendProxy(BaseSandbox):
         timeout: int | None = None,  # noqa: ASYNC109 - forwarded to backend, not an asyncio contract
     ) -> ExecuteOffloadResult:
         backend = await self._aget_backend()
+        effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
         offload = getattr(backend, "aexecute_with_offload", None)
         if offload is None:
             return ExecuteOffloadResult(
-                offloaded=False, response=await self._aplain(backend, command, timeout)
+                offloaded=False,
+                response=await self._aplain(backend, command, effective_timeout),
             )
         return await offload(
             command,
             capture_path,
             max_inline_bytes=max_inline_bytes,
             max_capture_bytes=max_capture_bytes,
-            timeout=timeout,
+            timeout=effective_timeout,
         )
 
     @staticmethod
