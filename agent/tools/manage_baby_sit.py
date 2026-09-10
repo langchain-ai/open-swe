@@ -19,14 +19,6 @@ def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
     return RunConfig.from_config(config), config if isinstance(config, Mapping) else {}
 
 
-def _matches_configured_repo(cfg: RunConfig, owner: str, repo: str) -> bool:
-    if cfg.repo is None:
-        return True
-    if not cfg.repo.owner or not cfg.repo.name:
-        return False
-    return cfg.repo.owner.lower() == owner.lower() and cfg.repo.name.lower() == repo.lower()
-
-
 def _run_config(cfg: RunConfig, thread_id: str) -> dict[str, Any]:
     allowed = (
         "source",
@@ -74,9 +66,6 @@ async def manage_baby_sit(
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "No executable agent thread is available"}
-    if not _matches_configured_repo(cfg, pr_ref.owner, pr_ref.repo):
-        return {"success": False, "error": "Pull request does not match this thread's repository"}
-
     key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if action == "stop":
         from agent.baby_sit import WATCHES

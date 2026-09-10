@@ -8,14 +8,14 @@ from agent.baby_sit import BabySitWatch
 manage_tool = importlib.import_module("agent.tools.manage_baby_sit")
 
 
-async def test_manage_baby_sit_starts_watch_from_current_thread(
+async def test_manage_baby_sit_starts_cross_repo_watch_from_current_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     configurable = {
         "thread_id": "thread-1",
         "source": "slack",
         "github_login": "octocat",
-        "repo": {"owner": "acme", "name": "repo"},
+        "repo": {"owner": "acme", "name": "default"},
         "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"},
     }
     monkeypatch.setattr(manage_tool, "get_config", lambda: {"configurable": configurable})
@@ -48,26 +48,8 @@ async def test_manage_baby_sit_starts_watch_from_current_thread(
     assert start.await_args is not None
     assert start.await_args.kwargs["thread_id"] == "thread-1"
     assert start.await_args.kwargs["installation_id"] == 42
+    assert start.await_args.kwargs["pr_ref"].owner == "acme"
+    assert start.await_args.kwargs["pr_ref"].repo == "repo"
     assert start.await_args.kwargs["source_context"].dump() == {
         "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"}
-    }
-
-
-async def test_manage_baby_sit_rejects_other_repository(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        manage_tool,
-        "get_config",
-        lambda: {
-            "configurable": {
-                "thread_id": "thread-1",
-                "repo": {"owner": "acme", "name": "repo"},
-            }
-        },
-    )
-
-    result = await manage_tool.manage_baby_sit("https://github.com/other/repo/pull/7")
-
-    assert result == {
-        "success": False,
-        "error": "Pull request does not match this thread's repository",
     }
