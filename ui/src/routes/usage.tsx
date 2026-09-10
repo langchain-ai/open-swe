@@ -51,7 +51,12 @@ function UsagePage() {
     enabled: !!session.data,
   })
   const mergeRate = useQuery({
-    queryKey: ["prMergeRateByModel", activePeriod],
+    queryKey: [
+      "prMergeRateByModel",
+      activePeriod,
+      session.data?.login,
+      session.data?.is_admin,
+    ],
     queryFn: () => api.prMergeRateByModel(activePeriod, 14),
     enabled: !!session.data,
   })
@@ -68,8 +73,8 @@ function UsagePage() {
   return (
     <AppShell user={session.data} title="Usage" className="max-w-5xl">
       <SettingsSection
-        title="PR merge rate by originating model"
-        description="PRs are grouped by open date and the opening run's effective model. Open PRs wait 14 days before becoming mature pending; pending is never failure."
+        title="PR outcomes by opening invocation's configured model"
+        description="PRs are grouped by open date and the opening invocation's configured model. Routing, provider fallback, subagents, and later invocations may use other models, so this does not measure one model's independent success. Open PRs wait 14 days before becoming mature pending; pending is never failure."
       >
         {mergeRate.isLoading ? (
           <div className="space-y-2 p-4">
@@ -188,7 +193,7 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
         <thead className="border-b border-border text-muted-foreground">
           <tr>
             <th className="px-4 py-3 text-left font-normal">
-              Originating model
+              Opening configured model
             </th>
             <th className="px-2 py-3 text-right font-normal">Merged</th>
             <th className="px-2 py-3 text-right font-normal">Closed</th>

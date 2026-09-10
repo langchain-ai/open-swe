@@ -331,7 +331,7 @@ export interface PRMergeRateCohort {
 }
 
 export interface PRMergeRatePayload extends AnalyticsMetadata {
-  metric: "pr_merge_rate_by_originating_model"
+  metric: "pr_outcomes_by_opening_invocation_configured_model"
   definition: string
   maturity_days: number
   period: UsageLeaderboardPeriod
