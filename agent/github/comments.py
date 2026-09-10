@@ -11,6 +11,7 @@ import httpx2
 
 from agent.config import ENV
 from agent.github.thread_token import GitHubAuthError
+from agent.prompts import render_prompt
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -530,18 +531,11 @@ def build_pr_prompt(
     repo_line = ""
     if repo_config:
         repo_line = f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-    return (
-        "You've been tagged in GitHub PR comments. Please resolve them.\n\n"
-        f"{repo_line}"
-        f"PR: {pr_url}\n\n"
-        f"## Comments:\n{comments_text}\n\n"
-        "If code changes are needed:\n"
-        "1. Make the changes in the sandbox\n"
-        "2. Push them and open/update a draft PR with `gh` — this is REQUIRED, do NOT skip it\n"
-        "3. Use `gh pr comment` to post a summary on GitHub\n\n"
-        "If no code changes are needed:\n"
-        "1. Use `gh pr comment` to explain your answer — this is REQUIRED, never end silently\n\n"
-        "**You MUST always comment on GitHub before finishing — whether or not changes were made.**"
+    return render_prompt(
+        "runs/github-pr-mention.md",
+        repo_line=repo_line,
+        pr_url=pr_url,
+        comments=comments_text,
     )
 
 

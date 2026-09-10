@@ -283,12 +283,7 @@ def _current_backend() -> tuple[str, Any]:
 async def background_execute(
     command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS
 ) -> dict[str, Any]:
-    """Start a long-running, non-interactive sandbox command and return immediately.
-
-    Use this for tests, builds, and waits while useful foreground work remains. Do not use it
-    for commands that edit files concurrently with the agent, installs, commits, or pushes.
-    Completion is delivered automatically; do not poll. Output is capped and saved in the sandbox.
-    """
+    """Implement the `background_execute` tool."""
     if not command.strip():
         return {"success": False, "error": "command must not be empty"}
     if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
@@ -335,11 +330,7 @@ async def background_execute(
 async def background_task(
     action: Literal["status", "list", "stop"], task_id: str | None = None
 ) -> dict[str, Any]:
-    """Inspect or stop background sandbox commands.
-
-    `status` and `stop` require `task_id`; `list` does not. Status reads are for explicit user
-    requests or when completion needs inspection, not polling loops.
-    """
+    """Implement the `background_task` tool."""
     if action in {"status", "stop"} and not task_id:
         return {"success": False, "error": f"task_id is required for {action}"}
     try:

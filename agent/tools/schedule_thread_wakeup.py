@@ -13,6 +13,7 @@ from langgraph_sdk import get_client
 
 from agent.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
 from agent.input_messages import build_run_input
+from agent.prompts import load_prompt
 from agent.run_config import RunConfig
 from agent.slack.client import get_active_slack_thread
 from agent.utils.thread_ops import langgraph_url
@@ -32,11 +33,7 @@ _WAKEUP_COUNT_METADATA_KEY = "thread_wakeup_count"
 _WAKEUP_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _PURGE_PAGE_SIZE = 100
 
-_DEFAULT_WAKEUP_PROMPT = (
-    "This is an automated re-trigger of this thread. The agent scheduled this "
-    "wakeup to poll for updates. Check the current state of whatever you were "
-    "waiting on and continue from there."
-)
+_DEFAULT_WAKEUP_PROMPT = load_prompt("runs/thread-wakeup.md")
 
 
 def _ceil_to_next_minute(value: datetime) -> datetime:
@@ -251,22 +248,7 @@ async def _create_wakeup_cron(
 
 
 async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) -> dict[str, Any]:
-    """Schedule a one-shot re-trigger of the current thread after a delay.
-
-    Use this when you need to poll or check back on something later — e.g.
-    waiting for CI to finish, a deploy to complete, or an external process
-    to settle. The current thread will be re-invoked with the given prompt
-    (or a default wakeup message) after the specified delay.
-
-    Args:
-        delay_minutes: How many minutes from now to wait before re-triggering.
-            Minimum 1 minute, maximum 1440 (24 hours).
-        prompt: Optional message to send to the thread when it wakes up.
-            If omitted, a default polling prompt is used.
-
-    Returns a dict with ``success``, ``cron_id``, ``scheduled_for`` (ISO UTC),
-    and ``thread_id``.
-    """
+    """Implement the `schedule_thread_wakeup` tool."""
     if not isinstance(delay_minutes, int) or delay_minutes < 1:
         return {"success": False, "error": "delay_minutes must be a positive integer (>= 1)"}
     delay_seconds = delay_minutes * 60

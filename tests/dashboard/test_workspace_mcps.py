@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from agent.dashboard import routes
 from agent.dashboard import workspace_mcps as mcps
 from agent.encryption import decrypt_token
-from agent.tool_loaders import workspace_mcp as loader
+from agent.mcp import MCPConnectionUpdate, runtime
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +20,7 @@ def encryption(monkeypatch):
 
 
 async def test_generic_connection_roundtrip_redacts_and_preserves_headers(fake_store):
-    update = mcps.WorkspaceMCPUpdate(
+    update = MCPConnectionUpdate(
         name="incident",
         url="https://mcp.incident.io/mcp",
         headers={"Authorization": "Bearer test-secret"},
@@ -34,7 +34,7 @@ async def test_generic_connection_roundtrip_redacts_and_preserves_headers(fake_s
         "Authorization": "Bearer test-secret"
     }
     revised = await mcps.save_workspace_mcp(
-        "incident", mcps.WorkspaceMCPUpdate(name="incident", url=update.url, enabled=False)
+        "incident", MCPConnectionUpdate(name="incident", url=update.url, enabled=False)
     )
     assert revised["enabled"] is False
     assert revised["header_names"] == ["Authorization"]
@@ -46,7 +46,7 @@ async def test_generic_connection_roundtrip_redacts_and_preserves_headers(fake_s
 
 async def test_corrupt_record_does_not_hide_other_connections_or_log_values(fake_store, caplog):
     saved = await mcps.save_workspace_mcp(
-        "example", mcps.WorkspaceMCPUpdate(name="example", url="https://example.com/mcp")
+        "example", MCPConnectionUpdate(name="example", url="https://example.com/mcp")
     )
     fake_store.values(["workspace_mcps"])["broken"] = {
         **saved,
@@ -64,19 +64,120 @@ async def test_corrupt_record_does_not_hide_other_connections_or_log_values(fake
 async def test_url_change_requires_explicit_header_replacement(fake_store):
     await mcps.save_workspace_mcp(
         "example",
-        mcps.WorkspaceMCPUpdate(
+        MCPConnectionUpdate(
             name="example", url="https://one.example/mcp", headers={"Authorization": "secret"}
         ),
     )
     with pytest.raises(ValueError, match="headers"):
         await mcps.save_workspace_mcp(
-            "example", mcps.WorkspaceMCPUpdate(name="example", url="https://two.example/mcp")
+            "example", MCPConnectionUpdate(name="example", url="https://two.example/mcp")
         )
     saved = await mcps.save_workspace_mcp(
         "example",
-        mcps.WorkspaceMCPUpdate(name="example", url="https://two.example/mcp", headers={}),
+        MCPConnectionUpdate(name="example", url="https://two.example/mcp", headers={}),
     )
     assert saved["header_names"] == []
+
+
+async def test_oauth_secret_is_encrypted_preserved_and_cleared(fake_store):
+    oauth = {
+        "token_url": "https://api.linear.app/oauth/token",
+        "client_id": "test-app",
+        "client_secret": "test-client-secret",
+        "scope": "read,write",
+    }
+    saved = await mcps.save_workspace_mcp(
+        "linear",
+        MCPConnectionUpdate(name="linear", url="https://mcp.linear.app/mcp", oauth=oauth),
+    )
+    assert saved["oauth"]["client_id"] == "test-app"
+    assert "client_secret" not in saved["oauth"]
+    assert "test-client-secret" not in json.dumps(saved)
+    raw = fake_store.values(["workspace_mcps"])["linear"]
+    assert "test-client-secret" not in json.dumps(raw)
+    assert decrypt_token(raw["encrypted_client_secret"]) == "test-client-secret"
+    for fields in ({}, {"oauth": saved["oauth"]}):
+        await mcps.save_workspace_mcp(
+            "linear",
+            MCPConnectionUpdate(name="linear", url=saved["url"], enabled=False, **fields),
+        )
+        assert (
+            fake_store.values(["workspace_mcps"])["linear"]["encrypted_client_secret"]
+            == raw["encrypted_client_secret"]
+        )
+    await mcps.save_workspace_mcp(
+        "linear", MCPConnectionUpdate(name="linear", url=saved["url"], oauth=None)
+    )
+    assert fake_store.values(["workspace_mcps"])["linear"]["encrypted_client_secret"] == ""
+
+
+async def test_new_oauth_connection_requires_secret(fake_store):
+    with pytest.raises(ValueError, match="client secret"):
+        await mcps.save_workspace_mcp(
+            "linear",
+            MCPConnectionUpdate(
+                name="linear",
+                url="https://mcp.linear.app/mcp",
+                oauth={"token_url": "https://api.linear.app/oauth/token", "client_id": "app"},
+            ),
+        )
+    assert await mcps.list_workspace_mcps() == []
+
+
+@pytest.mark.parametrize("saved_header", [False, True])
+async def test_oauth_rejects_explicit_or_saved_authorization_header(fake_store, saved_header):
+    values = {"name": "linear", "url": "https://mcp.linear.app/mcp"}
+    headers = {"authorization": "Bearer test-token"}
+    if saved_header:
+        await mcps.save_workspace_mcp("linear", MCPConnectionUpdate(**values, headers=headers))
+    with pytest.raises(ValueError, match="Remove the Authorization header"):
+        await mcps.save_workspace_mcp(
+            "linear",
+            MCPConnectionUpdate(
+                **values,
+                headers=None if saved_header else headers,
+                oauth={
+                    "token_url": "https://api.linear.app/oauth/token",
+                    "client_id": "app",
+                    "client_secret": "test-client-secret",
+                },
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"url": "https://other.example/mcp"},
+        {"token_url": "https://other.example/token"},
+        {"client_id": "other-app"},
+    ],
+)
+async def test_oauth_secret_cannot_be_reused_for_changed_destinations(fake_store, change):
+    saved = await mcps.save_workspace_mcp(
+        "linear",
+        MCPConnectionUpdate(
+            name="linear",
+            url="https://mcp.linear.app/mcp",
+            oauth={
+                "token_url": "https://api.linear.app/oauth/token",
+                "client_id": "test-app",
+                "client_secret": "test-client-secret",
+            },
+        ),
+    )
+    with pytest.raises(ValueError, match="client secret"):
+        await mcps.save_workspace_mcp(
+            "linear",
+            MCPConnectionUpdate(
+                name="linear",
+                url=change.get("url", saved["url"]),
+                oauth={
+                    **saved["oauth"],
+                    **{key: value for key, value in change.items() if key != "url"},
+                },
+            ),
+        )
 
 
 @pytest.mark.parametrize(
@@ -90,6 +191,19 @@ async def test_url_change_requires_explicit_header_replacement(fake_store):
         {"headers": {"Authorization": "a", "authorization": "b"}},
         {"name": "invalid name"},
         {"transport": "stdio"},
+        {
+            "oauth": {
+                "token_url": "http://example.com/token",
+                "client_id": "app",
+                "client_secret": "secret",
+            }
+        },
+        {
+            "oauth": {
+                "token_url": "https://example.com/token?client_secret=secret",
+                "client_id": "app",
+            }
+        },
         {"allowed_tools": [""]},
         {"allowed_tools": ["x" * 129]},
     ],
@@ -97,13 +211,13 @@ async def test_url_change_requires_explicit_header_replacement(fake_store):
 def test_invalid_connection_is_rejected(fields):
     values = {"name": "example", "url": "https://example.com/mcp", **fields}
     with pytest.raises(ValidationError):
-        mcps.WorkspaceMCPUpdate(**values)
+        MCPConnectionUpdate(**values)
 
 
 async def test_all_discovered_tools_can_be_saved_for_large_catalogs(fake_store, monkeypatch):
     tool_names = [f"tool_{index}" for index in range(201)]
     monkeypatch.setattr(
-        loader,
+        runtime,
         "_discover_tools",
         AsyncMock(return_value=[Tool(name=name, inputSchema={}) for name in tool_names]),
     )
@@ -175,7 +289,7 @@ async def test_reveal_headers_requires_admin_and_same_origin_without_saving(
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     saved = await mcps.save_workspace_mcp(
         "example",
-        mcps.WorkspaceMCPUpdate(
+        MCPConnectionUpdate(
             name="example", url="https://example.com/mcp", headers={"Authorization": "test-secret"}
         ),
     )
@@ -308,6 +422,16 @@ async def test_ordinary_query_parameters_roundtrip_unchanged(fake_store, monkeyp
         ({"url": "http://example.com/mcp"}, "Server URL"),
         ({"transport": "stdio"}, "Transport"),
         ({"headers": {"Authorization": {"test-secret": "test-secret"}}}, "Headers"),
+        (
+            {
+                "oauth": {
+                    "token_url": "http://example.com/token",
+                    "client_id": "app",
+                    "client_secret": "test-secret",
+                }
+            },
+            "OAuth",
+        ),
     ],
 )
 async def test_validation_identifies_fields_without_echoing_input(monkeypatch, fields, message):
@@ -341,7 +465,7 @@ async def test_discover_draft_never_saves_settings(fake_store, monkeypatch, exis
     if existing:
         previous = await mcps.save_workspace_mcp(
             "example",
-            mcps.WorkspaceMCPUpdate(
+            MCPConnectionUpdate(
                 name="example", url="https://example.com/old", headers={"Authorization": "old"}
             ),
         )
@@ -353,7 +477,7 @@ async def test_discover_draft_never_saves_settings(fake_store, monkeypatch, exis
         side_effect=ExceptionGroup("test-secret", [error]) if fails else None,
         return_value=[],
     )
-    monkeypatch.setattr(loader, "_discover_tools", discover)
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     app = FastAPI()
     app.include_router(routes.router)

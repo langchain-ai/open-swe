@@ -27,11 +27,9 @@ from agent.review.findings import (
     comment_ids_for_finding,
     is_thread_resolved,
 )
-from agent.run_config import Repo, RunConfig
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
 from agent.utils.thread_ops import langgraph_client
-from agent.webhooks.common import fetch_github_pr_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -751,37 +749,3 @@ async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -
     if not result.get("success"):
         raise HTTPException(502, str(result.get("error") or "could not trigger review"))
     return result
-
-
-async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
-    """Resolve a PR to its author coding-agent thread without running a review."""
-    from dataclasses import asdict
-
-    from agent.github.app import get_github_app_installation_token_with_expiry
-    from agent.review.trace_context import resolve_pr_trace
-    from agent.slack.client import GitHubPrRef
-
-    pr_ref = GitHubPrRef(
-        owner=owner,
-        repo=repo,
-        number=pr_number,
-        url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
-    )
-    token, _ = await get_github_app_installation_token_with_expiry()
-    if not token:
-        raise HTTPException(502, "No GitHub App token available")
-    pr_metadata = await fetch_github_pr_metadata(pr_ref, token=token)
-    if not pr_metadata:
-        raise HTTPException(502, "Could not fetch pull request metadata")
-
-    head = pr_metadata.get("head") or {}
-    base = pr_metadata.get("base") or {}
-    cfg = RunConfig(
-        repo=Repo(owner=owner, name=repo),
-        pr_number=pr_number,
-        pr_url=pr_metadata.get("html_url") or pr_ref.url,
-        branch_name=head.get("ref", ""),
-        head_sha=head.get("sha", ""),
-        base_sha=base.get("sha", ""),
-    )
-    return asdict(await resolve_pr_trace(cfg=cfg))

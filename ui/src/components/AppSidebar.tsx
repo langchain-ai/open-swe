@@ -17,6 +17,7 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { cn } from "@/lib/utils"
+import { getLastAppLocation } from "@/lib/appLocation"
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -74,7 +75,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         )}
       >
         <Link
-          to="/agents"
+          to={getLastAppLocation()}
           className={cn(LINK_CLASS, "-mx-2.5 font-medium")}
           onClick={layout.closeOnMobile}
         >
