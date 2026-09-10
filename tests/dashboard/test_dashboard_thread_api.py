@@ -285,12 +285,24 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["github_login"] == "octocat"
     assert configurable["source"] == "dashboard"
+    assert configurable["origin"] == "dashboard"
+    assert configurable["thread_category"] == "interactive"
+    assert configurable["trigger_kind"] == "user"
+    assert configurable["client"] == "web"
+    assert configurable["execution"] == "cloud"
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
     assert configurable["invocation_id"] == enriched["params"]["metadata"]["invocation_id"]
     assert configurable["prepare_run_id"] == configurable["invocation_id"]
     assert enriched["params"]["metadata"]["prepare_run_id"] == configurable["invocation_id"]
+    assert enriched["params"]["metadata"]["open_swe.invocation_id"] == configurable["invocation_id"]
+    assert enriched["params"]["metadata"]["open_swe.graph"] == "agent"
+    assert enriched["params"]["metadata"]["open_swe.trigger_surface"] == "web"
+    assert enriched["params"]["metadata"]["open_swe.client"] == "web"
+    assert enriched["params"]["metadata"]["open_swe.thread_category"] == "interactive"
+    assert enriched["params"]["metadata"]["open_swe.actor_id"] == "github:octocat"
+    assert enriched["params"]["metadata"]["open_swe.repo"] == "octo/repo"
     messages = enriched["params"]["input"]["messages"]
     assert messages[-1]["content"].startswith(
         '<input-message sender="github:octocat" surface="web" kind="human">'

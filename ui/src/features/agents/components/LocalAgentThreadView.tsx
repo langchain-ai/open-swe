@@ -292,6 +292,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             config: {
               configurable: {
                 source: "desktop",
+                client: "desktop",
+                execution: "local",
                 local_project_path: thread.worktreePath ?? thread.cwd,
                 ...modelConfigurable(activeSelection),
               },

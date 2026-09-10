@@ -100,6 +100,11 @@ class RunConfig(BaseModel):
     invocation_id: str | None = None
     prepare_run_id: str | None = None
     source: str | None = None
+    origin: str | None = None
+    thread_category: str | None = None
+    trigger_kind: str | None = None
+    client: str | None = None
+    execution: str | None = None
     task: str | None = None
     environment: str | None = None
     local_project_path: str | None = None

@@ -127,10 +127,14 @@ export function useSubmitAgentMessage(threadId: string) {
         }
       }
 
-      const configurable: Record<string, unknown> = modelConfigurable({
-        modelId: vars.model_id,
-        effort: vars.effort,
-      })
+      const configurable: Record<string, unknown> = {
+        ...modelConfigurable({
+          modelId: vars.model_id,
+          effort: vars.effort,
+        }),
+        client: window.openSweDesktop ? "desktop" : "web",
+        execution: "cloud",
+      }
       if (vars.plan_mode) configurable.plan_mode = true
       const config =
         Object.keys(configurable).length > 0 ? { configurable } : undefined
