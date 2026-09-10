@@ -2,8 +2,8 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 const DEFAULT_BYPASS_LABEL = "do-not-close"
 const DEFAULT_PENDING_DELETION_LABEL = "pending-deletion"
-const DEFAULT_WARNING_DAYS = 14
-const DEFAULT_CLOSE_DAYS = 30
+const DEFAULT_WARNING_DAYS = 7
+const DEFAULT_CLOSE_DAYS = 14
 const DEFAULT_MAX_ITEMS = 1000
 const COMMENT_MARKER = "<!-- old-pr-auto-close -->"
 const WORKFLOW_BOT_LOGIN = "github-actions[bot]"

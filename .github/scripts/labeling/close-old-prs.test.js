@@ -55,8 +55,8 @@ test("calculates PR age in whole days", () => {
   assert.equal(ageInDays("2026-08-26T12:00:00Z", now), 14)
 })
 
-test("warns at 14 days and marks the PR pending deletion", async () => {
-  const { calls, core, github } = fixture({ createdAt: "2026-08-26T00:00:00Z" })
+test("warns at 7 days and marks the PR pending deletion", async () => {
+  const { calls, core, github } = fixture({ createdAt: "2026-09-03T00:00:00Z" })
 
   const summary = await run({ github, context, core, options: { now } })
 
@@ -70,18 +70,18 @@ test("warns at 14 days and marks the PR pending deletion", async () => {
   )
 })
 
-test("closes at 30 days after a full warning period", async () => {
+test("closes at 14 days after a full warning period", async () => {
   const body = warningBody({
-    warningDays: 14,
-    closeDays: 30,
+    warningDays: 7,
+    closeDays: 14,
     bypassLabel: "do-not-close",
   })
   const { calls, core, github } = fixture({
-    createdAt: "2026-08-11T00:00:00Z",
+    createdAt: "2026-08-27T00:00:00Z",
     comments: [
       {
         id: 10,
-        created_at: "2026-08-25T00:00:00Z",
+        created_at: "2026-09-03T00:00:00Z",
         body,
         user: { login: "github-actions[bot]", type: "Bot" },
       },
@@ -103,7 +103,7 @@ test("closes at 30 days after a full warning period", async () => {
         name === "updateComment" &&
         input.body ===
           closeBody({
-            closeDays: 30,
+            closeDays: 14,
             bypassLabel: "do-not-close",
           })
     )
