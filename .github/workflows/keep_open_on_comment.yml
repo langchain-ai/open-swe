@@ -1,0 +1,62 @@
+name: Keep Old PR Open
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  apply-bypass-label:
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '!keep-open') &&
+      contains(fromJSON('["MEMBER", "OWNER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Apply do-not-close label
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 3
+          script: |
+            const { owner, repo } = context.repo;
+            const issueNumber = context.payload.issue.number;
+            const commentId = context.payload.comment.id;
+            const {
+              applyBypassLabel,
+              clearPendingDeletion,
+            } = require('./.github/scripts/labeling/close-old-prs.js');
+
+            await github.rest.reactions.createForIssueComment({
+              owner,
+              repo,
+              comment_id: commentId,
+              content: 'eyes',
+            });
+            await applyBypassLabel({ github, owner, repo, issueNumber });
+            await clearPendingDeletion({
+              github,
+              core,
+              owner,
+              repo,
+              issueNumber,
+            });
+            await github.rest.reactions.createForIssueComment({
+              owner,
+              repo,
+              comment_id: commentId,
+              content: 'rocket',
+            });
