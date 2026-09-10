@@ -138,6 +138,8 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
+  /** Tri-state user override of the org-wide routing default; null = team default. */
+  model_routing_override?: boolean | null
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
@@ -153,6 +155,7 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
+  model_routing_override?: boolean | null
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
@@ -187,6 +190,8 @@ export interface TeamSettings {
   default_chat_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
+  /** Org-wide adaptive model routing default for Slack-triggered runs; null = off. */
+  model_routing_enabled?: boolean | null
   updated_at?: string | null
 }
 

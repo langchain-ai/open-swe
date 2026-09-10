@@ -153,11 +153,31 @@ function CloudAgentsPage() {
             label="Adaptive model routing"
             description="Automatically choose a model for each turn; turn this off to always use your default model"
             control={
-              <Switch
-                checked={profile.data?.model_routing_enabled ?? false}
-                onCheckedChange={(v) => persist({ model_routing_enabled: v })}
+              <Select
+                value={
+                  profile.data?.model_routing_override === true
+                    ? "on"
+                    : profile.data?.model_routing_override === false
+                      ? "off"
+                      : "team-default"
+                }
+                onValueChange={(v) =>
+                  persist({
+                    model_routing_override:
+                      v === "team-default" ? null : v === "on",
+                  })
+                }
                 disabled={profile.isLoading || save.isPending}
-              />
+              >
+                <SelectTrigger className="w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="team-default">Team default</SelectItem>
+                  <SelectItem value="on">On</SelectItem>
+                  <SelectItem value="off">Off</SelectItem>
+                </SelectContent>
+              </Select>
             }
           />
           <SettingsRow

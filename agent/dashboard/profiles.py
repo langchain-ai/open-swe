@@ -48,6 +48,9 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     model_routing_enabled: bool | None = None
+    # Tri-state user override of the org-wide routing default: True/False forces a
+    # preference; None falls back to "team-default".
+    model_routing_override: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
@@ -156,6 +159,7 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             if update.model_routing_enabled is not None
             else existing.get("model_routing_enabled", False)
         ),
+        "model_routing_override": update.model_routing_override,
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),

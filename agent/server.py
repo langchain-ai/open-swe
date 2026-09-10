@@ -52,6 +52,7 @@ from agent.dashboard.agent_overrides import (
     normalize_profile_subagent_overrides,
     profile_draft_prs,
     profile_model_routing_enabled,
+    profile_model_routing_override,
     resolve_github_login,
 )
 from agent.dashboard.agent_usage import record_agent_invocation_usage
@@ -72,6 +73,7 @@ from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
+    get_team_model_routing_enabled,
 )
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
@@ -546,6 +548,14 @@ async def _cached_fable_enabled() -> bool:
     )
 
 
+async def _cached_team_model_routing_enabled() -> bool | None:
+    return await ttl_cache.cached(
+        "team:model-routing-enabled",
+        60,
+        get_team_model_routing_enabled,
+    )
+
+
 async def _cached_profile(profile_login: str | None):
     if not profile_login:
         return None
@@ -858,6 +868,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway = gateway_env_default()
         profile = None
         fable_enabled = False
+        team_routing_default: bool | None = None
     else:
         async with aphase(thread_id, "factory.settings_defaults"):
             (
@@ -867,6 +878,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 use_gateway,
                 profile,
                 fable_enabled,
+                team_routing_default,
             ) = await asyncio.gather(
                 _cached_team_default_model_pair("agent"),
                 _cached_agent_routing_models(),
@@ -874,6 +886,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 _cached_gateway_enabled(),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
                 _cached_fable_enabled(),
+                _cached_team_model_routing_enabled(),
             )
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
@@ -910,14 +923,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
-    adaptive_model_routing = profile_model_routing_enabled(profile)
+    # Org-wide Slack default first, then the user's explicit override; non-Slack
+    # runs keep the user-level toggle alone.
+    if cfg.source == "slack":
+        adaptive_model_routing = team_routing_default is True
+        user_override = profile_model_routing_override(profile)
+        if user_override is not None:
+            adaptive_model_routing = user_override
+    else:
+        adaptive_model_routing = profile_model_routing_enabled(profile)
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
         subagent_effort = thread_settings.get("subagent_effort")
-        adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
+        adaptive_model_routing = thread_settings.get(
+            "model_routing_enabled", adaptive_model_routing
+        )
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
     # An explicit per-run model choice is the one thing allowed to move a thread

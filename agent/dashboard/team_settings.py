@@ -86,6 +86,9 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
+    # Org-wide adaptive model routing default for Slack-triggered runs. True/False
+    # is authoritative; users may still override on their own profile.
+    model_routing_enabled: bool | None = None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -332,6 +335,7 @@ def _default_settings() -> dict[str, Any]:
         "default_chat_reasoning_effort": None,
         "default_thread_title_model": DEFAULT_THREAD_TITLE_MODEL,
         "default_thread_title_reasoning_effort": DEFAULT_THREAD_TITLE_REASONING_EFFORT,
+        "model_routing_enabled": None,
         "updated_at": None,
     }
 
@@ -397,6 +401,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_chat_reasoning_effort": update.default_chat_reasoning_effort,
         "default_thread_title_model": update.default_thread_title_model,
         "default_thread_title_reasoning_effort": update.default_thread_title_reasoning_effort,
+        "model_routing_enabled": update.model_routing_enabled,
         "updated_at": now_iso(),
     }
     await put_value(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
@@ -585,6 +590,13 @@ async def get_team_fable_enabled() -> bool:
     settings = await get_team_settings()
     value = settings.get("fable_enabled")
     return bool(value) if isinstance(value, bool) else False
+
+
+async def get_team_model_routing_enabled() -> bool | None:
+    """Return the org-wide adaptive model routing default (``None`` = inherit users)."""
+    settings = await get_team_settings()
+    value = settings.get("model_routing_enabled")
+    return value if isinstance(value, bool) else None
 
 
 async def get_effective_gateway_enabled() -> bool:

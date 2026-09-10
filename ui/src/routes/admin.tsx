@@ -715,6 +715,23 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           }
           disabled={!settings.data || save.isPending}
         />
+        <SettingsRow
+          label="Adaptive model routing (Slack default)"
+          description="Turns on adaptive model routing by default for Slack-triggered runs across the workspace. Users can still override it on their own Open SWE Agent settings."
+          control={
+            <Switch
+              checked={settings.data?.model_routing_enabled === true}
+              onCheckedChange={(next) =>
+                settings.data &&
+                save.mutate({
+                  ...settings.data,
+                  model_routing_enabled: next,
+                })
+              }
+              disabled={!settings.data || save.isPending}
+            />
+          }
+        />
         <RolePicker
           label="Agent routing: fast"
           description="Model used for straightforward agent turns."
