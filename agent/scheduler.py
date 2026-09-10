@@ -15,6 +15,7 @@ from agent.dashboard.schedules import launch_scheduled_agent_run
 from agent.reconcile import reconcile_stale_runs
 from agent.run_config import RunConfig
 from agent.session_cost import run_session_cost_refresh
+from agent.thread_feedback import run_feedback_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class SchedulerState(BaseModel):
     channel_id: str | None = None
     thread_ts: str | None = None
     attempt: int | None = None
+    feedback: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
 
 
@@ -52,6 +54,8 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         return {"result": await monitor_background_tasks(thread_id)}
     if task == "session_cost":
         return {"result": await run_session_cost_refresh(state.model_dump())}
+    if task == "thread_feedback":
+        return {"result": await run_feedback_prompt(state.model_dump(exclude_none=True))}
     if task == "agent_cost":
         return {"result": await run_agent_cost_refresh(state.model_dump())}
     schedule_id = state.schedule_id or cfg.schedule_id

@@ -18,6 +18,7 @@ import {
   createLocalGraphClient,
   dashboardFetch,
 } from "@/lib/langgraph-client"
+import { trackDatadogAction } from "@/lib/datadog"
 import { selectStreamFor, useStreamPool } from "./streamPool"
 import type { ReactNode } from "react"
 import type {
@@ -30,6 +31,10 @@ export type { AgentStream, AgentThreadTransport } from "./streamPool"
 
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
+// The SDK stops retrying after this many failed reconnects and the instance is
+// dead for good (isLoading frozen, no error). ~5 minutes of backoff covers a
+// wifi blip or a backend deploy; anything longer is caught by the reconcile kick.
+const MAX_RECONNECT_ATTEMPTS = 50
 
 const AgentStreamContext = createContext<AgentStream | null>(null)
 
@@ -57,6 +62,14 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+    onReconnect: ({ attempt, cause }) => {
+      trackDatadogAction("agent-stream.reconnect", {
+        threadId: entry.threadId,
+        attempt,
+        cause: cause instanceof Error ? cause.message : String(cause),
+      })
+    },
     onThreadId: (threadId) => pool().rekey(entry.id, threadId),
     onCreated: () => {
       pool().runAccepted(entry.id)
@@ -127,7 +140,7 @@ export function AgentStreamProvider({
   return (
     <>
       {entries.map((entry) => (
-        <PooledStream key={entry.id} entry={entry} />
+        <PooledStream key={`${entry.id}:${entry.generation}`} entry={entry} />
       ))}
       {stream && (
         <AgentStreamContext.Provider value={stream}>

@@ -996,6 +996,43 @@ async def post_slack_ephemeral_message(
             return False
 
 
+async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any]) -> bool:
+    """Update or delete an interaction's source message, including ephemeral messages."""
+    try:
+        parsed = urlparse(response_url)
+    except ValueError:
+        return False
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc not in {"hooks.slack.com", "hooks.slack-gov.com"}
+        or not parsed.path.startswith("/actions/")
+    ):
+        return False
+    request = httpx2.Request(
+        "POST",
+        response_url,
+        json=payload,
+        extensions={"timeout": httpx2.Timeout(5.0).as_dict()},
+    )
+    try:
+        # AsyncClient logs request URLs, which contain credentials for these callbacks.
+        async with httpx2.AsyncHTTPTransport() as transport:
+            response = await transport.handle_async_request(request)
+            try:
+                if not response.is_success:
+                    return False
+                await response.aread()
+                if response.text == "ok":
+                    return True
+                data = response.json()
+                return isinstance(data, dict) and data.get("ok") is True
+            finally:
+                await response.aclose()
+    except httpx2.HTTPError, ValueError:
+        logger.warning("Slack interaction response failed")
+        return False
+
+
 async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:
     """Open a modal before Slack's short-lived interaction trigger expires."""
     if not SLACK_BOT_TOKEN:

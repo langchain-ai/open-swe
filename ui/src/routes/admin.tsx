@@ -3,14 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 
-import type {
-  DatadogConnectBody,
-  LangSmithConnectBody,
-  ModelOption,
-  PRTraceResolutionResult,
-  TeamSettings,
-  UserMapping,
-} from "@/lib/api"
+import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -96,10 +89,6 @@ function AdminPage() {
           <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
         </Link>
       </SettingsSection>
-
-      <ObservabilityCredentialsSection />
-
-      <PRTraceResolutionSection />
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
@@ -279,7 +268,6 @@ function TriggerReviewSection() {
   const [url, setUrl] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
-  const [trace, setTrace] = useState<PRTraceResolutionResult | null>(null)
 
   const parsed = useMemo(() => {
     const match = PR_URL_RE.exec(url.trim())
@@ -308,26 +296,10 @@ function TriggerReviewSection() {
     },
   })
 
-  const resolveTrace = useMutation({
-    mutationFn: () => {
-      if (!parsed) throw new Error("invalid PR URL")
-      return api.resolveTrace(parsed.owner, parsed.repo, parsed.number)
-    },
-    onSuccess: (result) => {
-      setError(null)
-      setMessage(null)
-      setTrace(result)
-    },
-    onError: (e: Error) => {
-      setTrace(null)
-      setError(e.message)
-    },
-  })
-
   return (
     <SettingsSection
       title="Trigger a review"
-      description="Manually start an Open SWE Review run on a pull request, or dry-run author trace resolution for it. The repository must be enabled for review."
+      description="Manually start an Open SWE Review run on a pull request. The repository must be enabled for review."
     >
       <div className="flex flex-col gap-2 p-4">
         <div className="flex items-center gap-2">
@@ -339,17 +311,8 @@ function TriggerReviewSection() {
               setUrl(e.target.value)
               setMessage(null)
               setError(null)
-              setTrace(null)
             }}
           />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => resolveTrace.mutate()}
-            disabled={!parsed || resolveTrace.isPending}
-          >
-            {resolveTrace.isPending ? "Resolving…" : "Resolve trace"}
-          </Button>
           <Button
             size="sm"
             onClick={() => trigger.mutate()}
@@ -379,33 +342,6 @@ function TriggerReviewSection() {
             </Link>
           </p>
         )}
-        {trace &&
-          (trace.resolved ? (
-            <p className="text-xs text-muted-foreground">
-              Resolved thread{" "}
-              <code className="font-mono">{trace.thread_id}</code> · confidence{" "}
-              {trace.confidence?.toFixed(2)} · {trace.evidence.join(", ")} ·{" "}
-              {trace.run_count} run{trace.run_count === 1 ? "" : "s"}
-              {trace.trace_url && (
-                <>
-                  {" · "}
-                  <a
-                    href={trace.trace_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline hover:text-foreground"
-                  >
-                    open trace
-                  </a>
-                </>
-              )}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              No trace resolved — {trace.detail}
-              {trace.project ? ` (project: ${trace.project})` : ""}
-            </p>
-          ))}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
     </SettingsSection>
@@ -507,256 +443,6 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
           </div>
         )}
       </div>
-    </SettingsSection>
-  )
-}
-
-function ObservabilityCredentialsSection() {
-  const qc = useQueryClient()
-  const creds = useQuery({
-    queryKey: ["teamCredentials"],
-    queryFn: api.getTeamCredentials,
-  })
-  const [error, setError] = useState<string | null>(null)
-
-  const [ddSite, setDdSite] = useState("datadoghq.com")
-  const [ddApiKey, setDdApiKey] = useState("")
-  const [ddAppKey, setDdAppKey] = useState("")
-  const [lsApiKey, setLsApiKey] = useState("")
-  const [lsEndpoint, setLsEndpoint] = useState("")
-
-  const onError = (e: Error) => setError(e.message)
-  const onSuccess = (
-    saved: Awaited<ReturnType<typeof api.getTeamCredentials>>
-  ) => {
-    qc.setQueryData(["teamCredentials"], saved)
-    setError(null)
-  }
-
-  const connectDd = useMutation({
-    mutationFn: (body: DatadogConnectBody) => api.connectDatadog(body),
-    onSuccess: (saved) => {
-      onSuccess(saved)
-      setDdApiKey("")
-      setDdAppKey("")
-    },
-    onError,
-  })
-  const disconnectDd = useMutation({
-    mutationFn: () => api.disconnectDatadog(),
-    onSuccess,
-    onError,
-  })
-  const connectLs = useMutation({
-    mutationFn: (body: LangSmithConnectBody) => api.connectLangSmith(body),
-    onSuccess: (saved) => {
-      onSuccess(saved)
-      setLsApiKey("")
-    },
-    onError,
-  })
-  const disconnectLs = useMutation({
-    mutationFn: () => api.disconnectLangSmith(),
-    onSuccess,
-    onError,
-  })
-
-  const datadog = creds.data?.datadog
-  const langsmith = creds.data?.langsmith
-  const busy = creds.isLoading
-
-  return (
-    <SettingsSection
-      title="Observability credentials"
-      description="Team-wide Datadog and LangSmith credentials. Stored encrypted server-side and never exposed to the sandbox. Connecting enables read-only observability tools for agent runs."
-    >
-      <div className="divide-y divide-border">
-        <SettingsRow
-          label="Datadog"
-          description={
-            datadog?.connected
-              ? `Connected · ${datadog.site ?? ""} · key ••••${datadog.api_key_last4 ?? ""}`
-              : "Connect Datadog to enable read-only metrics, logs, traces, and monitor tools."
-          }
-          control={
-            datadog?.connected ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => disconnectDd.mutate()}
-                disabled={disconnectDd.isPending}
-              >
-                Disconnect
-              </Button>
-            ) : (
-              <div className="flex flex-col items-end gap-2">
-                <Input
-                  className="w-56"
-                  placeholder="datadoghq.com"
-                  value={ddSite}
-                  onChange={(e) => setDdSite(e.target.value)}
-                  disabled={busy}
-                />
-                <Input
-                  className="w-56"
-                  placeholder="API key"
-                  type="password"
-                  value={ddApiKey}
-                  onChange={(e) => setDdApiKey(e.target.value)}
-                  disabled={busy}
-                />
-                <Input
-                  className="w-56"
-                  placeholder="Application key"
-                  type="password"
-                  value={ddAppKey}
-                  onChange={(e) => setDdAppKey(e.target.value)}
-                  disabled={busy}
-                />
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    connectDd.mutate({
-                      site: ddSite.trim(),
-                      api_key: ddApiKey.trim(),
-                      app_key: ddAppKey.trim(),
-                    })
-                  }
-                  disabled={
-                    connectDd.isPending ||
-                    !ddSite.trim() ||
-                    !ddApiKey.trim() ||
-                    !ddAppKey.trim()
-                  }
-                >
-                  Connect
-                </Button>
-              </div>
-            )
-          }
-        />
-        <SettingsRow
-          label="LangSmith"
-          description={
-            langsmith?.connected
-              ? `Connected · key ••••${langsmith.api_key_last4 ?? ""}${langsmith.endpoint ? ` · ${langsmith.endpoint}` : ""}`
-              : "Connect LangSmith to enable read-only trace and run lookup tools."
-          }
-          control={
-            langsmith?.connected ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => disconnectLs.mutate()}
-                disabled={disconnectLs.isPending}
-              >
-                Disconnect
-              </Button>
-            ) : (
-              <div className="flex flex-col items-end gap-2">
-                <Input
-                  className="w-56"
-                  placeholder="API key"
-                  type="password"
-                  value={lsApiKey}
-                  onChange={(e) => setLsApiKey(e.target.value)}
-                  disabled={busy}
-                />
-                <Input
-                  className="w-56"
-                  placeholder="Endpoint (optional)"
-                  value={lsEndpoint}
-                  onChange={(e) => setLsEndpoint(e.target.value)}
-                  disabled={busy}
-                />
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    connectLs.mutate({
-                      api_key: lsApiKey.trim(),
-                      endpoint: lsEndpoint.trim() || null,
-                    })
-                  }
-                  disabled={connectLs.isPending || !lsApiKey.trim()}
-                >
-                  Connect
-                </Button>
-              </div>
-            )
-          }
-        />
-      </div>
-      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
-    </SettingsSection>
-  )
-}
-
-function PRTraceResolutionSection() {
-  const qc = useQueryClient()
-  const settings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
-  })
-  const [projectDraft, setProjectDraft] = useState("")
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setProjectDraft(settings.data?.review_tracing_project ?? "")
-  }, [settings.data?.review_tracing_project])
-
-  const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
-    onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved)
-      setError(null)
-    },
-    onError: (e: Error) => setError(e.message),
-  })
-
-  const savedProject = settings.data?.review_tracing_project ?? ""
-  const projectDirty = projectDraft.trim() !== savedProject
-
-  const saveProject = () => {
-    if (!settings.data || !projectDirty) return
-    save.mutate({
-      ...settings.data,
-      review_tracing_project: projectDraft.trim() || null,
-    })
-  }
-
-  return (
-    <SettingsSection
-      title="PR Trace Resolution"
-      description="Allow Open SWE Review to resolve PRs to author coding-agent traces in a configured LangSmith project. Requires connected LangSmith credentials."
-    >
-      <div className="divide-y divide-border">
-        <SettingsRow
-          label="Tracing project"
-          description="LangSmith project name or ID to search for author traces. Leave blank to disable trace resolution."
-          control={
-            <div className="flex items-center gap-2">
-              <Input
-                className="w-64"
-                placeholder="Project name or ID"
-                value={projectDraft}
-                onChange={(e) => setProjectDraft(e.target.value)}
-                onBlur={saveProject}
-                disabled={!settings.data || save.isPending}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={saveProject}
-                disabled={!settings.data || !projectDirty || save.isPending}
-              >
-                Save
-              </Button>
-            </div>
-          }
-        />
-      </div>
-      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )
 }
@@ -1025,6 +711,62 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
               ...settings.data,
               default_agent_subagent_model: model,
               default_agent_subagent_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Agent routing: fast"
+          description="Model used for straightforward agent turns."
+          models={models}
+          model={settings.data?.default_agent_routing_fast_model ?? null}
+          effort={
+            settings.data?.default_agent_routing_fast_reasoning_effort ?? null
+          }
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_agent_routing_fast_model: model,
+              default_agent_routing_fast_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Agent routing: balanced"
+          description="Model used for ordinary implementation and investigation turns."
+          models={models}
+          model={settings.data?.default_agent_routing_balanced_model ?? null}
+          effort={
+            settings.data?.default_agent_routing_balanced_reasoning_effort ??
+            null
+          }
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_agent_routing_balanced_model: model,
+              default_agent_routing_balanced_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Agent routing: performance"
+          description="Model used for complex reasoning and plan-mode turns."
+          models={models}
+          model={settings.data?.default_agent_routing_performance_model ?? null}
+          effort={
+            settings.data?.default_agent_routing_performance_reasoning_effort ??
+            null
+          }
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_agent_routing_performance_model: model,
+              default_agent_routing_performance_reasoning_effort: effort,
             })
           }
           disabled={!settings.data || save.isPending}

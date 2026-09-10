@@ -9,6 +9,7 @@ from uuid import uuid4
 from langchain_core.tools import tool
 
 from agent.config import ENV
+from agent.prompts import load_prompt
 from agent.tools.create_sandbox_file_download_url import (
     create_sandbox_file_download_url,
     resolve_sandbox_file,
@@ -46,7 +47,7 @@ async def _show_file(
     end_line: int | None = None,
     title: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Render a file from the working directory inline in the dashboard."""
+    """Implement the `show_file` tool."""
     if start_line is not None and start_line < 1:
         raise ValueError("start_line must be 1 or greater")
     if end_line is not None and end_line < (start_line or 1):
@@ -228,22 +229,6 @@ def _looks_like_patch(text: str) -> bool:
 
 show_file = tool(
     "show_file",
-    description="""Render a file from the working directory as a rich card in the dashboard:
-source code with syntax highlighting and line numbers, a unified diff (`.patch`/`.diff` or
-`git diff` output) with per-file highlighting, a Mermaid diagram (`.mmd`/`.mermaid`), rendered
-Markdown (`.md`), a self-contained HTML page (`.html`) in an isolated iframe, or an image. The
-user can select lines in code and diff cards and comment on them, so this is the way to point
-at specific code.
-
-Never retype diffs, file contents, logs, or generated output into a chat message from memory.
-Write them to a file and show that instead, for example
-`git diff > .open-swe/artifacts/changes.patch` followed by
-`show_file(path=".open-swe/artifacts/changes.patch", title="Changes")`. To point at existing
-source, pass its path with `start_line`/`end_line`; the full file is rendered with that range
-highlighted. For HTML, read the `html-artifacts` skill first: inline scripts, styles, Canvas,
-WebGL, and data-URI assets run, and omitting `<html>`/`<head>`/`<body>` wraps the content in
-that skeleton. Keep temporary files under `.open-swe/artifacts/` and add that path to the
-checkout's `.git/info/exclude`. Relative paths resolve from the working directory. Text files
-are limited to 200 KB, HTML to 1 MB, and images to 3 MB.""",
+    description=load_prompt("tools/show_file.md"),
     response_format="content_and_artifact",
 )(_show_file)

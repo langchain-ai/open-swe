@@ -79,6 +79,24 @@ describe("AgentStreamProvider", () => {
     expect(useStreamPool.getState().entries).toHaveLength(2)
   })
 
+  it("remounts a kicked thread's stream while keeping it served", () => {
+    const view = render(
+      wrapper(
+        <AgentStreamProvider threadId="one">
+          <Probe />
+        </AgentStreamProvider>
+      )
+    )
+    expect(mocks.streams).toHaveLength(1)
+
+    act(() => useStreamPool.getState().kick("cloud", "one"))
+
+    expect(mocks.streams).toHaveLength(2)
+    expect(mocks.streams[1]?.threadId).toBe("one")
+    expect(view.container.textContent).toBe("one")
+    expect(useStreamPool.getState().entries).toHaveLength(1)
+  })
+
   it("announces a lazy cloud thread only once the server accepts its run", () => {
     const onThreadCreated = vi.fn()
     render(

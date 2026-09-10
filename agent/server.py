@@ -45,12 +45,13 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from agent.dashboard.admin import is_admin, is_observability_authorized
+from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_draft_prs,
+    profile_model_routing_enabled,
     resolve_github_login,
 )
 from agent.dashboard.agent_usage import record_agent_run_usage
@@ -66,16 +67,15 @@ from agent.dashboard.options import (
 from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
+    get_team_agent_routing_models,
     get_team_default_model_pair,
     get_team_default_repo,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
-from agent.dashboard.user_credentials import get_sandbox_langsmith_credentials
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
-from agent.github.org_membership import is_user_active_org_member
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
@@ -93,6 +93,7 @@ from agent.middleware import (
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
+    ModelSelectionMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -119,6 +120,7 @@ from agent.prompt import (
     construct_system_prompt,
     render_open_swe_shared_base,
 )
+from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -140,14 +142,6 @@ from agent.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from agent.tool_loaders.corridor_mcp import (
-    CORRIDOR_TOOL_NAMES,
-    corridor_configured,
-    load_corridor_tools,
-)
-from agent.tool_loaders.currents import load_currents_tools
-from agent.tool_loaders.datadog_mcp import load_datadog_tools
-from agent.tool_loaders.langsmith import load_langsmith_tools
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
@@ -168,19 +162,13 @@ from agent.tools import (
     get_thread,
     http_request,
     linear_comment,
-    linear_create_issue,
-    linear_delete_issue,
-    linear_get_issue,
-    linear_get_issue_comments,
-    linear_list_teams,
-    linear_search_issues,
-    linear_update_issue,
     list_automations,
     list_environments,
     list_threads,
     manage_baby_sit,
     manage_code_channel,
     manage_thread,
+    mark_question_answered,
     notify_automation_channel,
     open_pull_request,
     read_user_settings,
@@ -361,9 +349,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_start_new_thread",
-        "linear_create_issue",
-        "linear_update_issue",
-        "linear_delete_issue",
         "save_environment",
         "capture_environment_snapshot",
         "delete_environment",
@@ -427,8 +412,8 @@ def _general_purpose_subagent(
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": (
-            GENERAL_PURPOSE_SUBAGENT["description"]
-            + " It cannot access Slack tools; relay all Slack communication from the main agent."
+            f"{GENERAL_PURPOSE_SUBAGENT['description']} "
+            f"{load_prompt('system/general-purpose-subagent-suffix.md')}"
         ),
         # Deep Agents' default GP prompt covers only task mechanics; the shared
         # base carries the Open SWE identity and conventions (gh proxy usage,
@@ -443,25 +428,6 @@ def _general_purpose_subagent(
     if skills:
         subagent["skills"] = skills
     return subagent
-
-
-async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether the triggering user may use the team observability tools.
-
-    Gates on admin / explicitly-authorized emails so prompt-injected runs from
-    untrusted contributors cannot reach the team's Datadog/LangSmith data.
-    """
-    cfg = RunConfig.from_config(config)
-    candidate_login = profile_login or cfg.github_login
-    candidate_emails = [
-        cfg.user_email,
-        cfg.slack_thread.triggering_user_email if cfg.slack_thread else None,
-    ]
-    if any(is_observability_authorized(email, login=candidate_login) for email in candidate_emails):
-        return True
-    return is_observability_authorized(
-        await email_for_login(candidate_login), login=candidate_login
-    )
 
 
 _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
@@ -513,34 +479,6 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
     )
 
 
-async def _cached_allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
-    login = _org_member_login(config, profile_login)
-    if not login:
-        return False
-    return await ttl_cache.cached(
-        f"org-member:{login}",
-        300,
-        lambda: _allowed_org_member(config, profile_login),
-    )
-
-
-def _org_member_login(config: RunnableConfig, profile_login: str | None) -> str | None:
-    return profile_login or RunConfig.from_config(config).github_login
-
-
-async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
-    login = _org_member_login(config, profile_login)
-    if not login:
-        return False
-    orgs = dict.fromkeys(
-        org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
-    )
-    for org in orgs:
-        if await is_user_active_org_member(login, org):
-            return True
-    return False
-
-
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
     async def load_with_timeout() -> list[Any]:
         return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
@@ -555,61 +493,14 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
         return []
 
 
-async def _cached_langsmith_tools(profile_login: str | None, *, allow_team: bool) -> list[Any]:
-    scope = "team" if allow_team else "solo"
-    return await _cached_tool_loader(
-        f"tools:langsmith:{profile_login or '-'}:{scope}",
-        300,
-        lambda: load_langsmith_tools(profile_login, allow_team=allow_team),
-    )
-
-
-async def _load_observability_tools(authorized: bool, profile_login: str | None) -> list[Any]:
-    """Load team observability tools for an authorized triggering user."""
-    if not authorized:
-        return []
-    datadog_tools, langsmith_tools = await asyncio.gather(
-        _cached_tool_loader("tools:datadog", 600, load_datadog_tools),
-        _cached_langsmith_tools(profile_login, allow_team=True),
-    )
-    return [*datadog_tools, *langsmith_tools]
-
-
-async def _observability_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
-    """Observability tools the triggering user is allowed to see.
-
-    The authorization gate itself stays uncached — it reads per-run config — so
-    only the credential and membership lookups behind it are reused.
-    """
-    if await _observability_authorized(config, profile_login):
-        return await _load_observability_tools(True, profile_login)
-    if await _cached_allowed_org_member(config, profile_login):
-        return await _cached_langsmith_tools(profile_login, allow_team=True)
-    return await _cached_langsmith_tools(profile_login, allow_team=False)
-
-
-async def _load_integration_tools(profile_login: str | None) -> tuple[list[Any], list[Any]]:
+async def _notion_tools_for(profile_login: str | None) -> list[Any]:
     if not profile_login:
-        return [], []
-    currents_tools, notion_tools = await asyncio.gather(
-        _cached_tool_loader(
-            f"tools:currents:{profile_login}",
-            300,
-            lambda: load_currents_tools(profile_login),
-        ),
-        _cached_tool_loader(
-            f"tools:notion:{profile_login}",
-            300,
-            lambda: load_notion_tools(profile_login),
-        ),
-    )
-    return currents_tools, notion_tools
-
-
-async def _workspace_mcp_tools_for(config: RunnableConfig, profile_login: str | None) -> list[Any]:
-    if not await _observability_authorized(config, profile_login):
         return []
-    return await load_workspace_mcp_tools()
+    return await _cached_tool_loader(
+        f"tools:notion:{profile_login}",
+        300,
+        lambda: load_notion_tools(profile_login),
+    )
 
 
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
@@ -617,16 +508,19 @@ async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
         return await loader()
 
 
-async def _load_corridor_mcp_tools() -> list[Any]:
-    """Corridor MCP tools when the deployment environment has configured them."""
-    return await _cached_tool_loader("tools:corridor", 600, load_corridor_tools)
-
-
 async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     return await ttl_cache.cached(
         f"team-default-model-pair:{kind}",
         60,
         lambda: get_team_default_model_pair(kind),
+    )
+
+
+async def _cached_agent_routing_models() -> dict[str, tuple[str, str]]:
+    return await ttl_cache.cached(
+        "team:agent-routing-models",
+        60,
+        get_team_agent_routing_models,
     )
 
 
@@ -713,7 +607,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_issue_number: str,
         draft_prs: bool,
         plan_mode: bool,
-        corridor_enabled: bool,
         admin_environments: bool,
     ) -> None:
         self._thread_id = thread_id
@@ -729,7 +622,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
-        self._corridor_enabled = corridor_enabled
         self._admin_environments = admin_environments
 
     def _prepare_config_fingerprint(self) -> Any:
@@ -904,7 +796,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=self._repo_instructions,
-                corridor_enabled=self._corridor_enabled,
                 environment_name=environment.name if environment else None,
                 environment_instructions=environment.instructions if environment else None,
                 admin_environments=self._admin_environments,
@@ -939,19 +830,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _cfg: RunConfig = cfg,
-        _profile_login: str | None = profile_login,
     ) -> SandboxBackendProtocol:
         if is_desktop_run(_cfg):
             return create_desktop_backend(_cfg)
-        credentials = (
-            await get_sandbox_langsmith_credentials(_profile_login)
-            if _profile_login and ENV.SANDBOX_TYPE.get() == "langsmith"
-            else None
-        )
         return await ensure_sandbox_for_thread(
             _thread_id,
             environment_slug=environment_slug(_cfg),
-            langsmith_credentials=credentials,
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
@@ -972,6 +856,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         from agent.dashboard.options import default_model_pair
 
         team_defaults = (default_model_pair(), default_model_pair())
+        routing_defaults = {
+            "fast": default_model_pair(),
+            "balanced": default_model_pair(),
+            "performance": default_model_pair(),
+        }
         title_defaults = team_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
@@ -980,12 +869,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         async with aphase(thread_id, "factory.settings_defaults"):
             (
                 team_defaults,
+                routing_defaults,
                 title_defaults,
                 use_gateway,
                 profile,
                 fable_enabled,
             ) = await asyncio.gather(
                 _cached_team_default_model_pair("agent"),
+                _cached_agent_routing_models(),
                 _cached_thread_title_model(),
                 _cached_gateway_enabled(),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
@@ -1026,12 +917,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
+    adaptive_model_routing = profile_model_routing_enabled(profile)
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
         subagent_effort = thread_settings.get("subagent_effort")
+        adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
     # An explicit per-run model choice is the one thing allowed to move a thread
@@ -1076,6 +969,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "effort": profile_effort,
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
+        "model_routing_enabled": adaptive_model_routing,
         "repo_instructions": repo_instructions,
     }
     if not local_run and (
@@ -1084,6 +978,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
+    config["metadata"] = {
+        **(config.get("metadata") or {}),
+        "model_routing_applied": adaptive_model_routing,
+    }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
     )
@@ -1143,30 +1041,19 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
-    observability_tools: list[Any] = []
     workspace_mcp_tools: list[Any] = []
-    currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        (
-            observability_tools,
-            workspace_mcp_tools,
-            (currents_tools, notion_tools),
-        ) = await asyncio.gather(
-            _phase_result(
-                thread_id,
-                "factory.observability_tools",
-                lambda: _observability_tools_for(config, profile_login),
-            ),
+        workspace_mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.workspace_mcp_tools",
-                lambda: _workspace_mcp_tools_for(config, profile_login),
+                load_workspace_mcp_tools,
             ),
             _phase_result(
                 thread_id,
-                "factory.integration_tools",
-                lambda: _load_integration_tools(profile_login),
+                "factory.notion_tools",
+                lambda: _notion_tools_for(profile_login),
             ),
         )
 
@@ -1192,17 +1079,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         save_user_skill,
         delete_user_skill,
         linear_comment,
-        linear_create_issue,
-        linear_delete_issue,
-        linear_get_issue,
-        linear_get_issue_comments,
-        linear_list_teams,
-        linear_search_issues,
-        linear_update_issue,
         list_threads,
         get_thread,
         manage_thread,
         manage_baby_sit,
+        mark_question_answered,
         notify_automation_channel,
         open_pull_request,
         *(
@@ -1225,31 +1106,23 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         *(ADMIN_TOOLS if admin_thread else ()),
     ]
-    if local_run:
-        static_tools = [http_request, fetch_url, web_search, show_file]
-    elif stop_summary_mode:
-        static_tools = [slack_read_thread_messages, slack_thread_reply]
-    reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    static_tools = apply_tool_descriptions(static_tools)
+    if local_run:
+        static_tools = apply_tool_descriptions([http_request, fetch_url, web_search, show_file])
+    elif stop_summary_mode:
+        static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
+    reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
-        "Observability": observability_tools,
         "Workspace MCPs": workspace_mcp_tools,
-        "Currents": currents_tools,
         "Notion": notion_tools,
     }
     if not stop_summary_mode and not local_run:
         browser_tools = load_browser_tools()
         if browser_tools:
             integration_tool_groups["Browser"] = browser_tools
-    # Corridor's catalog is a static allowlist, so the MCP handshake that used to
-    # run before every first model call now waits until the agent asks for it.
-    if not stop_summary_mode and not local_run and corridor_configured():
-        integration_tool_groups["Corridor"] = IntegrationGroup(
-            tool_names=CORRIDOR_TOOL_NAMES,
-            load=_load_corridor_mcp_tools,
-        )
     if integration_tool_groups:
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
@@ -1285,6 +1158,27 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    model_selection_middleware: list[Any] = []
+    if adaptive_model_routing:
+        routing_models = {
+            route: _make_model_or_defer(
+                routed_model_id,
+                use_gateway=use_gateway,
+                **provider_model_kwargs(
+                    routed_model_id,
+                    effort,
+                    max_tokens=DEFAULT_LLM_MAX_TOKENS,
+                ),
+            )
+            for route, (routed_model_id, effort) in routing_defaults.items()
+        }
+        model_selection_middleware.append(
+            ModelSelectionMiddleware(
+                routing_models,
+                routing_models["fast"],
+                initial_plan_mode=plan_mode,
+            )
+        )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
         use_gateway=use_gateway,
@@ -1333,7 +1227,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
-                    corridor_enabled="Corridor" in integration_tool_groups,
                     admin_environments=admin_thread,
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
@@ -1363,6 +1256,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 TimeoutWrapupMiddleware(),
                 notify_step_limit_reached,
                 record_run_usage,
+                *model_selection_middleware,
                 *fallback_middleware,
                 PlanModeMiddleware(
                     excluded=PLAN_MODE_EXCLUDED_TOOLS
