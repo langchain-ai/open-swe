@@ -163,7 +163,7 @@ test.describe("thread pull requests", () => {
       review_decision: "CHANGES_REQUESTED",
       review_threads: [
         {
-          path: "agent/dashboard/routes.py",
+          path: "agent/api/routes.py",
           line: 42,
           comments: [
             {

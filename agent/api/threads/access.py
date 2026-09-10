@@ -4,9 +4,9 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from agent.api.threads.summary import _assert_thread_readable
 from agent.config import ENV
 from agent.dashboard.profiles import get_valid_access_token
-from agent.dashboard.threads.summary import _assert_thread_readable
 from agent.dashboard.user_mappings import email_for_login
 from agent.utils.json_types import ThreadLike, thread_metadata
 from agent.utils.thread_ops import langgraph_client

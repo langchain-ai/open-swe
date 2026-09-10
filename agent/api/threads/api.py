@@ -8,19 +8,18 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from agent.dashboard.options import normalize_model_choice
-from agent.dashboard.threads.access import (
+from agent.api.threads.access import (
     _authorized_thread,
     _github_token_for_login,
     _readable_thread_metadata,
 )
-from agent.dashboard.threads.runs import (
+from agent.api.threads.runs import (
     ThreadMessageBody,
     _build_dashboard_configurable,
     _notify_slack_web_handoff,
     _user_message_content,
 )
-from agent.dashboard.threads.summary import (
+from agent.api.threads.summary import (
     _DASHBOARD_SOURCE,
     _SANDBOX_CREATING_SENTINEL,
     _assert_thread_postable,
@@ -34,6 +33,7 @@ from agent.dashboard.threads.summary import (
     _thread_run_id,
     _thread_summary,
 )
+from agent.dashboard.options import normalize_model_choice
 from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import get_pull_request_context

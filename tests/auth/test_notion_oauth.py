@@ -6,7 +6,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from agent import store as agent_store
-from agent.dashboard import notion_oauth as no
+from agent.api import notion_oauth as no
 
 
 class _FakeStore:

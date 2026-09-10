@@ -8,7 +8,7 @@ import pytest
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from fastapi import HTTPException
 
-from agent.dashboard import review_chat_api
+from agent.api import review_chat as review_chat_api
 
 # `agent.tools.__init__` rebinds these names to the tool *functions*, shadowing
 # the submodules. Import the real modules so we can monkeypatch their globals.

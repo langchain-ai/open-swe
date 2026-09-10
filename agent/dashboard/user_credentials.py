@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from agent.dashboard.notion_oauth import is_reauth_required_error, refresh_notion_access_token
+from agent.api.notion_oauth import is_reauth_required_error, refresh_notion_access_token
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value
 

@@ -6,8 +6,8 @@ import pytest
 from cryptography.fernet import Fernet
 
 from agent import store as agent_store
+from agent.api.notion_oauth import NotionOAuthError
 from agent.dashboard import user_credentials as uc
-from agent.dashboard.notion_oauth import NotionOAuthError
 
 
 class _FakeStore:

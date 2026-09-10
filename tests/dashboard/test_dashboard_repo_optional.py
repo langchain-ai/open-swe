@@ -3,8 +3,8 @@ from typing import Any
 
 import pytest
 
-from agent.dashboard.threads import runs as thread_runs
-from agent.dashboard.threads import summary as thread_summary
+from agent.api.threads import runs as thread_runs
+from agent.api.threads import summary as thread_summary
 from tests.conftest import patch_thread_module
 
 

@@ -5,9 +5,9 @@ from typing import Any, Literal, Self
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
-from agent.dashboard.plan_api import fetch_thread_metadata
-from agent.dashboard.threads.summary import thread_is_readable
+from agent.api.oauth import require_same_origin_for_mutations, require_session
+from agent.api.plans import fetch_thread_metadata
+from agent.api.threads.summary import thread_is_readable
 from agent.dashboard.user_mappings import login_for_slack_id
 from agent.source_context import SourceContext
 from agent.thread_feedback import PromptStatus, Rating, feedback_prompt_status, feedback_store

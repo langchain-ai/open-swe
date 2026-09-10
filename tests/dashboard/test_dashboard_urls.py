@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.dashboard import routes as dashboard_routes
+from agent.api import routes as dashboard_routes
 from agent.utils import dashboard_links
 
 

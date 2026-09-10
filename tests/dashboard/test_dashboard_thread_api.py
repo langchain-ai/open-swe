@@ -9,15 +9,15 @@ from xml.etree import ElementTree
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import routes
+from agent.api import routes
+from agent.api.threads import api as thread_api
+from agent.api.threads import diffs as thread_diffs
+from agent.api.threads import listing as thread_listing
+from agent.api.threads import proxy as thread_proxy
+from agent.api.threads import runs as thread_runs
+from agent.api.threads import summary as thread_summary
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
-from agent.dashboard.threads import api as thread_api
-from agent.dashboard.threads import diffs as thread_diffs
-from agent.dashboard.threads import listing as thread_listing
-from agent.dashboard.threads import proxy as thread_proxy
-from agent.dashboard.threads import runs as thread_runs
-from agent.dashboard.threads import summary as thread_summary
 from agent.dashboard.ttft import AssistantTextObservation
 from tests.conftest import patch_thread_module
 
@@ -2492,7 +2492,7 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
 @pytest.mark.asyncio
 async def test_get_my_profile_drops_deprecated_models() -> None:
     with patch(
-        "agent.dashboard.routes.get_profile",
+        "agent.api.routes.get_profile",
         new_callable=AsyncMock,
         return_value={
             "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
@@ -2509,17 +2509,17 @@ async def test_get_my_profile_drops_deprecated_models() -> None:
 async def test_options_omits_fable_when_disabled() -> None:
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.api.routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.api.routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.api.routes.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
@@ -2532,17 +2532,17 @@ async def test_options_omits_fable_when_disabled() -> None:
 async def test_options_includes_fable_when_enabled() -> None:
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.api.routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.api.routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.api.routes.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
@@ -2561,17 +2561,17 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     fable_pair = (_FABLE, "high")
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.api.routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.api.routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.api.routes.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),

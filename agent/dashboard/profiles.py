@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, model_validator
 
-from agent.dashboard.oauth import (
+from agent.api.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
     refresh_user_access_token,

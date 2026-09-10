@@ -7,8 +7,8 @@ import jwt
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import routes
-from agent.dashboard.oauth import COOKIE_NAME, decode_session, sanitize_redirect_to
+from agent.api import routes
+from agent.api.oauth import COOKIE_NAME, decode_session, sanitize_redirect_to
 
 
 def test_sanitize_redirect_to_preserves_allowed_dashboard_target(monkeypatch) -> None:

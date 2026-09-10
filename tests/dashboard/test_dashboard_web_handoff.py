@@ -4,8 +4,8 @@ from typing import Any, cast
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard.threads import api as thread_api
-from agent.dashboard.threads import runs as thread_runs
+from agent.api.threads import api as thread_api
+from agent.api.threads import runs as thread_runs
 from tests.conftest import patch_thread_module
 
 

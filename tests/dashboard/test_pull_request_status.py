@@ -5,8 +5,8 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard.threads import access as thread_access
-from agent.dashboard.threads import api as thread_api
+from agent.api.threads import access as thread_access
+from agent.api.threads import api as thread_api
 from agent.github import pull_request_status
 from tests.conftest import patch_thread_module
 

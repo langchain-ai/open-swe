@@ -7,7 +7,7 @@ the repository over the GitHub API.
 
 PR context (diff, findings, overview) is seeded as virtual files under ``/pr/``
 into the ``files`` state channel by the dashboard chat proxy
-(``agent/dashboard/review_chat_api.py``); the built-in ``read_file``/``grep``
+(``agent/api/review_chat.py``); the built-in ``read_file``/``grep``
 tools operate over those. Repo coordinates and the reviewer thread id arrive in
 ``configurable``; a repo-scoped GitHub App token is resolved here so the
 GitHub-backed tools never receive a user credential.

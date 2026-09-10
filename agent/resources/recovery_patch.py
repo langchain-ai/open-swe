@@ -1,6 +1,6 @@
 """Runs inside a thread's sandbox to emit a patch of its uncommitted work.
 
-Delivered as a heredoc by ``agent.dashboard.threads.diffs``; ``__PAYLOAD__`` is
+Delivered as a heredoc by ``agent.api.threads.diffs``; ``__PAYLOAD__`` is
 substituted with a base64 JSON blob before execution. Prints a single JSON line.
 """
 

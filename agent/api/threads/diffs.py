@@ -11,13 +11,13 @@ from typing import Any
 import httpx2
 from fastapi import HTTPException
 
-from agent.dashboard.threads.access import (
+from agent.api.threads.access import (
     _authorized_thread,
     _github_token_for_login,
     _readable_thread_metadata,
 )
-from agent.dashboard.threads.proxy import _PROXY_REQUEST_TIMEOUT
-from agent.dashboard.threads.summary import _metadata_repo
+from agent.api.threads.proxy import _PROXY_REQUEST_TIMEOUT
+from agent.api.threads.summary import _metadata_repo
 from agent.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
 from agent.slack.client import parse_github_pr_url
 from agent.utils.json_types import thread_metadata

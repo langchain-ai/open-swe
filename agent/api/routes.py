@@ -24,6 +24,99 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+from agent.api.notion_oauth import (
+    NOTION_STATE_COOKIE_NAME,
+    NotionOAuthError,
+    exchange_notion_code,
+    pop_notion_oauth_flow,
+    store_notion_oauth_flow,
+)
+from agent.api.oauth import (
+    COOKIE_NAME,
+    SESSION_COOKIE,
+    SESSION_TTL_SECONDS,
+    STATE_COOKIE_NAME,
+    STATE_TTL_SECONDS,
+    decode_state,
+    decode_terminal_ticket,
+    desktop_callback_url,
+    desktop_handoff_from_state,
+    enforce_github_login_gate,
+    exchange_code,
+    fetch_github_user,
+    hash_state_nonce,
+    issue_connect_handoff,
+    issue_desktop_handoff,
+    issue_session,
+    issue_state,
+    issue_terminal_ticket,
+    new_state_nonce,
+    redeem_connect_handoff,
+    redeem_desktop_handoff,
+    require_same_origin_for_mutations,
+    require_session,
+    sanitize_redirect_to,
+    valid_handoff_challenge,
+)
+from agent.api.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
+from agent.api.review_chat import (
+    delete_review_chat_thread,
+    get_review_chat,
+    list_review_chat_threads,
+    proxy_review_chat_commands,
+    proxy_review_chat_history,
+    proxy_review_chat_state,
+    proxy_review_chat_stream_events,
+)
+from agent.api.reviews import (
+    create_review_comment,
+    get_review,
+    get_review_diff,
+    list_review_comments,
+    list_reviews,
+    proxy_pr_image,
+    trigger_re_review,
+    update_review_comment,
+)
+from agent.api.threads.api import (
+    admin_cancel_dashboard_thread,
+    cancel_dashboard_thread,
+    delete_dashboard_thread,
+    get_dashboard_pull_request_checks,
+    get_dashboard_terminal_sandbox,
+    get_dashboard_thread,
+    get_dashboard_thread_pull_request_context,
+    get_dashboard_thread_pull_request_status,
+    get_dashboard_thread_state,
+    rename_dashboard_thread,
+    resolve_dashboard_thread,
+    send_dashboard_message,
+)
+from agent.api.threads.diffs import (
+    get_dashboard_thread_branch_diff,
+    get_dashboard_thread_recovery_patch,
+    get_dashboard_thread_working_tree_diff,
+)
+from agent.api.threads.listing import (
+    list_dashboard_pinned_threads,
+    list_dashboard_thread_projects,
+    list_dashboard_threads,
+    list_dashboard_threads_page,
+    pin_dashboard_thread,
+    unpin_dashboard_thread,
+)
+from agent.api.threads.proxy import (
+    proxy_dashboard_thread_commands,
+    proxy_dashboard_thread_history,
+    proxy_dashboard_thread_run_cancel,
+    proxy_dashboard_thread_stream_events,
+)
+from agent.api.threads.runs import (
+    ThreadMessageBody,
+    ThreadRenameBody,
+    ThreadResolveBody,
+)
+from agent.api.voice import transcribe_audio
 from agent.config import ENV
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_instructions import (
@@ -52,41 +145,6 @@ from agent.dashboard.environments import (
     slugify,
 )
 from agent.dashboard.feedback import feedback_router
-from agent.dashboard.notion_oauth import (
-    NOTION_STATE_COOKIE_NAME,
-    NotionOAuthError,
-    exchange_notion_code,
-    pop_notion_oauth_flow,
-    store_notion_oauth_flow,
-)
-from agent.dashboard.oauth import (
-    COOKIE_NAME,
-    SESSION_COOKIE,
-    SESSION_TTL_SECONDS,
-    STATE_COOKIE_NAME,
-    STATE_TTL_SECONDS,
-    decode_state,
-    decode_terminal_ticket,
-    desktop_callback_url,
-    desktop_handoff_from_state,
-    enforce_github_login_gate,
-    exchange_code,
-    fetch_github_user,
-    hash_state_nonce,
-    issue_connect_handoff,
-    issue_desktop_handoff,
-    issue_session,
-    issue_state,
-    issue_terminal_ticket,
-    new_state_nonce,
-    redeem_connect_handoff,
-    redeem_desktop_handoff,
-    require_same_origin_for_mutations,
-    require_session,
-    sanitize_redirect_to,
-    valid_handoff_challenge,
-)
-from agent.dashboard.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
 from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODELS,
@@ -107,25 +165,6 @@ from agent.dashboard.repo_cache import (
     read_cached_repos,
     schedule_repo_cache_refresh,
     write_cached_repos,
-)
-from agent.dashboard.review_api import (
-    create_review_comment,
-    get_review,
-    get_review_diff,
-    list_review_comments,
-    list_reviews,
-    proxy_pr_image,
-    trigger_re_review,
-    update_review_comment,
-)
-from agent.dashboard.review_chat_api import (
-    delete_review_chat_thread,
-    get_review_chat,
-    list_review_chat_threads,
-    proxy_review_chat_commands,
-    proxy_review_chat_history,
-    proxy_review_chat_state,
-    proxy_review_chat_stream_events,
 )
 from agent.dashboard.sandbox_settings import (
     SandboxSettingsUpdate,
@@ -165,44 +204,6 @@ from agent.dashboard.team_settings import (
     update_team_transcription_model,
     upsert_team_settings,
 )
-from agent.dashboard.threads.api import (
-    admin_cancel_dashboard_thread,
-    cancel_dashboard_thread,
-    delete_dashboard_thread,
-    get_dashboard_pull_request_checks,
-    get_dashboard_terminal_sandbox,
-    get_dashboard_thread,
-    get_dashboard_thread_pull_request_context,
-    get_dashboard_thread_pull_request_status,
-    get_dashboard_thread_state,
-    rename_dashboard_thread,
-    resolve_dashboard_thread,
-    send_dashboard_message,
-)
-from agent.dashboard.threads.diffs import (
-    get_dashboard_thread_branch_diff,
-    get_dashboard_thread_recovery_patch,
-    get_dashboard_thread_working_tree_diff,
-)
-from agent.dashboard.threads.listing import (
-    list_dashboard_pinned_threads,
-    list_dashboard_thread_projects,
-    list_dashboard_threads,
-    list_dashboard_threads_page,
-    pin_dashboard_thread,
-    unpin_dashboard_thread,
-)
-from agent.dashboard.threads.proxy import (
-    proxy_dashboard_thread_commands,
-    proxy_dashboard_thread_history,
-    proxy_dashboard_thread_run_cancel,
-    proxy_dashboard_thread_stream_events,
-)
-from agent.dashboard.threads.runs import (
-    ThreadMessageBody,
-    ThreadRenameBody,
-    ThreadResolveBody,
-)
 from agent.dashboard.user_credentials import (
     connect_notion,
     disconnect_notion,
@@ -220,7 +221,6 @@ from agent.dashboard.user_mappings import (
     list_mappings,
     upsert_mapping,
 )
-from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
     WorkspaceMCPRoute,
     delete_workspace_mcp,

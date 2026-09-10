@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from mcp.types import Tool
 from pydantic import ValidationError
 
-from agent.dashboard import routes
+from agent.api import routes
 from agent.dashboard import workspace_mcps as mcps
 from agent.encryption import decrypt_token
 from agent.mcp import MCPConnectionUpdate, runtime

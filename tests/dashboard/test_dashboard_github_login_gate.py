@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import oauth
+from agent.api import oauth
 
 
 @pytest.mark.parametrize("value", [None, "  ,  "])

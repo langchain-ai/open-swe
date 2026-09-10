@@ -9,7 +9,12 @@ from langgraph_sdk import get_client
 from langgraph_sdk.schema import Run
 from pydantic import BaseModel, Field, model_validator
 
-from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
+from agent.api.oauth import require_same_origin_for_mutations, require_session
+from agent.api.threads.summary import (
+    repo_config_from_metadata,
+    thread_is_readable,
+    thread_source,
+)
 from agent.dashboard.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_CANCELLED,
@@ -26,11 +31,6 @@ from agent.dashboard.plan_store import (
     save_plan_content,
     set_plan_status,
     write_plan_to_sandbox,
-)
-from agent.dashboard.threads.summary import (
-    repo_config_from_metadata,
-    thread_is_readable,
-    thread_source,
 )
 from agent.dispatch import dispatch_agent_run
 from agent.slack.client import post_slack_thread_reply

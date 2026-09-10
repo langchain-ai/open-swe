@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI, HTTPException, Response, WebSocket
 from fastapi.testclient import TestClient
 
-from agent.dashboard import oauth, routes
+from agent.api import oauth, routes
 
 
 def test_terminal_ticket_is_short_lived_and_thread_bound(monkeypatch) -> None:

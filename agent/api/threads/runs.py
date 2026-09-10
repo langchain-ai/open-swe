@@ -11,6 +11,20 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.api.threads.access import (
+    _ensure_dashboard_github_token,
+    agent_version_metadata,
+    resolve_run_email,
+)
+from agent.api.threads.summary import (
+    _DASHBOARD_SOURCE,
+    _is_thread_resolved,
+    _metadata_model_id,
+    _now_ms,
+    _parse_repo,
+    repo_config_from_metadata,
+    thread_source,
+)
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.environments import ENVIRONMENTS, slugify
@@ -23,20 +37,6 @@ from agent.dashboard.options import (
 )
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
-from agent.dashboard.threads.access import (
-    _ensure_dashboard_github_token,
-    agent_version_metadata,
-    resolve_run_email,
-)
-from agent.dashboard.threads.summary import (
-    _DASHBOARD_SOURCE,
-    _is_thread_resolved,
-    _metadata_model_id,
-    _now_ms,
-    _parse_repo,
-    repo_config_from_metadata,
-    thread_source,
-)
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,

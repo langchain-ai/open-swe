@@ -271,7 +271,7 @@ async def leave_failure_comment(
             # which must not be posted in a shared thread (anyone could complete
             # it and bind the wrong account). Post a generic, token-free notice and
             # let the user finish sign-in from their own authenticated dashboard.
-            from agent.dashboard.oauth import build_settings_url
+            from agent.api.oauth import build_settings_url
 
             settings_url = build_settings_url()
             link = (

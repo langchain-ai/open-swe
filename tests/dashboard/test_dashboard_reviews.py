@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.dashboard import review_api, routes
+from agent.api import reviews as review_api
+from agent.api import routes
 from agent.review.findings import REVIEWER_THREAD_KIND
 
 

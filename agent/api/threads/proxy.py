@@ -9,23 +9,23 @@ from typing import Any
 import httpx2
 from fastapi import HTTPException
 
-from agent.config import ENV
-from agent.dashboard.threads.access import (
+from agent.api.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
 )
-from agent.dashboard.threads.runs import (
+from agent.api.threads.runs import (
     _ASSISTANT_ID,
     _enrich_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
 )
-from agent.dashboard.threads.summary import (
+from agent.api.threads.summary import (
     _assert_thread_postable,
     _assert_thread_readable,
     _now_ms,
     _thread_is_busy,
 )
+from agent.config import ENV
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle

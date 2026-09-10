@@ -17,14 +17,14 @@ from typing import Any
 import httpx2
 from fastapi import HTTPException
 
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
-from agent.dashboard.review_api import classify_finding, get_pr_head_sha, get_review
-from agent.dashboard.threads.proxy import (
+from agent.api.reviews import classify_finding, get_pr_head_sha, get_review
+from agent.api.threads.proxy import (
     langgraph_proxy_headers,
     require_json_content_type,
     stream_thread_events,
 )
-from agent.dashboard.threads.runs import DASHBOARD_STREAM_MODES
+from agent.api.threads.runs import DASHBOARD_STREAM_MODES
+from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.github.app import get_github_app_installation_token
 from agent.review.diff import fetch_pr_diff
 from agent.review.findings import REVIEWER_THREAD_KIND

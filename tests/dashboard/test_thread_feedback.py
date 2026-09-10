@@ -7,8 +7,9 @@ import pytest
 from fastapi import FastAPI
 
 from agent import thread_feedback
-from agent.dashboard import feedback, routes
-from agent.dashboard.oauth import require_session
+from agent.api import routes
+from agent.api.oauth import require_session
+from agent.dashboard import feedback
 
 
 @pytest.fixture

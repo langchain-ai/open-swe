@@ -17,8 +17,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import routes
-from agent.dashboard.oauth import COOKIE_NAME, issue_session
+from agent.api import routes
+from agent.api.oauth import COOKIE_NAME, issue_session
 from agent.slack.oauth import SlackIdentity
 
 _VERIFIER = "desktop-connect-verifier"

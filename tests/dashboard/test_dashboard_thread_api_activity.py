@@ -1,7 +1,7 @@
 from typing import Any
 
-from agent.dashboard.threads import api as thread_api
-from agent.dashboard.threads import listing as thread_listing
+from agent.api.threads import api as thread_api
+from agent.api.threads import listing as thread_listing
 from tests.conftest import patch_thread_module
 
 
