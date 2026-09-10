@@ -139,8 +139,9 @@ export function ModelPicker({
 
   const pickerDisabled = disabled || models.length === 0 || !onSelectionChange
 
-  const selectedModel =
-    models.find((model) => model.id === selection?.modelId) ?? models[0]
+  const selectedModel = selection
+    ? (models.find((model) => model.id === selection.modelId) ?? models[0])
+    : null
   const efforts = selectedModel?.efforts ?? []
   const currentEffort = selectedModel
     ? effortForModel(selectedModel, selection)
@@ -165,7 +166,7 @@ export function ModelPicker({
   useEffect(() => {
     if (!open) return
     // oxlint-disable-next-line react/set-state-in-effect
-    setPane("main")
+    setPane(selection ? "main" : "models")
     setQuery("")
     setFocusedModelId(null)
     const index = currentEffort ? efforts.indexOf(currentEffort) : -1
@@ -341,18 +342,19 @@ export function ModelPicker({
           <ChevronDown className="size-3.5 shrink-0 opacity-60" />
         )}
       </button>
-      {open && !pickerDisabled && selectedModel && (
+      {open && !pickerDisabled && (
         <div
           data-testid="model-picker-panel"
           onKeyDown={handleKeyDown}
           style={{ zIndex: Z.DROPDOWN }}
           className="absolute bottom-full left-0 mb-1"
         >
-          <div
-            ref={mainPaneRef}
-            tabIndex={-1}
-            className="dropdown-glass flex w-56 flex-col overflow-hidden rounded-xl py-1 outline-none"
-          >
+          {selection && (
+            <div
+              ref={mainPaneRef}
+              tabIndex={-1}
+              className="dropdown-glass flex w-56 flex-col overflow-hidden rounded-xl py-1 outline-none"
+            >
             {contextWindow != null && (
               <>
                 <SectionHeading>Context</SectionHeading>
@@ -389,7 +391,7 @@ export function ModelPicker({
             <div ref={modelRowRef} className="mt-1 border-t border-border pt-1">
               <SectionHeading>Model</SectionHeading>
               <OptionRow
-                label={selectedModel.label}
+                label={selectedModel?.label ?? "Auto"}
                 selected={false}
                 focused={pane === "models" || mainIndex === modelRowIndex}
                 trailing={
@@ -400,6 +402,7 @@ export function ModelPicker({
               />
             </div>
           </div>
+          )}
           {pane === "models" && (
             <div
               ref={modelPaneRef}

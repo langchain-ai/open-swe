@@ -72,8 +72,9 @@ describe("ModelPicker", () => {
 
     const trigger = screen.getByRole("button", { name: "Auto" })
     fireEvent.click(trigger)
-    openModelPane()
-    fireEvent.click(screen.getByRole("option", { name: "Auto" }))
+    const auto = screen.getByRole("option", { name: "Auto" })
+    expect(auto.getAttribute("aria-selected")).toBe("true")
+    fireEvent.click(auto)
 
     expect(onSelectionChange).toHaveBeenCalledWith(null)
   })
