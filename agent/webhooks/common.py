@@ -678,8 +678,7 @@ async def upsert_agent_thread_metadata(
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
-    Returns whether the write succeeded; callers creating private threads must
-    not dispatch a run when it did not.
+    Returns whether the write succeeded so private-thread callers can fail closed.
 
     Webhook-triggered runs only pass ``source``/``github_login`` through the run
     config; the Agents UI lists threads by thread *metadata*, so we mirror the

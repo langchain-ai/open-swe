@@ -478,8 +478,7 @@ async def _notify_slack_processing_error(
 
 async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
     """GitHub login for a Slack user: by Slack id first, then by profile email."""
-    login = await common.login_for_slack_id(user_id) if user_id else None
-    if login:
+    if login := await common.login_for_slack_id(user_id):
         return login
     if user_email is None and user_id:
         slack_user = await common.get_slack_user_info(user_id)
@@ -493,9 +492,8 @@ def _slack_thread_visibility(
 ) -> str:
     """A bot DM from a mapped user is private to them; anything else is collaborative.
 
-    Normal mode blocks unmapped senders before a thread exists. Bot-token-only
-    mode does not, and a private thread nobody owns would be unreachable, so
-    those DMs stay collaborative as before.
+    Bot-token-only mode lets unmapped senders through, and a private thread
+    nobody owns would be unreachable, so those DMs stay collaborative.
     """
     if owner_login and isinstance(channel_context, dict) and channel_context.get("is_im") is True:
         return "private"
