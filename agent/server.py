@@ -1173,7 +1173,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ModelSelectionMiddleware(
                 routing_models,
                 routing_models["fast"],
-                initial_plan_mode=plan_mode,
             )
         )
     subagent_model = _make_model_or_defer(
