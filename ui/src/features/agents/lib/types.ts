@@ -95,36 +95,36 @@ export type OutputIframeDisplay =
       filename: string
     }
 
-interface ShowFileDisplayBase {
-  type: "show_file"
+interface ShowUserDisplayBase {
+  type: "show_user"
   path: string
   filename: string
   title: string
 }
 
-export type ShowFileDisplay =
-  | (ShowFileDisplayBase & {
+export type ShowUserDisplay =
+  | (ShowUserDisplayBase & {
       kind: "text"
       content: string
       totalLines: number
       startLine: number
       endLine: number
     })
-  | (ShowFileDisplayBase & { kind: "diff"; content: string })
-  | (ShowFileDisplayBase & { kind: "diagram"; content: string })
-  | (ShowFileDisplayBase & { kind: "markdown"; content: string })
-  | (ShowFileDisplayBase & {
+  | (ShowUserDisplayBase & { kind: "diff"; content: string })
+  | (ShowUserDisplayBase & { kind: "diagram"; content: string })
+  | (ShowUserDisplayBase & { kind: "markdown"; content: string })
+  | (ShowUserDisplayBase & {
       kind: "html"
       previewUrl: string
       downloadUrl: string
     })
-  | (ShowFileDisplayBase & {
+  | (ShowUserDisplayBase & {
       kind: "image"
       mimeType: string
       contentBase64: string
     })
 
-export type ToolDisplay = OutputIframeDisplay | ShowFileDisplay
+export type ToolDisplay = OutputIframeDisplay | ShowUserDisplay
 
 export interface ToolExecutionChunk {
   kind: "tool-execution"

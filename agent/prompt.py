@@ -49,13 +49,13 @@ def _load_default_prompt() -> str:
 UI_SOURCES = frozenset({"dashboard", "desktop"})
 
 
-def render_open_swe_shared_base(*, sandbox_file_downloads: bool, show_file: bool = False) -> str:
+def render_open_swe_shared_base(*, sandbox_file_downloads: bool, show_user: bool = False) -> str:
     """Render shared guidance for the tools available to this agent."""
     sections = [OPEN_SWE_SHARED_BASE]
     if sandbox_file_downloads:
         sections.append(load_prompt("system/sandbox-file-downloads.md"))
-    if show_file:
-        sections.append(load_prompt("system/show-file.md"))
+    if show_user:
+        sections.append(load_prompt("system/show-user.md"))
     return "\n\n".join(sections)
 
 
@@ -272,6 +272,6 @@ def construct_system_prompt(
         )
         + render_open_swe_shared_base(
             sandbox_file_downloads=sandbox_file_downloads,
-            show_file=source in UI_SOURCES,
+            show_user=source in UI_SOURCES,
         ),
     )

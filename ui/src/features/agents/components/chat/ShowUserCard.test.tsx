@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { ShowFileCard } from "./ShowFileCard"
+import { ShowUserCard } from "./ShowUserCard"
 import { subscribeComposerInsert } from "@/features/agents/lib/composerInsert"
 
 vi.mock("@/features/agents/utils/diffUtils", () => ({
@@ -72,12 +72,12 @@ afterEach(() => {
   cleanup()
 })
 
-describe("ShowFileCard", () => {
+describe("ShowUserCard", () => {
   it("renders images inline from the artifact bytes", () => {
     render(
-      <ShowFileCard
+      <ShowUserCard
         display={{
-          type: "show_file",
+          type: "show_user",
           kind: "image",
           path: "shot.png",
           filename: "shot.png",
@@ -95,9 +95,9 @@ describe("ShowFileCard", () => {
 
   it("renders mermaid files through the markdown diagram renderer", () => {
     render(
-      <ShowFileCard
+      <ShowUserCard
         display={{
-          type: "show_file",
+          type: "show_user",
           kind: "diagram",
           path: ".open-swe/artifacts/flow.mmd",
           filename: "flow.mmd",
@@ -114,9 +114,9 @@ describe("ShowFileCard", () => {
 
   it("renders html previews in a sandboxed iframe with a download button", () => {
     render(
-      <ShowFileCard
+      <ShowUserCard
         display={{
-          type: "show_file",
+          type: "show_user",
           kind: "html",
           path: ".open-swe/artifacts/chart.html",
           filename: "chart.html",
@@ -137,9 +137,9 @@ describe("ShowFileCard", () => {
 
   it("renders markdown files through the markdown renderer", () => {
     render(
-      <ShowFileCard
+      <ShowUserCard
         display={{
-          type: "show_file",
+          type: "show_user",
           kind: "markdown",
           path: "docs/plan.md",
           filename: "plan.md",
@@ -155,9 +155,9 @@ describe("ShowFileCard", () => {
     const inserted: Array<string> = []
     const unsubscribe = subscribeComposerInsert((text) => inserted.push(text))
     render(
-      <ShowFileCard
+      <ShowUserCard
         display={{
-          type: "show_file",
+          type: "show_user",
           kind: "text",
           path: "src/app.py",
           filename: "app.py",
@@ -201,9 +201,9 @@ describe("ShowFileCard", () => {
       "",
     ].join("\n")
     render(
-      <ShowFileCard
+      <ShowUserCard
         display={{
-          type: "show_file",
+          type: "show_user",
           kind: "diff",
           path: ".open-swe/artifacts/changes.patch",
           filename: "changes.patch",

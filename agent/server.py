@@ -182,7 +182,7 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
-    show_file,
+    show_user,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -397,7 +397,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "manage_thread",
         "notify_automation_channel",
         "read_user_settings",
-        "show_file",
+        "show_user",
     }
 
 
@@ -1096,7 +1096,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
-        *((show_file,) if _ui_tools_enabled(cfg) else ()),
+        *((show_user,) if _ui_tools_enabled(cfg) else ()),
         manage_code_channel,
         slack_add_reaction,
         slack_attach_html,
@@ -1110,7 +1110,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     static_tools = apply_tool_descriptions(static_tools)
     if local_run:
-        static_tools = apply_tool_descriptions([http_request, fetch_url, web_search, show_file])
+        static_tools = apply_tool_descriptions([http_request, fetch_url, web_search, show_user])
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}

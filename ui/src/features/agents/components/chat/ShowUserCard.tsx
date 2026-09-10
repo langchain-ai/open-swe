@@ -4,7 +4,7 @@ import { File as PierreFile, PatchDiff } from "@pierre/diffs/react"
 import type { SelectedLineRange } from "@pierre/diffs/react"
 
 import { openDownload } from "./OutputIframe"
-import type { ShowFileDisplay } from "@/features/agents/lib/types"
+import type { ShowUserDisplay } from "@/features/agents/lib/types"
 import {
   ARTIFACT_ALLOW,
   ARTIFACT_SANDBOX,
@@ -50,7 +50,7 @@ function fenceLanguage(filename: string): string {
   return extension === filename ? "" : extension.toLowerCase()
 }
 
-export function ShowFileCard({ display }: { display: ShowFileDisplay }) {
+export function ShowUserCard({ display }: { display: ShowUserDisplay }) {
   const [expanded, setExpanded] = useState(true)
   const [selection, setSelection] = useState<Selection | null>(() =>
     display.kind === "text"
@@ -232,7 +232,7 @@ function TextBody({
   display,
   selection,
   onSelect,
-}: BodyProps & { display: Extract<ShowFileDisplay, { kind: "text" }> }) {
+}: BodyProps & { display: Extract<ShowUserDisplay, { kind: "text" }> }) {
   const diffOptions = useDiffOptions()
   const scrolledRef = useRef(false)
   const options = useMemo(

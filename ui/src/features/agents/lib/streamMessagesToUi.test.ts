@@ -223,7 +223,7 @@ describe("streamMessagesToUi", () => {
     })
   })
 
-  it("attaches show_file artifacts as a typed display", () => {
+  it("attaches show_user artifacts as a typed display", () => {
     const messages = streamMessagesToUi([
       new AIMessage({
         id: "ai-1",
@@ -231,7 +231,7 @@ describe("streamMessagesToUi", () => {
         tool_calls: [
           {
             id: "call-1",
-            name: "show_file",
+            name: "show_user",
             args: { path: "src/app.py", start_line: 2, end_line: 3 },
             type: "tool_call",
           },
@@ -241,7 +241,7 @@ describe("streamMessagesToUi", () => {
         tool_call_id: "call-1",
         content: "Displayed src/app.py lines 2-3 of 4 in the dashboard.",
         artifact: {
-          type: "show_file",
+          type: "show_user",
           kind: "text",
           path: "src/app.py",
           filename: "app.py",
@@ -257,7 +257,7 @@ describe("streamMessagesToUi", () => {
     const agent = messages.find((message) => message.author === "agent")
     const tool = agent?.chunks.find((chunk) => chunk.kind === "tool-execution")
     expect(tool?.kind === "tool-execution" ? tool.display : undefined).toEqual({
-      type: "show_file",
+      type: "show_user",
       kind: "text",
       path: "src/app.py",
       filename: "app.py",

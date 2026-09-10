@@ -14,7 +14,7 @@ import type {
   DiffData,
   Message,
   OutputIframeDisplay,
-  ShowFileDisplay,
+  ShowUserDisplay,
   ToolExecutionChunk,
 } from "./types"
 
@@ -271,14 +271,14 @@ function isHttpUrl(value: unknown): value is string {
 
 function showFileDisplay(
   toolMessage: ToolMessage | undefined
-): ShowFileDisplay | undefined {
+): ShowUserDisplay | undefined {
   const artifact = toolMessage?.artifact
   if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
     return undefined
   }
   const value = artifact as Record<string, unknown>
   if (
-    value.type !== "show_file" ||
+    value.type !== "show_user" ||
     typeof value.path !== "string" ||
     typeof value.filename !== "string" ||
     typeof value.title !== "string"
@@ -286,7 +286,7 @@ function showFileDisplay(
     return undefined
   }
   const base = {
-    type: "show_file" as const,
+    type: "show_user" as const,
     path: value.path,
     filename: value.filename,
     title: value.title,

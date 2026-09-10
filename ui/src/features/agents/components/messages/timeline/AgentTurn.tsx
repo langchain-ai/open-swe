@@ -21,7 +21,7 @@ import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
-import { ShowFileCard } from "@/features/agents/components/chat/ShowFileCard"
+import { ShowUserCard } from "@/features/agents/components/chat/ShowUserCard"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
 
@@ -244,9 +244,9 @@ export function AgentTurn({
           <OutputIframe key={item.key} display={item.chunk.display} />
         ) : null
 
-      case "file-item":
-        return item.chunk.display?.type === "show_file" ? (
-          <ShowFileCard key={item.key} display={item.chunk.display} />
+      case "show-user-item":
+        return item.chunk.display?.type === "show_user" ? (
+          <ShowUserCard key={item.key} display={item.chunk.display} />
         ) : null
 
       case "tool-item":
