@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { Check, Copy, WrapText } from "lucide-react"
 import { getSingletonHighlighter } from "shiki"
 import type { ThemedToken } from "shiki"
 import { useResolvedTheme } from "@/lib/theme"
@@ -6,6 +7,8 @@ import { useResolvedTheme } from "@/lib/theme"
 interface CodeBlockProps {
   text: string
   language?: string
+  /** Filename from the fence meta (```ts title="src/main.ts"), shown instead of the language. */
+  title?: string | null
 }
 
 const SHIKI_THEME = { light: "github-light", dark: "github-dark" } as const
@@ -33,6 +36,8 @@ function normalizeLanguage(language?: string): string {
     "c#": "csharp",
     plaintext: "text",
     txt: "text",
+    // Shiki has no gitignore grammar; ini is a close match.
+    gitignore: "ini",
   }
 
   return aliases[raw] || raw
@@ -45,9 +50,13 @@ function languageLabel(language: string): string {
   return language
 }
 
-export function CodeBlock({ text, language }: CodeBlockProps) {
+export function CodeBlock({ text, language, title }: CodeBlockProps) {
+  // Only the parser-added terminal newline: trailing spaces and blank lines are
+  // part of the fence, and this value is what Copy writes to the clipboard.
+  const code = useMemo(() => text.replace(/\n$/, ""), [text])
   const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null)
   const [copied, setCopied] = useState(false)
+  const [wrapped, setWrapped] = useState(false)
   const resolvedTheme = useResolvedTheme()
   const shikiTheme = SHIKI_THEME[resolvedTheme]
   const normalizedLanguage = useMemo(
@@ -66,7 +75,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
 
     if (normalizedLanguage === "text") return
 
-    const cacheKey = `${shikiTheme}::${normalizedLanguage}::${text}`
+    const cacheKey = `${shikiTheme}::${normalizedLanguage}::${code}`
     const cached = TOKEN_CACHE.get(cacheKey)
     if (cached) {
       setTokens(cached)
@@ -79,7 +88,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
     })
       .then((highlighter) => {
         if (cancelled) return
-        const result = highlighter.codeToTokens(text, {
+        const result = highlighter.codeToTokens(code, {
           lang: normalizedLanguage as any,
           theme: shikiTheme,
         })
@@ -97,11 +106,11 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
     return () => {
       cancelled = true
     }
-  }, [text, normalizedLanguage, shikiTheme])
+  }, [code, normalizedLanguage, shikiTheme])
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(code)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1200)
     } catch {
@@ -109,40 +118,66 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
     }
   }
 
+  const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines"
+  const lineClassName = wrapped
+    ? "[overflow-wrap:anywhere] break-words whitespace-pre-wrap"
+    : "whitespace-pre"
+
   return (
-    <div className="my-2 max-w-full overflow-hidden rounded-xl border border-border/60 bg-muted">
-      <div className="flex items-center justify-between px-3 py-2 text-xs">
-        <span className="font-mono text-muted-foreground">
-          {displayLanguage}
+    <div className="my-[0.65rem] max-w-full overflow-hidden rounded-lg border border-border/70 bg-muted/50">
+      <div className="flex items-center justify-between gap-2 pt-1 pr-1 pl-2.5 select-none">
+        <span className="truncate font-mono text-[11px] text-muted-foreground">
+          {title || displayLanguage}
         </span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="text-muted-foreground transition-colors hover:text-foreground"
-          title="Copy code"
+        <span
+          className="flex items-center gap-0.5"
+          role="toolbar"
+          aria-label="Code block actions"
         >
-          {copied ? "Copied" : "Copy"}
-        </button>
+          <button
+            type="button"
+            onClick={() => setWrapped((value) => !value)}
+            aria-pressed={wrapped}
+            aria-label={wrapLabel}
+            title={wrapLabel}
+            className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground aria-pressed:text-foreground"
+          >
+            <WrapText className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleCopy}
+            aria-label={copied ? "Copied" : "Copy code"}
+            title={copied ? "Copied" : "Copy code"}
+            className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {copied ? (
+              <Check className="size-3.5" />
+            ) : (
+              <Copy className="size-3.5" />
+            )}
+          </button>
+        </span>
       </div>
-      <pre className="max-w-full px-3 pb-3 text-[12px] [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
+      <pre
+        className={`max-w-full overflow-x-auto px-2.5 pt-0.5 pb-2.5 text-[12.5px] leading-[1.55] ${wrapped ? "whitespace-pre-wrap" : ""}`}
+      >
         {tokens ? (
           <code className="block max-w-full">
             {tokens.map((lineTokens, lineIndex) => (
-              <div
-                key={lineIndex}
-                className="max-w-full [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
-              >
+              <div key={lineIndex} className={`max-w-full ${lineClassName}`}>
                 {lineTokens.map((token, tokenIndex) => (
                   <span key={tokenIndex} style={{ color: token.color }}>
                     {token.content}
                   </span>
                 ))}
+                {lineTokens.length === 0 ? "\n" : null}
               </div>
             ))}
           </code>
         ) : (
-          <code className="block max-w-full [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-foreground">
-            {text}
+          <code className={`block max-w-full text-foreground ${lineClassName}`}>
+            {code}
           </code>
         )}
       </pre>

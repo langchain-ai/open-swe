@@ -42,7 +42,7 @@ def _load_e2b_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "e2b", fake_e2b)
     monkeypatch.setitem(sys.modules, "langchain_e2b", fake_langchain_e2b)
 
-    module_path = ROOT / "agent" / "integrations" / "e2b.py"
+    module_path = ROOT / "agent" / "sandboxes" / "providers" / "e2b.py"
     spec = importlib.util.spec_from_file_location("e2b_under_test", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -85,14 +85,11 @@ def test_create_e2b_sandbox_reconnects_by_id(monkeypatch):
     assert _FakeSandbox.create_calls == []
 
 
-def test_e2b_rejects_empty_template(monkeypatch):
+def test_e2b_treats_blank_template_as_unset(monkeypatch):
     monkeypatch.setenv("E2B_API_KEY", "api-key")
     monkeypatch.setenv("E2B_TEMPLATE", "  ")
     module = _load_e2b_module(monkeypatch)
 
-    try:
-        module.create_e2b_sandbox()
-    except ValueError as exc:
-        assert "E2B_TEMPLATE must not be empty" in str(exc)
-    else:
-        raise AssertionError("expected empty E2B_TEMPLATE to fail")
+    module.create_e2b_sandbox()
+
+    assert _FakeSandbox.create_calls == [{"timeout": 3600, "api_key": "api-key"}]

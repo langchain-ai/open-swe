@@ -14,9 +14,9 @@ from agent import background_tasks
 from agent.background_tasks import monitor_background_tasks
 from agent.tools.background_execute import (
     TASK_ROOT,
-    _control_script,
     _launch_command,
     background_execute,
+    control_script,
 )
 
 # _launch_command refuses to run without setsid, which macOS does not ship; the
@@ -28,7 +28,7 @@ requires_setsid = pytest.mark.skipif(
 
 def _run_control(action: str, task_id: str) -> dict:
     result = subprocess.run(
-        ["python3", "-c", _control_script(action, task_id)],
+        ["python3", "-c", control_script(action, task_id)],
         capture_output=True,
         check=True,
         text=True,
@@ -136,7 +136,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
             "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
         ),
         patch(
-            "agent.tools.background_execute._execute",
+            "agent.tools.background_execute.execute",
             AsyncMock(
                 side_effect=[
                     {"tasks": []},
@@ -178,8 +178,8 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
             "github_login": "brendan",
             "source_context": {
                 "slack_thread": {
-                    "channel_id": "C1",
-                    "thread_ts": "1.2",
+                    "channel_id": "C123",
+                    "thread_ts": "123.45",
                     "triggering_user_id": "U1",
                 }
             },
@@ -203,13 +203,16 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     assert result == {"status": "idle", "delivered": 1}
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
+    configurable = dispatch.await_args.args[1]
+    assert configurable["source"] == "slack"
+    assert configurable["background_task_completion"] is True
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
     assert dispatch.await_args.kwargs["source"] == "slack"
     assert dispatch.await_args.args[0] == "thread-1"
     run_input = dispatch.await_args.kwargs["input"]
     envelope = ElementTree.fromstring(run_input["messages"][-1]["content"])
     assert envelope.attrib == {
-        "sender": "system:background-task-monitor",
+        "sender": "system:background-task",
         "surface": "automation",
         "kind": "system",
     }

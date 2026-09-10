@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { api, slackConnectUrl } from "@/lib/api"
+import { api, connectService } from "@/lib/api"
 import {
   buildProfileUpdate,
   useOptions,
@@ -21,14 +21,16 @@ import {
 } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
+const SLACK_ONBOARDING_DISMISSED_KEY = "open-swe.slack-onboarding-dismissed"
+
 /**
  * First-run onboarding modal: pick a default agent model, then connect Slack.
  *
  * The model step shows until the user has saved a default model; the Slack step
  * shows (where Sign in with Slack is enabled) until their Slack account is
  * linked. Both steps live in the same dialog so a new user is walked through
- * picking a model and connecting Slack in one place. Dismissing hides it for
- * the session; an incomplete step reappears on the next login.
+ * picking a model and connecting Slack in one place. The Slack prompt can be
+ * permanently dismissed in the current browser.
  */
 export function OnboardingDialog() {
   const session = useSession()
@@ -37,9 +39,20 @@ export function OnboardingDialog() {
   const options = useOptions()
   const save = useSaveProfile()
   const [dismissed, setDismissed] = useState(false)
+  const [slackDismissed, setSlackDismissed] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const firstModel: ModelOption | undefined = options.data?.models[0]
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setSlackDismissed(
+      window.localStorage.getItem(SLACK_ONBOARDING_DISMISSED_KEY) === "true"
+    )
+  }, [])
+
+  const defaultModels = options.data?.models.filter(
+    (model) => model.can_be_default !== false
+  )
+  const firstModel: ModelOption | undefined = defaultModels?.[0]
   const defaultModel = options.data?.default_agent_model ?? firstModel?.id ?? ""
   const defaultEffort =
     options.data?.default_agent_reasoning_effort ??
@@ -54,7 +67,7 @@ export function OnboardingDialog() {
   }, [modelId, defaultModel])
 
   const currentModel: ModelOption | undefined =
-    options.data?.models.find((m) => m.id === modelId) ?? firstModel
+    defaultModels?.find((m) => m.id === modelId) ?? firstModel
 
   useEffect(() => {
     if (!currentModel) return
@@ -71,7 +84,11 @@ export function OnboardingDialog() {
   const needsModel =
     !profile.isLoading && profile.data !== undefined && !hasDefaultModel
   const needsSlack =
-    slackEnabled && !slackConnected && !mapping.isLoading && !mapping.isError
+    slackEnabled &&
+    !slackConnected &&
+    !slackDismissed &&
+    !mapping.isLoading &&
+    !mapping.isError
   const open = !dismissed && (needsModel || needsSlack)
   const step: "model" | "slack" = needsModel ? "model" : "slack"
 
@@ -120,7 +137,7 @@ export function OnboardingDialog() {
                       <SelectValue placeholder="Pick a model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {options.data?.models.map((m) => (
+                      {defaultModels?.map((m) => (
                         <SelectItem key={m.id} value={m.id}>
                           {m.label}
                         </SelectItem>
@@ -186,13 +203,23 @@ export function OnboardingDialog() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setDismissed(true)}
+                  onClick={() => {
+                    window.localStorage.setItem(
+                      SLACK_ONBOARDING_DISMISSED_KEY,
+                      "true"
+                    )
+                    setSlackDismissed(true)
+                  }}
                 >
-                  Maybe later
+                  Don't ask again
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => window.location.assign(slackConnectUrl())}
+                  onClick={() =>
+                    void connectService("slack")?.finally(
+                      () => void mapping.refetch()
+                    )
+                  }
                 >
                   <IoLogoSlack className="size-4" />
                   Connect Slack

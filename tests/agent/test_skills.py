@@ -130,7 +130,7 @@ async def test_skill_listing_returns_next_offset() -> None:
 async def test_save_organization_skill_requires_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with patch(
-        "agent.tools.admin_gate.get_config",
+        "agent.run_config.get_config",
         return_value={"configurable": {"github_login": "someone-else"}},
     ):
         result = await save_organization_skill("deslop", "Minimize diffs")

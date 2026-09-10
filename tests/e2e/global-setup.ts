@@ -2,11 +2,39 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-// Build the real ui/ app once, then run its Nitro server so the harness can
-// proxy page requests to it — the tests exercise server rendering, not a
-// prerendered shell. Both API bases are baked in at build time, so they must
-// match the harness port. Set E2E_FORCE_UI_BUILD=1 to rebuild (e.g. after
-// changing the port or the UI).
+function reclaimStaleUiServer(port: string, server: string) {
+  let output: string;
+  try {
+    output = execFileSync(
+      "lsof",
+      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+      { encoding: "utf8" },
+    );
+  } catch (error) {
+    if ((error as { status?: number }).status === 1) return;
+    throw error;
+  }
+  const pids = new Set(output.match(/\d+/g) ?? []);
+  for (const pid of pids) {
+    const command = execFileSync("ps", ["-p", pid, "-o", "command="], {
+      encoding: "utf8",
+    }).trim();
+    if (!command.includes(server)) {
+      throw new Error(`E2E UI port ${port} is already in use by PID ${pid}`);
+    }
+  }
+  for (const pid of pids) process.kill(Number(pid), "SIGKILL");
+}
+
+// Build the real ui/ app once, then run its Nitro server — the origin the specs
+// drive, exactly as a deployed browser does. The client API base is left empty
+// so its `/dashboard/api/*` calls are same-origin and reach the backend through
+// the app server's own proxy handler, which is the only path a deployment has.
+// Baking the harness in as the API base instead pointed the browser straight at
+// the backend, so the suite never ran the proxy and stayed green while it was
+// broken. E2E_HARNESS makes the built server front the harness's fake-SaaS and
+// control routes too, keeping the specs on one origin.
+// Set E2E_FORCE_UI_BUILD=1 to rebuild (e.g. after changing the port or the UI).
 export default async function globalSetup() {
   const repoRoot = resolve(__dirname, "..", "..");
   const ui = resolve(repoRoot, "ui");
@@ -14,6 +42,8 @@ export default async function globalSetup() {
   const port = process.env.E2E_PORT ?? "2024";
   const uiPort = process.env.E2E_UI_PORT ?? "3100";
   const harness = `http://127.0.0.1:${port}`;
+
+  reclaimStaleUiServer(uiPort, server);
 
   if (!existsSync(server) || process.env.E2E_FORCE_UI_BUILD) {
     if (!existsSync(resolve(ui, "node_modules"))) {
@@ -31,8 +61,9 @@ export default async function globalSetup() {
       stdio: "inherit",
       env: {
         ...process.env,
-        VITE_DASHBOARD_API_BASE_URL: harness,
+        VITE_DASHBOARD_API_BASE_URL: "",
         DASHBOARD_API_URL: harness,
+        E2E_HARNESS: harness,
       },
     });
   }

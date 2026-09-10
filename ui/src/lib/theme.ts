@@ -32,11 +32,29 @@ export function resolveTheme(theme: Theme): ResolvedTheme {
   return theme
 }
 
+/** Browser chrome colour per resolved theme, mirroring `--background`. */
+export const THEME_COLOR = { light: "#fcfcfc", dark: "#0a0a0a" } as const
+
 function applyTheme(resolved: ResolvedTheme) {
   if (typeof document === "undefined") return
   const root = document.documentElement
   root.classList.toggle("dark", resolved === "dark")
   root.style.colorScheme = resolved
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", THEME_COLOR[resolved])
+}
+
+/**
+ * Point the desktop window's native appearance at the app's own theme, so
+ * macOS draws the traffic lights to match the UI rather than the OS.
+ *
+ * Sends the preference, not the resolved value: pinning themeSource to
+ * light/dark while the user chose "system" would flip `prefers-color-scheme`
+ * underneath `resolveTheme`, which reads it back.
+ */
+function syncDesktopAppearance(theme: Theme) {
+  void window.openSweDesktop?.setAppearance(theme)
 }
 
 /** Theme state with system detection, persistence, and `.dark` class syncing. */
@@ -53,6 +71,7 @@ export function useTheme() {
       setThemeState(stored)
       setResolvedTheme(resolved)
       applyTheme(resolved)
+      syncDesktopAppearance(stored)
     }
     syncPreference()
 
@@ -81,6 +100,7 @@ export function useTheme() {
     setThemeState(next)
     setResolvedTheme(resolved)
     applyTheme(resolved)
+    syncDesktopAppearance(next)
   }, [])
 
   const toggleTheme = useCallback(() => {

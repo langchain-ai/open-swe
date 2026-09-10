@@ -5,11 +5,12 @@ from uuid import uuid4
 
 from langchain_core.tools import tool
 
-from ..utils.html_artifact import artifact_skeleton, sandbox_wrap_command
-from .create_sandbox_file_download_url import (
-    _resolve_sandbox_file,
+from agent.prompts import load_prompt
+from agent.tools.create_sandbox_file_download_url import (
     create_sandbox_file_download_url,
+    resolve_sandbox_file,
 )
+from agent.utils.html_artifact import artifact_skeleton, sandbox_wrap_command
 
 _MAX_HTML_BYTES = 1_000_000
 
@@ -19,7 +20,7 @@ async def _output_iframe(
     title: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Display a sandbox HTML file in an isolated iframe in the dashboard."""
-    backend, source_path, work_dir = await _resolve_sandbox_file(path)
+    backend, source_path, work_dir = await resolve_sandbox_file(path)
     quoted_source = shlex.quote(source_path)
     stat = await backend.aexecute(f"test -f {quoted_source} && stat -c %s -- {quoted_source}")
     if stat.exit_code != 0:
@@ -89,11 +90,6 @@ async def _output_iframe(
 
 output_iframe = tool(
     "output_iframe",
-    description="""Display a self-contained HTML file from the sandbox in an isolated dashboard
-iframe. Use this for visualizations, diagrams, interactive demos, SVG graphics, and small HTML
-apps. Read the `html-artifacts` skill for the authoring rules: inline scripts, styles, Canvas,
-WebGL, and data-URI assets all run, and omitting `<html>`/`<head>`/`<body>` wraps the content
-in that skeleton with a minimal CSS reset. Relative paths are resolved from the sandbox
-working directory. Do not use this for regular text responses or file operations.""",
+    description=load_prompt("tools/output_iframe.md"),
     response_format="content_and_artifact",
 )(_output_iframe)

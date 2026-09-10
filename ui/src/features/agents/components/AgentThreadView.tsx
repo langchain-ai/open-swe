@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
-  FolderOpen,
+  GitMerge as GitMergeIcon,
 } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 
@@ -15,18 +14,19 @@ import type {
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
-import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
+import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
+import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
-import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
+import type { MessagesScrollControl } from "@/features/agents/components/messages"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
@@ -34,14 +34,20 @@ import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitA
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
   useAgentSkills,
+  useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
-import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
+import {
+  visiblePendingMessages,
+  visibleQueuedMessages,
+} from "@/features/agents/lib/queuedMessages"
 import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useReconcileStream } from "@/features/agents/lib/stream/useReconcileStream"
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -77,18 +83,15 @@ function CodeChannelLink({ url }: { url?: string | null }) {
   )
 }
 
-// The stream lives at the `/agents` layout (one persistent provider that
-// survives the home → thread navigation), so this view only consumes it.
 export function AgentThreadView({
   thread,
   autoFocusComposer = false,
 }: AgentThreadViewProps) {
+  const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
-  const stream = useAgentThreadStream()
+  const stream = useAgentStream()
+  useReconcileStream(thread.id, thread.status === "running")
   const isMobile = useIsMobile()
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
   const session = useSession()
   const canPost =
@@ -116,12 +119,14 @@ export function AgentThreadView({
   const [planMode, setPlanMode] = useState<boolean | null>(null)
   const [planFeedbackPending, setPlanFeedbackPending] =
     useState(autoFocusComposer)
+  const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const activePlanMode = planMode ?? thread.planMode ?? false
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
   const submitMessage = useCallback(
     async (content: string, images: Array<ImageChunk>) => {
+      scrollControlRef.current?.scrollToBottom()
       if (planFeedbackPending) await rejectPlan(thread.id, false)
       await sendMessage.mutateAsync({
         content,
@@ -179,28 +184,34 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
-  const baseMessages = useMemo<Array<Message>>(() => {
-    if (thread.messages.length > 0) return thread.messages
-    return streamMessagesToUi(
-      stream.messages,
-      stream.toolCalls,
-      messageArrivalTimestamp
-    )
-  }, [stream.messages, stream.toolCalls, thread.messages])
+  const baseMessages = useMemo<Array<Message>>(
+    () =>
+      streamMessagesToUi(
+        stream.messages,
+        stream.toolCalls,
+        messageArrivalTimestamp
+      ),
+    [stream.messages, stream.toolCalls]
+  )
 
-  const isStreaming =
-    thread.status === "running" ||
-    stream.isLoading ||
-    thread.messages.length > 0
+  const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
   )
-  const queuedMessages = useMemo(
-    () => visibleQueuedMessages(thread.queuedMessages, baseMessages),
-    [baseMessages, thread.queuedMessages]
+  const pendingMessages = useMemo(
+    () => visiblePendingMessages(thread.pendingMessages, baseMessages),
+    [baseMessages, thread.pendingMessages]
   )
-  const hasMessages = baseMessages.length > 0
+  const visibleMessages = useMemo(
+    () => [...baseMessages, ...pendingMessages],
+    [baseMessages, pendingMessages]
+  )
+  const queuedMessages = useMemo(
+    () => visibleQueuedMessages(thread.queuedMessages, visibleMessages),
+    [thread.queuedMessages, visibleMessages]
+  )
+  const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedMessages.length > 0
   // The only file list the UI has: whatever the agent has already touched in
   // this thread. Those are also the paths a follow-up is most likely about.
@@ -229,10 +240,6 @@ export function AgentThreadView({
 
   return (
     <div className="flex min-w-0 flex-1">
-      <OptimisticThreadHydrationRecovery
-        threadId={thread.id}
-        enabled={thread.messages.length > 0}
-      />
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col",
@@ -240,30 +247,16 @@ export function AgentThreadView({
         )}
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <header
-          data-desktop-drag-region=""
-          className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
-        >
-          <div
-            className={cn(
-              "flex h-full w-full items-center gap-3 px-4",
-              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
-              panelCollapsed && "pr-14"
-            )}
-          >
-            {thread.repoFullName && (
-              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-                <FolderOpen className="size-3.5 shrink-0" />
-                <span className="truncate" title={thread.repoFullName}>
-                  {thread.repoFullName}
-                </span>
-              </span>
-            )}
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              Cloud
-            </span>
-          </div>
-        </header>
+        <AgentThreadHeader
+          key={thread.id}
+          title={thread.title}
+          onRename={(title) =>
+            renameThread.mutateAsync({ threadId: thread.id, title })
+          }
+          target="Cloud"
+          panelCollapsed={panelCollapsed}
+          thread={thread}
+        />
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
@@ -289,100 +282,94 @@ export function AgentThreadView({
             </Alert>
           </div>
         )}
-        <WorkflowApprovalCard
-          threadId={thread.id}
-          pollWhileActive={isStreaming}
-        />
-        {hasConversation ? (
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        {thread.attentionReason === "prs_closed" && !thread.resolved && (
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+            <Alert variant="info">
+              <GitMergeIcon />
+              <AlertDescription>
+                <span>
+                  Every pull request from this thread is merged or closed.
+                  Resolve the thread if the work is done, or send a follow-up to
+                  keep going.
+                </span>
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          {isHydrating ? (
+            <div className="flex flex-1 items-center justify-center px-6">
+              <img
+                src={`${import.meta.env.BASE_URL}logo-mark.png`}
+                alt="Loading conversation"
+                className="size-12 animate-pulse"
+              />
+            </div>
+          ) : (
             <Messages
-              messages={baseMessages}
+              messages={visibleMessages}
               threadId={thread.id}
+              scrollKey={thread.id}
               showPlanArtifact={
                 thread.planStatus === "ready" || thread.planStatus === "shared"
+              }
+              emptyState={
+                <div className="flex min-h-60 items-center justify-center">
+                  {hydrationFailed ? (
+                    <Alert variant="error" className="max-w-3xl">
+                      <CircleAlertIcon />
+                      <AlertDescription>
+                        <span>
+                          This thread&apos;s messages could not be loaded.
+                          Reload to try again.
+                        </span>
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <p className="text-xs text-muted-foreground/70">
+                      This thread has no messages yet.
+                    </p>
+                  )}
+                </div>
               }
               onOpenFile={handleOpenFile}
               queuedMessages={queuedMessages}
               isStreaming={isStreaming}
               streamIsLoading={stream.isLoading}
+              scrollControlRef={scrollControlRef}
               isThinking={isThinking}
               settingUpSandbox={settingUpSandbox}
+              pollWorkflowApprovalsWhileActive={isStreaming}
               contentWidthClass="max-w-3xl"
+              footer={
+                !isStreaming &&
+                !sendMessage.isPending &&
+                queuedMessages.length === 0 && (
+                  <ThreadFeedbackCard
+                    key={`${thread.id}:${session.data?.login ?? ""}`}
+                    threadId={thread.id}
+                    login={session.data?.login ?? null}
+                  />
+                )
+              }
             />
-            <div className="shrink-0 px-4 pb-4">
-              <div className="mx-auto w-full max-w-3xl min-w-0">
-                <CodeChannelLink url={thread.codeChannelUrl} />
-                <ThreadPullRequests
-                  pullRequests={thread.pullRequests ?? []}
-                  health={pullRequestHealth}
-                  healthUnavailable={pullRequestStatus.isError}
-                  onFix={fixPullRequest}
-                  fixDisabled={!canPost || sendMessage.isPending}
-                />
-                <AgentPromptBar
-                  placeholder={
-                    canPost
-                      ? "Add a follow up"
-                      : "Only workspace admins can send messages in this thread"
-                  }
-                  autoFocus={autoFocusComposer}
-                  compact
-                  disabled={!canPost}
-                  busy={isStreaming}
-                  activeRun={activeRun}
-                  onSubmit={submitMessage}
-                  models={models}
-                  selection={activeSelection}
-                  onSelectionChange={setSelection}
-                  planMode={activePlanMode}
-                  onPlanModeChange={setPlanMode}
-                  mentionPaths={mentionPaths}
-                  skills={skills.data}
-                  contextUsage={{
-                    usedTokens,
-                    contextWindow: activeModel?.context_window ?? null,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        ) : isHydrating ? (
-          <div className="flex flex-1 items-center justify-center px-6">
-            <img
-              src="/logo-mark.png"
-              alt="Loading conversation"
-              className="size-12 animate-pulse"
-            />
-          </div>
-        ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            {hydrationFailed ? (
-              <Alert variant="error" className="max-w-3xl">
-                <CircleAlertIcon />
-                <AlertDescription>
-                  <span>
-                    This thread&apos;s messages could not be loaded. Reload to
-                    try again.
-                  </span>
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <p className="text-xs text-muted-foreground/70">
-                This thread has no messages yet.
-              </p>
-            )}
-            <div className="w-full max-w-3xl">
+          )}
+          {!isHydrating && (
+            <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
               <ThreadPullRequests
                 pullRequests={thread.pullRequests ?? []}
                 health={pullRequestHealth}
+                healthUnavailable={pullRequestStatus.isError}
                 onFix={fixPullRequest}
                 fixDisabled={!canPost || sendMessage.isPending}
               />
               <AgentPromptBar
                 placeholder={
                   canPost
-                    ? "Send the first message"
+                    ? hasConversation
+                      ? "Add a follow up"
+                      : "Send the first message"
                     : "Only workspace admins can send messages in this thread"
                 }
                 autoFocus={autoFocusComposer}
@@ -390,26 +377,22 @@ export function AgentThreadView({
                 disabled={!canPost}
                 busy={isStreaming}
                 activeRun={activeRun}
-                onSubmit={(content, images) =>
-                  sendMessage.mutateAsync({
-                    content,
-                    images,
-                    model_id: activeSelection?.modelId ?? null,
-                    effort: activeSelection?.effort ?? null,
-                  })
-                }
+                onSubmit={submitMessage}
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={setSelection}
+                planMode={activePlanMode}
+                onPlanModeChange={setPlanMode}
+                mentionPaths={mentionPaths}
                 skills={skills.data}
                 contextUsage={{
                   usedTokens,
                   contextWindow: activeModel?.context_window ?? null,
                 }}
               />
-            </div>
-          </div>
-        )}
+            </AgentComposerDock>
+          )}
+        </div>
       </div>
       <AgentGitPanel
         thread={thread}

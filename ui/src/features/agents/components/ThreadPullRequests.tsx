@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
 const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
   draft: "bg-muted text-muted-foreground",
   open: "bg-success/15 text-success-foreground",
-  merged: "bg-info/15 text-info-foreground",
+  merged: "bg-merged/15 text-merged-foreground",
   closed: "bg-destructive/10 text-destructive",
 }
 

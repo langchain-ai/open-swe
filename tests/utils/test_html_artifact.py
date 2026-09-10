@@ -1,4 +1,5 @@
 import subprocess
+import sys
 
 import pytest
 
@@ -42,6 +43,17 @@ def test_scripts_and_forms_survive_wrapping() -> None:
     assert f"<title>{DEFAULT_TITLE}</title>" in wrapped
 
 
+# sandbox_wrap_command emits a POSIX pipeline (printf | base64 -d | python3 -) for
+# the Linux sandbox to run. subprocess.run(shell=True) sends it through cmd.exe on
+# Windows, which has neither base64 nor python3 and does not treat ' as a quote.
+# Deliberately keyed on the platform rather than on tool availability, so a POSIX
+# CI box missing python3 fails loudly instead of quietly skipping.
+_requires_posix_shell = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="sandbox_wrap_command is a POSIX shell pipeline",
+)
+
+
 @pytest.mark.parametrize(
     "content",
     [
@@ -54,6 +66,7 @@ def test_scripts_and_forms_survive_wrapping() -> None:
         "<h1>caf\u00e9 \u2014 na\u00efve</h1>",
     ],
 )
+@_requires_posix_shell
 def test_sandbox_command_matches_in_process_wrapping(content: str, tmp_path) -> None:
     source = tmp_path / "artifact.html"
     destination = tmp_path / "snapshot.html"
@@ -69,6 +82,7 @@ def test_sandbox_command_matches_in_process_wrapping(content: str, tmp_path) -> 
     assert int(result.stdout.strip()) == len(expected.encode())
 
 
+@_requires_posix_shell
 def test_sandbox_command_truncates_at_the_limit(tmp_path) -> None:
     source = tmp_path / "artifact.html"
     destination = tmp_path / "snapshot.html"

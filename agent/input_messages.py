@@ -83,8 +83,6 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
     "system": ("display_name", "platform", "sender_type", "subject_id", "context_hash"),
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
-_SYSTEM_ENTITY_ID = "system:open-swe"
-_SYSTEM_WRAPPER_MARKER = '<system-instructions format="open-swe-v1">'
 
 
 def _xml_text(value: object) -> str:
@@ -363,12 +361,12 @@ def build_input_messages(
         injected_dynamic_context_hashes if injected_dynamic_context_hashes is not None else set()
     )
     messages: list[RunMessage] = []
-    for identity, builder in (
-        *((person, person_introduction) for person in people or []),
-        *((channel, channel_introduction) for channel in channels or []),
-        *((system, system_introduction) for system in systems or []),
-    ):
-        message = builder(identity)  # type: ignore[arg-type]
+    introductions = [
+        *(person_introduction(person) for person in people or []),
+        *(channel_introduction(channel) for channel in channels or []),
+        *(system_introduction(system) for system in systems or []),
+    ]
+    for message in introductions:
         context_hash = dynamic_context_hash(message["content"])
         if context_hash is None or context_hash in injected:
             continue
@@ -429,39 +427,4 @@ def build_system_run_input(
             "data": data or {},
         },
         systems=[system],
-    )
-
-
-def wrap_system_prompt(text: str, *, additions: list[str] | None = None) -> str:
-    if text.startswith(_SYSTEM_WRAPPER_MARKER) and text.endswith("</system-instructions>"):
-        if not additions:
-            return text
-        closing = "</system-instructions>"
-        serialized_additions = [
-            _serialize_message(
-                addition,
-                {"sender_id": _SYSTEM_ENTITY_ID, "surface": "automation", "kind": "system"},
-            )
-            for addition in additions
-        ]
-        extra = "\n".join(item for item in serialized_additions if item not in text)
-        if not extra:
-            return text
-        return f"{text[: -len(closing)]}{extra}\n{closing}"
-    identity = system_introduction(
-        {"id": _SYSTEM_ENTITY_ID, "display_name": "Open SWE", "platform": "open-swe"}
-    )["content"]
-    message = _serialize_message(
-        text,
-        {"sender_id": _SYSTEM_ENTITY_ID, "surface": "automation", "kind": "system"},
-    )
-    extras = [
-        _serialize_message(
-            addition,
-            {"sender_id": _SYSTEM_ENTITY_ID, "surface": "automation", "kind": "system"},
-        )
-        for addition in additions or []
-    ]
-    return "\n".join(
-        [_SYSTEM_WRAPPER_MARKER, str(identity), message, *extras, "</system-instructions>"]
     )

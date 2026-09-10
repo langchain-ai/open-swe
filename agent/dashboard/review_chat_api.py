@@ -4,7 +4,7 @@ A dedicated, sandbox-less ``chat`` graph (``agent/chat.py``) answers questions
 about one PR. This module mints a per-user chat thread, seeds the PR diff,
 review findings, and an overview as virtual files on the first run, and proxies
 the LangGraph stream/commands/state/history protocol the frontend SDK speaks —
-the chat counterpart of ``thread_api``'s agent proxy, pinned to assistant
+the chat counterpart of ``threads.proxy``'s agent proxy, pinned to assistant
 ``chat`` and scoped to the review's PR.
 """
 
@@ -14,24 +14,23 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 
-from agent.thread_ids import reviewer_thread_id
-
-from ..review.diff import fetch_pr_diff
-from ..review.findings import REVIEWER_THREAD_KIND
-from ..utils.github_app import get_github_app_installation_token
-from ..utils.json_types import as_json_object
-from ..utils.thread_ops import langgraph_client, langgraph_url
-from .options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
-from .review_api import classify_finding, get_pr_head_sha, get_review
-from .thread_api import (
-    _DASHBOARD_STREAM_MODES,
-    _langgraph_proxy_headers,
-    _require_json_content_type,
-    _stream_thread_events,
+from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from agent.dashboard.review_api import classify_finding, get_pr_head_sha, get_review
+from agent.dashboard.threads.proxy import (
+    langgraph_proxy_headers,
+    require_json_content_type,
+    stream_thread_events,
 )
+from agent.dashboard.threads.runs import DASHBOARD_STREAM_MODES
+from agent.github.app import get_github_app_installation_token
+from agent.review.diff import fetch_pr_diff
+from agent.review.findings import REVIEWER_THREAD_KIND
+from agent.thread_ids import reviewer_thread_id
+from agent.utils.json_types import as_json_object
+from agent.utils.thread_ops import langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +38,7 @@ _CHAT_ASSISTANT_ID = "chat"
 _CHAT_SOURCE = "review_chat"
 # Sentinel: caller did not pre-fetch the thread metadata, so fetch it here.
 _UNFETCHED = object()
-_PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
 _MAX_DIFF_CHARS = 400_000
 
 
@@ -433,7 +432,7 @@ async def _enrich_chat_command(
         configurable["chat_head_sha"] = stored_head
 
     params["assistant_id"] = _CHAT_ASSISTANT_ID
-    params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
+    params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
     params["config"] = {**client_config, "configurable": configurable}
     command["params"] = params
@@ -454,7 +453,7 @@ async def proxy_review_chat_commands(
     # below on the first `run.start` (with the caller as owner). Reuse the
     # fetched metadata to avoid a second thread read during enrichment.
     metadata = await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -472,8 +471,8 @@ async def proxy_review_chat_commands(
         thread_metadata=metadata,
     )
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
-    headers = _langgraph_proxy_headers(content_type=content_type)
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    headers = langgraph_proxy_headers(content_type=content_type)
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=json.dumps(enriched).encode(), headers=headers)
     return response.status_code, response.content, response.headers.get("content-type")
 
@@ -489,16 +488,16 @@ async def proxy_review_chat_stream_events(
     content_type: str = "application/json",
 ) -> AsyncIterator[bytes]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    _require_json_content_type(content_type)
-    return _stream_thread_events(thread_id, body, content_type)
+    require_json_content_type(content_type)
+    return stream_thread_events(thread_id, body, content_type)
 
 
 async def _proxy_passthrough(
     method: str, thread_id: str, suffix: str, body: bytes | None, content_type: str
 ) -> tuple[int, bytes, str | None]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/{suffix}"
-    headers = _langgraph_proxy_headers(content_type=content_type)
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    headers = langgraph_proxy_headers(content_type=content_type)
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         if method == "GET":
             response = await client.get(url, headers=headers)
         else:
@@ -533,7 +532,7 @@ async def proxy_review_chat_history(
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     status_code, content, media_type = await _proxy_passthrough(
         "POST", thread_id, "history", body, content_type
     )

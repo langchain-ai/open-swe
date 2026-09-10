@@ -2,8 +2,8 @@ from typing import Any
 
 import pytest
 
-from agent.dashboard import analyzer_cron
-from agent.dashboard.review_styles import REVIEW_STYLES, ReviewStyle
+from agent.review import analyzer_cron
+from agent.review.styles import REVIEW_STYLES, ReviewStyle
 
 
 class _FakeCrons:
@@ -27,7 +27,7 @@ class _FakeClient:
 @pytest.fixture
 def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
     client = _FakeClient()
-    monkeypatch.setattr(analyzer_cron, "_client", lambda: client)
+    monkeypatch.setattr(analyzer_cron, "langgraph_client", lambda: client)
     return client
 
 

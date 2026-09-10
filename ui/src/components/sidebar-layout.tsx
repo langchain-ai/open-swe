@@ -125,8 +125,8 @@ export function SidebarFrame({
         data-sidebar-expand=""
         onClick={toggle}
         className={cn(
-          "fixed top-3 left-3 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground",
-          isDesktop && "top-2 left-[90px] border-0 bg-transparent shadow-none"
+          "fixed top-2 left-2 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          isDesktop && "left-[90px]"
         )}
       >
         <SidebarSimpleIcon className="size-4" />

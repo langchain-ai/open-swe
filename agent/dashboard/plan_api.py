@@ -9,13 +9,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.schema import Run
 from pydantic import BaseModel, Field, model_validator
 
-from agent.input_messages import build_system_run_input
-from agent.source_context import SourceContext
-
-from ..dispatch import dispatch_agent_run
-from ..utils.slack import post_slack_thread_reply
-from .oauth import require_same_origin_for_mutations, require_session
-from .plan_store import (
+from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
+from agent.dashboard.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_CANCELLED,
     PLAN_STATUS_READY,
@@ -32,11 +27,15 @@ from .plan_store import (
     set_plan_status,
     write_plan_to_sandbox,
 )
-from .thread_api import (
-    _repo_config_from_metadata,
-    _thread_is_readable,
-    _thread_source,
+from agent.dashboard.threads.summary import (
+    repo_config_from_metadata,
+    thread_is_readable,
+    thread_source,
 )
+from agent.dispatch import dispatch_agent_run
+from agent.input_messages import build_system_run_input
+from agent.slack.client import post_slack_thread_reply
+from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 _plan_approval_locks: dict[str, asyncio.Lock] = {}
@@ -59,7 +58,7 @@ class TextAnchor(BaseModel):
     end: int = Field(gt=0, le=2_000_000)
 
     @model_validator(mode="after")
-    def validate_range(self) -> "TextAnchor":
+    def validate_range(self) -> TextAnchor:
         if self.end <= self.start or self.end - self.start != len(self.exact):
             raise ValueError("anchor range must match the selected text")
         return self
@@ -79,7 +78,7 @@ class PlanRejection(BaseModel):
     dispatch: bool = True
 
 
-async def _thread_metadata(thread_id: str) -> dict[str, Any]:
+async def fetch_thread_metadata(thread_id: str) -> dict[str, Any]:
     client = get_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -93,8 +92,8 @@ async def _thread_metadata(thread_id: str) -> dict[str, Any]:
 
 @plan_router.get("/{thread_id}")
 async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
+    metadata = await fetch_thread_metadata(thread_id)
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
     login = session["sub"]
     email = session.get("email")
@@ -130,8 +129,8 @@ async def update_plan(
     thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     """Save an edited HTML artifact while preserving review comments."""
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
+    metadata = await fetch_thread_metadata(thread_id)
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
     content = await get_plan_content(thread_id) or {}
     _reject_shared_content(content)
@@ -172,8 +171,8 @@ async def update_plan(
 async def get_plan_comments(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
+    metadata = await fetch_thread_metadata(thread_id)
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
     return {"comments": await list_plan_comments(thread_id)}
 
@@ -182,8 +181,8 @@ async def get_plan_comments(
 async def post_plan_comment(
     thread_id: str, body: CommentBody, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
+    metadata = await fetch_thread_metadata(thread_id)
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
     _reject_shared_content(await get_plan_content(thread_id) or {})
     text = body.body.strip()
@@ -203,8 +202,8 @@ async def post_plan_comment(
 async def remove_plan_comment(
     thread_id: str, comment_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
+    metadata = await fetch_thread_metadata(thread_id)
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
     _reject_shared_content(await get_plan_content(thread_id) or {})
     comments = await list_plan_comments(thread_id)
@@ -220,8 +219,8 @@ async def remove_plan_comment(
 
 @plan_router.post("/{thread_id}/approve")
 async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
+    metadata = await fetch_thread_metadata(thread_id)
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
     actor_id = str(session.get("sub") or "").strip()
     return await approve_plan_for_thread(
@@ -242,7 +241,7 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
     )
     lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
     async with lock:
-        metadata = await _thread_metadata(thread_id)
+        metadata = await fetch_thread_metadata(thread_id)
         content = await get_plan_content(thread_id, raise_on_error=True) or {}
         _reject_shared_content(content)
         if (
@@ -281,7 +280,7 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
         if feedback:
             text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
         try:
-            run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+            run = await dispatch_followup(thread_id, metadata, text, plan_mode=False)
         except Exception:
             await set_plan_status(thread_id, PLAN_STATUS_READY, plan_mode=True)
             raise
@@ -300,12 +299,12 @@ async def reject_plan(
     rejection: PlanRejection | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
+    metadata = await fetch_thread_metadata(thread_id)
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
     lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
     async with lock:
-        metadata = await _thread_metadata(thread_id)
+        metadata = await fetch_thread_metadata(thread_id)
         content = await get_plan_content(thread_id, raise_on_error=True) or {}
         _reject_shared_content(content)
         if (
@@ -322,7 +321,7 @@ async def reject_plan(
         "existing self-contained HTML file under /workspace/plans/, then publish an updated "
         f"artifact with the save_plan tool:\n\n{feedback or '(no specific comments were left)'}"
     )
-    await _dispatch_followup(thread_id, metadata, text, plan_mode=True)
+    await dispatch_followup(thread_id, metadata, text, plan_mode=True)
     return {"status": PLAN_STATUS_REVISING}
 
 
@@ -380,13 +379,13 @@ async def _maybe_post_plan_approved_to_slack(
         logger.warning("Could not post plan approval Slack reply to %s/%s", channel_id, thread_ts)
 
 
-async def _dispatch_followup(
+async def dispatch_followup(
     thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
 ) -> Run:
     """Continue the existing thread with the decision as a new instruction run."""
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
-        "source": _thread_source(metadata) or "slack",
+        "source": thread_source(metadata) or "slack",
     }
     email = metadata.get("triggering_user_email")
     if isinstance(email, str) and email:
@@ -394,7 +393,7 @@ async def _dispatch_followup(
     login = metadata.get("github_login")
     if isinstance(login, str) and login:
         configurable["github_login"] = login
-    repo = _repo_config_from_metadata(metadata)
+    repo = repo_config_from_metadata(metadata)
     if repo:
         configurable["repo"] = repo
     context = SourceContext.from_metadata(metadata)

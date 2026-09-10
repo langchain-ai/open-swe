@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
+import httpx2
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def github_headers(token: str) -> dict[str, str]:
 
 
 async def _paginate(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     url: str,
     *,
     headers: dict[str, str],
@@ -98,7 +98,7 @@ def _substantive_body(body: str | None) -> str | None:
 
 
 async def _recent_merged_prs(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     *,
     owner: str,
     repo: str,
@@ -154,7 +154,7 @@ async def collect_review_samples(
     raw_entries: list[tuple[str, int, ReviewSample]] = []
     reviewer_counts: Counter[str] = Counter()
 
-    async with httpx.AsyncClient(timeout=90.0) as client:
+    async with httpx2.AsyncClient(timeout=90.0) as client:
         merged_prs = await _recent_merged_prs(
             client, owner=owner, repo=repo, headers=headers, max_prs=max_prs
         )

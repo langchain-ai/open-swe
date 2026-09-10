@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.slack.client import extract_channel_description_text
 from agent.utils.repo import extract_repo_from_text
-from agent.utils.slack import extract_channel_description_text
 
 
 class TestExtractRepoFromText:
@@ -105,7 +105,7 @@ class TestLinearWebhookRepoOverride:
 
     @pytest.mark.asyncio
     async def test_comment_repo_overrides_team_mapping(self, _base_payload: dict) -> None:
-        from agent.webhooks.linear_routes import linear_webhook
+        from agent.linear.routes import linear_webhook
 
         with (
             patch("agent.webhooks.common.verify_linear_signature", return_value=True),
@@ -122,7 +122,7 @@ class TestLinearWebhookRepoOverride:
                     "comments": {"nodes": []},
                 },
             ),
-            patch("agent.webhooks.common._is_repo_allowed", return_value=True),
+            patch("agent.webhooks.common.is_repo_allowed", return_value=True),
             patch("agent.webhooks.common.BackgroundTasks"),
         ):
             mock_request = AsyncMock()
@@ -141,7 +141,7 @@ class TestLinearWebhookRepoOverride:
 
     @pytest.mark.asyncio
     async def test_falls_back_to_team_mapping_when_no_repo_in_comment(self) -> None:
-        from agent.webhooks.linear_routes import linear_webhook
+        from agent.linear.routes import linear_webhook
 
         payload = {
             "type": "Comment",
@@ -172,7 +172,7 @@ class TestLinearWebhookRepoOverride:
                     "comments": {"nodes": []},
                 },
             ),
-            patch("agent.webhooks.common._is_repo_allowed", return_value=True),
+            patch("agent.webhooks.common.is_repo_allowed", return_value=True),
         ):
             mock_request = AsyncMock()
             mock_request.body.return_value = json.dumps(payload).encode()

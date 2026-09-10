@@ -2,7 +2,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
-const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "viewed"]);
+const MUTABLE_FIELDS = new Set([
+  "title",
+  "modelId",
+  "effort",
+  "viewed",
+  "archived",
+]);
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function isRecord(value) {
@@ -56,6 +62,19 @@ function cleanSkills(value) {
     }));
 }
 
+function cleanPaths(value) {
+  if (!Array.isArray(value)) return [];
+  const paths = value
+    .filter(
+      (item) =>
+        typeof item === "string" &&
+        item.length <= 8_192 &&
+        path.isAbsolute(item),
+    )
+    .map((item) => path.normalize(item));
+  return [...new Set(paths)];
+}
+
 function normalizeThread(value) {
   if (
     !isRecord(value) ||
@@ -83,13 +102,26 @@ function normalizeThread(value) {
         skills: cleanSkills(value.pending.skills),
       }
     : null;
+  const worktreePath = stringOrNull(value.worktreePath, 8_192);
   return {
     id: value.id,
     cwd: path.normalize(value.cwd),
+    worktreePath:
+      worktreePath && path.isAbsolute(worktreePath)
+        ? path.normalize(worktreePath)
+        : null,
+    // Threads written before ownership was tracked only ever ran in a worktree
+    // this app created for them.
+    ownedWorktrees: cleanPaths(
+      value.ownedWorktrees === undefined
+        ? [worktreePath]
+        : value.ownedWorktrees,
+    ),
     title: value.title.slice(0, 80) || "New local agent",
     modelId: stringOrNull(value.modelId),
     effort: stringOrNull(value.effort),
     viewed: value.viewed !== false,
+    archived: value.archived === true,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     checkpoint,
@@ -163,10 +195,13 @@ class LocalThreadStore {
     const thread = {
       id: this.uuid(),
       cwd: input.cwd,
+      worktreePath: null,
+      ownedWorktrees: [],
       title: sessionTitle(prompt),
       modelId: stringOrNull(input.modelId),
       effort: stringOrNull(input.effort),
       viewed: true,
+      archived: false,
       createdAt: now,
       updatedAt: now,
       checkpoint: { repo: null, ref: null, branch: null },
@@ -202,9 +237,44 @@ class LocalThreadStore {
         throw new Error("Invalid viewed state");
       next.viewed = patch.viewed;
     }
-    if (Object.keys(patch).some((key) => key !== "viewed"))
+    if ("archived" in patch) {
+      if (typeof patch.archived !== "boolean")
+        throw new Error("Invalid archived state");
+      next.archived = patch.archived;
+    }
+    // Neither reading nor archiving is an edit, so neither reorders the list.
+    if (
+      Object.keys(patch).some((key) => key !== "viewed" && key !== "archived")
+    )
       next.updatedAt = this.now();
     this.threads.set(id, next);
+    this.persist();
+    return this.get(id);
+  }
+
+  /**
+   * `null` moves the thread back into the project's own checkout. `owned` marks
+   * a worktree this app created: it stays recorded even after the thread moves
+   * off it, so nothing the app made is left behind when the thread is deleted.
+   */
+  setWorktree(id, worktreePath, owned = false) {
+    const current = this.threads.get(id);
+    if (!current) return null;
+    if (
+      worktreePath !== null &&
+      (typeof worktreePath !== "string" || !path.isAbsolute(worktreePath))
+    )
+      throw new Error("Invalid worktree path");
+    const next = worktreePath && path.normalize(worktreePath);
+    this.threads.set(id, {
+      ...current,
+      worktreePath: next,
+      ownedWorktrees:
+        owned && next
+          ? [...new Set([...current.ownedWorktrees, next])]
+          : current.ownedWorktrees,
+      updatedAt: this.now(),
+    });
     this.persist();
     return this.get(id);
   }

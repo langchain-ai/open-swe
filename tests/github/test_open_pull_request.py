@@ -42,7 +42,7 @@ class _FakeClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_FakeClient":
+    async def __aenter__(self) -> _FakeClient:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -64,7 +64,7 @@ class _FakeClient:
 
 
 class _RoutingClient:
-    """Fake httpx client that routes GETs by URL substring."""
+    """Fake httpx2 client that routes GETs by URL substring."""
 
     def __init__(self, *, post: _FakeResponse, get_routes: dict[str, _FakeResponse]) -> None:
         self._post = post
@@ -72,7 +72,7 @@ class _RoutingClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_RoutingClient":
+    async def __aenter__(self) -> _RoutingClient:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -95,11 +95,12 @@ class _RoutingClient:
 
 
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _RoutingClient) -> None:
-    monkeypatch.setattr(opr.httpx, "AsyncClient", lambda **_kwargs: client)
+    monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **_kwargs: client)
 
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -> None:
-    monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable}, raising=False)
 
 
 def _open(base: str = "main") -> dict[str, Any]:
@@ -798,3 +799,150 @@ def test_derive_pr_state_draft() -> None:
 
 def test_derive_pr_state_open() -> None:
     assert opr.derive_pr_state(state="open", merged=False, draft=False) == "open"
+
+
+def test_resolves_thread_flag_is_forwarded_to_telemetry(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
+
+    async def fake_bot() -> str | None:
+        return "bot-tok"
+
+    monkeypatch.setattr(opr, "get_github_app_installation_token", fake_bot)
+    record_telemetry = AsyncMock()
+    monkeypatch.setattr(opr, "_record_pr_telemetry", record_telemetry)
+    _install_client(
+        monkeypatch,
+        _FakeClient(
+            post=_FakeResponse(
+                201, {"html_url": "https://x/pull/4", "number": 4, "user": {"login": "octo"}}
+            )
+        ),
+    )
+
+    result = asyncio.run(
+        opr._open_pull_request(
+            owner="langchain-ai",
+            repo="open-swe",
+            head="open-swe/feature",
+            base="main",
+            title="feat: x",
+            body="body",
+            draft=True,
+            resolves_thread=True,
+        )
+    )
+
+    assert result["success"] is True
+    record_telemetry.assert_awaited_once()
+    assert record_telemetry.await_args is not None
+    assert record_telemetry.await_args.kwargs["resolves_thread"] is True
+
+
+def test_resolves_thread_flag_defaults_to_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
+
+    async def fake_bot() -> str | None:
+        return "bot-tok"
+
+    monkeypatch.setattr(opr, "get_github_app_installation_token", fake_bot)
+    record_telemetry = AsyncMock()
+    monkeypatch.setattr(opr, "_record_pr_telemetry", record_telemetry)
+    _install_client(
+        monkeypatch,
+        _FakeClient(
+            post=_FakeResponse(
+                201, {"html_url": "https://x/pull/4", "number": 4, "user": {"login": "octo"}}
+            )
+        ),
+    )
+
+    _open()
+
+    record_telemetry.assert_awaited_once()
+    assert record_telemetry.await_args is not None
+    assert record_telemetry.await_args.kwargs["resolves_thread"] is False
+
+
+@pytest.mark.parametrize("top_level_run_id", [False, True])
+async def test_record_pr_telemetry_persists_resolves_thread_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    top_level_run_id: bool,
+) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "thread_id": "t1",
+            "github_login": "octo",
+            "run_id": "old-run" if top_level_run_id else "run-1",
+            "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+        },
+    )
+    if top_level_run_id:
+        config = {**opr.get_config(), "run_id": "run-1"}
+        monkeypatch.setattr(opr, "get_config", lambda: config)
+    monkeypatch.setattr(opr, "record_agent_pr_usage", AsyncMock())
+    monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
+    langgraph = MagicMock()
+    langgraph.threads.get = AsyncMock(return_value={"metadata": {}})
+    langgraph.threads.update = AsyncMock()
+    monkeypatch.setattr(opr, "get_client", lambda: langgraph)
+    details = {
+        "html_url": "https://github.com/langchain-ai/open-swe/pull/3",
+        "number": 3,
+        "state": "open",
+        "draft": True,
+        "merged": False,
+        "title": "feat: x",
+        "user": {"login": "octo"},
+    }
+    client = _FakeClient(post=_FakeResponse(201, {}), get=_FakeResponse(200, details))
+
+    await opr._record_pr_telemetry(
+        client=client,  # type: ignore[arg-type]
+        token="tok",
+        owner="langchain-ai",
+        repo="open-swe",
+        head="open-swe/feature",
+        base="main",
+        pr=details,
+        resolves_thread=True,
+    )
+
+    langgraph.threads.update.assert_awaited_once()
+    assert langgraph.threads.update.await_args is not None
+    metadata = langgraph.threads.update.await_args.kwargs["metadata"]
+    assert metadata["pull_requests"] == [
+        {
+            "repo_full_name": "langchain-ai/open-swe",
+            "number": 3,
+            "url": details["html_url"],
+            "title": "feat: x",
+            "state": "draft",
+            "head_ref": "open-swe/feature",
+            "base_ref": "main",
+            "author": "octo",
+            "author_avatar_url": "",
+            "created_at": "",
+            "diff_stats": {"files": 0, "additions": 0, "deletions": 0},
+            "resolves_thread": True,
+            "slack_feedback": {"run_id": "run-1", "channel_id": "C1"},
+        }
+    ]
+
+
+def test_updating_pr_preserves_original_feedback_run() -> None:
+    original = {
+        "url": "https://github.com/lc/repo/pull/7",
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "slack_feedback": {"run_id": "original-run", "channel_id": "C1"},
+    }
+    updated = {
+        **original,
+        "state": "open",
+        "slack_feedback": {"run_id": "later-run", "channel_id": "C2"},
+    }
+    result = opr._upsert_pull_request([original], updated)
+    assert result[0]["slack_feedback"] == original["slack_feedback"]
+    assert result[0]["state"] == "open"

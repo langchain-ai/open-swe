@@ -53,10 +53,10 @@ def _error_fields(exc: Exception) -> dict[str, object]:
 
 def _is_httpx_transport_error(exc: Exception) -> bool:
     try:
-        import httpx
+        import httpx2
     except ImportError:  # pragma: no cover - dependency is declared in production
         return False
-    return isinstance(exc, httpx.TransportError)
+    return isinstance(exc, httpx2.TransportError)
 
 
 def task_retry_on(exc: Exception) -> bool:

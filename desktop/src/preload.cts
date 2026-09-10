@@ -23,10 +23,30 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
   getProjectBranches: (cwd) =>
     ipcRenderer.invoke("desktop:project-branches", cwd),
+  watchProjectHead: (cwd) =>
+    ipcRenderer.invoke("desktop:watch-project-head", cwd),
+  onProjectHeadChanged: (callback) => {
+    const listener = (_event, cwd) => callback(cwd);
+    ipcRenderer.on("desktop:project-head-changed", listener);
+    return () =>
+      ipcRenderer.removeListener("desktop:project-head-changed", listener);
+  },
+  setLocalBranch: (input) =>
+    ipcRenderer.invoke("desktop:set-local-branch", { ...input }),
   checkoutProjectBranch: (input) =>
     ipcRenderer.invoke("desktop:checkout-project-branch", { ...input }),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
+  getVersion: () => ipcRenderer.invoke("desktop:version"),
+  getUpdateState: () => ipcRenderer.invoke("desktop:update-state"),
+  installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("desktop:update-state", listener);
+    return () => ipcRenderer.removeListener("desktop:update-state", listener);
+  },
+  connectService: (provider) =>
+    ipcRenderer.invoke("desktop:connect-service", provider),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   resolveLocalProjectPath: (input) =>
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
@@ -41,6 +61,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
   getLocalThread: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-thread", threadId),
+  setAppearance: (appearance) =>
+    ipcRenderer.invoke("desktop:set-appearance", appearance),
   listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
   localActivity: () => ipcRenderer.invoke("desktop:local-activity"),
   updateLocalThread: (input) =>
@@ -51,6 +73,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:get-local-diff", threadId),
   getLocalPrDiff: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
+  getProjectDiff: (cwd) => ipcRenderer.invoke("desktop:get-project-diff", cwd),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects);
     ipcRenderer.on("desktop:projects-changed", listener);
@@ -112,7 +135,7 @@ window.addEventListener("DOMContentLoaded", () => {
       pointer-events: none;
       position: fixed;
       top: 0;
-      left: 90px;
+      left: 118px;
       right: 0;
       height: ${DRAG_REGION_HEIGHT}px;
       z-index: 2147483647;

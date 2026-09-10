@@ -13,7 +13,7 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
-from agent.utils.sandbox_state import (
+from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
     SandboxBackendProxy,
     get_or_create_sandbox_backend_proxy,
@@ -133,10 +133,10 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
         return _FakeSandboxBackend()
 
     monkeypatch.setattr(
-        "agent.utils.sandbox_state.get_sandbox_id_from_metadata",
+        "agent.sandboxes.state.get_sandbox_id_from_metadata",
         get_sandbox_id_from_metadata,
     )
-    monkeypatch.setattr("agent.utils.sandbox_state.create_sandbox", create_sandbox)
+    monkeypatch.setattr("agent.sandboxes.state.create_sandbox", create_sandbox)
 
     proxy = get_or_create_sandbox_backend_proxy(thread_id)
     assert SANDBOX_BACKENDS[thread_id] is proxy
@@ -171,7 +171,7 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
     async def create_sandbox(sandbox_id: str):
         raise AssertionError(f"unexpected direct reconnect to {sandbox_id}")
 
-    monkeypatch.setattr("agent.utils.sandbox_state.create_sandbox", create_sandbox)
+    monkeypatch.setattr("agent.sandboxes.state.create_sandbox", create_sandbox)
 
     proxy = get_or_create_sandbox_backend_proxy(
         thread_id,
@@ -340,11 +340,11 @@ async def test_sandbox_id_metadata_falls_back_to_live_thread(
     )
 
     monkeypatch.setattr(
-        "agent.utils.sandbox_state.get_config",
+        "agent.sandboxes.state.get_config",
         lambda: {"metadata": {}},
     )
     monkeypatch.setattr(
-        "agent.utils.sandbox_state.get_client",
+        "agent.sandboxes.state.get_client",
         lambda: SimpleNamespace(threads=threads),
     )
 

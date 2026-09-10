@@ -32,6 +32,7 @@ export interface ThreadMessageRequest {
   model_id?: string | null
   effort?: string | null
   plan_mode?: boolean
+  client_message_id?: string
 }
 
 export interface ScheduleCreateRequest {
@@ -125,6 +126,8 @@ export interface ThreadsPageParams {
   q?: string
   scope?: ThreadScope
   automationId?: string
+  repo?: string
+  ownerless?: boolean
   sortBy?: ThreadSortBy
 }
 
@@ -136,16 +139,10 @@ export interface ThreadsPage {
   hasMore?: boolean
 }
 
-export interface SidebarThreadsGroup {
-  items: Array<AgentThread>
-  limit: number
-  hasMore: boolean
-}
-
-export interface SidebarThreads {
-  active: SidebarThreadsGroup
-  resolved: SidebarThreadsGroup
-  pinned?: Array<AgentThread>
+export interface SidebarProject {
+  repoFullName: string
+  name: string
+  updatedAt: number
 }
 
 const API_BASE = dashboardApiBase()
@@ -229,27 +226,21 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.q) search.set("q", params.q)
   if (params.scope) search.set("scope", params.scope)
   if (params.automationId) search.set("automation_id", params.automationId)
+  if (params.repo) search.set("repo", params.repo)
+  if (params.ownerless != null)
+    search.set("ownerless", String(params.ownerless))
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
 }
 
-function buildSidebarThreadsQuery(params: {
-  activeLimit?: number
-  resolvedLimit?: number
-  activeThreadId?: string
+function buildProjectsQuery(params: {
+  includeResolved?: boolean
   includeAutomations?: boolean
 }): string {
   const search = new URLSearchParams()
-  if (params.activeLimit != null) {
-    search.set("active_limit", String(params.activeLimit))
-  }
-  if (params.resolvedLimit != null) {
-    search.set("resolved_limit", String(params.resolvedLimit))
-  }
-  if (params.activeThreadId) {
-    search.set("active_thread_id", params.activeThreadId)
-  }
+  if (params.includeResolved != null)
+    search.set("include_resolved", String(params.includeResolved))
   if (params.includeAutomations != null) {
     search.set("include_automations", String(params.includeAutomations))
   }
@@ -257,19 +248,64 @@ function buildSidebarThreadsQuery(params: {
   return query ? `?${query}` : ""
 }
 
+export type PullRequestCheckState =
+  | "failing"
+  | "passing"
+  | "pending"
+  | "unknown"
+
+export type PullRequestLiveState = "open" | "draft" | "merged" | "closed"
+
+/** Live GitHub truth for one PR, keyed `owner/repo#number`. */
+export interface PullRequestSnapshot {
+  checks: PullRequestCheckState
+  state: PullRequestLiveState | null
+}
+
+export type ThreadFeedbackRating = "bad" | "good"
+
+export type ThreadFeedbackSubmission =
+  | { action?: "submit"; rating: ThreadFeedbackRating; comment?: string }
+  | { action: "comment"; comment: string }
+  | { action: "dismiss" }
+
+export interface ThreadFeedback {
+  status: "unavailable" | "ready" | "completed" | "dismissed"
+  rating: ThreadFeedbackRating | "other" | null
+  comment: string
+}
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
-  listSidebarThreads: (params: {
-    activeLimit?: number
-    resolvedLimit?: number
-    activeThreadId?: string
-    includeAutomations?: boolean
-  }) =>
-    agentsRequest<SidebarThreads>(
-      `/threads/sidebar${buildSidebarThreadsQuery(params)}`
+  getThreadFeedback: (threadId: string) =>
+    agentsRequest<ThreadFeedback>(
+      `/threads/${encodeURIComponent(threadId)}/feedback`
     ),
+  submitThreadFeedback: (threadId: string, body: ThreadFeedbackSubmission) =>
+    agentsRequest<ThreadFeedback>(
+      `/threads/${encodeURIComponent(threadId)}/feedback`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    ),
+  listThreadProjects: (
+    params: {
+      includeResolved?: boolean
+      includeAutomations?: boolean
+    } = {}
+  ) =>
+    agentsRequest<Array<SidebarProject>>(
+      `/threads/projects${buildProjectsQuery(params)}`
+    ),
+  listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  renameThread: (threadId: string, title: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
   resolveThread: (threadId: string, resolved: boolean) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/resolve`,
@@ -310,6 +346,13 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}${
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
+    ),
+  getPullRequestChecks: (
+    pullRequests: Array<{ repoFullName: string; number: number }>
+  ) =>
+    agentsRequest<Record<string, PullRequestSnapshot>>(
+      "/threads/pull-request-checks",
+      { method: "POST", body: JSON.stringify({ pullRequests }) }
     ),
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
@@ -385,8 +428,6 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
     ),
-  streamUrl: (threadId: string) =>
-    `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
 }
 
 export type ThreadGroup = "today" | "last7" | "last30" | "older"

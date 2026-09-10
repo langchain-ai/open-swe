@@ -17,20 +17,20 @@ from typing import Any
 
 from pydantic import BaseModel, model_validator
 
-from agent.store import delete_value, get_value, now_iso, put_value, search_values
-
-from ..encryption import decrypt_token, encrypt_token
-from .oauth import (
+from agent.dashboard.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
 )
-from .options import (
+from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
+    NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     model_supports_effort,
     provider_fallback_pair,
 )
+from agent.encryption import decrypt_token, encrypt_token
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +47,12 @@ class ProfileUpdate(BaseModel):
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
+    model_routing_enabled: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
     @model_validator(mode="after")
-    def _normalize_stale_model_pairs(self) -> "ProfileUpdate":
+    def _normalize_stale_model_pairs(self) -> ProfileUpdate:
         model, effort = _normalize_stale_model_pair(
             self.default_model,
             self.reasoning_effort,
@@ -69,6 +70,10 @@ class ProfileUpdate(BaseModel):
         return self
 
     def validate_pairing(self) -> None:
+        if self.default_model in NON_DEFAULT_MODEL_IDS:
+            raise ValueError(f"{self.default_model!r} cannot be a default model")
+        if self.default_subagent_model in NON_DEFAULT_MODEL_IDS:
+            raise ValueError(f"{self.default_subagent_model!r} cannot be a default model")
         if not model_supports_effort(self.default_model, self.reasoning_effort):
             raise ValueError(
                 f"effort {self.reasoning_effort!r} not supported by {self.default_model!r}"
@@ -107,7 +112,7 @@ def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     ):
         model = value.get(model_field)
         effort = value.get(effort_field)
-        if model in DEPRECATED_MODEL_IDS:
+        if model in DEPRECATED_MODEL_IDS or model in NON_DEFAULT_MODEL_IDS:
             value.pop(model_field, None)
             value.pop(effort_field, None)
         elif isinstance(model, str):
@@ -146,6 +151,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
+        "model_routing_enabled": (
+            update.model_routing_enabled
+            if update.model_routing_enabled is not None
+            else existing.get("model_routing_enabled", False)
+        ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),

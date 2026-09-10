@@ -1,15 +1,16 @@
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 from langchain_core.language_models import BaseChatModel
 from langchain_openai.chat_models.codex import _ChatOpenAICodex  # noqa: PLC2701
-from langchain_openai.chatgpt_oauth import (  # noqa: PLC2701
-    _ChatGPTOAuthTokenProvider,
-    _ChatGPTToken,
+from langchain_openai.chatgpt_oauth import (
+    _ChatGPTOAuthTokenProvider,  # noqa: PLC2701
+    _ChatGPTToken,  # noqa: PLC2701
 )
+
+from agent.config import ENV
 
 _BROKER_URL_ENV = "OPEN_SWE_OPENAI_OAUTH_BROKER_URL"
 _BROKER_TOKEN_ENV = "OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN"
@@ -17,8 +18,8 @@ _BROKER_MANAGED_REFRESH_TOKEN = "managed-by-desktop-broker"
 
 
 def _broker_config() -> tuple[str, str] | None:
-    url = os.environ.get(_BROKER_URL_ENV, "")
-    token = os.environ.get(_BROKER_TOKEN_ENV, "")
+    url = ENV.OPEN_SWE_OPENAI_OAUTH_BROKER_URL.get()
+    token = ENV.OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN.get()
     if not url or not token:
         return None
     parsed = urlparse(url)
@@ -43,7 +44,7 @@ class _DesktopOpenAIOAuthTokenProvider(_ChatGPTOAuthTokenProvider):
         return self._current_token
 
     async def aget_token(self) -> _ChatGPTToken:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx2.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 self._broker_url,
                 headers={"Authorization": f"Bearer {self._broker_token}"},
