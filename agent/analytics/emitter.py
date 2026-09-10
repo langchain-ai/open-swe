@@ -6,7 +6,7 @@ from typing import Literal
 from uuid import UUID
 
 from agent.analytics.capture import fail_soft
-from agent.analytics.database import workspace_id
+from agent.analytics.database import configured, workspace_id
 from agent.analytics.events import (
     EntryPoint,
     EventName,
@@ -207,7 +207,7 @@ async def pr_opened(
     owner: str,
     repo: str,
     number: int,
-    run_key: str,
+    run_key: str | None,
     model: str | None,
     source: str | None,
     repository_private: bool | None,
@@ -218,7 +218,7 @@ async def pr_opened(
     pr_id = opaque_id("pr", pr_key)
     run_id = opaque_id("run", run_key)
     repository_id = opaque_id("repository", f"{owner.lower()}/{repo.lower()}")
-    if pr_id is None or run_id is None or repository_id is None:
+    if pr_id is None or repository_id is None:
         return
     from agent.analytics.directory import upsert_model, upsert_repository
 
@@ -240,17 +240,18 @@ async def pr_opened(
         repository_id=repository_id,
         model_id=model_id,
     )
-    await emit(
-        EventName.PR_RUN_LINKED,
-        f"pr:{pr_key}:run:{run_key}:opening",
-        PRRunLinkedPayload(link_role="opening"),
-        occurred_at=occurred_at,
-        source=source,
-        pr_id=pr_id,
-        run_id=run_id,
-        repository_id=repository_id,
-        model_id=model_id,
-    )
+    if run_id is not None:
+        await emit(
+            EventName.PR_RUN_LINKED,
+            f"pr:{pr_key}:run:{run_key}:opening",
+            PRRunLinkedPayload(link_role="opening"),
+            occurred_at=occurred_at,
+            source=source,
+            pr_id=pr_id,
+            run_id=run_id,
+            repository_id=repository_id,
+            model_id=model_id,
+        )
 
 
 @fail_soft

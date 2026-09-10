@@ -166,6 +166,7 @@ async def finalize_agent_invocation_usage(
     try:
         recorded = await record_agent_invocation_completion(
             invocation_id=invocation_id,
+            thread_id=thread_id,
             status=status,
             usage=summarize_run_usage(state, invocation_id=invocation_id),
         )

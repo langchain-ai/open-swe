@@ -600,7 +600,7 @@ async def _record_pr_telemetry(
             merged=merged,
             created_at=details.get("created_at") or pr.get("created_at"),
             merged_at=details.get("merged_at") or pr.get("merged_at"),
-            run_id=cfg.prepare_run_id,
+            invocation_id=cfg.invocation_id,
             model_id=cfg.agent_model_id,
             source=cfg.source,
             repository_private=(

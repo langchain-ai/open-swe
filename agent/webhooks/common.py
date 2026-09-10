@@ -1338,9 +1338,9 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
             await task_marked_complete(thread_id, source="github", auto=True)
             await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
-            from agent.slack.thread_feedback import post_slack_pr_feedback_prompt
+            from agent.thread_feedback import schedule_pr_feedback
 
-            await post_slack_pr_feedback_prompt(thread_id, metadata, pr_url)
+            await schedule_pr_feedback(thread_id, metadata, pr_url)
         elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
             from agent.analytics.emitter import task_rework
 

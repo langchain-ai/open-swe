@@ -122,7 +122,7 @@ class TaskReworkRequestedPayload(StrictPayload):
 
 
 class PROpenedPayload(StrictPayload):
-    opening_run_id: UUID
+    opening_run_id: UUID | None = None
     originating_model_id: UUID | None = None
     model_attribution_quality: Literal["effective", "configured", "unavailable"]
     repository_private: bool | None = None

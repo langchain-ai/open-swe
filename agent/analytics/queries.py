@@ -255,8 +255,12 @@ async def pr_merge_rate_by_model(
         )
         started_at = await collection_started_at(conn)
     return {
-        "metric": "pr_merge_rate_by_originating_model",
-        "definition": "PR-open-date cohorts attributed to the opening run's effective primary model.",
+        "metric": "pr_outcomes_by_opening_invocation_configured_model",
+        "definition": (
+            "PR-open-date cohorts grouped by the opening invocation's configured model. "
+            "Routing, provider fallback, subagents, and later invocations may use other models; "
+            "this metric does not allocate independent model credit."
+        ),
         "maturity_days": days,
         "period": period if period in {"7d", "30d", "all"} else "30d",
         "suppression_threshold": minimum,
