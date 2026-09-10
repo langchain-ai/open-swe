@@ -122,7 +122,6 @@ function Probe() {
   return null
 }
 
-
 it("registers the active thread's commands once and then stops", async () => {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
