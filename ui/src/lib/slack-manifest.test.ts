@@ -34,9 +34,9 @@ describe("slackAppManifest", () => {
       slash_command_url:
         "https://<your-backend-url>/webhooks/slack/code-channel-commands",
     })
-    expect(manifest.oauth_config.redirect_urls).toContain(
-      "https://smith.langchain.com/host-oauth-callback/<your-provider-id>"
-    )
+    expect(manifest.oauth_config.redirect_urls).toEqual([
+      "https://<your-backend-url>/dashboard/api/slack/callback",
+    ])
     expect(manifest.oauth_config.scopes.bot).toEqual(
       expect.arrayContaining(CODE_CHANNEL_SCOPES)
     )
@@ -45,10 +45,9 @@ describe("slackAppManifest", () => {
     )
   })
 
-  it("fills in the running deployment's backend URL and provider id", () => {
+  it("fills in the running deployment's backend URL", () => {
     const manifest = slackAppManifest(true, {
       backendUrl: "https://openswe.example.com/",
-      providerId: "acme-github-oauth",
     })
 
     expect(manifest.settings.event_subscriptions.request_url).toBe(
@@ -63,21 +62,15 @@ describe("slackAppManifest", () => {
         "https://openswe.example.com/webhooks/slack/code-channel-commands",
     })
     expect(manifest.oauth_config.redirect_urls).toEqual([
-      "https://smith.langchain.com/host-oauth-callback/acme-github-oauth",
       "https://openswe.example.com/dashboard/api/slack/callback",
     ])
   })
 
   it("reports whether any placeholder survives the given config", () => {
     expect(slackManifestPlaceholdersRemain()).toBe(true)
+    expect(slackManifestPlaceholdersRemain({ backendUrl: "  " })).toBe(true)
     expect(
       slackManifestPlaceholdersRemain({ backendUrl: "https://a.example.com" })
-    ).toBe(true)
-    expect(
-      slackManifestPlaceholdersRemain({
-        backendUrl: "https://a.example.com",
-        providerId: "p",
-      })
     ).toBe(false)
   })
 })

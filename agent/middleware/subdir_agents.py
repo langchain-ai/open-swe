@@ -6,13 +6,15 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
+from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from ..utils.sandbox_state import SANDBOX_BACKENDS
+from agent.middleware.trace import OpenSWEMiddleware
+from agent.run_config import RunConfig
+from agent.sandboxes.state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +54,7 @@ def _thread_id(request: ToolCallRequest) -> str | None:
         config = maybe_config if isinstance(maybe_config, Mapping) else None
     if config is None:
         return None
-    configurable = config.get("configurable", {})
-    if not isinstance(configurable, Mapping):
-        return None
-    thread_id = configurable.get("thread_id")
-    return thread_id if isinstance(thread_id, str) and thread_id else None
+    return RunConfig.from_config(config).thread_id or None
 
 
 def _file_path(args: Mapping[str, Any]) -> str | None:
@@ -136,7 +134,7 @@ def _append_reminder(result: ToolMessage | Command, reminder: str | None) -> Too
     return result
 
 
-class SubdirAgentsReadMiddleware(AgentMiddleware):
+class SubdirAgentsReadMiddleware(OpenSWEMiddleware):
     """Append applicable ancestor ``AGENTS.md`` files to ``read_file`` results."""
 
     state_schema = AgentState

@@ -1,19 +1,15 @@
 from typing import Any
 
-from langgraph.config import get_config
-
-from agent.integrations.langsmith import get_async_sandbox_client
-from agent.utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
+from agent.run_config import RunConfig
+from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 
 async def create_sandbox_service_url(
     port: int,
     expires_in_seconds: int = 600,
 ) -> dict[str, Any]:
-    """Create a browser URL for a service listening in the active LangSmith sandbox.
-
-    The service must listen on `0.0.0.0` at the specified port. Anyone with the URL can access it.
-    """
+    """Implement the `create_sandbox_service_url` tool."""
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("port must be an integer between 1 and 65535")
     if (
@@ -23,9 +19,7 @@ async def create_sandbox_service_url(
     ):
         raise ValueError("expires_in_seconds must be an integer between 1 and 86400")
 
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise ValueError("no thread_id in run config")
 

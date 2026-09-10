@@ -12,12 +12,13 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 
-from agent.utils import github_comments, github_token
+from agent.github import comments as github_comments
+from agent.github import thread_token as github_token
+from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
-from agent.webhooks import github as github_webhooks
 
 
 @pytest.fixture(autouse=True)
@@ -164,7 +165,7 @@ class _MockHttpxClient:
         self.posts: list[dict[str, Any]] = []
         self.gets: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_MockHttpxClient":
+    async def __aenter__(self) -> _MockHttpxClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -181,7 +182,7 @@ class _MockHttpxClient:
 
 def test_react_to_github_comment_raises_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_client = _MockHttpxClient(status_code=401)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: mock_client)
+    monkeypatch.setattr(httpx2, "AsyncClient", lambda *a, **kw: mock_client)
 
     async def _run() -> None:
         await github_comments.react_to_github_comment(
@@ -199,7 +200,7 @@ def test_fetch_pr_comments_since_last_tag_raises_on_401(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mock_client = _MockHttpxClient(status_code=401)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: mock_client)
+    monkeypatch.setattr(httpx2, "AsyncClient", lambda *a, **kw: mock_client)
 
     async def _run() -> None:
         await github_comments.fetch_pr_comments_since_last_tag(
@@ -214,7 +215,7 @@ def test_fetch_pr_comments_since_last_tag_raises_on_401(
 
 def test_fetch_issue_comments_raises_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_client = _MockHttpxClient(status_code=401)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: mock_client)
+    monkeypatch.setattr(httpx2, "AsyncClient", lambda *a, **kw: mock_client)
 
     async def _run() -> None:
         await github_comments.fetch_issue_comments(
@@ -289,11 +290,11 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
         return None
 
     monkeypatch.setattr(webhook_common, "extract_pr_context", fake_extract_pr_context)
-    monkeypatch.setattr(webhook_common, "_get_or_resolve_thread_github_token", fake_get_or_resolve)
+    monkeypatch.setattr(webhook_common, "get_or_resolve_thread_github_token", fake_get_or_resolve)
     monkeypatch.setattr(webhook_common, "invalidate_cached_github_token", fake_invalidate)
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react)
     monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fake_fetch_pr_comments)
-    monkeypatch.setattr(webhook_common, "_trigger_or_queue_run", fake_trigger_or_queue_run)
+    monkeypatch.setattr(webhook_common, "trigger_or_queue_run", fake_trigger_or_queue_run)
     monkeypatch.setattr(
         webhook_common,
         "email_for_login",

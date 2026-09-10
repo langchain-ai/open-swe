@@ -4,7 +4,7 @@ okf_version: "0.2"
 
 # Files
 
-- [Open SWE Quickstart & Wiki Map](quickstart.md) - Entry point for choosing the Open SWE runtime, UI, integration, workflow, operations, or testing guide. It lists the supported local commands and the browser and desktop end-to-end test entrypoints.
+- [Open SWE Codebase Guide](quickstart.md) - Start here to set up Open SWE, choose the entrypoint and owner for a safe change, and run focused validation. Links route contributors to the detailed architecture, workflow, integration, operations, and testing guides.
 
 # Directories
 

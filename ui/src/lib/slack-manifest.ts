@@ -20,17 +20,15 @@ const LEGACY_BOT_SCOPES = [
 const LEGACY_BOT_EVENTS = ["app_mention", "message.im", "message.mpim"]
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
-const PROVIDER_ID_PLACEHOLDER = "<your-provider-id>"
 
 export interface SlackManifestConfig {
   backendUrl?: string | null
-  providerId?: string | null
 }
 
 export function slackManifestPlaceholdersRemain(
   config: SlackManifestConfig = {}
 ): boolean {
-  return !config.backendUrl?.trim() || !config.providerId?.trim()
+  return !config.backendUrl?.trim()
 }
 
 export function slackAppManifest(
@@ -39,7 +37,6 @@ export function slackAppManifest(
 ) {
   const backendUrl =
     config.backendUrl?.trim().replace(/\/+$/, "") || BACKEND_URL_PLACEHOLDER
-  const providerId = config.providerId?.trim() || PROVIDER_ID_PLACEHOLDER
 
   const features: Record<string, unknown> = {
     app_home: {
@@ -64,10 +61,7 @@ export function slackAppManifest(
     },
     features,
     oauth_config: {
-      redirect_urls: [
-        `https://smith.langchain.com/host-oauth-callback/${providerId}`,
-        `${backendUrl}/dashboard/api/slack/callback`,
-      ],
+      redirect_urls: [`${backendUrl}/dashboard/api/slack/callback`],
       scopes: {
         bot: codeChannelsEnabled
           ? [...LEGACY_BOT_SCOPES, "code_channels:manage", "files:read"]

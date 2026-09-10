@@ -32,7 +32,7 @@ def _load_daytona_module(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "daytona", fake_daytona)
     monkeypatch.setitem(sys.modules, "langchain_daytona", fake_langchain_daytona)
-    module_path = ROOT / "agent" / "integrations" / "daytona.py"
+    module_path = ROOT / "agent" / "sandboxes" / "providers" / "daytona.py"
     spec = importlib.util.spec_from_file_location("daytona_under_test", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -58,13 +58,10 @@ def test_daytona_params_use_env_snapshot(monkeypatch):
     assert params.snapshot == "custom/snapshot:1.0"
 
 
-def test_daytona_params_reject_empty_snapshot(monkeypatch):
+def test_daytona_params_treat_blank_snapshot_as_unset(monkeypatch):
     monkeypatch.setenv("DAYTONA_SANDBOX_SNAPSHOT", "  ")
     module = _load_daytona_module(monkeypatch)
 
-    try:
-        module._get_daytona_sandbox_params()
-    except ValueError as exc:
-        assert "DAYTONA_SANDBOX_SNAPSHOT must not be empty" in str(exc)
-    else:
-        raise AssertionError("expected empty Daytona snapshot to fail")
+    params = module._get_daytona_sandbox_params()
+
+    assert params.snapshot == "daytonaio/sandbox:0.6.0"

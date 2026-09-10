@@ -42,7 +42,7 @@ def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
 
 
 class _DummyAgent:
-    def with_config(self, config: dict[str, object]) -> "_DummyAgent":
+    def with_config(self, config: dict[str, object]) -> _DummyAgent:
         self.config = config
         return self
 
@@ -82,7 +82,7 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -135,7 +135,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
             return_value=MagicMock(),
         ) as mock_sandbox,
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -223,7 +223,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -271,7 +271,7 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -332,12 +332,12 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.dashboard.review_styles.get_repo_custom_prompt",
+            "agent.review.styles.get_repo_custom_prompt",
             new_callable=AsyncMock,
             return_value="Flag table rerender regressions.",
         ),
@@ -399,7 +399,7 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -409,7 +409,7 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             return_value="Never approve a PR that disables a CI gate.",
         ),
         patch(
-            "agent.dashboard.review_styles.get_repo_custom_prompt",
+            "agent.review.styles.get_repo_custom_prompt",
             new_callable=AsyncMock,
             return_value=None,
         ),
@@ -466,7 +466,7 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -524,7 +524,7 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -879,7 +879,7 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -956,7 +956,7 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1025,7 +1025,7 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1090,7 +1090,7 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1165,7 +1165,7 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1237,7 +1237,7 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -1303,7 +1303,7 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.reviewer.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),

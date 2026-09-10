@@ -6,14 +6,11 @@ import {
   CalendarBlankIcon,
   ChatCircleIcon,
   CircleNotchIcon,
-  CopyIcon,
   FolderIcon,
   GitMergeIcon,
   GitPullRequestIcon,
   PushPinIcon,
   PushPinSlashIcon,
-  TrashIcon,
-  TreeStructureIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react"
 import {
@@ -31,6 +28,7 @@ import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
 import {
   markAgentThreadViewed,
@@ -292,7 +290,7 @@ export function SidebarThreadRow({
         <span
           ref={marquee.text}
           className={cn(
-            "block w-max text-[13px] whitespace-nowrap will-change-transform",
+            "block w-max text-sm whitespace-nowrap will-change-transform",
             marquee.shift !== 0 && "sidebar-title-marquee"
           )}
           style={
@@ -377,13 +375,14 @@ export function SidebarThreadRow({
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
+    "text-foreground",
     isActive
       ? thread?.adminThread
-        ? "bg-destructive/10 text-foreground"
-        : "bg-accent text-foreground"
+        ? "bg-destructive/10"
+        : "bg-accent"
       : thread?.adminThread
-        ? "bg-destructive/5 text-muted-foreground group-hover/row:bg-destructive/10"
-        : "text-muted-foreground group-hover/row:bg-sidebar-row-hover group-hover/row:text-foreground"
+        ? "bg-destructive/5 group-hover/row:bg-destructive/10"
+        : "group-hover/row:bg-sidebar-row-hover"
   )
 
   const link =
@@ -423,7 +422,7 @@ export function SidebarThreadRow({
               side="right"
               align="start"
               sideOffset={8}
-              className="pointer-events-auto max-w-80 rounded-xl p-3"
+              className="pointer-events-auto max-w-80 rounded-xl p-3 [--dropdown-glass-background:var(--sidebar)]"
             >
               <ThreadHoverCard item={item} live={live} />
             </TooltipPopup>
@@ -432,73 +431,15 @@ export function SidebarThreadRow({
         <ContextMenu.Portal>
           <ContextMenu.Positioner className="z-50 outline-none">
             <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-              {thread?.traceUrl && (
-                <ContextMenu.LinkItem
-                  href={thread.traceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  closeOnClick
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-                >
-                  <TreeStructureIcon className="size-3.5" />
-                  Open trace
-                </ContextMenu.LinkItem>
-              )}
-              {thread?.sourceUrl && (
-                <ContextMenu.LinkItem
-                  href={thread.sourceAppUrl ?? thread.sourceUrl}
-                  closeOnClick
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-                >
-                  <IoLogoSlack className="size-3.5" />
-                  Open in Slack
-                </ContextMenu.LinkItem>
-              )}
-              <ContextMenu.Item
-                onClick={onTogglePin}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-              >
-                {pinned ? (
-                  <PushPinSlashIcon className="size-3.5" />
-                ) : (
-                  <PushPinIcon className="size-3.5" />
-                )}
-                {pinned ? "Unpin thread" : "Pin thread"}
-              </ContextMenu.Item>
-              {thread && (
-                <ContextMenu.Item
-                  disabled={!thread.sandboxId}
-                  onClick={() => {
-                    if (thread.sandboxId) {
-                      void navigator.clipboard.writeText(thread.sandboxId)
-                    }
-                  }}
-                  title={thread.sandboxId ?? undefined}
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                >
-                  <CopyIcon className="size-3.5" />
-                  Copy sandbox ID
-                </ContextMenu.Item>
-              )}
-              <ContextMenu.Item
-                onClick={onToggleArchived}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-              >
-                {archived ? (
-                  <ArrowCounterClockwiseIcon className="size-3.5" />
-                ) : (
-                  <ArchiveIcon className="size-3.5" />
-                )}
-                {archived ? "Unarchive thread" : "Archive thread"}
-              </ContextMenu.Item>
-              <ContextMenu.Item
-                onClick={() => setDeleteOpen(true)}
-                disabled={isDeleting}
-                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-              >
-                <TrashIcon className="size-3.5" />
-                Delete thread
-              </ContextMenu.Item>
+              <ThreadMenuItems
+                thread={thread}
+                pinned={pinned}
+                archived={archived}
+                isDeleting={isDeleting}
+                onTogglePin={onTogglePin}
+                onToggleArchived={onToggleArchived}
+                onDelete={() => setDeleteOpen(true)}
+              />
             </ContextMenu.Popup>
           </ContextMenu.Positioner>
         </ContextMenu.Portal>
@@ -513,9 +454,11 @@ export function SidebarThreadRow({
         isDeleting={isDeleting}
         onConfirm={() => void onConfirmDelete()}
         detail={
-          item.location === "local"
-            ? "This removes its history but does not revert changes made to your project."
-            : undefined
+          item.location !== "local"
+            ? undefined
+            : item.thread.ownedWorktrees?.length
+              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+              : "This removes its history but does not revert changes made to your project."
         }
         error={deleteError}
       />

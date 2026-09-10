@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from agent import server
+from agent.run_config import RunConfig
 
 
 def test_resolve_prompt_default_repo_uses_explicit_repo(
@@ -14,7 +15,9 @@ def test_resolve_prompt_default_repo_uses_explicit_repo(
     monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
 
     repo = asyncio.run(
-        server._resolve_prompt_default_repo({"repo": {"owner": "octo", "name": "repo"}})
+        server._resolve_prompt_default_repo(
+            RunConfig.parse({"repo": {"owner": "octo", "name": "repo"}})
+        )
     )
 
     assert repo == {"owner": "octo", "name": "repo"}
@@ -28,7 +31,7 @@ def test_resolve_prompt_default_repo_skips_team_default_for_repo_less_run(
 
     monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
 
-    repo = asyncio.run(server._resolve_prompt_default_repo({"repo_explicitly_none": True}))
+    repo = asyncio.run(server._resolve_prompt_default_repo(RunConfig(repo_explicitly_none=True)))
 
     assert repo is None
 
@@ -41,6 +44,6 @@ def test_resolve_prompt_default_repo_falls_back_to_team_default(
 
     monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
 
-    repo = asyncio.run(server._resolve_prompt_default_repo({}))
+    repo = asyncio.run(server._resolve_prompt_default_repo(RunConfig()))
 
     assert repo == {"owner": "team", "name": "repo"}

@@ -8,23 +8,25 @@ human messages before the next model call.
 import logging
 from typing import Any, cast
 
-import httpx
+import httpx2
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
-from ..dashboard.options import model_supports_images
-from ..input_messages import (
+from agent.dashboard.options import model_supports_images
+from agent.input_messages import (
     PersonIdentity,
     SystemIdentity,
     build_input_messages,
     visible_dynamic_context_hashes,
 )
-from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from ..utils.multimodal import fetch_image_block, vision_not_supported_warning
+from agent.middleware.trace import scrub_middleware_inputs
+from agent.prompts import load_prompt
+from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ async def _build_blocks_from_payload(
                 "text": text + vision_not_supported_warning(model_id, len(image_urls)),
             }
         return blocks
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:
@@ -162,12 +164,7 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
         logger.debug(
             "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
         )
-    message = (
-        "A PR babysitting event arrived while you were already working on this PR. "
-        "Do not start a separate run for that event. Before finishing, re-check the "
-        "PR's latest CI status and review comments, then address any newly failed "
-        "checks or actionable comments that are clear and deterministic."
-    )
+    message = load_prompt("runs/autofix-event.md")
     details = item.value.get("details")
     if isinstance(details, list):
         joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
@@ -176,6 +173,7 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
     return message
 
 
+@scrub_middleware_inputs
 @before_model(state_schema=LinearNotifyState)
 async def check_message_queue_before_model(  # noqa: PLR0911
     state: LinearNotifyState,  # noqa: ARG001
@@ -299,6 +297,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                         injected_dynamic_context_hashes=injected,
                     )
                     _flush_blocks(queued_updates, content_blocks, injected)
+                    queue_id = content.get("queue_id")
+                    if isinstance(queue_id, str) and structured:
+                        structured[-1]["id"] = queue_id
                     queued_updates.extend(cast(list[dict[str, Any]], structured))
                 else:
                     content_blocks.extend(blocks)

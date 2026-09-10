@@ -82,6 +82,7 @@ function focusKey(thread: AgentThread): string {
     thread.status === "interrupted" ||
     thread.planStatus === "ready" ||
     thread.planStatus === "shared" ||
+    thread.attentionReason != null ||
     (thread.status === "finished" && !thread.viewed)
   ) {
     return "attention"

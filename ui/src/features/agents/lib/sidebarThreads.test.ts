@@ -9,6 +9,7 @@ import {
   groupSidebarThreadsByProject,
   localSidebarThread,
   sidebarProjectOptions,
+  sortSidebarThreads,
 } from "./sidebarThreads"
 
 function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
@@ -34,6 +35,7 @@ function localThread(
   return {
     id: "same-id",
     cwd: "/Users/example/open-swe",
+    worktreePath: null,
     title: "Local thread",
     viewed: true,
     createdAt: 10,
@@ -48,6 +50,7 @@ const project: DesktopProject = {
   cwd: "/Users/example/open-swe",
   name: "open-swe",
   addedAt: 1,
+  scopeId: "project-open-swe",
 }
 
 describe("sidebar thread adapters", () => {
@@ -111,13 +114,40 @@ describe("sidebar thread adapters", () => {
     // The label is ambiguous, so a local "api" must not be folded into either.
     const local = localSidebarThread(
       localThread({ cwd: "/Users/example/api" }),
-      { cwd: "/Users/example/api", name: "api", addedAt: 1 },
+      {
+        cwd: "/Users/example/api",
+        name: "api",
+        addedAt: 1,
+        scopeId: "project-api",
+      },
       undefined
     )
     const aliases = cloudProjectKeysByLabel([acme, other])
     expect(applyProjectKeyAliases([local], aliases)[0]?.projectKey).toBe(
       local.projectKey
     )
+  })
+})
+
+describe("sortSidebarThreads", () => {
+  it("sorts chats by creation time without moving recently updated chats", () => {
+    const olderUpdated = cloudSidebarThread(
+      cloudThread({ id: "older-updated", createdAt: 10, updatedAt: 50 })
+    )
+    const newer = cloudSidebarThread(
+      cloudThread({ id: "newer", createdAt: 20, updatedAt: 20 })
+    )
+
+    expect(
+      sortSidebarThreads([olderUpdated, newer], "created").map(
+        (thread) => thread.id
+      )
+    ).toEqual(["newer", "older-updated"])
+    expect(
+      sortSidebarThreads([olderUpdated, newer], "updated").map(
+        (thread) => thread.id
+      )
+    ).toEqual(["older-updated", "newer"])
   })
 })
 

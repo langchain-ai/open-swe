@@ -4,20 +4,22 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
+import time
 import weakref
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-import httpx
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import APIStatusError
 
 from agent.review.findings import coerce_finding, is_surfaced
+from agent.utils.json_types import as_json_object, thread_metadata
+from agent.utils.run_usage import RunUsageSummary
 
-from ..utils.json_types import as_json_object, thread_metadata
-
-AGENT_RUN_NAMESPACE = ["usage", "v2", "agent_runs"]
+AGENT_INVOCATION_NAMESPACE = ["usage", "v2", "agent_runs"]
 AGENT_PR_NAMESPACE = ["usage", "v2", "agent_prs"]
 REVIEW_NAMESPACE = ["usage", "v2", "reviews"]
 REVIEW_FINDING_NAMESPACE = ["usage", "v2", "review_findings"]
@@ -100,7 +102,7 @@ def _write_lock(namespace: list[str], key: str) -> asyncio.Lock:
 async def _get(namespace: list[str], key: str) -> dict[str, Any] | None:
     try:
         return _record(await _client().store.get_item(namespace, key))
-    except httpx.HTTPStatusError as exc:
+    except APIStatusError as exc:
         if exc.response.status_code == 404:
             return None
         raise
@@ -110,20 +112,52 @@ async def _mutate(
     namespace: list[str], key: str, update: Callable[[dict[str, Any] | None], dict[str, Any]]
 ) -> None:
     async with _write_lock(namespace, key):
-        await _client().store.put_item(namespace, key, update(await _get(namespace, key)))
+        # An empty result means the callback found nothing to update; writing it
+        # would insert a record with no identity that every reader must skip.
+        value = update(await _get(namespace, key))
+        if not value:
+            return
+        await _client().store.put_item(namespace, key, value)
 
 
 async def _all(namespace: list[str]) -> list[dict[str, Any]]:
+    started_at = time.monotonic()
     values: list[dict[str, Any]] = []
     offset = 0
-    while True:
-        result = await _client().store.search_items(namespace, limit=_PAGE_SIZE, offset=offset)
-        items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-        page = list(items or [])
-        values.extend(value for item in page if (value := _record(item)) is not None)
-        if len(page) < _PAGE_SIZE:
-            return values
-        offset += len(page)
+    pages = 0
+    try:
+        while True:
+            result = await _client().store.search_items(namespace, limit=_PAGE_SIZE, offset=offset)
+            items = (
+                result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
+            )
+            page = list(items or [])
+            pages += 1
+            values.extend(value for item in page if (value := _record(item)) is not None)
+            if len(page) < _PAGE_SIZE:
+                logger.info(
+                    "Usage telemetry scan completed",
+                    extra={
+                        "usage_namespace": "/".join(namespace),
+                        "usage_pages": pages,
+                        "usage_records": len(values),
+                        "usage_elapsed_ms": round((time.monotonic() - started_at) * 1000),
+                    },
+                )
+                return values
+            offset += len(page)
+    except Exception:
+        logger.exception(
+            "Usage telemetry scan failed",
+            extra={
+                "usage_namespace": "/".join(namespace),
+                "usage_pages": pages,
+                "usage_records": len(values),
+                "usage_offset": offset,
+                "usage_elapsed_ms": round((time.monotonic() - started_at) * 1000),
+            },
+        )
+        raise
 
 
 def _login(value: object) -> str:
@@ -149,12 +183,13 @@ async def _backfill_legacy_agent_records() -> None:
         if record.get("source") not in _AGENT_SOURCES:
             continue
         key = _store_key("run", f"legacy:{thread_id}")
-        if await _get(AGENT_RUN_NAMESPACE, key):
+        if await _get(AGENT_INVOCATION_NAMESPACE, key):
             continue
         await _client().store.put_item(
-            AGENT_RUN_NAMESPACE,
+            AGENT_INVOCATION_NAMESPACE,
             key,
             {
+                "invocation_id": f"legacy:{thread_id}",
                 "run_id": f"legacy:{thread_id}",
                 "thread_id": thread_id,
                 "github_login": _login(record.get("github_login")),
@@ -190,7 +225,7 @@ async def _backfill_legacy_agent_records() -> None:
 
 
 async def _backfill_legacy_reviews() -> None:
-    from ..review.findings import REVIEWER_THREAD_KIND
+    from agent.review.findings import REVIEWER_THREAD_KIND
 
     offset = 0
     while True:
@@ -303,9 +338,9 @@ async def _backfill_legacy_usage() -> None:
         )
 
 
-async def record_agent_run_usage(
+async def record_agent_invocation_usage(
     *,
-    run_id: str,
+    invocation_id: str,
     thread_id: str,
     github_login: str | None,
     user_email: str | None,
@@ -313,15 +348,16 @@ async def record_agent_run_usage(
     effort: str | None,
     source: str | None,
 ) -> None:
-    """Record one actual Agent run, idempotently."""
-    if not run_id or not thread_id:
+    """Record one actual agent invocation, idempotently."""
+    if not invocation_id or not thread_id:
         return
-    key = _store_key("run", run_id)
+    key = _store_key("run", invocation_id)
     now_ms = _now_ms()
 
     def update(existing: dict[str, Any] | None) -> dict[str, Any]:
         return existing or {
-            "run_id": run_id,
+            "invocation_id": invocation_id,
+            "run_id": invocation_id,
             "thread_id": thread_id,
             "github_login": _login(github_login),
             "user_email": _email(user_email),
@@ -329,9 +365,83 @@ async def record_agent_run_usage(
             "effort": effort or "",
             "source": source if source in _AGENT_SOURCES else "dashboard",
             "created_at_ms": now_ms,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "cost_usd": None,
+            "cost_refresh_scheduled_at_ms": 0,
+            "finished_at_ms": 0,
         }
 
-    await _mutate(AGENT_RUN_NAMESPACE, key, update)
+    await _mutate(AGENT_INVOCATION_NAMESPACE, key, update)
+
+
+async def record_agent_invocation_completion(
+    *, invocation_id: str, usage: RunUsageSummary | None
+) -> bool:
+    """Complete an existing invocation record idempotently."""
+    if not invocation_id:
+        return False
+    key = _store_key("run", invocation_id)
+    async with _write_lock(AGENT_INVOCATION_NAMESPACE, key):
+        existing = await _get(AGENT_INVOCATION_NAMESPACE, key)
+        if not existing or existing.get("finished_at_ms"):
+            return False
+        value = {**existing, "invocation_id": invocation_id, "finished_at_ms": _now_ms()}
+        if usage is not None:
+            counts = {
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "total_tokens": usage.total_tokens,
+            }
+            value.update({field: count for field, count in counts.items() if count is not None})
+        await _client().store.put_item(AGENT_INVOCATION_NAMESPACE, key, value)
+    return True
+
+
+async def agent_invocation_needs_cost_refresh(*, invocation_id: str) -> bool:
+    """Return whether a completed invocation still needs cost enrichment scheduled."""
+    if not invocation_id:
+        return False
+    existing = await _get(AGENT_INVOCATION_NAMESPACE, _store_key("run", invocation_id))
+    return bool(
+        existing
+        and existing.get("finished_at_ms")
+        and existing.get("cost_usd") is None
+        and not existing.get("cost_refresh_scheduled_at_ms")
+    )
+
+
+async def mark_agent_invocation_cost_refresh_scheduled(*, invocation_id: str) -> None:
+    """Persist that deferred invocation cost enrichment was scheduled."""
+    if not invocation_id:
+        return
+    key = _store_key("run", invocation_id)
+
+    def update(existing: dict[str, Any] | None) -> dict[str, Any]:
+        if not existing or existing.get("cost_refresh_scheduled_at_ms"):
+            return existing or {}
+        return {
+            **existing,
+            "invocation_id": invocation_id,
+            "cost_refresh_scheduled_at_ms": _now_ms(),
+        }
+
+    await _mutate(AGENT_INVOCATION_NAMESPACE, key, update)
+
+
+async def record_agent_invocation_cost(*, invocation_id: str, cost_usd: float) -> None:
+    """Store the LangSmith cost for an existing invocation."""
+    if not invocation_id or not math.isfinite(cost_usd) or cost_usd < 0:
+        return
+    key = _store_key("run", invocation_id)
+
+    def update(existing: dict[str, Any] | None) -> dict[str, Any]:
+        return (
+            {**existing, "invocation_id": invocation_id, "cost_usd": cost_usd} if existing else {}
+        )
+
+    await _mutate(AGENT_INVOCATION_NAMESPACE, key, update)
 
 
 async def record_agent_pr_usage(
@@ -567,12 +677,16 @@ def _new_user(key: str, record: dict[str, Any], aliases: dict[str, str]) -> dict
         "github_login": login,
         "email": email,
         "name": login or email.split("@", 1)[0],
-        "agent_runs": 0,
+        "invocations": 0,
         "prs_opened": 0,
         "merged_prs": 0,
         "agent_loc": 0,
         "additions": 0,
         "deletions": 0,
+        "total_tokens": 0,
+        "total_cost_usd": 0.0,
+        "invocation_duration_ms": 0,
+        "finished_invocations": 0,
         "models": Counter(),
     }
 
@@ -599,17 +713,30 @@ async def list_agent_usage_leaderboard(
     current_email: str | None,
 ) -> dict[str, Any]:
     """Aggregate current usage from complete, paginated telemetry."""
+    started_at = time.monotonic()
     normalized = _normalize_period(period)
+    logger.info(
+        "Usage leaderboard aggregation started",
+        extra={"usage_period": normalized, "usage_limit": limit},
+    )
     cache_key = (normalized, _login(current_login) or _email(current_email))
     cached = _USAGE_CACHE.get(cache_key)
     if cached and _now_ms() - cached[0] < _USAGE_CACHE_TTL_MS:
         payload = dict(cached[1])
         payload["rows"] = _limited_rows(payload["rows"], cached[2], limit)
+        logger.info(
+            "Usage leaderboard cache hit",
+            extra={
+                "usage_period": normalized,
+                "usage_rows": len(payload["rows"]),
+                "usage_elapsed_ms": round((time.monotonic() - started_at) * 1000),
+            },
+        )
         return payload
     await _backfill_legacy_usage()
     cutoff_ms = _period_cutoff_ms(normalized)
     runs, prs, review_records, finding_records = await asyncio.gather(
-        _all(AGENT_RUN_NAMESPACE),
+        _all(AGENT_INVOCATION_NAMESPACE),
         _all(AGENT_PR_NAMESPACE),
         _all(REVIEW_NAMESPACE),
         _all(REVIEW_FINDING_NAMESPACE),
@@ -624,7 +751,21 @@ async def list_agent_usage_leaderboard(
         if not key:
             continue
         user = users.setdefault(key, _new_user(key, record, aliases))
-        user["agent_runs"] += 1
+        user["invocations"] += 1
+        user["total_tokens"] += _int(record.get("total_tokens"))
+        cost_usd = record.get("cost_usd")
+        if (
+            isinstance(cost_usd, int | float)
+            and not isinstance(cost_usd, bool)
+            and math.isfinite(cost_usd)
+            and cost_usd >= 0
+        ):
+            user["total_cost_usd"] += float(cost_usd)
+        created_at_ms = _timestamp_ms(record.get("created_at_ms"))
+        finished_at_ms = _timestamp_ms(record.get("finished_at_ms"))
+        if created_at_ms and finished_at_ms >= created_at_ms:
+            user["invocation_duration_ms"] += finished_at_ms - created_at_ms
+            user["finished_invocations"] += 1
         model = record.get("model_id")
         if isinstance(model, str) and model:
             user["models"][model] += 1
@@ -650,7 +791,7 @@ async def list_agent_usage_leaderboard(
             -user["merged_prs"],
             -user["agent_loc"],
             -user["prs_opened"],
-            -user["agent_runs"],
+            -user["invocations"],
             user["name"],
         ),
     )
@@ -671,15 +812,28 @@ async def list_agent_usage_leaderboard(
                 "email": (user["email"] or None) if is_current else None,
             },
             "favorite_model": models.most_common(1)[0][0] if models else "default",
+            "avg_invocation_seconds": (
+                user["invocation_duration_ms"] / user["finished_invocations"] / 1000
+                if user["finished_invocations"]
+                else 0.0
+            ),
+            "avg_run_seconds": (
+                user["invocation_duration_ms"] / user["finished_invocations"] / 1000
+                if user["finished_invocations"]
+                else 0.0
+            ),
+            "agent_runs": user["invocations"],
             **{
                 key: user[key]
                 for key in (
-                    "agent_runs",
+                    "invocations",
                     "prs_opened",
                     "merged_prs",
                     "agent_loc",
                     "additions",
                     "deletions",
+                    "total_tokens",
+                    "total_cost_usd",
                 )
             },
         }
@@ -745,4 +899,17 @@ async def list_agent_usage_leaderboard(
     _USAGE_CACHE[cache_key] = (now_ms, payload, current_row)
     result = dict(payload)
     result["rows"] = _limited_rows(rows, current_row, limit)
+    logger.info(
+        "Usage leaderboard aggregation completed",
+        extra={
+            "usage_period": normalized,
+            "usage_invocations": len(runs),
+            "usage_prs": len(prs),
+            "usage_reviews": len(review_records),
+            "usage_findings": len(finding_records),
+            "usage_members": len(ordered),
+            "usage_rows": len(result["rows"]),
+            "usage_elapsed_ms": round((time.monotonic() - started_at) * 1000),
+        },
+    )
     return result

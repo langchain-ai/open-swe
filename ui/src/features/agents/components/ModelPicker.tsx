@@ -363,7 +363,6 @@ export function ModelPicker({
                   <span className="min-w-0 flex-1 truncate">
                     {formatTokenCount(contextWindow)}
                   </span>
-                  <Check className="size-3.5 shrink-0 text-muted-foreground/60" />
                 </div>
               </>
             )}

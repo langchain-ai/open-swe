@@ -13,11 +13,16 @@ export interface DesktopProject {
   cwd: string
   name: string
   addedAt: number
+  /** Terminal/panel scope for the project itself, before a thread exists. */
+  scopeId: string
 }
 
 export interface DesktopLocalThreadSummary {
   id: string
   cwd: string
+  worktreePath: string | null
+  /** Worktrees this app created for the thread, removed when it is deleted. */
+  ownedWorktrees?: Array<string>
   title: string
   viewed: boolean
   archived?: boolean
@@ -26,6 +31,15 @@ export interface DesktopLocalThreadSummary {
   modelId: string | null
   effort: string | null
   pending?: DesktopLocalPromptInput | null
+}
+
+export type DesktopWorkspaceMode = "local" | "worktree"
+
+export interface DesktopProjectRef {
+  name: string
+  current: boolean
+  isDefault: boolean
+  worktreePath: string | null
 }
 
 export type DesktopLocalActivity = Record<string, "running" | "error">
@@ -99,6 +113,11 @@ export type DesktopTerminalMetadataEvent =
   | { type: "upsert"; terminal: DesktopTerminalSummary }
   | (DesktopTerminalTarget & { type: "remove" })
 
+export type DesktopUpdateState = {
+  status: "idle" | "downloading" | "ready" | "installing"
+  version?: string
+}
+
 export interface DesktopTerminalBridge {
   attach: (
     input: DesktopTerminalTarget & {
@@ -142,19 +161,31 @@ declare global {
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{
         current: string | null
-        branches: Array<string>
+        branches: Array<DesktopProjectRef>
       }>
+      watchProjectHead: (cwd: string | null) => Promise<void>
+      onProjectHeadChanged: (callback: (cwd: string) => void) => () => void
       checkoutProjectBranch: (input: {
         cwd: string
         branch: string
-        create?: boolean
       }) => Promise<string>
+      setLocalBranch: (input: {
+        threadId: string
+        branch: string
+      }) => Promise<DesktopLocalThreadSummary | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
+      getVersion: () => Promise<string>
+      getUpdateState: () => Promise<DesktopUpdateState>
+      installUpdate: () => Promise<boolean>
+      onUpdateState: (
+        callback: (state: DesktopUpdateState) => void
+      ) => () => void
       onProjectsChanged: (
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
+      connectService: (provider: "slack" | "notion") => Promise<boolean>
       resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string
@@ -168,6 +199,8 @@ declare global {
       startLocalThread: (
         input: DesktopLocalPromptInput & {
           cwd: string
+          workspaceMode?: DesktopWorkspaceMode
+          baseBranch?: string | null
           modelId?: string
           effort?: string
         }
@@ -188,6 +221,7 @@ declare global {
       localActivity: () => Promise<DesktopLocalActivity>
       updateLocalThread: (input: {
         threadId: string
+        title?: string
         viewed?: boolean
         archived?: boolean
         modelId?: string
@@ -196,6 +230,7 @@ declare global {
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
+      getProjectDiff: (cwd: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge
     }
   }

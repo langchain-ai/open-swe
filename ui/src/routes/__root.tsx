@@ -16,6 +16,7 @@ import type { QueryClient } from "@tanstack/react-query"
 import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { ThemeSync } from "@/lib/ThemeSync"
+import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem("open-swe-theme");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
@@ -32,14 +33,24 @@ export const Route = createRootRouteWithContext<{
         name: "viewport",
         content: "width=device-width, initial-scale=1, maximum-scale=1",
       },
-      { name: "theme-color", content: "#1c1c1c" },
+      { name: "theme-color", content: THEME_COLOR.light },
       { title: "Open SWE" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "manifest", href: "/manifest.webmanifest" },
-      { rel: "icon", type: "image/png", href: "/favicon.png" },
-      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+      {
+        rel: "manifest",
+        href: `${import.meta.env.BASE_URL}manifest.webmanifest`,
+      },
+      {
+        rel: "icon",
+        type: "image/png",
+        href: `${import.meta.env.BASE_URL}favicon.png`,
+      },
+      {
+        rel: "apple-touch-icon",
+        href: `${import.meta.env.BASE_URL}apple-touch-icon.png`,
+      },
     ],
   }),
   notFoundComponent: () => (

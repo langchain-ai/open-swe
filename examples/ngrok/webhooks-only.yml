@@ -1,0 +1,14 @@
+# ngrok traffic policy for a local Open SWE backend: only the webhook endpoints are public.
+# Under `langgraph dev` the LangGraph API (threads, runs, assistants, store) has no authentication,
+# so everything but the signature-checked webhooks must stay on localhost. `make tunnel` passes
+# this file to `ngrok http 2024`; any other tunnel needs an equivalent allowlist.
+on_http_request:
+  - expressions:
+      - "!req.url.path.startsWith('/webhooks/')"
+    actions:
+      - type: custom-response
+        config:
+          status_code: 404
+          headers:
+            content-type: text/plain
+          body: Not found

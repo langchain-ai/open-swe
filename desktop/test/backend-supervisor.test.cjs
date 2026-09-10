@@ -28,6 +28,8 @@ test("development target isolates repository LangGraph state", () => {
       "127.0.0.1",
       "--port",
       "49152",
+      "--n-jobs-per-worker",
+      "10",
       "--config",
       path.join(repoRoot, "langgraph.desktop.json"),
     ],

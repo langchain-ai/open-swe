@@ -3,14 +3,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 from langgraph_sdk.errors import ConflictError
 
 from agent import baby_sit, scheduler
 from agent import store as agent_store
+from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
-from agent.utils.slack import GitHubPrRef
 
 
 class _Store:
@@ -65,7 +65,7 @@ class _Threads:
         assert ttl == baby_sit.WATCH_LOCK_TTL_MINUTES
         async with self.create_lock:
             if thread_id in self.active:
-                response = httpx.Response(409, request=httpx.Request("POST", "http://test"))
+                response = httpx2.Response(409, request=httpx2.Request("POST", "http://test"))
                 raise ConflictError("already exists", response=response, body=None)
             self.active.add(thread_id)
 
@@ -421,7 +421,7 @@ async def test_scheduler_routes_baby_sit_task(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(scheduler, "evaluate_watch", evaluate)
 
     result = await scheduler._launch(
-        {"task": "baby_sit", "watch_key": "acme/repo#7"},
+        scheduler.SchedulerState(task="baby_sit", watch_key="acme/repo#7"),
         {"configurable": {}},
     )
 

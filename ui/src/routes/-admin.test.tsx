@@ -32,12 +32,7 @@ describe("SlackIntegrationSection", () => {
   })
 
   it("defaults to legacy Slack and copies Code Channels only when enabled", async () => {
-    render(
-      <SlackIntegrationSection
-        backendUrl="https://openswe.example.com"
-        providerId="acme-github-oauth"
-      />
-    )
+    render(<SlackIntegrationSection backendUrl="https://openswe.example.com" />)
 
     const toggle = screen.getByRole("switch", {
       name: /^Slack Code Channels/,
@@ -52,7 +47,7 @@ describe("SlackIntegrationSection", () => {
       "https://openswe.example.com/webhooks/slack"
     )
     expect(legacy.oauth_config.redirect_urls).toContain(
-      "https://smith.langchain.com/host-oauth-callback/acme-github-oauth"
+      "https://openswe.example.com/dashboard/api/slack/callback"
     )
 
     fireEvent.click(toggle)

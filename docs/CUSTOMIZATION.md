@@ -26,14 +26,14 @@ return create_deep_agent(
 
 ## 1. Sandbox
 
-By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/integrations/langsmith.py`.
+By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/sandboxes/providers/langsmith.py`.
 
 ### Using a custom sandbox snapshot
 
 Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
 
 ```bash
-DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required unless an admin sets the base snapshot at runtime
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Optional; defaults to LangSmith's root snapshot
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"          # Optional, default 128 GiB
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"                            # Optional, default 16 GiB
@@ -54,24 +54,24 @@ The proxy token is minted at runtime from the GitHub App installation credential
 
 ### Using a different sandbox provider
 
-Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/integrations/` and a factory function registered in `agent/utils/sandbox.py`:
+Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/sandboxes/providers/` and a factory function registered in `agent/sandboxes/providers/registry.py`:
 
 | `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
-| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
-| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
-| `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
-| `e2b` | `agent/integrations/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
-| `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
-| `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
+| `langsmith` (default) | `agent/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY`, `SANDBOX_TYPE="langsmith"` |
+| `daytona` | `agent/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
+| `runloop` | `agent/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `e2b` | `agent/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
+| `modal` | `agent/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `local` | `agent/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY` / `LANGSMITH_API_KEY_PROD`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and environment snapshot captures — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and environment snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 
-1. **Create an integration file** at `agent/integrations/my_provider.py` with a factory function matching this signature:
+1. **Create an integration file** at `agent/sandboxes/providers/my_provider.py` with a factory function matching this signature:
 
 ```python
 def create_my_provider_sandbox(sandbox_id: str | None = None):
@@ -87,12 +87,12 @@ def create_my_provider_sandbox(sandbox_id: str | None = None):
     ...
 ```
 
-2. **Register it** in `agent/utils/sandbox.py` by adding it to `SANDBOX_FACTORIES`:
+2. **Register it** in `agent/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
 
 ```python
 SANDBOX_FACTORIES = {
     ...
-    "my_provider": ("agent.integrations.my_provider", "create_my_provider_sandbox"),
+    "my_provider": ("agent.sandboxes.providers.my_provider", "create_my_provider_sandbox"),
 }
 ```
 
@@ -130,20 +130,24 @@ class MySandbox(BaseSandbox):
         )
 ```
 
-See `deepagents.backends.LangSmithSandbox` and `agent/integrations/langsmith.py` for a full reference implementation.
+See `deepagents.backends.LangSmithSandbox` and `agent/sandboxes/providers/langsmith.py` for a full reference implementation.
 
 ---
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.6-sol` with medium reasoning effort, but you can override the model with the `LLM_MODEL_ID` environment variable:
+Set optional deployment defaults with `LLM_MODEL_ID` and `LLM_REASONING_EFFORT`:
 
 ```bash
-# Set the model via environment variable (uses provider:model format)
 LLM_MODEL_ID="anthropic:claude-sonnet-5"
+LLM_REASONING_EFFORT="high"
 ```
 
-If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.6-sol`) is used.
+When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5`. All other deployments default to `openai:gpt-5.6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
+
+Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `agent/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
+
+These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
 
 `max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
@@ -201,8 +205,8 @@ Routing is opt-in and off by default. Enable it either way:
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `LANGSMITH_GATEWAY_ENABLED` | `false` | Deployment-level default for gateway routing. |
-| `LANGSMITH_GATEWAY_API_KEY` | unset | Optional dedicated LangSmith key for Gateway calls. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY_PROD`, then `LANGSMITH_API_KEY`. |
+| `LANGSMITH_GATEWAY_ENABLED` | on when `LANGSMITH_GATEWAY_API_KEY` is set, else off | Deployment-level default for gateway routing; set explicitly to override. |
+| `LANGSMITH_GATEWAY_API_KEY` | unset | Dedicated LangSmith key for Gateway calls; setting it also turns routing on. Prefer this in LangGraph Cloud if the platform-provided `LANGSMITH_API_KEY` lacks `gateway:invoke`. Falls back to `LANGSMITH_API_KEY` when routing is enabled some other way. |
 | `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
 | `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
 
@@ -222,11 +226,173 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 |---|---|---|
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
-| `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
-| `slack_attach_html` | `agent/tools/slack_attach_html.py` | Attach sandbox HTML previews to Slack threads |
-| `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
+| `linear_comment` | `agent/linear/tools/comment.py` | Post comments on Linear tickets |
+| `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
+| `slack_thread_reply` | `agent/slack/tools/thread_reply.py` | Reply in Slack threads |
 
-### Adding a tool
+### Workspace MCP servers
+
+Admins can connect generic remote MCP servers under **Admin → Workspace MCPs**.
+Connections belong to this Open SWE deployment and are shared across repositories
+and remote coding-agent threads. Enabled connections provide baseline tools for
+all users, limited to the tools selected by an admin. Only admins can manage
+connections or reveal saved credentials. Plan mode continues to block workspace
+MCP tools.
+
+1. Choose **Add MCP server** and enter a unique lowercase connection name, an
+   HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
+2. Choose **Headers / API key** or **OAuth client credentials** for authentication.
+   For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY`
+   in the LangGraph Store; normal dashboard responses only return header names.
+   Admins can use the eye icon (**Show saved headers**) to reveal values on demand,
+   then the crossed-out eye to clear them from the editor. Entered or imported
+   values also have an eye icon to show or hide them. Use headers
+   for credentials, rather than URL query parameters.
+   For OAuth, enter the token URL, client ID, client secret, scopes, and the
+   provider's client authentication method. The secret is encrypted in the Store
+   and is never returned to the browser. Leave it blank when editing to keep it.
+3. Choose **Save and discover tools**. For new connections, all discovered tools
+   are selected by default. Review the selection, then choose **Save connection**
+   to enable those tools. Rediscovering an existing connection preserves its
+   selected tools, including an intentionally empty selection. Newly added tools
+   on the remote server require explicit selection.
+   Discovery checks the draft before saving; if it fails, no connection is
+   created and existing settings stay unchanged. Discovery only lists tools.
+
+Alternatively, choose **Import JSON** and paste a Claude-style configuration:
+
+```json
+{
+  "mcpServers": {
+    "datadog": {
+      "type": "http",
+      "url": "https://mcp.us5.datadoghq.com/v1/mcp?toolsets=core",
+      "headers": {
+        "DD_API_KEY": "YOUR_API_KEY",
+        "DD_APPLICATION_KEY": "YOUR_APPLICATION_KEY"
+      }
+    }
+  }
+}
+```
+
+Datadog, LangSmith, Linear, and Currents agent tools are configured through
+Workspace MCPs. The dedicated Datadog and Currents credentials forms and built-in
+provider tools have been removed. Reconnect Datadog using the MCP configuration
+above; legacy saved credentials are not migrated automatically. Use the JSON
+import or connection form to add the other MCP servers as needed.
+
+The [Currents MCP server](https://github.com/currents-dev/currents-mcp) wraps the
+Currents REST API. Run its Streamable HTTP server on an HTTPS host reachable by
+Open SWE, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY`
+header. The Currents REST API URL itself does not speak MCP, and the local
+`npx @currents/mcp` command cannot be imported as a workspace connection.
+
+Optional reviewer trace resolution and personal LangSmith credential proxying
+have been removed. Configure agent access to LangSmith through Workspace MCPs.
+Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and
+`LANGSMITH_ENDPOINT`. Linear webhook intake and replies continue to use the
+existing Linear app setup.
+
+Use the endpoint for your Datadog site (this example uses US5). Replace the key
+placeholders directly in the dashboard. Import supports multiple named servers,
+optional `type` (`http` by default, or `sse`), and string authentication headers.
+It opens each connection for review without saving automatically. Existing
+connections keep their enabled state and selected tools. Local `command` servers
+and environment-variable expansion are not supported.
+
+For a Linear OAuth application, enable **Client credentials tokens** in the
+application's settings, then import this configuration. The `oauth` object is
+an Open SWE extension to the remote MCP JSON format:
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "oauth": {
+        "grant_type": "client_credentials",
+        "token_url": "https://api.linear.app/oauth/token",
+        "client_id": "YOUR_CLIENT_ID",
+        "client_secret": "YOUR_CLIENT_SECRET",
+        "scope": "read,write",
+        "token_endpoint_auth_method": "client_secret_post"
+      }
+    }
+  }
+}
+```
+
+Client credentials require no redirect URI. Open SWE requests a bearer token,
+caches it in memory until shortly before expiry, and obtains another when needed.
+A rejected token is renewed once on HTTP 401. Client credentials go only to the
+configured token URL; bearer tokens go to the MCP server. Both destinations use
+the same public HTTPS address validation and redirect restrictions. An explicit
+`Authorization` header cannot be combined with OAuth.
+
+Other providers can use the same `oauth` settings with their own token URL and
+scope format; `client_secret_basic` sends credentials using HTTP Basic instead
+of the request body. Changing the token URL, client ID, or MCP URL requires
+re-entering the client secret. Sending `oauth: null` removes OAuth credentials;
+omitting `oauth` from a partial API update preserves them. Linear documents this
+flow under [client credentials tokens](https://linear.app/developers/oauth-2-0-authentication#client-credentials-tokens).
+
+Examples for the generic connection form:
+
+| Connection | URL | Authentication headers |
+|---|---|---|
+| `incident` | `https://mcp.incident.io/mcp` | `Authorization`: `Bearer <your incident.io API key>` |
+| `datadog` | `https://mcp.datadoghq.com/v1/mcp?toolsets=core` | `DD_API_KEY`: your API key; `DD_APPLICATION_KEY`: your application key |
+
+Both examples use Streamable HTTP. Choose the Datadog MCP hostname for your site
+(for example, `mcp.datadoghq.eu`). Use appropriately scoped provider keys and
+select the read tools you need for investigation. The incident.io authentication
+and catalog are documented in [its remote MCP guide](https://docs.incident.io/ai/remote-mcp).
+Datadog documents its headers and site-specific endpoints in the
+[MCP setup guide](https://docs.datadoghq.com/mcp_server/setup/#api-and-application-keys).
+Enter Datadog key values directly, without a `Bearer` prefix. The `core` toolset
+includes logs, metrics, traces, dashboards, monitors, and incidents.
+
+Allowed tools appear in the agent's **Workspace MCPs** tool group with connection
+prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming
+collisions. Catalogs are cached for ten minutes
+per settings revision. Changing a connection causes the next run to discover its
+catalog again. Every tool call reloads the current authentication settings and checks whether the
+connection and tool are still enabled. Disabling or deleting a connection blocks
+subsequent calls from already-loaded tools; it does not cancel an in-flight call.
+
+Editing keeps saved headers unless **Replace headers** is selected. Replacing
+with an empty header list clears those headers. Changing the URL requires
+explicitly replacing or clearing saved headers. Requests must remain on the
+configured public HTTPS origin; redirects, private addresses, local processes,
+and interactive OAuth login are not supported by this connection manager.
+
+The backend implementation lives in `agent/mcp`: connection models and credential
+preparation, OAuth, HTTPS transport, and tool discovery/execution. Workspace storage
+and dashboard authorization remain in the workspace adapters. Existing stored
+connections and imported JSON need no migration.
+
+For another scope, provide an `MCPSource` with an owner-specific `namespace` plus
+async `list_connections` and `get_connection` callbacks. The caller must authorize
+each source before passing it to `load_mcp_tools(workspace_source, user_source)`.
+Sources are ordered from lowest to highest precedence. Distinct connection names
+contribute tools; a later connection with the same name replaces the entire earlier
+connection, including credentials and allowed tools. Disabled connections and empty
+tool selections also override earlier entries, preventing fallback to broader access.
+Saved secrets must only be preserved from the previous record in the same scope.
+
+Catalog and token caches include the source namespace. Each tool call resolves the
+current winning connection again, checks its allowlist, and refuses to switch scopes
+mid-run. Source lookup errors must raise instead of returning an empty result, so a
+failed lookup cannot expose a lower-precedence connection. Only workspace sources
+are wired into the product today; user-scoped storage, authorization, and UI can use
+this package when added.
+An unavailable server omits its tools without preventing other connections from
+loading. This catalog is not attached to the separate read-only reviewer or
+Investigate graphs.
+
+### Adding a Python tool
 
 Create a new file in `agent/tools/`, define a function, and add it to the tools list.
 
@@ -295,9 +461,9 @@ return create_deep_agent(tools=tools, ...)
 
 ### Browser automation (Stagehand)
 
-A `browser` subagent drives Chromium inside the task sandbox via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK, exposing `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close`. Because the browser shares the sandbox network namespace, it can test development servers on `localhost`. Static reads should still use `fetch_url`.
+The main agent can dynamically load `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close` to drive Chromium inside the task sandbox via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK. Because the browser shares the sandbox network namespace, it can test development servers on `localhost`. Static reads should still use `fetch_url`.
 
-The tools require a LangSmith sandbox and a supported model credential. The real credential remains outside the sandbox and is injected by the sandbox egress proxy; only a placeholder is visible to sandbox processes.
+The browser schemas appear in the `load_integration_tools` catalog only when the tools are available, and remain out of the model context until loaded. The tools require a LangSmith sandbox and a supported model credential. The real credential remains outside the sandbox and is injected by the sandbox egress proxy; only a placeholder is visible to sandbox processes.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -347,7 +513,7 @@ Both Slack and Linear support specifying a target repo directly in the message o
 
 ### Customizing Linear routing
 
-The `LINEAR_TEAM_TO_REPO` dict in `agent/utils/linear_team_repo_map.py` maps Linear teams and projects to GitHub repos:
+The `LINEAR_TEAM_TO_REPO` dict in `agent/linear/team_repo_map.py` maps Linear teams and projects to GitHub repos:
 
 ```python
 LINEAR_TEAM_TO_REPO = {
@@ -443,12 +609,14 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 
 | Section | What it controls |
 |---|---|
-| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints |
-| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) |
-| `CODING_STANDARDS_SECTION` | Code style, testing, and quality rules |
-| `COMMIT_PR_SECTION` | PR title/body format and commit conventions |
-| `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
-| `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
+| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints (or `DESKTOP_WORKING_ENV_SECTION` for local desktop runs) |
+| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
+| `DEPENDENCY_SECTION` | Installing, vetting, and managing project dependencies |
+| `COMMIT_PR_SECTION` | PR title/body format, lint/format steps, and commit conventions (or `DESKTOP_PR_SECTION`) |
+| `OPEN_SWE_SHARED_BASE` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
+| `PLAN_MODE_SECTION` | Read-only planning mode instructions |
+
+> **Note:** General code style (`### Working with Code`), communication guidelines (`### Communication`), and core behaviors are composed as subsections of `OPEN_SWE_SHARED_BASE` rather than separate configurable constants.
 
 ### Default prompt file
 

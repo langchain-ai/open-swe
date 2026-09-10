@@ -5,6 +5,7 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { nitro } from "nitro/vite"
+import type { IncomingMessage } from "node:http"
 import type { Plugin } from "vite"
 
 // Paths the backend owns, not the app router. `/dashboard/api` is the only one a
@@ -19,7 +20,26 @@ const BACKEND_PREFIXES = [
   "/fake-slack",
   "/static",
   "/ok",
+  // LangGraph's own API, which the harness serves alongside the fake SaaS. The
+  // app router has no route under either, so fronting them shadows nothing.
+  "/threads",
+  "/store",
 ]
+
+// The harness-owned subset: everything but the two a deployment fronts and
+// `/static`, which would shadow nitro's own assets.
+const E2E_HARNESS_PREFIXES = BACKEND_PREFIXES.filter(
+  (prefix) => !["/dashboard/api", "/webhooks", "/static"].includes(prefix)
+)
+
+function matchesBackendPrefix(url?: string): boolean {
+  return (
+    !!url &&
+    BACKEND_PREFIXES.some(
+      (p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`)
+    )
+  )
+}
 
 // Dev-only: when E2E_HARNESS is set (the `dev:mock` local harness) serve the app
 // and the harness from one origin by proxying the API routes + the Yjs collab
@@ -28,12 +48,7 @@ const BACKEND_PREFIXES = [
 function mockHarnessProxy(): Plugin | null {
   const target = process.env.E2E_HARNESS
   if (!target) return null
-  const prefixes = BACKEND_PREFIXES
-  const matches = (url?: string): boolean =>
-    !!url &&
-    prefixes.some(
-      (p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`)
-    )
+  const matches = matchesBackendPrefix
   const upstream = new URL(target)
   return {
     name: "mock-harness-proxy",
@@ -140,6 +155,66 @@ const devRouteRules = IS_PRODUCTION
       ])
     )
 
+// The nitro dev handler builds its request from `rawHeaders`, so setting only
+// `headers` here would be dropped before anything is proxied.
+function setRequestHeader(
+  req: IncomingMessage,
+  name: string,
+  value: string
+): void {
+  req.headers[name] = value
+  const raw = req.rawHeaders
+  for (let i = raw.length - 2; i >= 0; i -= 2) {
+    if (raw[i]?.toLowerCase() === name) raw.splice(i, 2)
+  }
+  raw.push(name, value)
+}
+
+// `pnpm run dev:prod`: a deployed backend keeps `osw_session` on its own origin and
+// rejects mutations carrying any other Origin, so this dev server presents the
+// session that target minted (scripts/dev-prod.mjs) and speaks as that origin.
+// The cookie also has to reach the server render, which forwards the incoming
+// one by hand; the Origin rewrite is confined to proxied paths so Vite's own
+// module and HMR requests keep the origin they arrived with.
+function deployedBackendSession(): Plugin | null {
+  const session = process.env.OPEN_SWE_DEV_SESSION
+  const backend = process.env.DASHBOARD_API_URL
+  if (!session || !backend) return null
+  const origin = new URL(backend).origin
+  return {
+    name: "deployed-backend-session",
+    enforce: "pre",
+    configureServer(server) {
+      const ownOrigins = new Set([
+        `http://localhost:${DEV_PORT}`,
+        `http://127.0.0.1:${DEV_PORT}`,
+      ])
+      server.middlewares.use((req, res, next) => {
+        if (matchesBackendPrefix(req.url)) {
+          // Any page open in the browser can post here while this runs, and a
+          // blanket rewrite would launder its Origin past the backend's CSRF
+          // check on a session it never had. Only this server's pages get that.
+          const from = req.headers.origin
+          if (from && !ownOrigins.has(from)) {
+            res.writeHead(403).end()
+            return
+          }
+          if (from) setRequestHeader(req, "origin", origin)
+          if (req.headers.referer)
+            setRequestHeader(req, "referer", `${origin}/`)
+        }
+        const jar = (req.headers.cookie ?? "")
+          .split(";")
+          .map((cookie) => cookie.trim())
+          .filter((cookie) => cookie && !cookie.startsWith("osw_session="))
+        jar.push(`osw_session=${session}`)
+        setRequestHeader(req, "cookie", jar.join("; "))
+        next()
+      })
+    },
+  }
+}
+
 // The Electron app and the service worker's offline navigation both load a
 // client-only `_shell.html`. SSR alone doesn't emit one, so prerender `/` with
 // the header that tells the Start handler to render the shell instead of the route.
@@ -155,8 +230,19 @@ const SHELL_PAGE = {
   sitemap: { exclude: true },
 }
 
+// Where the app is served from. "/" for the dev server and the standalone image;
+// a LangGraph `http.mount_prefix` (plus trailing slash) when the backend bundles
+// the build and serves it under that prefix.
+const BASE_PATH = process.env.DASHBOARD_BASE_PATH || "/"
+
+// The backend can front this dev server (DASHBOARD_DEV_SERVER_URL) so the UI
+// hot-reloads on its origin. HTTP is proxied; the HMR WebSocket is not, so the
+// client is told to open it against this port whatever page origin it loaded from.
+const DEV_PORT = Number(process.env.PORT) || 3000
+
 const config = defineConfig({
-  base: "/",
+  base: BASE_PATH,
+  server: { port: DEV_PORT, strictPort: true, hmr: { clientPort: DEV_PORT } },
   resolve: { tsconfigPaths: true },
   optimizeDeps: {
     include: [
@@ -173,6 +259,7 @@ const config = defineConfig({
   },
   worker: { format: "es" },
   plugins: [
+    deployedBackendSession(),
     mockHarnessProxy(),
     devtools(),
     nitro({
@@ -183,7 +270,16 @@ const config = defineConfig({
       // handler deliberately refuses to have. Only the two prefixes a deployed
       // dashboard fronts, since proxying `/static` would shadow nitro's assets.
       handlers: IS_PRODUCTION
-        ? ["/dashboard/api", "/webhooks"].map((prefix) => ({
+        ? [
+            "/dashboard/api",
+            "/webhooks",
+            // A built server fronting the mock harness fronts its fake-SaaS and
+            // control routes too, so the E2E browser has the one origin a
+            // deployment gives it and reaches the backend the way it really
+            // does — through the handler below. Serving the app from the
+            // harness instead let the suite pass while this proxy was broken.
+            ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
+          ].map((prefix) => ({
             route: `${prefix}/**`,
             handler: "./server/backend-proxy.ts",
           }))

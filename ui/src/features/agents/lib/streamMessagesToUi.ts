@@ -44,7 +44,6 @@ function toolKind(name: string): ToolKind {
   if (lowered === "task") return "task"
   if (lowered === "slack_thread_reply") return "slack"
   if (lowered === "linear_comment") return "linear"
-  if (lowered === "write_todos") return "other"
   if (
     EDIT_TOOLS.has(lowered) ||
     ["edit", "write", "replace"].some((t) => lowered.includes(t))
@@ -381,6 +380,7 @@ export function streamMessagesToUi(
       messageTimestamp(raw, msgId, resolveCreatedAt)
 
     if (HumanMessage.isInstance(raw)) {
+      if (raw.additional_kwargs.lc_source === "summarization") return
       flushAgentTurn()
       turnKey = typeof raw.id === "string" ? raw.id : undefined
       const content = (raw as unknown as { content?: unknown }).content
@@ -427,6 +427,7 @@ export function streamMessagesToUi(
     }
 
     if (AIMessage.isInstance(raw)) {
+      if (raw.additional_kwargs.lc_source === "summarization") return
       const chunks: Array<Chunk> = []
       const reasoning = reasoningText(raw)
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })

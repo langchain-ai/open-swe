@@ -19,7 +19,7 @@ class TestNotifyStepLimitReached:
 
         with (
             patch(
-                "agent.middleware.notify_step_limit.get_config",
+                "agent.run_config.get_config",
                 return_value={
                     "configurable": {"slack_thread": {"channel_id": "C123", "thread_ts": "171.123"}}
                 },
@@ -53,7 +53,7 @@ class TestNotifyStepLimitReached:
 
         with (
             patch(
-                "agent.middleware.notify_step_limit.get_config",
+                "agent.run_config.get_config",
                 return_value={
                     "configurable": {"slack_thread": {"channel_id": "C123", "thread_ts": "171.123"}}
                 },
@@ -89,7 +89,7 @@ class TestNotifyStepLimitReached:
 
         with (
             patch(
-                "agent.middleware.notify_step_limit.get_config",
+                "agent.run_config.get_config",
                 return_value={"configurable": {}},
             ),
             patch(

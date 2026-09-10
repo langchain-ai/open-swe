@@ -1,4 +1,4 @@
-import httpx
+import httpx2
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -56,13 +56,13 @@ async def test_transcribe_audio_validates_and_forwards(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(voice, "get_team_transcription_model", model)
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.url == "https://api.openai.com/v1/audio/transcriptions"
         assert request.headers["authorization"] == "Bearer secret"
         assert b"gpt-transcribe" in request.content
         assert b"audio" in request.content
-        return httpx.Response(200, json={"text": " dictated text "})
+        return httpx2.Response(200, json={"text": " dictated text "})
 
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **_: client)
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    monkeypatch.setattr(httpx2, "AsyncClient", lambda **_: client)
     assert await voice.transcribe_audio(_request(b"audio")) == "dictated text"

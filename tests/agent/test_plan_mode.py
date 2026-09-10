@@ -4,8 +4,10 @@ from typing import Any
 import pytest
 
 from agent import server
-from agent.dashboard import thread_api
+from agent.dashboard.threads import runs as thread_runs
+from agent.dashboard.threads import summary as thread_summary
 from agent.prompt import construct_system_prompt
+from tests.conftest import patch_thread_module
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -50,9 +52,6 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         "delete_user_skill",
         "slack_move_thread",
         "slack_start_new_thread",
-        "linear_create_issue",
-        "linear_update_issue",
-        "linear_delete_issue",
     ):
         assert tool in excluded
     # Read-only tools, plan-file editing tools, and explicit plan approval stay available.
@@ -63,6 +62,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     assert "write_file" not in excluded
     assert "edit_file" not in excluded
     assert "execute" not in excluded
+    assert "browser_close" not in excluded
 
 
 class _FakeThreadsClient:
@@ -116,10 +116,10 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
     async def fake_resolve_email(login: str, profile: dict[str, Any]) -> str:
         return "octo@example.com"
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
     return client
 
 
@@ -140,7 +140,7 @@ def test_run_start_passes_plan_mode_when_enabled(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
     enriched = asyncio.run(
-        thread_api._enrich_run_start_command(
+        thread_runs._enrich_run_start_command(
             "thread-id",
             "octo",
             _run_start_command(True),
@@ -157,7 +157,7 @@ def test_run_start_omits_plan_mode_when_disabled(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
     enriched = asyncio.run(
-        thread_api._enrich_run_start_command(
+        thread_runs._enrich_run_start_command(
             "thread-id",
             "octo",
             _run_start_command(None),
@@ -171,12 +171,12 @@ def test_run_start_omits_plan_mode_when_disabled(
 
 
 async def test_thread_summary_reports_plan_mode() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_summary._thread_summary(
         {"thread_id": "t1", "metadata": {"source": "dashboard", "plan_mode": True}}
     )
     assert summary["planMode"] is True
 
-    summary_off = await thread_api._thread_summary(
+    summary_off = await thread_summary._thread_summary(
         {"thread_id": "t2", "metadata": {"source": "dashboard"}}
     )
     assert summary_off["planMode"] is False
@@ -224,8 +224,7 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     saved: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        approve_plan_tool,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",
@@ -313,8 +312,7 @@ async def test_approve_plan_tool_ignores_stale_state_approver(
     saved: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        approve_plan_tool,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",
@@ -384,8 +382,7 @@ async def test_approve_plan_tool_allows_non_owner_configurable_identity(
     approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
     saved: dict[str, Any] = {}
     monkeypatch.setattr(
-        approve_plan_tool,
-        "get_config",
+        "agent.run_config.get_config",
         lambda: {
             "configurable": {
                 "thread_id": "t1",
