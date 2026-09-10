@@ -1,3 +1,4 @@
+import type { QueryClient } from "@tanstack/react-query"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
@@ -22,6 +23,27 @@ function upsertMessage<T extends QueuedThreadMessage>(
   message: T
 ): Array<T> {
   return [...(messages ?? []).filter((item) => item.id !== message.id), message]
+}
+
+/** A send racing an in-flight stop must land after it, or the stop cancels the run the follow-up just joined. */
+async function waitForCancellation(
+  queryClient: QueryClient,
+  threadId: string
+): Promise<void> {
+  const cancelling = () =>
+    queryClient.isMutating({ mutationKey: agentThreadKeys.cancel(threadId) }) >
+    0
+  if (!cancelling()) return
+  await new Promise<void>((resolve) => {
+    let unsubscribe = () => {}
+    const finishIfCancelled = () => {
+      if (cancelling()) return
+      unsubscribe()
+      resolve()
+    }
+    unsubscribe = queryClient.getMutationCache().subscribe(finishIfCancelled)
+    finishIfCancelled()
+  })
 }
 
 function setPendingMessage(
@@ -62,13 +84,20 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
   }
 }
 
-/** Submit user messages through the active-run queue or a new stream run. */
+/**
+ * Submit user messages through the active-run queue or a new stream run.
+ *
+ * A busy thread persists the follow-up to the dashboard queue. If stop wins the
+ * race after that persistence, the endpoint starts a replacement run that
+ * consumes it, so the text is never dropped.
+ */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
   const stream = useAgentStream()
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
+      await waitForCancellation(queryClient, threadId)
       const createdAt = Date.now()
       const id = vars.client_message_id ?? crypto.randomUUID()
       const queuedMessage = {
@@ -86,6 +115,10 @@ export function useSubmitAgentMessage(threadId: string) {
           agentThreadKeys.detail(threadId),
           (prev) => (prev ? update(prev) : prev)
         )
+      const knownRunning =
+        stream.isLoading ||
+        queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))
+          ?.status === "running"
       const queue = async () => {
         await agentsApi.queueMessage(threadId, {
           content: vars.content,
@@ -94,11 +127,12 @@ export function useSubmitAgentMessage(threadId: string) {
           effort: vars.effort,
           plan_mode: vars.plan_mode,
           client_message_id: id,
+          expect_active: knownRunning,
         })
         updateThread((thread) => setQueuedMessage(thread, queuedMessage))
       }
 
-      if (stream.isLoading) {
+      if (knownRunning) {
         updateThread((thread) => setQueuedMessage(thread, queuedMessage))
         try {
           await queue()

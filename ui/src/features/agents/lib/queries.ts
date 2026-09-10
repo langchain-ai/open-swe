@@ -35,6 +35,7 @@ export const agentThreadKeys = {
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
+  cancel: (threadId: string) => ["agent-threads", threadId, "cancel"] as const,
   pullRequestStatus: (threadId: string) =>
     ["agent-threads", threadId, "pull-request-status"] as const,
   branchDiff: (threadId: string) =>
@@ -839,9 +840,16 @@ export function useCancelAgentThread(threadId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
+    mutationKey: agentThreadKeys.cancel(threadId),
     mutationFn: () => agentsApi.cancelThread(threadId),
     onSuccess: (thread) => {
-      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      queryClient.setQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId),
+        (current) =>
+          thread.queuedMessages === undefined && current?.queuedMessages?.length
+            ? { ...thread, queuedMessages: current.queuedMessages }
+            : thread
+      )
       invalidateAgentThreadLists(queryClient)
     },
   })

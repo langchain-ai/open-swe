@@ -160,6 +160,62 @@ async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[s
     return queued
 
 
+async def _start_replacement_run_if_stopped(
+    client: Any,
+    thread_id: str,
+    login: str,
+    metadata: Mapping[str, Any],
+    *,
+    model_id: str | None,
+    effort: str | None,
+    plan_mode: bool,
+) -> None:
+    """Rescue a follow-up that landed in the queue just as stop ended the run.
+
+    The queue is only drained by a live run, so without a replacement the message
+    would sit there unseen until the user sent another one.
+    """
+    active = await get_thread_active_status(thread_id)
+    if active is None:
+        raise HTTPException(502, "could not determine whether thread is active")
+    if active:
+        return
+
+    configurable = await _build_dashboard_configurable(
+        thread_id,
+        login,
+        metadata,
+        overrides={
+            "agent_model_id": model_id,
+            "agent_effort": effort,
+            "plan_mode": plan_mode or None,
+        },
+    )
+    try:
+        run = await dispatch_agent_run(
+            thread_id,
+            None,
+            configurable,
+            source=_DASHBOARD_SOURCE,
+            input={"messages": []},
+            client=client,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to start dashboard follow-up run",
+            extra={"thread_id": thread_id},
+        )
+        raise HTTPException(502, "failed to start follow-up run") from exc
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={
+            "latest_run_status": "pending",
+            "latest_run_id": run.get("run_id") if isinstance(run, Mapping) else None,
+            "updated_at_ms": _now_ms(),
+        },
+    )
+
+
 async def get_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
 ) -> dict[str, Any]:
@@ -238,7 +294,7 @@ async def send_dashboard_message(
     active = await get_thread_active_status(thread_id)
     if active is None:
         raise HTTPException(502, "could not determine whether thread is active")
-    if not active:
+    if not active and not body.expect_active:
         raise HTTPException(
             409,
             "thread is idle; start a run via the stream commands endpoint",
@@ -287,12 +343,25 @@ async def send_dashboard_message(
     queued = await queue_message_for_thread(thread_id, queue_payload)
     if not queued:
         raise HTTPException(502, "failed to queue follow-up message")
+
+    await _start_replacement_run_if_stopped(
+        client,
+        thread_id,
+        login,
+        {**metadata, **metadata_update},
+        model_id=chosen_model,
+        effort=chosen_effort,
+        plan_mode=body.plan_mode,
+    )
+
     try:
         await _notify_slack_web_handoff(thread_id, handoff_metadata, client)
     except Exception:
         logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
     thread = await client.threads.get(thread_id)
-    return await _thread_summary(thread)
+    summary = await _thread_summary(thread)
+    summary["queuedMessages"] = await _queued_dashboard_messages(client, thread_id)
+    return summary
 
 
 async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:

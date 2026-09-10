@@ -40,6 +40,9 @@ class _FakeStore:
     async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
         return self.items.get((namespace, key))
 
+    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
+        self.items[(namespace, key)] = {"value": value}
+
 
 class _FakeClient:
     def __init__(
@@ -128,6 +131,7 @@ async def test_dashboard_followup_sends_image_content_blocks(
         "github_login": "octocat",
         "repo_owner": "octo",
         "repo_name": "repo",
+        "model": "vision-model",
     }
     client = _FakeClient(metadata)
 
@@ -148,6 +152,8 @@ async def test_dashboard_followup_sends_image_content_blocks(
             "octocat",
             thread_runs.ThreadMessageBody(
                 content="describe this",
+                model_id="vision-model",
+                effort="medium",
                 images=[
                     thread_runs.DashboardImageBody(
                         base64="aW1hZ2U=",
@@ -159,6 +165,61 @@ async def test_dashboard_followup_sends_image_content_blocks(
         )
 
     assert exc_info.value.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "active_statuses",
+    [
+        pytest.param((False, False), id="stop-already-landed"),
+        pytest.param((True, False), id="stop-wins-the-race"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_dashboard_followup_dispatches_replacement_run_when_stop_won(
+    monkeypatch: pytest.MonkeyPatch,
+    active_statuses: tuple[bool, bool],
+) -> None:
+    metadata = {"source": "dashboard", "github_login": "octocat"}
+    client = _FakeClient(metadata)
+    statuses = iter(active_statuses)
+    queued_messages: list[object] = []
+    dispatched: list[dict[str, Any]] = []
+
+    async def fake_active_status(thread_id: str) -> bool:
+        return next(statuses)
+
+    async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
+        queued_messages.append(message_content)
+        return True
+
+    async def fake_dispatch(
+        thread_id: str,
+        content: Any,
+        configurable: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, str]:
+        dispatched.append({"content": content, "input": kwargs.get("input")})
+        return {"run_id": "replacement-run"}
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    patch_thread_module(monkeypatch, "get_thread_active_status", fake_active_status)
+    patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue_message_for_thread)
+    patch_thread_module(monkeypatch, "dispatch_agent_run", fake_dispatch)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", _noop_token_check)
+    patch_thread_module(monkeypatch, "get_profile", _empty_profile)
+    patch_thread_module(monkeypatch, "resolve_run_email", _run_email)
+
+    await thread_api.send_dashboard_message(
+        "thread-1",
+        "octocat",
+        thread_runs.ThreadMessageBody(content="survive stop", expect_active=True),
+    )
+
+    assert len(queued_messages) == 1
+    assert dispatched == [{"content": None, "input": {"messages": []}}]
+    assert any(
+        update.get("latest_run_id") == "replacement-run" for update in client.threads.updates
+    )
 
 
 @pytest.mark.asyncio

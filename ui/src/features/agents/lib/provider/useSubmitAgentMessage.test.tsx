@@ -214,4 +214,33 @@ describe("useSubmitAgentMessage", () => {
     ])
     expect(queuedMessages(client)).toBeUndefined()
   })
+
+  it("hints the thread is active so a stop race keeps the follow-up", async () => {
+    stream.isLoading = true
+    const { client, result } = setup()
+
+    await result.current.mutateAsync({ content: "hi", images: [] })
+
+    expect(queueMessage).toHaveBeenCalledWith(
+      THREAD_ID,
+      expect.objectContaining({ expect_active: true })
+    )
+    expect(queuedMessages(client)).toHaveLength(1)
+    expect(stream.submit).not.toHaveBeenCalled()
+  })
+
+  it("treats a running cached thread as active even without a live stream", async () => {
+    const { client, result } = setup()
+    client.setQueryData<AgentThread>(
+      agentThreadKeys.detail(THREAD_ID),
+      (prev) => (prev ? { ...prev, status: "running" } : prev)
+    )
+
+    await result.current.mutateAsync({ content: "hi", images: [] })
+
+    expect(queueMessage).toHaveBeenCalledWith(
+      THREAD_ID,
+      expect.objectContaining({ expect_active: true })
+    )
+  })
 })

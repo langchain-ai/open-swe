@@ -93,6 +93,9 @@ class ThreadMessageBody(BaseModel):
     effort: str | None = None
     plan_mode: bool = False
     client_message_id: uuid.UUID | None = None
+    # The client saw a live run. Queue the follow-up even if stop already landed,
+    # and start a replacement run to consume it.
+    expect_active: bool = False
 
 
 class ThreadRenameBody(BaseModel):

@@ -43,6 +43,7 @@ vi.mock("@/lib/appCommands", () => ({
 afterEach(() => cleanup())
 
 beforeEach(() => {
+  window.sessionStorage.clear()
   stream.isLoading = false
   stream.stop.mockClear()
   stream.disconnect.mockClear()
@@ -67,6 +68,23 @@ function renderComposer(
     </QueryClientProvider>
   )
 }
+
+describe("ChatComposer submission", () => {
+  it("restores a per-thread draft after remount", async () => {
+    window.sessionStorage.setItem(
+      "open-swe:composer-draft:thread-1",
+      "unfinished draft"
+    )
+
+    renderComposer(false, { draftKey: "thread-1" })
+
+    await waitFor(() =>
+      expect(screen.getByTestId("composer-editor").textContent).toBe(
+        "unfinished draft"
+      )
+    )
+  })
+})
 
 describe("ChatComposer stop button", () => {
   it("offers to stop a run this client never joined", async () => {
