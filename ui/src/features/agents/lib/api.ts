@@ -262,8 +262,32 @@ export interface PullRequestSnapshot {
   state: PullRequestLiveState | null
 }
 
+export type ThreadFeedbackRating = "bad" | "good" | "other"
+
+export type ThreadFeedbackSubmission =
+  | { action?: "submit"; rating: ThreadFeedbackRating; comment: string }
+  | { action: "dismiss" }
+
+export interface ThreadFeedback {
+  status: "unavailable" | "ready" | "completed" | "dismissed"
+  rating: ThreadFeedbackRating | null
+  comment: string
+}
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
+  getThreadFeedback: (threadId: string) =>
+    agentsRequest<ThreadFeedback>(
+      `/threads/${encodeURIComponent(threadId)}/feedback`
+    ),
+  submitThreadFeedback: (threadId: string, body: ThreadFeedbackSubmission) =>
+    agentsRequest<ThreadFeedback>(
+      `/threads/${encodeURIComponent(threadId)}/feedback`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    ),
   listThreadProjects: (
     params: {
       includeResolved?: boolean

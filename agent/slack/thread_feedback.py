@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal, cast
 
 from fastapi import BackgroundTasks
 from pydantic import BaseModel, Field
@@ -23,6 +23,7 @@ from agent.slack.client import (
 from agent.slack.responses import FeedbackResponse
 from agent.source_context import SourceContext
 from agent.store import TypedStore
+from agent.thread_feedback import complete_feedback_prompt
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
 from agent.utils.thread_ops import langgraph_client
@@ -38,6 +39,8 @@ _RATING_ACTION = "open_swe_feedback_rating"
 _RATING_BLOCK = "feedback_rating"
 _COMMENT_BLOCK = "feedback_comment"
 _RATINGS = ("😡 Very Bad", "💩 Bad", "😐 Okay", "🙂 Good", "😍 Great")
+_CHOICES = {"bad": "💩 Bad", "good": "🙂 Good", "other": "💬 Other"}
+_Choice = Literal["bad", "good", "other"]
 
 
 class ThreadFeedback(BaseModel):
@@ -50,10 +53,11 @@ class ThreadFeedback(BaseModel):
     prompted: bool = False
     dismissed: bool = False
     rating: int | None = Field(default=None, ge=1, le=5)
+    choice: _Choice | None = None
     comment: str = Field(default="", max_length=3000)
     completed: bool = False
-    submitted_at: Decimal | None = None
     draft_rating: int | None = Field(default=None, ge=1, le=5)
+    draft_choice: _Choice | None = None
     last_selection_ts: Decimal = Decimal(0)
 
 
@@ -83,7 +87,7 @@ def _dismiss_button(run_id: str) -> dict[str, Any]:
     }
 
 
-def _comment_input(comment: str = "") -> dict[str, Any]:
+def _comment_input(comment: str = "", *, required: bool = False) -> dict[str, Any]:
     comment_element: dict[str, Any] = {
         "type": "plain_text_input",
         "action_id": "comment",
@@ -96,7 +100,7 @@ def _comment_input(comment: str = "") -> dict[str, Any]:
     return {
         "type": "input",
         "block_id": _COMMENT_BLOCK,
-        "optional": True,
+        "optional": not required,
         "dispatch_action": False,
         "label": {"type": "plain_text", "text": "Comments"},
         "element": comment_element,
@@ -133,10 +137,15 @@ def rating_blocks(
     thread_id: str,
     *,
     rating: int | None = None,
+    choice: _Choice | None = None,
     comment: str = "",
     error: str = "",
     selection_ts: Decimal = Decimal(0),
 ) -> list[dict[str, Any]]:
+    selected_choice = choice or {1: "bad", 5: "good"}.get(rating)
+    selection = {"run_id": run_id, "rating": rating, "selection_ts": str(selection_ts)}
+    if choice is not None:
+        selection["choice"] = choice
     url = dashboard_thread_url(thread_id)
     thread_link = f"<{url}|this thread>" if url else "this thread"
     blocks = [
@@ -161,12 +170,12 @@ def rating_blocks(
                     "text": {"type": "plain_text", "text": label, "emoji": True},
                     "action_id": f"{_SELECT_PREFIX}{value}",
                     "value": run_id,
-                    **({"style": "primary"} if value == rating else {}),
+                    **({"style": "primary"} if value == selected_choice else {}),
                 }
-                for value, label in enumerate(_RATINGS, start=1)
+                for value, label in _CHOICES.items()
             ],
         },
-        _comment_input(comment),
+        _comment_input(comment, required=choice == "other"),
         {
             "type": "actions",
             "elements": [
@@ -174,10 +183,8 @@ def rating_blocks(
                     "type": "button",
                     "text": {"type": "plain_text", "text": "Submit feedback"},
                     "action_id": _SUBMIT_ACTION,
-                    "value": json.dumps(
-                        {"run_id": run_id, "rating": rating, "selection_ts": str(selection_ts)}
-                    )
-                    if rating is not None
+                    "value": json.dumps(selection)
+                    if rating is not None or choice is not None
                     else run_id,
                     "style": "primary",
                 },
@@ -188,7 +195,12 @@ def rating_blocks(
 
 
 async def post_slack_feedback_prompt(
-    thread_id: str, run_id: str, channel_id: str, *, require_answer: bool = False
+    thread_id: str,
+    run_id: str,
+    channel_id: str,
+    *,
+    require_answer: bool = False,
+    expected_event_id: str | None = None,
 ) -> None:
     """Prompt the thread initiator once, using the qualifying run's response mapping."""
     try:
@@ -245,6 +257,11 @@ async def post_slack_feedback_prompt(
             if await store.search(filter=prompt_filter, limit=1):
                 return
             await store.put(run_id, record)
+            if expected_event_id is not None:
+                from agent.thread_feedback import feedback_event_is_ready
+
+                if not await feedback_event_is_ready(thread_id, expected_event_id):
+                    return
             posted = await post_slack_ephemeral_message(
                 channel_id,
                 record.user_id,
@@ -260,25 +277,6 @@ async def post_slack_feedback_prompt(
         logger.warning(
             "Could not post Slack feedback prompt", extra={"feedback_run_id": run_id}, exc_info=True
         )
-
-
-async def post_slack_pr_feedback_prompt(
-    thread_id: str, metadata: dict[str, Any], pr_url: str
-) -> None:
-    """Use the merged PR's original Slack run, never the latest conversation."""
-    records = metadata.get("pull_requests")
-    if not isinstance(records, list):
-        return
-    for record in records:
-        if not isinstance(record, dict) or record.get("url") != pr_url:
-            continue
-        origin = record.get("slack_feedback")
-        if not isinstance(origin, dict):
-            return
-        run_id, channel_id = origin.get("run_id"), origin.get("channel_id")
-        if isinstance(run_id, str) and run_id and isinstance(channel_id, str) and channel_id:
-            await post_slack_feedback_prompt(thread_id, run_id, channel_id)
-        return
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -416,6 +414,7 @@ async def _dismiss_feedback(payload: dict[str, Any]) -> None:
             if await respond_to_slack_interaction(
                 str(payload.get("response_url") or ""), {"delete_original": True}
             ):
+                await complete_feedback_prompt(record.agent_thread_id, "dismissed")
                 return
             if not was_dismissed:
                 async with _locked_feedback(current) as latest:
@@ -434,21 +433,28 @@ class _FeedbackInputError(ValueError):
 
 def _form_values(
     values: dict[str, Any], default_rating: int | None = None
-) -> tuple[int | None, str]:
+) -> tuple[int | None, str, _Choice | None]:
     selected = _object(_object(values.get(_RATING_BLOCK)).get(_RATING_ACTION)).get(
         "selected_option"
     )
     value = _object(selected).get("value")
     if selected is not None and (
-        not isinstance(value, str) or value not in {"1", "2", "3", "4", "5"}
+        not isinstance(value, str) or value not in {*_CHOICES, "1", "2", "3", "4", "5"}
     ):
-        raise _FeedbackInputError("Choose a rating from 1 to 5.")
-    rating = int(value) if value is not None else default_rating
+        raise _FeedbackInputError("Choose Bad, Good, or Other.")
+    choice: _Choice | None = value if value in _CHOICES else None
+    rating = (
+        {"bad": 1, "good": 5}.get(choice)
+        if choice is not None
+        else int(value)
+        if value is not None
+        else default_rating
+    )
     comment = _object(_object(values.get(_COMMENT_BLOCK)).get("comment")).get("value")
     if comment is not None and (not isinstance(comment, str) or len(comment) > 3000):
         raise _FeedbackInputError("Comments must be at most 3,000 characters.")
     comment = comment.strip() if isinstance(comment, str) else ""
-    return rating, comment
+    return rating, comment, choice
 
 
 async def _save_submission(
@@ -456,8 +462,6 @@ async def _save_submission(
     values: dict[str, Any],
     *,
     legacy_modal: bool = False,
-    submitted_at: Decimal | None = None,
-    selection_ts: Decimal = Decimal(0),
 ) -> ThreadFeedback:
     async with _locked_feedback(record) as current:
         if current is None:
@@ -465,18 +469,18 @@ async def _save_submission(
         if current.completed or current.dismissed:
             return current
         default_rating = current.rating if legacy_modal and _RATING_BLOCK not in values else None
-        rating, comment = _form_values(values, default_rating)
-        completed = rating is not None or bool(comment)
-        if not completed and submitted_at is None:
-            raise _FeedbackInputError("Choose a rating or enter a comment before submitting.")
+        rating, comment, choice = _form_values(values, default_rating)
+        if rating is None and not comment:
+            raise _FeedbackInputError(
+                "Add a comment when choosing Other before submitting."
+                if choice == "other"
+                else "Choose a rating or enter a comment before submitting."
+            )
         current.rating = rating
+        current.choice = choice
         current.comment = comment
-        current.completed = completed
-        current.submitted_at = submitted_at
-        current.last_selection_ts = max(current.last_selection_ts, selection_ts)
+        current.completed = True
         await _store(current.channel_id).put(current.run_id, current)
-        if not completed:
-            raise _FeedbackInputError("Choose a rating or enter a comment before submitting.")
         return current
 
 
@@ -495,6 +499,7 @@ async def _show_submission_error(
         if isinstance(selected, str) and selected in {"1", "2", "3", "4", "5"}
         else None
     )
+    choice = selected if isinstance(selected, str) and selected in _CHOICES else None
     comment = _object(_object(values.get(_COMMENT_BLOCK)).get("comment")).get("value")
     comment = comment[:3000] if isinstance(comment, str) else ""
     current = await _store(record.channel_id).get(record.run_id)
@@ -510,6 +515,7 @@ async def _show_submission_error(
                 record.run_id,
                 record.agent_thread_id,
                 rating=rating,
+                choice=choice,
                 comment=comment,
                 error=error,
                 selection_ts=selection_ts,
@@ -535,7 +541,11 @@ async def _process_submission(payload: dict[str, Any]) -> None:
             values = {
                 **values,
                 _RATING_BLOCK: {
-                    _RATING_ACTION: {"selected_option": {"value": str(selection.get("rating"))}}
+                    _RATING_ACTION: {
+                        "selected_option": {
+                            "value": str(selection.get("choice") or selection.get("rating"))
+                        }
+                    }
                 },
             }
         record = await _load_feedback(channel_id, action_value, user_id)
@@ -545,29 +555,31 @@ async def _process_submission(payload: dict[str, Any]) -> None:
             if current is None:
                 return
             action_ts = _action(payload).get("action_ts")
-            submitted_at = None
             if action_ts is not None:
                 submitted_at = Decimal(str(action_ts))
                 if (
                     not submitted_at.is_finite()
                     or submitted_at <= 0
                     or submitted_at < current.last_selection_ts
-                    or (current.submitted_at is not None and submitted_at < current.submitted_at)
                 ):
                     return
             # A Submit click can reach us before the preceding emoji update reaches Slack.
-            if current.draft_rating is not None and current.last_selection_ts > selection_ts:
+            if (
+                current.draft_rating is not None or current.draft_choice is not None
+            ) and current.last_selection_ts > selection_ts:
                 selection_ts = current.last_selection_ts
                 values = {
                     **values,
                     _RATING_BLOCK: {
-                        _RATING_ACTION: {"selected_option": {"value": str(current.draft_rating)}}
+                        _RATING_ACTION: {
+                            "selected_option": {
+                                "value": str(current.draft_choice or current.draft_rating)
+                            }
+                        }
                     },
                 }
             try:
-                record = await _save_submission(
-                    current, values, submitted_at=submitted_at, selection_ts=selection_ts
-                )
+                record = await _save_submission(current, values)
             except Exception as exc:
                 error = "Your feedback could not be saved. Please submit again."
                 if isinstance(exc, _FeedbackInputError):
@@ -576,6 +588,8 @@ async def _process_submission(payload: dict[str, Any]) -> None:
                     logger.warning("Could not save Slack feedback submission")
                 await _show_submission_error(current, values, response_url, error, selection_ts)
                 return
+        if record.completed:
+            await complete_feedback_prompt(record.agent_thread_id, "completed")
         await _acknowledge(record, response_url=response_url)
         await _export_feedback(record)
     except Exception:
@@ -589,8 +603,10 @@ def _comment_error(text: str) -> FeedbackResponse:
 async def _select_feedback_rating(payload: dict[str, Any]) -> None:
     action = _action(payload)
     suffix = str(action.get("action_id", "")).removeprefix(_SELECT_PREFIX)
-    if suffix not in {"1", "2", "3", "4", "5"}:
+    if suffix not in {*_CHOICES, "1", "2", "3", "4", "5"}:
         return
+    choice = cast(_Choice, suffix) if suffix in _CHOICES else None
+    rating = {"bad": 1, "good": 5}.get(choice) if choice is not None else int(suffix)
     try:
         timestamp = Decimal(str(action.get("action_ts") or "0"))
     except InvalidOperation:
@@ -600,58 +616,46 @@ async def _select_feedback_rating(payload: dict[str, Any]) -> None:
     channel_id = str(_object(payload.get("channel")).get("id") or "")
     user_id = str(_object(payload.get("user")).get("id") or "")
     response_url = str(payload.get("response_url") or "")
+    if not response_url:
+        return
     try:
         record = await _load_feedback(channel_id, str(action.get("value") or ""), user_id)
         if record is None:
             return
         async with _locked_feedback(record, purpose="feedback_response") as current:
-            if current is None or current.dismissed or timestamp <= current.last_selection_ts:
+            if (
+                current is None
+                or current.completed
+                or current.dismissed
+                or timestamp <= current.last_selection_ts
+            ):
                 return
-            if current.submitted_at is not None and timestamp < current.submitted_at:
-                # Slack can deliver a pre-Submit click after the submission has been saved.
+            values = _object(_object(payload.get("state")).get("values"))
+            comment = _object(_object(values.get(_COMMENT_BLOCK)).get("comment")).get("value")
+            comment = comment[:3000] if isinstance(comment, str) else ""
+            posted = await respond_to_slack_interaction(
+                response_url,
+                {
+                    "replace_original": True,
+                    "response_type": "ephemeral",
+                    "text": "Add a rating or comment, then submit feedback.",
+                    "blocks": rating_blocks(
+                        current.run_id,
+                        current.agent_thread_id,
+                        rating=rating,
+                        choice=choice,
+                        comment=comment,
+                        selection_ts=timestamp,
+                    ),
+                },
+            )
+            if posted:
                 async with _locked_feedback(current) as latest:
-                    if (
-                        latest is None
-                        or latest.dismissed
-                        or latest.submitted_at is None
-                        or not latest.last_selection_ts < timestamp < latest.submitted_at
-                    ):
-                        return
-                    latest.rating = latest.draft_rating = int(suffix)
-                    latest.last_selection_ts = timestamp
-                    latest.completed = True
-                    record = await _store(channel_id).put(latest.run_id, latest)
-            else:
-                if current.completed or not response_url:
-                    return
-                values = _object(_object(payload.get("state")).get("values"))
-                comment = _object(_object(values.get(_COMMENT_BLOCK)).get("comment")).get("value")
-                comment = comment[:3000] if isinstance(comment, str) else ""
-                posted = await respond_to_slack_interaction(
-                    response_url,
-                    {
-                        "replace_original": True,
-                        "response_type": "ephemeral",
-                        "text": "Add a rating or comment, then submit feedback.",
-                        "blocks": rating_blocks(
-                            current.run_id,
-                            current.agent_thread_id,
-                            rating=int(suffix),
-                            comment=comment,
-                            selection_ts=timestamp,
-                        ),
-                    },
-                )
-                if posted:
-                    async with _locked_feedback(current) as latest:
-                        if latest is not None and not latest.completed and not latest.dismissed:
-                            latest.draft_rating = int(suffix)
-                            latest.last_selection_ts = timestamp
-                            latest.submitted_at = None
-                            await _store(channel_id).put(latest.run_id, latest)
-                return
-        await _acknowledge(record, response_url=response_url)
-        await _export_feedback(record)
+                    if latest is not None and not latest.completed and not latest.dismissed:
+                        latest.draft_rating = rating
+                        latest.draft_choice = choice
+                        latest.last_selection_ts = timestamp
+                        await _store(channel_id).put(latest.run_id, latest)
     except Exception:
         logger.warning("Could not update Slack feedback rating selection")
 
@@ -680,6 +684,8 @@ async def handle_slack_feedback_interaction(
         except Exception:
             logger.warning("Could not save Slack feedback submission")
             return _comment_error("Your feedback could not be saved. Please try again.")
+        if record.completed:
+            background_tasks.add_task(complete_feedback_prompt, record.agent_thread_id, "completed")
         background_tasks.add_task(
             _acknowledge, record, response_url=str(metadata.get("response_url") or "")
         )

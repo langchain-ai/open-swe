@@ -230,6 +230,7 @@ async def send_dashboard_message(
     metadata_update: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
+        "feedback_last_activity_at_ms": now_ms,
         "plan_mode": body.plan_mode,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
         PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),

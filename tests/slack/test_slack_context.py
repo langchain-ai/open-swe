@@ -1075,7 +1075,9 @@ def test_process_slack_mention_runs_without_a_repository(
         and 'sender="system:slack-context"' in message["content"]
     )
     assert "Default Repository Hint" not in prompt_message["content"]
-    assert "metadata_update" not in captured
+    metadata_update = captured.get("metadata_update", {})
+    assert isinstance(metadata_update, dict)
+    assert "repo" not in metadata_update.get("metadata", {})
 
 
 def test_process_slack_mention_preserves_forwarded_attachment_from_event(
