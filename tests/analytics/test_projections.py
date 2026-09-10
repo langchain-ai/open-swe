@@ -365,7 +365,7 @@ async def test_emitted_finding_links_to_published_review(analytics_db, monkeypat
             return DAY
 
     monkeypatch.setattr(emitter, "datetime", FixedDatetime)
-    monkeypatch.setattr(emitter, "configured", lambda: True)
+    monkeypatch.setenv("ANALYTICS_POSTGRES_URI", "postgresql://localhost/analytics_test")
     monkeypatch.setattr(emitter, "enqueue", ingestion.ingest)
     await emitter.review_published(
         thread_key="thread",

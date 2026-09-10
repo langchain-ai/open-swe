@@ -2,11 +2,13 @@
 
 from sqlalchemy import text
 
-from agent.analytics.database import configured, transaction
+from agent.analytics.capture import fail_soft
+from agent.analytics.database import transaction
 from agent.analytics.emitter import opaque_id, opaque_person, workspace_id
 from agent.config import ENV
 
 
+@fail_soft
 async def upsert_person(
     *,
     provider: str,
@@ -17,7 +19,7 @@ async def upsert_person(
     team_key: str | None = None,
 ) -> None:
     person_id = opaque_person(provider, immutable_person_key)
-    if not configured() or person_id is None:
+    if person_id is None:
         return
     async with transaction() as conn:
         await conn.execute(
@@ -50,9 +52,10 @@ async def upsert_person(
         )
 
 
+@fail_soft
 async def upsert_model(provider_model_id: str | None) -> None:
     model_id = opaque_id("model", provider_model_id)
-    if not configured() or model_id is None or provider_model_id is None:
+    if model_id is None or provider_model_id is None:
         return
     async with transaction() as conn:
         await conn.execute(
@@ -70,9 +73,10 @@ async def upsert_model(provider_model_id: str | None) -> None:
         )
 
 
+@fail_soft
 async def upsert_repository(*, full_name: str, private: bool | None) -> None:
     repository_id = opaque_id("repository", full_name.lower())
-    if not configured() or repository_id is None or private is None:
+    if repository_id is None or private is None:
         return
     async with transaction() as conn:
         await conn.execute(

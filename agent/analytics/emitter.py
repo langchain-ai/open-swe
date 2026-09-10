@@ -1,12 +1,11 @@
 """Fail-soft lifecycle event capture at product transition points."""
 
-import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from agent.analytics.database import configured
+from agent.analytics.capture import fail_soft
 from agent.analytics.events import (
     EntryPoint,
     EventName,
@@ -32,8 +31,6 @@ from agent.analytics.events import (
 )
 from agent.analytics.outbox import enqueue
 from agent.config import ENV
-
-logger = logging.getLogger(__name__)
 
 _ENTRY_POINTS = {
     "dashboard": EntryPoint.DASHBOARD,
@@ -67,6 +64,7 @@ def entry_point(source: str | None) -> EntryPoint:
     return _ENTRY_POINTS.get(str(source or "").lower(), EntryPoint.UNKNOWN)
 
 
+@fail_soft
 async def emit(
     event_name: EventName,
     producer_event_id: str,
@@ -77,30 +75,22 @@ async def emit(
     source_version: int | None = None,
     **identifiers: object,
 ) -> None:
-    if not configured():
-        return
-    try:
-        event = make_event(
-            event_name=event_name,
-            workspace_id=workspace_id(),
-            producer="open-swe",
-            producer_event_id=producer_event_id,
-            occurred_at=occurred_at or datetime.now(UTC),
-            payload=payload,
-            environment=ENV.ANALYTICS_ENVIRONMENT.get(),
-            source_version=source_version,
-            entry_point=entry_point(source),
-            **identifiers,
-        )
-        await enqueue(event)
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Analytics event enqueue failed",
-            extra={"analytics_event_name": event_name.value},
-            exc_info=True,
-        )
+    event = make_event(
+        event_name=event_name,
+        workspace_id=workspace_id(),
+        producer="open-swe",
+        producer_event_id=producer_event_id,
+        occurred_at=occurred_at or datetime.now(UTC),
+        payload=payload,
+        environment=ENV.ANALYTICS_ENVIRONMENT.get(),
+        source_version=source_version,
+        entry_point=entry_point(source),
+        **identifiers,
+    )
+    await enqueue(event)
 
 
+@fail_soft
 async def run_started(
     *,
     run_key: str,
@@ -135,6 +125,7 @@ async def run_started(
     )
 
 
+@fail_soft
 async def run_terminal(
     *,
     run_key: str,
@@ -175,6 +166,7 @@ async def run_terminal(
     )
 
 
+@fail_soft
 async def run_cost(
     *,
     run_key: str,
@@ -205,6 +197,7 @@ async def run_cost(
     )
 
 
+@fail_soft
 async def pr_opened(
     *,
     owner: str,
@@ -256,6 +249,7 @@ async def pr_opened(
     )
 
 
+@fail_soft
 async def pr_state(
     *,
     owner: str,
@@ -286,6 +280,7 @@ async def pr_state(
     )
 
 
+@fail_soft
 async def task_marked_complete(thread_key: str, *, source: str, auto: bool = False) -> None:
     await emit(
         EventName.TASK_MARKED_COMPLETE,
@@ -297,6 +292,7 @@ async def task_marked_complete(thread_key: str, *, source: str, auto: bool = Fal
     )
 
 
+@fail_soft
 async def task_accepted(thread_key: str, *, source: str, actor_key: str | int | None) -> None:
     await emit(
         EventName.TASK_ACCEPTED,
@@ -309,6 +305,7 @@ async def task_accepted(thread_key: str, *, source: str, actor_key: str | int | 
     )
 
 
+@fail_soft
 async def task_rework(
     thread_key: str,
     *,
@@ -326,6 +323,7 @@ async def task_rework(
     )
 
 
+@fail_soft
 async def feedback_submitted(
     *, run_key: str, person_key: str, rating: int, producer_version: str
 ) -> None:
@@ -340,6 +338,7 @@ async def feedback_submitted(
     )
 
 
+@fail_soft
 async def review_published(
     *, thread_key: str, owner: str, repo: str, number: int, head_sha: str, finding_count: int
 ) -> None:
@@ -355,6 +354,7 @@ async def review_published(
     )
 
 
+@fail_soft
 async def finding_transition(
     *,
     thread_key: str,
