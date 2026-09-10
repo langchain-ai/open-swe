@@ -356,6 +356,32 @@ async def test_post_slack_thread_reply_with_ts_sends_blocks(
 
 
 @pytest.mark.asyncio
+async def test_open_slack_direct_message_returns_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    response = _ok_response()
+    response.json.return_value = {"ok": True, "channel": {"id": "D1"}}
+    client_cm = _async_client_cm(response)
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.open_slack_direct_message("U1")
+
+    assert result == ("D1", None)
+    assert client_cm.post.await_args.args[0].endswith("/conversations.open")
+    assert client_cm.post.await_args.kwargs["json"] == {"users": "U1"}
+
+
+@pytest.mark.asyncio
+async def test_open_slack_direct_message_returns_slack_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    client_cm = _async_client_cm(_err_response("cannot_dm_bot"))
+    with patch.object(slack_utils.httpx2, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.open_slack_direct_message("U1")
+
+    assert result == (None, "cannot_dm_bot")
+
+
+@pytest.mark.asyncio
 async def test_post_slack_top_level_message_with_ts_omits_thread_ts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
