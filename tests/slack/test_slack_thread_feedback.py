@@ -806,7 +806,7 @@ async def test_dismiss_removes_prompt_without_saving_feedback(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("missing_url", [False, True])
-async def test_message_update_failure_preserves_feedback_without_posting_another_prompt(
+async def test_prompt_cleanup_failure_preserves_saved_feedback_and_confirmation(
     context: Any, fake_store: Any, missing_url: bool
 ) -> None:
     payload = _inline_submission()
@@ -818,7 +818,12 @@ async def test_message_update_failure_preserves_feedback_without_posting_another
     await tasks()
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["rating"] == 5
     feedback.create_langsmith_thread_feedback.assert_awaited_once()
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    if missing_url:
+        feedback.post_slack_ephemeral_message.assert_not_awaited()
+    else:
+        feedback.post_slack_ephemeral_message.assert_awaited_once_with(
+            "C1", "U1", "✅ Feedback completed. Thanks!", thread_ts="1.0"
+        )
 
 
 @pytest.mark.asyncio
@@ -910,6 +915,8 @@ async def test_dismiss_during_failed_submission_update_prevents_later_acknowledg
         await asyncio.gather(rating_task, dismiss_task)
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["dismissed"] is True
     response_mock.reset_mock()
+    feedback.post_slack_ephemeral_message.assert_awaited_once()
+    feedback.post_slack_ephemeral_message.reset_mock()
     await feedback._acknowledge(
         feedback.ThreadFeedback(**context, rating=5, completed=True),
         response_url=_RESPONSE_URL,
@@ -1387,14 +1394,18 @@ async def test_native_rating_retry_removes_controls_without_reopening_modal(cont
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 0.0
 
 
-async def test_confirmation_failure_can_retry_without_repeating_success(context, fake_store):
-    feedback.post_slack_ephemeral_message.side_effect = [False, True]
+@pytest.mark.parametrize("failure", [False, TimeoutError()])
+async def test_confirmation_failure_can_retry_without_repeating_success(
+    context, fake_store, failure
+):
+    feedback.post_slack_ephemeral_message.side_effect = [failure, True]
     payload = _action("open_swe_feedback", json.dumps({"run_id": "run-1", "choice": "good"}))
-    for expected_acknowledged in (False, True, True):
+    for deletions, expected_acknowledged in enumerate((False, True, True)):
         tasks = BackgroundTasks()
         await routes.slack_interactivity(_request(payload), tasks)
         await tasks()
         saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
         assert saved["completed"] and saved["rating"] == 5
         assert saved.get("acknowledged", False) is expected_acknowledged
+        assert feedback.respond_to_slack_interaction.await_count == deletions
     assert feedback.post_slack_ephemeral_message.await_count == 2

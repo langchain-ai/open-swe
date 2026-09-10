@@ -426,24 +426,22 @@ async def _acknowledge(record: ThreadFeedback, *, response_url: str) -> None:
             if current is None or current.dismissed or not current.completed or not response_url:
                 return
             async with asyncio.timeout(8):
-                removed = await respond_to_slack_interaction(
-                    response_url,
-                    {"delete_original": True},
-                )
-                if not removed or current.acknowledged:
-                    return
-                # Ephemeral response_url updates can also appear at the channel root.
-                posted = await post_slack_ephemeral_message(
-                    current.channel_id,
-                    current.user_id,
-                    "✅ Feedback completed. Thanks!",
-                    thread_ts=current.thread_ts if current.thread_ts != "0" else None,
-                )
-            if posted:
-                async with _locked_feedback(current) as latest:
-                    if latest is not None:
+                if not current.acknowledged:
+                    # Ephemeral response_url updates can also appear at the channel root.
+                    posted = await post_slack_ephemeral_message(
+                        current.channel_id,
+                        current.user_id,
+                        "✅ Feedback completed. Thanks!",
+                        thread_ts=current.thread_ts if current.thread_ts != "0" else None,
+                    )
+                    if not posted:
+                        return
+                    async with _locked_feedback(current) as latest:
+                        if latest is None:
+                            return
                         latest.acknowledged = True
                         await _store(latest.channel_id).put(latest.run_id, latest)
+                await respond_to_slack_interaction(response_url, {"delete_original": True})
     except Exception:
         logger.warning("Could not acknowledge saved Slack feedback")
 
