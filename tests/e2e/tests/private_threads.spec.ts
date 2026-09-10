@@ -81,8 +81,9 @@ test("private threads are owner-only and visibility is fixed at creation", async
     ).json();
     expect(continued.visibility).toBe("private");
     expect(continued.continuedFromThreadId).toBe(sharedId);
-    const copied = (await (await api.get(`/threads/${continuedId}/state`)).json())
-      .values.messages;
+    const copied = (
+      await (await api.get(`/threads/${continuedId}/state`)).json()
+    ).values.messages;
     expect(copied.map((m: { content: string }) => m.content)).toEqual([
       "Shared planning notes",
       "Here is a plan.",
