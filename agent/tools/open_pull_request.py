@@ -4,22 +4,28 @@ import logging
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from ..dashboard.agent_usage import record_agent_pr_usage
-from ..dashboard.plan_store import get_plan_content
-from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from ..utils.github_app import get_github_app_installation_token
-from ..utils.github_comments import derive_pr_state
-from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
-from ..utils.slack_code_channels import (
+from agent.dashboard.agent_usage import record_agent_pr_usage
+from agent.dashboard.plan_store import get_plan_content
+from agent.github.app import get_github_app_installation_token
+from agent.github.comments import derive_pr_state
+from agent.run_config import RunConfig
+from agent.slack.client import (
+    get_active_slack_thread,
+    get_slack_permalink,
+    parse_github_pr_url,
+)
+from agent.slack.code_channels import (
     is_code_channel_session,
     repo_context_bar_items,
+    set_agent_resource,
     set_context_bar,
     set_view,
 )
+from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +62,12 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     metadata: Slack thread ids are shared across a conversation, so a cached
     token could belong to a prior triggering user.
     """
-    configurable = get_config().get("configurable", {})
-    source = configurable.get("source")
-    github_login = configurable.get("github_login")
+    cfg = RunConfig.from_runtime()
+    source = cfg.source
+    github_login = cfg.github_login
 
-    if source in _USER_TOKEN_SOURCES and isinstance(github_login, str) and github_login.strip():
-        from ..dashboard.profiles import get_valid_access_token
+    if source in _USER_TOKEN_SOURCES and github_login and github_login.strip():
+        from agent.dashboard.profiles import get_valid_access_token
 
         user_token = await get_valid_access_token(github_login.strip())
         if user_token:
@@ -79,7 +85,7 @@ def _auth_headers(token: str) -> dict[str, str]:
     }
 
 
-def _github_message(resp: httpx.Response) -> str:
+def _github_message(resp: httpx2.Response) -> str:
     try:
         data = resp.json()
     except Exception:
@@ -91,7 +97,7 @@ def _github_message(resp: httpx.Response) -> str:
     return resp.text.strip() or f"HTTP {resp.status_code}"
 
 
-def _github_response_summary(resp: httpx.Response | None) -> str:
+def _github_response_summary(resp: httpx2.Response | None) -> str:
     """Report what GitHub actually returned so the agent can diagnose it itself."""
     if resp is None:
         return ""
@@ -114,18 +120,15 @@ def _github_response_summary(resp: httpx.Response | None) -> str:
 
 
 def _effective_draft(draft: bool) -> bool:
-    configurable = _configurable()
-    preference = configurable.get("draft_prs")
-    return preference if isinstance(preference, bool) else draft
+    preference = _configurable().draft_prs
+    return preference if preference is not None else draft
 
 
-def _configurable() -> dict[str, Any]:
+def _configurable() -> RunConfig:
     try:
-        config = get_config()
+        return RunConfig.from_runtime()
     except Exception:
-        return {}
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    return dict(configurable) if isinstance(configurable, dict) else {}
+        return RunConfig()
 
 
 def _head_branch_for_repo(owner: str, head: str) -> str | None:
@@ -150,7 +153,7 @@ def _failure_payload(
     likely_cause: str,
     branch_pushed: bool | None,
     failed_step: str,
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
 ) -> dict[str, Any]:
     pushed = "unknown" if branch_pushed is None else "yes" if branch_pushed else "no"
     _record_open_pr_failure_telemetry(
@@ -187,7 +190,7 @@ def _record_open_pr_failure_telemetry(
     branch_pushed: bool | None,
     failed_step: str,
 ) -> None:
-    configurable = _configurable()
+    cfg = _configurable()
     logger.warning(
         "open_pull_request_failed code=%s owner=%s repo=%s head=%s base=%s "
         "http_status=%s token_kind=%s branch_pushed=%s thread_id=%s source=%s",
@@ -199,8 +202,8 @@ def _record_open_pr_failure_telemetry(
         http_status,
         token_kind,
         branch_pushed,
-        configurable.get("thread_id"),
-        configurable.get("source"),
+        cfg.thread_id,
+        cfg.source,
         extra={
             "open_pull_request_failure": {
                 "code": code,
@@ -213,8 +216,8 @@ def _record_open_pr_failure_telemetry(
                 "branch_pushed": branch_pushed,
                 "pr_created": False,
                 "failed_step": failed_step,
-                "thread_id": configurable.get("thread_id"),
-                "source": configurable.get("source"),
+                "thread_id": cfg.thread_id,
+                "source": cfg.source,
             }
         },
     )
@@ -231,7 +234,7 @@ def _access_failure_payload(
     reason: str,
     branch_pushed: bool | None,
     failed_step: str,
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
 ) -> dict[str, Any]:
     return _failure_payload(
         code=_ACCESS_FAILURE_CODE,
@@ -262,7 +265,7 @@ def _branch_failure_payload(
     http_status: int,
     branch: str,
     branch_role: str,
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
 ) -> dict[str, Any]:
     branch_pushed = False if branch_role == "head" else None
     return _failure_payload(
@@ -284,13 +287,13 @@ def _branch_failure_payload(
     )
 
 
-async def _github_get(client: httpx.AsyncClient, token: str, path: str) -> httpx.Response:
+async def _github_get(client: httpx2.AsyncClient, token: str, path: str) -> httpx2.Response:
     return await client.get(f"{GITHUB_API}{path}", headers=_auth_headers(token))
 
 
 async def _preflight_pr_access(
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     token: str,
     token_kind: str,
     owner: str,
@@ -431,7 +434,7 @@ async def _preflight_pr_access(
 
 
 async def _find_existing_pr(
-    client: httpx.AsyncClient, token: str, owner: str, repo: str, head: str
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, head: str
 ) -> dict[str, Any] | None:
     resp = await client.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
@@ -445,7 +448,7 @@ async def _find_existing_pr(
 
 
 async def _fetch_pr_details(
-    client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, pr_number: int
 ) -> dict[str, Any]:
     resp = await client.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
@@ -470,6 +473,17 @@ def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[s
     repo = record.get("repo_full_name")
     number = record.get("number")
     url = record.get("url")
+    for item in existing:
+        if (
+            isinstance(item, dict)
+            and (
+                (item.get("repo_full_name") == repo and item.get("number") == number)
+                or item.get("url") == url
+            )
+            and isinstance(item.get("slack_feedback"), dict)
+        ):
+            record = {**record, "slack_feedback": item["slack_feedback"]}
+            break
     return [
         item
         for item in existing
@@ -528,13 +542,14 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
 
 async def _record_pr_telemetry(
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     token: str,
     owner: str,
     repo: str,
     head: str,
     base: str,
     pr: dict[str, Any],
+    resolves_thread: bool = False,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
@@ -542,16 +557,13 @@ async def _record_pr_telemetry(
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
         config = get_config()
-        configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-        thread_id = configurable.get("thread_id")
-        github_login = configurable.get("github_login")
-        user_email = configurable.get("user_email")
-        if not isinstance(github_login, str) or not github_login.strip():
-            from ..dashboard.user_mappings import login_for_email
+        cfg = RunConfig.from_config(config)
+        thread_id = cfg.thread_id
+        github_login = cfg.github_login
+        if not (github_login or "").strip():
+            from agent.dashboard.user_mappings import login_for_email
 
-            github_login = (
-                await login_for_email(user_email if isinstance(user_email, str) else None) or ""
-            )
+            github_login = await login_for_email(cfg.user_email) or ""
         pr_url = details.get("html_url") or pr.get("html_url")
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))
@@ -563,9 +575,9 @@ async def _record_pr_telemetry(
         changed_files_value = details.get("changed_files")
         changed_files = changed_files_value if isinstance(changed_files_value, int) else 0
         await record_agent_pr_usage(
-            thread_id=thread_id if isinstance(thread_id, str) else None,
+            thread_id=thread_id,
             github_login=github_login,
-            user_email=user_email if isinstance(user_email, str) else None,
+            user_email=cfg.user_email,
             owner=owner,
             repo=repo,
             pr_number=pr_number,
@@ -615,7 +627,14 @@ async def _record_pr_telemetry(
                     else ""
                 ),
                 "diff_stats": diff_stats,
+                "resolves_thread": resolves_thread,
             }
+            run_id = config.get("run_id") or cfg.run_id
+            if run_id and cfg.slack_thread and cfg.slack_thread.channel_id:
+                record["slack_feedback"] = {
+                    "run_id": str(run_id),
+                    "channel_id": cfg.slack_thread.channel_id,
+                }
             pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",
@@ -636,11 +655,10 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
-            slack_thread = configurable.get("slack_thread")
             active = await get_active_slack_thread(
                 get_client(),
                 thread_id,
-                slack_thread if isinstance(slack_thread, dict) else None,
+                cfg.slack_thread.dump() if cfg.slack_thread else None,
             )
             if active and is_code_channel_session(str(active.get("thread_ts") or "")):
                 channel_id = str(active.get("channel_id") or "")
@@ -653,6 +671,20 @@ async def _record_pr_telemetry(
                         dashboard_url=dashboard_thread_url(thread_id) or "",
                     ),
                 )
+                if isinstance(pr_url, str):
+                    await set_agent_resource(
+                        channel_id,
+                        {
+                            "url": pr_url,
+                            "resource_type": "pull_request",
+                            "title": (
+                                pr_title[:255]
+                                if isinstance(pr_title, str) and pr_title
+                                else "Pull request"
+                            ),
+                            "provider": "GitHub",
+                        },
+                    )
                 response = await client.get(
                     f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
                     headers={**_auth_headers(token), "Accept": "application/vnd.github.v3.diff"},
@@ -671,9 +703,9 @@ async def _record_pr_telemetry(
         )
 
 
-async def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str):
+async def _plan_reference_line(cfg: RunConfig) -> str | None:
+    thread_id = cfg.thread_id
+    if thread_id is None:
         return None
     try:
         plan = await get_plan_content(thread_id)
@@ -688,18 +720,15 @@ async def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
     return f"- Plan: {plan_url}"
 
 
-async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[str]:
+async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
     """Build source reference lines for the run."""
-    source = configurable.get("source")
     lines: list[str] = []
 
-    if source == "slack":
-        slack_thread = configurable.get("slack_thread") or {}
-        thread_id = configurable.get("thread_id")
+    if cfg.source == "slack":
         active = await get_active_slack_thread(
             get_client(),
-            thread_id if isinstance(thread_id, str) else None,
-            slack_thread if isinstance(slack_thread, dict) else None,
+            cfg.thread_id,
+            cfg.slack_thread.dump() if cfg.slack_thread else None,
         )
         slack_thread = active or {}
         channel_id = slack_thread.get("channel_id")
@@ -711,18 +740,14 @@ async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[st
                 permalink = await get_slack_permalink(channel_id, thread_ts)
         if isinstance(permalink, str) and permalink.strip():
             lines.append(f"- Slack thread: {permalink.strip()}")
-    elif source == "linear":
-        linear_issue = configurable.get("linear_issue") or {}
-        url = linear_issue.get("url")
-        identifier = linear_issue.get("identifier")
+    elif cfg.source == "linear" and cfg.linear_issue:
+        url, identifier = cfg.linear_issue.url, cfg.linear_issue.identifier
         if url:
             lines.append(f"- Linear ticket: [{identifier or url}]({url})")
         elif identifier:
             lines.append(f"- Linear ticket: {identifier}")
-    elif source in ("github", "github_issue"):
-        github_issue = configurable.get("github_issue") or {}
-        url = github_issue.get("url")
-        number = github_issue.get("number")
+    elif cfg.source in ("github", "github_issue") and cfg.github_issue:
+        url, number = cfg.github_issue.url, cfg.github_issue.number
         if url:
             label = f"#{number}" if number else url
             lines.append(f"- GitHub issue: [{label}]({url})")
@@ -732,7 +757,7 @@ async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[st
     return lines
 
 
-async def _is_private_repo(client: httpx.AsyncClient, token: str, owner: str, repo: str) -> bool:
+async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, repo: str) -> bool:
     """Return True only when GitHub confirms the repo is private."""
     resp = await client.get(f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token))
     if resp.status_code != 200:  # noqa: PLR2004
@@ -742,21 +767,19 @@ async def _is_private_repo(client: httpx.AsyncClient, token: str, owner: str, re
 
 
 async def _maybe_append_references(
-    client: httpx.AsyncClient, token: str, owner: str, repo: str, body: str
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, body: str
 ) -> str:
     """Append run references to the PR body."""
     try:
         if _REFERENCES_HEADING in body:
             return body
-        configurable = get_config().get("configurable", {})
-        if not isinstance(configurable, dict):
-            configurable = {}
+        cfg = RunConfig.from_runtime()
         lines: list[str] = []
-        plan_line = await _plan_reference_line(configurable)
+        plan_line = await _plan_reference_line(cfg)
         if plan_line:
             lines.append(plan_line)
         try:
-            source_lines = await _build_source_reference_lines(configurable)
+            source_lines = await _build_source_reference_lines(cfg)
             if source_lines and await _is_private_repo(client, token, owner, repo):
                 lines.extend(source_lines)
         except Exception:
@@ -778,6 +801,7 @@ async def _open_pull_request(
     title: str,
     body: str,
     draft: bool,
+    resolves_thread: bool = False,
 ) -> dict[str, Any]:
     token, kind = await _resolve_pr_author_token()
     if not token:
@@ -795,7 +819,7 @@ async def _open_pull_request(
             failed_step="resolve_pr_author_token",
         )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx2.AsyncClient(timeout=30.0) as client:
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,
@@ -832,6 +856,7 @@ async def _open_pull_request(
                     head=head,
                     base=base,
                     pr=pr,
+                    resolves_thread=resolves_thread,
                 )
             return {
                 "success": True,
@@ -855,6 +880,7 @@ async def _open_pull_request(
                     head=head,
                     base=base,
                     pr=existing,
+                    resolves_thread=resolves_thread,
                 )
                 return {
                     "success": True,
@@ -903,35 +929,9 @@ async def open_pull_request(
     title: str,
     body: str,
     draft: bool = True,
+    resolves_thread: bool = False,
 ) -> dict[str, Any]:
-    """Open a draft GitHub pull request attributed to the triggering user.
-
-    Use this to OPEN a NEW pull request (instead of `gh pr create`) so the PR is
-    created as the person who triggered the run rather than open-swe[bot]. Push
-    your branch with `git push origin <branch>` BEFORE calling this.
-
-    For everything else — updating an existing PR, marking it ready for review,
-    commenting, reading status — keep using `gh`. If a PR already
-    exists for the branch, this returns that PR's URL without creating a
-    duplicate; switch to `gh pr edit` for updates.
-
-    Args:
-        owner: Repository owner/org (e.g. "langchain-ai").
-        repo: Repository name (e.g. "open-swe").
-        head: The branch with your changes (already pushed to origin).
-        base: The branch you want to merge into (e.g. "main").
-        title: PR title.
-        body: PR description (Markdown).
-        draft: Requested draft status. The authenticated user's dashboard preference
-          overrides this value for newly created PRs; existing PRs are returned unchanged.
-
-    Returns:
-        On success: {"success": True, "created": bool, "url": str, "number": int,
-        "author": str}. ``created`` is False when an open PR already existed.
-        On failure: {"success": False, "error": str}, where ``error`` states what
-        failed and quotes the request, status, headers, and body GitHub actually
-        returned — read it and decide what to do next.
-    """
+    """Implement the `open_pull_request` tool."""
     return await _open_pull_request(
         owner=owner,
         repo=repo,
@@ -940,4 +940,5 @@ async def open_pull_request(
         title=title,
         body=body,
         draft=draft,
+        resolves_thread=resolves_thread,
     )

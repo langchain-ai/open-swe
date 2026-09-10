@@ -30,9 +30,13 @@ const SIGNED_IN_ROUTES = {
     is_admin: false,
     slack_oauth_enabled: false,
   },
-  "/dashboard/api/threads/sidebar": {
-    active: { items: [], limit: 50, hasMore: false },
-    resolved: { items: [], limit: 20, hasMore: false },
+  "/dashboard/api/threads/projects": [],
+  "/dashboard/api/threads/pinned": [],
+  "/dashboard/api/threads/page": {
+    items: [],
+    limit: 10,
+    offset: 0,
+    hasMore: false,
   },
   "/dashboard/api/my-mapping": {},
   "/dashboard/api/profile": {},

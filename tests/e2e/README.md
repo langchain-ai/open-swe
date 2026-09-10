@@ -83,11 +83,21 @@ Watch it in human time:
 SLOW_MO=700 pnpm exec playwright test --headed
 ```
 
+The webServer is reused locally, so re-running a single spec against a warm
+`langgraph dev` is the fast iteration loop — prefer that over the whole suite:
+
+```bash
+pnpm exec playwright test tests/full_flow.spec.ts
+```
+
 ## Artifacts (replay a run)
 
-Browser tests record a **trace** (DOM-snapshot timeline + network + console + source)
-and a **video**; failures also get a screenshot. The Desktop test records an Electron trace and a
-success screenshot. Artifacts land in `test-results/<test>/` and `playwright-report/`:
+Recording costs real time on every spec, so browser tests keep a **trace**
+(DOM-snapshot timeline + network + console + source) and a **video** only for a
+failed attempt; failures also get a screenshot. Set `E2E_ARTIFACTS=1` to capture
+both unconditionally, which is what you want when a spec passes but does the
+wrong thing. The Desktop test records an Electron trace and a success
+screenshot. Artifacts land in `test-results/<test>/` and `playwright-report/`:
 
 ```bash
 pnpm exec playwright show-report                       # browse runs; each has a Trace tab

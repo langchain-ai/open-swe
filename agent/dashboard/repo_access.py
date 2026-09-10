@@ -1,11 +1,11 @@
 """GitHub repository access checks for dashboard actions."""
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from .profiles import get_valid_access_token
-from .review_styles import normalize_repo_full_name
+from agent.dashboard.profiles import get_valid_access_token
+from agent.review.styles import normalize_repo_full_name
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 
 def _raise_for_github_repo_status(status_code: int) -> None:
@@ -27,7 +27,7 @@ async def assert_repo_access(full_name: str, token: str) -> str:
         "X-GitHub-Api-Version": "2022-11-28",
     }
     owner, name = full_name.split("/", 1)
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         response = await client.get(
             f"https://api.github.com/repos/{owner}/{name}",
             headers=headers,

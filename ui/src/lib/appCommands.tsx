@@ -14,6 +14,7 @@ import { AppCommandPalette } from "@/components/AppCommandPalette"
 import { AppShortcutReference } from "@/components/AppShortcutReference"
 import { useSession } from "@/lib/session"
 import { eventMatchesShortcut, shouldIgnoreHotkey } from "@/lib/hotkeys"
+import { useTheme } from "@/lib/theme"
 
 export interface AppCommand {
   id: string
@@ -33,7 +34,7 @@ export function createNewThreadCommand(run: () => void): AppCommand {
     id: "new-thread",
     label: "New thread",
     aliases: ["new chat", "start thread"],
-    shortcuts: ["c"],
+    shortcuts: ["c", "mod+n", "mod+shift+o"],
     group: "General",
     run,
     desktopId: "new-thread",
@@ -74,6 +75,7 @@ export function AppCommandProvider({
 }) {
   const navigate = useNavigate()
   const session = useSession()
+  const { toggleTheme } = useTheme()
   const enabled = Boolean(session.data)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutReferenceOpen, setShortcutReferenceOpen] = useState(false)
@@ -103,6 +105,51 @@ export function AppCommandProvider({
       },
       createNewThreadCommand(() => void navigate({ to: "/agents" })),
       {
+        id: "open-threads",
+        label: "Open threads",
+        aliases: ["home", "chats", "agents"],
+        group: "Navigation",
+        run: () => void navigate({ to: "/agents" }),
+      },
+      {
+        id: "open-kanban",
+        label: "Open Kanban",
+        aliases: ["board", "all threads"],
+        group: "Navigation",
+        run: () =>
+          void navigate({
+            to: "/agents/threads",
+            search: { page: 1, layout: "board", group: "focus" },
+          }),
+      },
+      {
+        id: "open-skills",
+        label: "Open skills",
+        group: "Navigation",
+        run: () => void navigate({ to: "/agents/skills" }),
+      },
+      {
+        id: "open-automations",
+        label: "Open automations",
+        aliases: ["schedules"],
+        group: "Navigation",
+        run: () => void navigate({ to: "/agents/automations" }),
+      },
+      {
+        id: "open-reviews",
+        label: "Open reviews",
+        aliases: ["pull requests", "prs"],
+        group: "Navigation",
+        run: () => void navigate({ to: "/agents/reviews" }),
+      },
+      {
+        id: "toggle-theme",
+        label: "Toggle color theme",
+        aliases: ["dark mode", "light mode", "appearance"],
+        group: "General",
+        run: toggleTheme,
+      },
+      {
         id: "open-settings",
         label: "Open settings",
         aliases: ["preferences", "dashboard"],
@@ -123,7 +170,7 @@ export function AppCommandProvider({
         desktopShortcuts: ["mod+/"],
       },
     ],
-    [navigate, openPalette, openShortcutReference]
+    [navigate, openPalette, openShortcutReference, toggleTheme]
   )
 
   const register = useCallback((commands: ReadonlyArray<AppCommand>) => {

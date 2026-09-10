@@ -1,10 +1,13 @@
 """Unit tests for LangSmith LLM Gateway routing (agent/utils/gateway.py + make_model)."""
 
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any, cast
 from unittest.mock import patch
 
-import httpx
+import httpx2
 import pytest
+from aiohttp import web
 from fireworks import AsyncFireworks
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
@@ -15,7 +18,6 @@ from agent.utils.model import OpenAIReasoning
 
 _GATEWAY_ENV_VARS = (
     "LANGSMITH_API_KEY",
-    "LANGSMITH_API_KEY_PROD",
     "LANGSMITH_GATEWAY_API_KEY",
     "LANGSMITH_GATEWAY_ENABLED",
     "LANGSMITH_GATEWAY_BASE_URL",
@@ -23,6 +25,25 @@ _GATEWAY_ENV_VARS = (
     "OPENAI_API_BASE",
     "OPENAI_BASE_URL",
 )
+
+
+@asynccontextmanager
+async def _http_server(
+    handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+) -> AsyncIterator[str]:
+    app = web.Application()
+    app.router.add_route("*", "/{path:.*}", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    server = site._server
+    assert server is not None
+    port = server.sockets[0].getsockname()[1]
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        await runner.cleanup()
 
 
 @pytest.fixture(autouse=True)
@@ -56,11 +77,11 @@ def test_openai_overrides_chat_completions_optout(monkeypatch: pytest.MonkeyPatc
 
 
 async def test_openai_sdk_uses_gateway_responses_path() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(
+        return httpx2.Response(
             200,
             json={
                 "id": "resp_test",
@@ -81,7 +102,7 @@ async def test_openai_sdk_uses_gateway_responses_path() -> None:
             },
         )
 
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     try:
         chat_model = ChatOpenAI(
             model="gpt-5.6-sol",
@@ -126,13 +147,12 @@ def test_baseten_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
-    requests: list[httpx.Request] = []
+    paths: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            200,
-            json={
+    async def handler(request: web.Request) -> web.Response:
+        paths.append(request.path)
+        return web.json_response(
+            {
                 "id": "chatcmpl-test",
                 "object": "chat.completion",
                 "created": 0,
@@ -145,26 +165,24 @@ async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
                     }
                 ],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            },
+            }
         )
 
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    try:
+    async with _http_server(handler) as base_url:
         client = AsyncFireworks(
             api_key="dummy",
-            base_url="https://gateway.smith.langchain.com/fireworks",
-            http_client=http_client,
+            base_url=f"{base_url}/fireworks",
             max_retries=0,
         )
-        await client.chat.completions.create(
-            model="accounts/fireworks/models/glm-5p2",
-            messages=[{"role": "user", "content": "hi"}],
-        )
-    finally:
-        await http_client.aclose()
+        try:
+            await client.chat.completions.create(
+                model="accounts/fireworks/models/glm-5p2",
+                messages=[{"role": "user", "content": "hi"}],
+            )
+        finally:
+            await client.close()
 
-    assert len(requests) == 1
-    assert requests[0].url.path == "/fireworks/v1/chat/completions"
+    assert paths == ["/fireworks/v1/chat/completions"]
 
 
 async def test_fireworks_gateway_strips_legacy_function_call() -> None:
@@ -177,20 +195,16 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
     the request body contains ``function_call``; with it, only ``tool_calls``
     survives.
     """
-    import json
-
-    from fireworks import AsyncFireworks
     from langchain_fireworks.chat_models import ChatFireworks
 
     from agent.middleware.sanitize_fireworks_messages import _sanitize_messages
 
     captured_bodies: list[dict] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured_bodies.append(json.loads(request.content))
-        return httpx.Response(
-            200,
-            json={
+    async def handler(request: web.Request) -> web.Response:
+        captured_bodies.append(await request.json())
+        return web.json_response(
+            {
                 "id": "chatcmpl-test",
                 "object": "chat.completion",
                 "created": 0,
@@ -203,41 +217,25 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
                     }
                 ],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            },
+            }
         )
 
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    try:
+    async with _http_server(handler) as base_url:
         chat_model = ChatFireworks(
             model="accounts/fireworks/models/glm-5p2",
             api_key=SecretStr("dummy"),
-            base_url="https://gateway.smith.langchain.com/fireworks",
+            base_url=f"{base_url}/fireworks",
             max_retries=0,
         )
-        # Inject a mock-transport client so no real network call is made.
-        mock_sdk = AsyncFireworks(
-            api_key="dummy",
-            base_url="https://gateway.smith.langchain.com/fireworks",
-            http_client=http_client,
-            max_retries=0,
-        )
-        chat_model._async_sdk_client = mock_sdk  # type: ignore[attr-defined]
-        chat_model.async_client = mock_sdk.chat.completions  # type: ignore[attr-defined]
-
         ai_message = AIMessage(
             content="",
             tool_calls=[{"name": "read_file", "args": {"file_path": "/x"}, "id": "tc1"}],
             additional_kwargs={"function_call": {"name": "read_file", "arguments": "{}"}},
         )
         messages = [HumanMessage(content="hi"), ai_message]
-
-        # Apply the sanitizer the same way the middleware stack does.
         _sanitize_messages(messages)
-
         await chat_model.ainvoke(messages)
-        await mock_sdk.close()
-    finally:
-        await http_client.aclose()
+        await chat_model._async_sdk_client.close()
 
     assert len(captured_bodies) == 1
     body = captured_bodies[0]
@@ -250,7 +248,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
 
 def test_google_genai_routes_to_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("google_genai:gemini-3.7-flash")
+    overrides = gateway.gateway_overrides("google_genai:gemini-3.8-flash")
     assert overrides == {
         "base_url": "https://gateway.smith.langchain.com/gemini",
         "api_key": "ls-key",
@@ -267,24 +265,15 @@ def test_missing_api_key_passes_through(monkeypatch: pytest.MonkeyPatch) -> None
     assert gateway.gateway_overrides("openai:gpt-5.6-sol") is None
 
 
-def test_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
+def test_standard_key_used_when_no_gateway_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
     overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
-    assert overrides["api_key"] == "ls-prod-key"
+    assert overrides["api_key"] == "ls-platform-key"
 
 
-def test_prod_key_preferred_over_platform_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_key_preferred_over_standard_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
-    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
-    assert overrides is not None
-    assert overrides["api_key"] == "ls-prod-key"
-
-
-def test_gateway_key_preferred_over_prod_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
-    monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "ls-gateway-key")
     overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
@@ -461,7 +450,7 @@ def test_make_model_gateway_google_genai(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
-        model.make_model("google_genai:gemini-3.7-flash", use_gateway=True)
+        model.make_model("google_genai:gemini-3.8-flash", use_gateway=True)
     assert captured["base_url"] == "https://gateway.smith.langchain.com/gemini"
     assert captured["api_key"] == "ls-key"
 
@@ -505,3 +494,21 @@ def test_make_model_gateway_without_key_falls_back_direct(
     assert captured["store"] is False
     assert captured["include"] == ["reasoning.encrypted_content"]
     assert "api_key" not in captured
+
+
+def test_gateway_default_follows_the_dedicated_key(monkeypatch) -> None:
+    from agent.utils import gateway
+
+    for name in ("LANGSMITH_GATEWAY_ENABLED", "LANGSMITH_GATEWAY_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    assert gateway.gateway_env_default() is False
+
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "lsv2_sk_gateway")
+    assert gateway.gateway_env_default() is True
+
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "false")
+    assert gateway.gateway_env_default() is False
+
+    monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
+    assert gateway.gateway_env_default() is True

@@ -5,11 +5,11 @@ reviewer thread for the PR. The reviewer thread id is seeded into the run config
 by the dashboard chat proxy.
 """
 
+from collections.abc import Mapping
 from typing import Any
 
-from langgraph.config import get_config
-
-from ..review.findings import list_findings as list_findings_async
+from agent.review.findings import list_findings as list_findings_async
+from agent.run_config import RunConfig
 
 _COMPACT_FIELDS = (
     "id",
@@ -28,33 +28,17 @@ _COMPACT_FIELDS = (
 )
 
 
-def _compact(finding: dict[str, Any]) -> dict[str, Any]:
+def _compact(finding: Mapping[str, Any]) -> dict[str, Any]:
     return {key: finding.get(key) for key in _COMPACT_FIELDS if finding.get(key) is not None}
 
 
 async def list_review_findings(status_filter: str | None = None) -> dict[str, Any]:
-    """List the findings the reviewer published for this PR.
-
-    Use this to ground answers about the review — what was flagged, the
-    severity/confidence, and any resolution notes. Prefer quoting these over
-    re-deriving issues from the diff.
-
-    Args:
-        status_filter: One of ``open``, ``resolved``, ``dismissed``. ``None``
-            (default) returns findings of every status.
-
-    Returns:
-        ``{findings, count}``; ``{findings: [], count: 0, error}`` on failure.
-    """
+    """Implement the `list_review_findings` tool."""
     if status_filter is not None and status_filter not in {"open", "resolved", "dismissed"}:
         return {"findings": [], "count": 0, "error": f"Invalid status_filter: {status_filter}"}
 
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    reviewer_thread_id = (
-        configurable.get("reviewer_thread_id") if isinstance(configurable, dict) else None
-    )
-    if not isinstance(reviewer_thread_id, str) or not reviewer_thread_id:
+    reviewer_thread_id = RunConfig.from_runtime().reviewer_thread_id
+    if not reviewer_thread_id:
         return {"findings": [], "count": 0, "error": "reviewer thread unavailable"}
 
     try:

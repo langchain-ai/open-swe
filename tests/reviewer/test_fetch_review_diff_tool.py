@@ -27,10 +27,10 @@ async def test_fetch_review_diff_returns_metadata_without_diff_body() -> None:
     }
 
     with (
-        patch("agent.tools.fetch_review_diff.get_config", return_value=config),
+        patch("agent.run_config.get_config", return_value=config),
         patch("agent.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()),
         patch(
-            "agent.tools.fetch_review_diff.aresolve_sandbox_work_dir",
+            "agent.tools.fetch_review_diff.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -81,10 +81,10 @@ async def test_fetch_review_diff_uses_incremental_range_for_re_review() -> None:
     )
 
     with (
-        patch("agent.tools.fetch_review_diff.get_config", return_value=config),
+        patch("agent.run_config.get_config", return_value=config),
         patch("agent.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()),
         patch(
-            "agent.tools.fetch_review_diff.aresolve_sandbox_work_dir",
+            "agent.tools.fetch_review_diff.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),

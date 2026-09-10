@@ -173,6 +173,8 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  deliveryStatus?: "sending" | "failed"
+  optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
@@ -228,6 +230,10 @@ export interface QueuedThreadMessage {
   createdAt: number
 }
 
+export interface PendingThreadMessage extends QueuedThreadMessage {
+  status: "sending" | "failed"
+}
+
 export type WorkflowApprovalStatus = "pending" | "approved" | "rejected"
 
 export interface WorkflowDiffStats {
@@ -247,6 +253,7 @@ export interface WorkflowPushApproval {
   diffStats: WorkflowDiffStats
   diffPreview: string
   diffPreviewTruncated: boolean
+  inheritedFrom: string | null
   approvalUrl: string | null
   requestedAt: string | null
   decidedAt: string | null
@@ -371,14 +378,17 @@ export interface AgentThread {
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
+  attentionReason?: string | null
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
   sourceUrl?: string | null
+  sourceAppUrl?: string | null
   codeChannelUrl?: string | null
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>
+  pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary
   pullRequests?: Array<AgentPullRequest>
   diffStats?: {

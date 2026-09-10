@@ -35,3 +35,16 @@ test("persists, deduplicates, and removes projects", (t) => {
   assert.deepEqual(readProjects(storePath), []);
   assert.equal(removeProject(storePath, cwd), false);
 });
+
+test("drops projects whose directories no longer exist", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-projects-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const storePath = path.join(root, "projects.json");
+  const selectedPath = path.join(root, "removed");
+  fs.mkdirSync(selectedPath);
+
+  addProject(storePath, selectedPath);
+  fs.rmSync(selectedPath, { recursive: true });
+
+  assert.deepEqual(readProjects(storePath), []);
+});

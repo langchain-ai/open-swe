@@ -4,7 +4,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ThemeSync } from "./ThemeSync"
-import { useTheme } from "./theme"
+import { THEME_COLOR, useTheme } from "./theme"
+
+function themeColor() {
+  return document
+    .querySelector('meta[name="theme-color"]')
+    ?.getAttribute("content")
+}
 
 function ThemeControl() {
   const { setTheme } = useTheme()
@@ -29,12 +35,17 @@ describe("ThemeSync", () => {
       configurable: true,
       value: storage,
     })
+    const meta = document.createElement("meta")
+    meta.setAttribute("name", "theme-color")
+    meta.setAttribute("content", THEME_COLOR.light)
+    document.head.append(meta)
   })
 
   afterEach(() => {
     window.localStorage.clear()
     document.documentElement.classList.remove("dark")
     document.documentElement.style.colorScheme = ""
+    document.querySelector('meta[name="theme-color"]')?.remove()
     vi.restoreAllMocks()
   })
 
@@ -53,6 +64,7 @@ describe("ThemeSync", () => {
     await waitFor(() => {
       expect(document.documentElement.classList.contains("dark")).toBe(true)
       expect(document.documentElement.style.colorScheme).toBe("dark")
+      expect(themeColor()).toBe(THEME_COLOR.dark)
     })
   })
 
@@ -85,6 +97,7 @@ describe("ThemeSync", () => {
     await waitFor(() => {
       expect(document.documentElement.classList.contains("dark")).toBe(false)
       expect(document.documentElement.style.colorScheme).toBe("light")
+      expect(themeColor()).toBe(THEME_COLOR.light)
     })
   })
 })

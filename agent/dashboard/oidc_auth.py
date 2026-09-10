@@ -25,11 +25,12 @@ endpoints that accept this, so scope the allowlist to internal repos.
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 import jwt
 from fastapi import HTTPException
+
+from agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +52,14 @@ def _client() -> jwt.PyJWKClient:
 
 
 def _audience() -> str:
-    return os.environ.get("ADMIN_OIDC_AUDIENCE", "").strip() or DEFAULT_OIDC_AUDIENCE
+    return ENV.ADMIN_OIDC_AUDIENCE.get("").strip() or DEFAULT_OIDC_AUDIENCE
 
 
 def _allowlist() -> tuple[frozenset[str], frozenset[str]]:
     """Return ``(exact subjects, repositories)`` from ``ADMIN_OIDC_SUBJECTS``."""
     subjects: set[str] = set()
     repositories: set[str] = set()
-    for raw in os.environ.get("ADMIN_OIDC_SUBJECTS", "").split(","):
+    for raw in ENV.ADMIN_OIDC_SUBJECTS.get().split(","):
         entry = raw.strip()
         if not entry:
             continue

@@ -3,10 +3,11 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, AnyMessage
 from langchain_openai import ChatOpenAI
+
+from agent.middleware.trace import OpenSWEMiddleware
 
 
 def _is_stateless_chat_openai(model: object) -> bool:
@@ -51,7 +52,7 @@ def _sanitize_messages(messages: list[AnyMessage]) -> list[AnyMessage]:
     return sanitized
 
 
-class SanitizeOpenAIResponsesMiddleware(AgentMiddleware):
+class SanitizeOpenAIResponsesMiddleware(OpenSWEMiddleware):
     """Drop reasoning item IDs that OpenAI cannot resolve with ``store=False``."""
 
     async def awrap_model_call(
