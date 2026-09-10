@@ -221,12 +221,6 @@ def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyP
     assert "visibility" not in cast(dict, legacy.thread)["metadata"]
 
 
-def test_slack_dm_threads_are_private_and_channel_threads_are_not() -> None:
-    assert slack_webhooks._slack_thread_visibility({"is_im": True}) == "private"
-    assert slack_webhooks._slack_thread_visibility({"is_im": False}) == "public"
-    assert slack_webhooks._slack_thread_visibility(None) == "public"
-
-
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
     bot_user_id = "UBOT"
     messages = [

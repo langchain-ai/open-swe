@@ -30,6 +30,7 @@ from agent.dashboard.threads.api import (
 from agent.dashboard.threads.listing import list_dashboard_threads_page
 from agent.dashboard.threads.proxy import proxy_dashboard_thread_commands
 from agent.dashboard.threads.runs import ThreadMessageBody
+from agent.dashboard.threads.summary import thread_is_owner
 from agent.dashboard.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
@@ -597,8 +598,6 @@ def _looks_uuid(value: str) -> bool:
 
 
 async def _private_thread_context(actor: _Actor) -> bool:
-    from agent.dashboard.threads.summary import thread_is_owner
-
     thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         return False
@@ -990,10 +989,8 @@ async def manage_thread(
         model_id, effort = validated
 
     try:
-        # A private thread is only reachable from its owner's private context,
-        # for management as much as for reading. Admins keep the dashboard's
-        # power to stop a run anywhere, but the caller's thread may be
-        # workspace-visible, so the response must not carry private details.
+        # Private threads are only reachable from the owner's private context.
+        # admin_cancel is the exception, so its response must not leak details.
         admin_override = action == "admin_cancel" and actor.admin
         resolved = await _authorized_locator(thread_id, actor, admin_override=admin_override)
         if isinstance(resolved, dict):

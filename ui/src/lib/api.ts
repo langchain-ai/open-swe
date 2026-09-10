@@ -360,7 +360,6 @@ export interface UserInstructions {
 export type ThreadVisibility = "public" | "private"
 
 export interface UserPreferences {
-  login?: string
   default_visibility: ThreadVisibility
 }
 

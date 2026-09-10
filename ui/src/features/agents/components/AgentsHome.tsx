@@ -438,7 +438,6 @@ export function AgentsHome({
       images,
       repo,
       visibility,
-      ownerLogin: session.data?.login ?? null,
       repo_explicitly_none: repoOverride === null,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,

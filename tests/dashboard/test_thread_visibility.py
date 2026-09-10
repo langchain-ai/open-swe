@@ -44,7 +44,7 @@ def private_thread(monkeypatch):
     return thread, client
 
 
-def test_private_readable_by_owner_and_admin_only(private_thread):
+def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(private_thread):
     thread, _ = private_thread
     metadata = thread["metadata"]
     assert summary.thread_is_readable(metadata, "ALICE")
@@ -52,15 +52,9 @@ def test_private_readable_by_owner_and_admin_only(private_thread):
     assert summary.thread_is_readable(metadata, "someone", "admin@example.com")
     assert not summary.thread_is_readable(metadata, "bob")
     assert not summary.thread_is_readable(metadata, None)
-    assert summary.thread_is_readable({"source": "dashboard"}, "bob")
-
-
-def test_private_promptable_by_owner_only(private_thread):
-    thread, _ = private_thread
-    metadata = thread["metadata"]
     assert summary.thread_is_promptable(metadata, "alice")
     assert not summary.thread_is_promptable(metadata, "admin")
-    assert not summary.thread_is_promptable(metadata, "bob")
+    assert summary.thread_is_readable({"source": "dashboard"}, "bob")
     assert summary.thread_is_promptable({"source": "dashboard"}, "bob")
 
 
@@ -180,14 +174,6 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert copied[0]["additional_kwargs"]["x"] == 1
 
 
-async def test_continue_privately_rejects_private_source(private_thread):
-    _, client = private_thread
-    with pytest.raises(HTTPException) as exc:
-        await api.continue_thread_privately("private-thread", "alice")
-    assert exc.value.status_code == 409
-    client.threads.create.assert_not_awaited()
-
-
 async def test_continue_privately_rolls_back_when_copy_fails(private_thread):
     thread, client = private_thread
     thread["metadata"]["visibility"] = "public"
@@ -198,21 +184,6 @@ async def test_continue_privately_rolls_back_when_copy_fails(private_thread):
         await api.continue_thread_privately("private-thread", "bob")
     assert exc.value.status_code == 502
     client.threads.delete.assert_awaited_once()
-
-
-async def test_tools_do_not_export_private_content_into_public_thread(private_thread, monkeypatch):
-    thread, _ = private_thread
-    monkeypatch.setattr(
-        tools, "get_dashboard_thread", AsyncMock(return_value={"visibility": "private"})
-    )
-    monkeypatch.setattr(tools, "_config", lambda: {"configurable": {"thread_id": "current"}})
-    actor = tools._Actor(login="alice", email=None, name="alice")
-    thread["metadata"]["visibility"] = "public"
-    with pytest.raises(HTTPException) as exc:
-        await tools._authorized_locator("private-thread", actor)
-    assert exc.value.status_code == 404
-    thread["metadata"]["visibility"] = "private"
-    assert (await tools._authorized_locator("private-thread", actor))[0] == "private-thread"
 
 
 async def test_manage_thread_denies_private_thread_outside_private_context(

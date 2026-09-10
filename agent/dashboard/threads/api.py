@@ -12,7 +12,6 @@ from agent.dashboard.options import normalize_model_choice
 from agent.dashboard.threads.access import (
     _authorized_thread,
     _github_token_for_login,
-    _readable_thread,
     _readable_thread_metadata,
 )
 from agent.dashboard.threads.runs import (
@@ -463,8 +462,7 @@ async def continue_thread_privately(
 ) -> dict[str, Any]:
     """Copy a collaborative transcript into a new private thread owned by the caller."""
     client = langgraph_client()
-    thread = await _readable_thread(thread_id, login=login, email=email)
-    metadata = thread_metadata(thread)
+    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     if metadata.get("visibility", "public") != "public":
         raise HTTPException(409, "thread is already private")
     state = as_json_object(await client.threads.get_state(thread_id))

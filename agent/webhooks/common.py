@@ -743,10 +743,8 @@ async def upsert_agent_thread_metadata(
     elif source == "slack" and "title" in metadata:
         metadata["title_seed"] = metadata["title"]
 
-    # A bare stub (no visibility, no created_at_ms) was created moments ago by a
-    # helper such as set_thread_plan_mode; it still needs its creation stamps.
-    # Threads this function created always carry created_at_ms, so legacy
-    # threads without a visibility key are left alone.
+    # A helper may have pre-created a bare stub this request; it still needs the
+    # creation stamps. Legacy threads carry created_at_ms and are left alone.
     if existing is None or (
         "visibility" not in existing_meta and existing_meta.get("created_at_ms") is None
     ):
