@@ -454,6 +454,19 @@ export function captureDebugSnapshot({
   }
 }
 
+function requestPath(url: string): string {
+  try {
+    const parsed = new URL(url, window.location.origin)
+    return `${parsed.pathname}${parsed.search}`
+  } catch {
+    return url
+  }
+}
+
+function oneLine(value: string, max: number): string {
+  return truncate(value.replace(/\s+/g, " ").trim(), max)
+}
+
 export function formatDebugSnapshot(snapshot: DebugSnapshot): string {
   const failedRequests = snapshot.requests.filter(
     (request) => request.status === null || request.status >= 400
@@ -470,6 +483,10 @@ export function formatDebugSnapshot(snapshot: DebugSnapshot): string {
     snapshot.app.datadog.sessionLink
       ? `- datadog: ${snapshot.app.datadog.sessionLink}`
       : "- datadog: no session",
+    ...failedRequests.slice(-3).map((request) => {
+      const reason = request.detail ?? request.error ?? ""
+      return `- failed: ${request.method} ${requestPath(request.url)} → ${request.status ?? "network"}${reason ? ` ${oneLine(reason, 160)}` : ""}`
+    }),
   ]
   return `${header.join("\n")}\n\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\`\n`
 }

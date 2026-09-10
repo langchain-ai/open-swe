@@ -2,6 +2,9 @@ const MAX_LOGS = 40
 const MAX_ERRORS = 20
 const MAX_REQUESTS = 60
 const MAX_TEXT = 600
+const MAX_DETAIL = 1024
+/** Past this the body is summarized rather than buffered. */
+const MAX_DETAIL_SOURCE_BYTES = 256 * 1024
 
 export interface RecordedLog {
   at: number
@@ -24,6 +27,8 @@ export interface RecordedRequest {
   status: number | null
   ms: number
   error?: string
+  /** Response body of a 4xx/5xx, filled in once the clone has been read. */
+  detail?: string
 }
 
 function ring<T>(max: number) {
@@ -70,6 +75,39 @@ function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
 
 function requestUrl(input: RequestInfo | URL): string {
   return input instanceof Request ? input.url : String(input)
+}
+
+/**
+ * Read a failed response's body off a clone, so a 500 carries its reason
+ * rather than just its status. Never awaited: the caller's response must not
+ * wait on the recorder, so the entry is filled in late.
+ */
+function recordFailureDetail(entry: RecordedRequest, response: Response): void {
+  if (response.status < 400) return
+  const declared = Number(response.headers.get("content-length"))
+  if (declared > MAX_DETAIL_SOURCE_BYTES) {
+    entry.detail = `[${declared} byte body not captured]`
+    return
+  }
+  let clone: Response
+  try {
+    clone = response.clone()
+  } catch (error) {
+    entry.detail = `[body unreadable: ${describeUnknown(error).slice(0, 120)}]`
+    return
+  }
+  void clone.text().then(
+    (body) => {
+      if (!body) return
+      entry.detail =
+        body.length > MAX_DETAIL
+          ? `${body.slice(0, MAX_DETAIL)}…(${body.length})`
+          : body
+    },
+    (error) => {
+      entry.detail = `[body unreadable: ${describeUnknown(error).slice(0, 120)}]`
+    }
+  )
 }
 
 let installed = false
@@ -122,12 +160,14 @@ export function installDebugRecorder(): void {
     const entry = { method: requestMethod(input, init), url: requestUrl(input) }
     try {
       const response = await originalFetch(input, init)
-      requests.push({
+      const recorded: RecordedRequest = {
         at: Date.now(),
         ...entry,
         status: response.status,
         ms: Math.round(performance.now() - started),
-      })
+      }
+      requests.push(recorded)
+      recordFailureDetail(recorded, response)
       return response
     } catch (error) {
       requests.push({
