@@ -33,7 +33,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.2",
     "stagehand>=3.23.0,<4.0.0",
     "websockets>=16.1.1",
-    "sqlalchemy==2.0.52",
+    "sqlalchemy[asyncio]==2.0.52",
     "asyncpg==0.31.0",
 ]
 
