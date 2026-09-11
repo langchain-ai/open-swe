@@ -90,25 +90,61 @@ test("reports whether the selected provider is configured", () => {
   );
 });
 
-test("caches the managed macOS gateway key", () => {
-  let probes = 0;
+test("caches the managed macOS environment", () => {
+  const probes = [];
   const supervisor = new BackendSupervisor({
     env: {},
-    gatewayEnvironment: {
+    managedEnvironment: {
       platform: "darwin",
-      execFileSync: () => {
-        probes += 1;
-        return "managed-key\n";
+      execFileSync: (_command, [, name]) => {
+        probes.push(name);
+        return {
+          LC_GATEWAY_KEY: "gateway-key\n",
+          LANGSMITH_API_KEY: "tracing-key\n",
+          LANGSMITH_PROJECT: "open-swe\n",
+        }[name];
       },
     },
   });
 
-  assert.deepEqual(supervisor.credentialStatus("anthropic:test"), {
-    available: true,
-    variable: null,
+  assert.deepEqual(supervisor.managedEnvironment(), {
+    LANGSMITH_GATEWAY_API_KEY: "gateway-key",
+    LANGSMITH_GATEWAY_ENABLED: "true",
+    LANGSMITH_API_KEY: "tracing-key",
+    LANGSMITH_TRACING: "true",
+    LANGSMITH_PROJECT: "open-swe",
   });
   supervisor.credentialStatus("openai:test");
-  assert.equal(probes, 1);
+  assert.deepEqual(probes, [
+    "LC_GATEWAY_KEY",
+    "LANGSMITH_API_KEY",
+    "LANGSMITH_PROJECT",
+  ]);
+});
+
+test("applies the configured tracing project when starting", async () => {
+  let spawnedEnv;
+  const child = {
+    stdout: { on() {} },
+    stderr: { on() {} },
+    once() {},
+  };
+  const supervisor = new BackendSupervisor({
+    repoRoot: "/work/open-swe",
+    projectsFile: "/tmp/projects.json",
+    worktreesDir: "/tmp/worktrees",
+    reservePort: async () => 49152,
+    tracingEnv: async () => ({ LANGSMITH_PROJECT: "personal-project" }),
+    spawn: (_command, _args, options) => {
+      spawnedEnv = options.env;
+      return child;
+    },
+    fetch: async () => new Response(null, { status: 200 }),
+  });
+
+  await supervisor.start();
+
+  assert.equal(spawnedEnv.LANGSMITH_PROJECT, "personal-project");
 });
 
 test("creates the local LangGraph thread before stream hydration", async () => {

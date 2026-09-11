@@ -1483,6 +1483,21 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
+      tracingEnv: async () => {
+        if (!backendUrl) return {};
+        try {
+          const response = await backendFetch(
+            new URL("/dashboard/api/me/local-tracing", backendUrl).toString(),
+          );
+          if (!response.ok) return {};
+          const { project } = await response.json();
+          return typeof project === "string" && project
+            ? { LANGSMITH_PROJECT: project }
+            : {};
+        } catch {
+          return {};
+        }
+      },
       providerEnv: () => openAiOAuth?.backendEnv() || {},
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&
