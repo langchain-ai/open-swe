@@ -22,6 +22,7 @@ from agent.analytics.events import (
     PROpenedPayload,
     PRStatePayload,
     ReviewPublishedPayload,
+    RunCompletedPayload,
     RunCostRecordedPayload,
     RunStartedPayload,
     make_event,
@@ -643,6 +644,289 @@ async def test_finding_history_survives_late_transitions(
     assert stats["reopened_findings"] == 1
     assert stats["dismissed_findings"] == 1
     assert stats["unresolved_surfaced_findings"] == 0
+
+
+@pytest.mark.parametrize("kind", ["pr", "finding"])
+@pytest.mark.parametrize("flush_before_expiry", [False, True])
+async def test_additive_totals_survive_raw_expiry(analytics_db, kind, flush_before_expiry):
+    workspace, transaction = analytics_db
+    subject_id = uuid4()
+    if kind == "pr":
+        opened = event(
+            workspace,
+            EventName.PR_OPENED,
+            PROpenedPayload(opening_run_id=uuid4(), model_attribution_quality="unavailable"),
+            pr_id=subject_id,
+            repository_id=uuid4(),
+        )
+        outcome = event(
+            workspace,
+            EventName.PR_MERGED,
+            PRStatePayload(),
+            pr_id=subject_id,
+            day=40,
+        )
+        family, state = "pr_open_cohort", "merged"
+    else:
+        opened = event(
+            workspace,
+            EventName.FINDING_SURFACED,
+            FindingSurfacedPayload(severity="high", category="correctness"),
+            finding_id=subject_id,
+        )
+        outcome = event(
+            workspace,
+            EventName.FINDING_RESOLVED,
+            FindingStatePayload(),
+            finding_id=subject_id,
+            day=40,
+        )
+        family, state = "finding_surfaced_cohort", "resolved"
+    await ingestion.ingest(opened)
+    if flush_before_expiry:
+        await flush_summaries()
+    async with transaction() as conn:
+        await conn.execute(text("DELETE FROM events"))
+    await ingestion.ingest(outcome)
+    # A previously unseen event for the expired day must still count exactly once.
+    late = event(
+        workspace,
+        EventName.RUN_STARTED,
+        RunStartedPayload(model_attribution_quality="unavailable"),
+        run_id=uuid4(),
+    )
+    assert await ingestion.ingest(late)
+    assert not await ingestion.ingest(late)
+    await flush_summaries()
+    async with transaction() as conn:
+        counters = await conn.scalar(
+            text(
+                "SELECT counters FROM daily_summaries WHERE family = 'additive' "
+                "AND partition_date = :day"
+            ),
+            {"day": DAY.date()},
+        )
+        assert counters == {opened.event_name.value: 1, "run.started": 1}
+        counters = await conn.scalar(
+            text(
+                "SELECT counters FROM daily_summaries WHERE family = :family "
+                "AND partition_date = :day"
+            ),
+            {"family": family, "day": DAY.date()},
+        )
+        assert counters == {state: 1}
+
+
+async def test_reopenings_accumulate_across_repeated_raw_expiry(analytics_db):
+    workspace, transaction = analytics_db
+    finding_id = uuid4()
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.FINDING_SURFACED,
+            FindingSurfacedPayload(severity="high", category="correctness"),
+            finding_id=finding_id,
+        )
+    )
+    for index in range(1, 5):
+        reopening = event(
+            workspace,
+            EventName.FINDING_REOPENED,
+            FindingStatePayload(),
+            finding_id=finding_id,
+            day=index,
+            source_version=index,
+        )
+        assert await ingestion.ingest(reopening)
+        assert not await ingestion.ingest(reopening)
+        stats = await queries.reviewer_stats(DAY)
+        assert stats["reopened_findings"] == index
+        if index >= 2:
+            async with transaction() as conn:
+                await conn.execute(text("DELETE FROM events"))
+
+
+async def test_additive_migration_preserves_expired_and_unsummarized_totals(analytics_db):
+    workspace, transaction = analytics_db
+    for day in (0, 0, 1):
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_STARTED,
+                RunStartedPayload(model_attribution_quality="unavailable"),
+                run_id=uuid4(),
+                day=day,
+            )
+        )
+    await flush_summaries()
+    async with transaction() as conn:
+        await conn.execute(text("DELETE FROM events WHERE occurred_at = :day"), {"day": DAY})
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.RUN_STARTED,
+            RunStartedPayload(model_attribution_quality="unavailable"),
+            run_id=uuid4(),
+            day=1,
+        )
+    )
+    async with transaction() as conn:
+        await conn.execute(text("DROP TABLE additive_event_projection"))
+        schema = await conn.scalar(text("SELECT current_schema()"))
+        script = (
+            (Path(database.__file__).with_name("migrations") / "0006_additive_event_projection.sql")
+            .read_text()
+            .replace("open_swe_analytics", schema)
+        )
+        await database._run_script(conn, script)
+        await database._run_script(conn, script)
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT partition_date, event_count FROM additive_event_projection ORDER BY partition_date"
+                )
+            )
+        ).all()
+        assert rows == [(DAY.date(), 2), ((DAY + timedelta(days=1)).date(), 2)]
+
+
+@pytest.mark.parametrize(
+    "latest_version, delayed_version, delayed_day",
+    [
+        (10, 9, 20),
+        (10, 10, 9),
+        (None, None, 9),
+        (10, None, 20),
+    ],
+)
+async def test_stale_finding_transition_after_raw_expiry(
+    analytics_db, latest_version, delayed_version, delayed_day
+):
+    workspace, transaction = analytics_db
+    finding_id = uuid4()
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.FINDING_SURFACED,
+            FindingSurfacedPayload(severity="high", category="correctness"),
+            finding_id=finding_id,
+        )
+    )
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.FINDING_RESOLVED,
+            FindingStatePayload(),
+            finding_id=finding_id,
+            day=10,
+            source_version=latest_version,
+        )
+    )
+    async with transaction() as conn:
+        await conn.execute(text("DELETE FROM events"))
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.FINDING_REOPENED,
+            FindingStatePayload(),
+            finding_id=finding_id,
+            day=delayed_day,
+            source_version=delayed_version,
+        )
+    )
+    await flush_summaries()
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM finding_projection"))).mappings().one()
+        assert row["current_state"] == "resolved"
+        assert row["source_version"] == latest_version
+        assert row["latest_occurred_at"] == DAY + timedelta(days=10)
+        assert await conn.scalar(
+            text(
+                "SELECT counters FROM daily_summaries WHERE family = 'finding_surfaced_cohort' "
+                "AND partition_date = :day"
+            ),
+            {"day": DAY.date()},
+        ) == {"resolved": 1}
+    stats = await queries.reviewer_stats(DAY)
+    assert stats["addressed_findings"] == 1
+    assert stats["reopened_findings"] == 1
+
+
+@pytest.mark.parametrize("effective_first", [False, True])
+async def test_late_run_start_restores_attribution(analytics_db, effective_first):
+    workspace, transaction = analytics_db
+    run_id, model_id = uuid4(), uuid4()
+    await ingestion.ingest(
+        event(workspace, EventName.RUN_COMPLETED, RunCompletedPayload(), run_id=run_id, day=1)
+    )
+    if effective_first:
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_STARTED,
+                RunStartedPayload(
+                    effective_model_id=model_id, model_attribution_quality="effective"
+                ),
+                run_id=run_id,
+            )
+        )
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.RUN_STARTED,
+            RunStartedPayload(configured_model_id=model_id, model_attribution_quality="configured"),
+            run_id=run_id,
+        )
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM run_projection"))).mappings().one()
+        assert row["configured_model_id"] == model_id
+        assert row["model_attribution_quality"] == (
+            "effective" if effective_first else "configured"
+        )
+        assert row["technical_status"] == "completed"
+
+
+@pytest.mark.parametrize(
+    "amounts, completeness",
+    [
+        ([None], "unavailable"),
+        ([0], "complete"),
+        ([None, 0], "partial"),
+    ],
+)
+async def test_leaderboard_distinguishes_unknown_and_zero_cost(analytics_db, amounts, completeness):
+    workspace, _ = analytics_db
+    user_id = uuid4()
+    for amount in amounts:
+        run_id = uuid4()
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_STARTED,
+                RunStartedPayload(model_attribution_quality="unavailable"),
+                run_id=run_id,
+                user_id=user_id,
+            )
+        )
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_COST_RECORDED,
+                RunCostRecordedPayload(
+                    cost_usd=amount,
+                    status="complete",
+                    source="langsmith",
+                    observation_revision=1,
+                    observed_at=DAY,
+                ),
+                run_id=run_id,
+            )
+        )
+    result = await queries.usage_leaderboard(period="all", limit=10, current_login=None, admin=True)
+    assert len(result["rows"]) == 1
+    assert result["rows"][0]["cost_completeness"] == completeness
+    assert result["rows"][0]["total_cost_usd"] == 0
 
 
 @pytest.mark.parametrize("delivery", [*permutations(range(3)), "concurrent"])

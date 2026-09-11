@@ -206,3 +206,10 @@ async def enforce_retention() -> None:
             ),
             {"years": ENV.ANALYTICS_AGGREGATE_YEARS.get_int(7)},
         )
+        await conn.execute(
+            text(
+                "DELETE FROM additive_event_projection WHERE partition_date < current_date - "
+                "(:years * interval '1 year')"
+            ),
+            {"years": ENV.ANALYTICS_AGGREGATE_YEARS.get_int(7)},
+        )

@@ -130,10 +130,10 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
     else:
         result = await conn.execute(
             text(
-                "SELECT event_name, count(*) AS count FROM events WHERE workspace_id = :workspace_id "
-                "AND occurred_at >= :day AND occurred_at < :day + interval '1 day' GROUP BY event_name"
+                "SELECT event_name, event_count AS count FROM additive_event_projection "
+                "WHERE workspace_id = :workspace_id AND partition_date = :partition_date"
             ),
-            {"workspace_id": workspace_id, "day": day},
+            {"workspace_id": workspace_id, "partition_date": partition_date},
         )
         counters = {row["event_name"]: int(row["count"]) for row in result.mappings()}
     watermark = await conn.scalar(

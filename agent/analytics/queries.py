@@ -47,7 +47,7 @@ async def usage_leaderboard(
             GROUP BY r.user_id
         ), cost_stats AS (
             SELECT r.user_id, COALESCE(sum(c.cost_usd), 0) AS total_cost_usd,
-                   count(*) FILTER (WHERE c.status = 'complete') AS known_cost_runs,
+                   count(*) FILTER (WHERE c.status = 'complete' AND c.cost_usd IS NOT NULL) AS known_cost_runs,
                    count(*) AS cost_run_count
             FROM run_projection r LEFT JOIN latest_cost_projection c
               ON c.workspace_id = r.workspace_id AND c.run_id = r.run_id

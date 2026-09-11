@@ -75,6 +75,19 @@ async def ingest(event: EventEnvelope) -> bool:
         await conn.execute(_INSERT_EVENT, _params(event))
         await conn.execute(
             text(
+                "INSERT INTO additive_event_projection (workspace_id, partition_date, event_name, "
+                "event_count) VALUES (:workspace_id, :partition_date, :event_name, 1) "
+                "ON CONFLICT (workspace_id, partition_date, event_name) DO UPDATE SET "
+                "event_count = additive_event_projection.event_count + 1"
+            ),
+            {
+                "workspace_id": event.workspace_id,
+                "partition_date": event.occurred_at.astimezone(UTC).date(),
+                "event_name": event.event_name.value,
+            },
+        )
+        await conn.execute(
+            text(
                 "INSERT INTO ingestion_receipts (workspace_id, producer, producer_event_id, "
                 "event_name, event_id, expires_at) VALUES (:workspace_id, :producer, "
                 ":producer_event_id, :event_name, :event_id, clock_timestamp() + "
@@ -114,6 +127,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                     configured_model_id = COALESCE(EXCLUDED.configured_model_id, run_projection.configured_model_id),
                     effective_model_id = COALESCE(EXCLUDED.effective_model_id, run_projection.effective_model_id),
                     model_attribution_quality = CASE WHEN EXCLUDED.model_attribution_quality = 'effective'
+                        OR run_projection.model_attribution_quality = 'unavailable'
                         THEN EXCLUDED.model_attribution_quality ELSE run_projection.model_attribution_quality END,
                     entry_point = CASE WHEN run_projection.entry_point = 'unknown'
                         THEN EXCLUDED.entry_point ELSE run_projection.entry_point END,
@@ -383,6 +397,15 @@ async def _reconcile_finding(conn: AsyncConnection, event: EventEnvelope) -> Non
             ), latest AS (
                 SELECT * FROM transitions
                 ORDER BY source_version DESC NULLS LAST, occurred_at DESC, event_id DESC LIMIT 1
+            ), candidate AS (
+                SELECT latest.*,
+                    f.latest_occurred_at IS NULL
+                    OR (latest.source_version IS NOT NULL AND
+                        (f.source_version IS NULL OR latest.source_version > f.source_version))
+                    OR (latest.source_version IS NOT DISTINCT FROM f.source_version
+                        AND latest.occurred_at >= f.latest_occurred_at) AS replace_state
+                FROM latest CROSS JOIN finding_projection f
+                WHERE f.workspace_id = :workspace_id AND f.finding_id = :finding_id
             ), history AS (
                 SELECT max(occurred_at) FILTER (WHERE event_name = 'finding.resolved') AS resolved_at,
                        max(occurred_at) FILTER (WHERE event_name = 'finding.dismissed') AS dismissed_at,
@@ -390,11 +413,14 @@ async def _reconcile_finding(conn: AsyncConnection, event: EventEnvelope) -> Non
                 FROM transitions
             )
             UPDATE finding_projection SET
-                current_state = CASE latest.event_name
+                current_state = CASE WHEN NOT candidate.replace_state THEN current_state
+                    ELSE CASE candidate.event_name
                     WHEN 'finding.resolved' THEN 'resolved'
-                    WHEN 'finding.dismissed' THEN 'dismissed' ELSE 'open' END,
-                source_version = latest.source_version,
-                latest_occurred_at = latest.occurred_at,
+                    WHEN 'finding.dismissed' THEN 'dismissed' ELSE 'open' END END,
+                source_version = CASE WHEN candidate.replace_state
+                    THEN candidate.source_version ELSE finding_projection.source_version END,
+                latest_occurred_at = CASE WHEN candidate.replace_state
+                    THEN candidate.occurred_at ELSE latest_occurred_at END,
                 -- Raw events expire after the retention window; the durable baseline
                 -- columns keep prior history from being erased by a post-retention
                 -- rebuild, and absorb every newly observed transition.
@@ -407,7 +433,8 @@ async def _reconcile_finding(conn: AsyncConnection, event: EventEnvelope) -> Non
                     COALESCE(history_baseline_dismissed_at, history.dismissed_at)
                 ),
                 reopened_count = GREATEST(
-                    COALESCE(history.reopened_count, 0), history_baseline_reopened_count
+                    history.reopened_count,
+                    GREATEST(finding_projection.reopened_count, history_baseline_reopened_count) + :new_reopening
                 ),
                 history_baseline_resolved_at = GREATEST(
                     COALESCE(history.resolved_at, history_baseline_resolved_at),
@@ -418,14 +445,19 @@ async def _reconcile_finding(conn: AsyncConnection, event: EventEnvelope) -> Non
                     COALESCE(history_baseline_dismissed_at, history.dismissed_at)
                 ),
                 history_baseline_reopened_count = GREATEST(
-                    COALESCE(history.reopened_count, 0), history_baseline_reopened_count
+                    history.reopened_count,
+                    GREATEST(finding_projection.reopened_count, history_baseline_reopened_count) + :new_reopening
                 ),
                 updated_at = clock_timestamp()
-            FROM latest, history
+            FROM candidate, history
             WHERE workspace_id = :workspace_id AND finding_id = :finding_id
             """
         ),
-        {"workspace_id": event.workspace_id, "finding_id": event.finding_id},
+        {
+            "workspace_id": event.workspace_id,
+            "finding_id": event.finding_id,
+            "new_reopening": int(event.event_name == EventName.FINDING_REOPENED),
+        },
     )
 
 
