@@ -127,38 +127,27 @@ function modelCredentialStatus(modelId, env, options = {}) {
   };
 }
 
-function resolveManagedEnvironment(
+function resolveGatewayEnvironment(
   env,
   { platform = process.platform, execFileSync = execFileSyncProcess } = {},
 ) {
-  if (platform !== "darwin") return {};
-  const read = (name) => {
-    try {
-      return execFileSync("/bin/launchctl", ["getenv", name], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 1_000,
-      }).trim();
-    } catch {
-      return "";
-    }
-  };
-  const gatewayKey = env.LANGSMITH_GATEWAY_API_KEY
-    ? ""
-    : read("LC_GATEWAY_KEY");
-  const tracingKey = env.LANGSMITH_API_KEY ? "" : read("LANGSMITH_API_KEY");
-  const project = env.LANGSMITH_PROJECT ? "" : read("LANGSMITH_PROJECT");
-  return {
-    ...(gatewayKey ? { LANGSMITH_GATEWAY_API_KEY: gatewayKey } : {}),
-    ...(gatewayKey && env.LANGSMITH_GATEWAY_ENABLED === undefined
-      ? { LANGSMITH_GATEWAY_ENABLED: "true" }
-      : {}),
-    ...(tracingKey ? { LANGSMITH_API_KEY: tracingKey } : {}),
-    ...(tracingKey && env.LANGSMITH_TRACING === undefined
-      ? { LANGSMITH_TRACING: "true" }
-      : {}),
-    ...(project ? { LANGSMITH_PROJECT: project } : {}),
-  };
+  if (env.LANGSMITH_GATEWAY_API_KEY || platform !== "darwin") return {};
+  try {
+    const key = execFileSync("/bin/launchctl", ["getenv", "LC_GATEWAY_KEY"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1_000,
+    }).trim();
+    if (!key) return {};
+    return {
+      LANGSMITH_GATEWAY_API_KEY: key,
+      ...(env.LANGSMITH_GATEWAY_ENABLED === undefined
+        ? { LANGSMITH_GATEWAY_ENABLED: "true" }
+        : {}),
+    };
+  } catch {
+    return {};
+  }
 }
 
 class BackendSupervisor {
@@ -174,17 +163,17 @@ class BackendSupervisor {
     this.closing = false;
     this.ready = null;
     this.failure = null;
-    this.managedEnv = null;
+    this.gatewayEnv = null;
   }
 
-  managedEnvironment() {
-    if (this.managedEnv) return this.managedEnv;
+  gatewayEnvironment() {
+    if (this.gatewayEnv) return this.gatewayEnv;
     const env = { ...process.env, ...this.options.env };
-    this.managedEnv = resolveManagedEnvironment(
+    this.gatewayEnv = resolveGatewayEnvironment(
       env,
-      this.options.managedEnvironment || this.options.gatewayEnvironment,
+      this.options.gatewayEnvironment,
     );
-    return this.managedEnv;
+    return this.gatewayEnv;
   }
 
   start() {
@@ -213,14 +202,13 @@ class BackendSupervisor {
     if (this.options.isPackaged && !fs.existsSync(target.command)) {
       throw new Error(`Bundled local backend is missing: ${target.command}`);
     }
-    const tracingEnv = (await this.options.tracingEnv?.()) || {};
     const child = this.spawn(target.command, target.args, {
       cwd: target.cwd,
       env: {
         ...process.env,
         ...this.options.env,
-        ...this.managedEnvironment(),
-        ...tracingEnv,
+        ...this.gatewayEnvironment(),
+        ...(await this.options.tracingEnv?.()),
         ...this.options.providerEnv?.(),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
@@ -295,7 +283,7 @@ class BackendSupervisor {
       {
         ...process.env,
         ...this.options.env,
-        ...this.managedEnvironment(),
+        ...this.gatewayEnvironment(),
       },
       { openAiOAuth: this.options.openAiOAuthAvailable?.() === true },
     );

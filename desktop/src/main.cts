@@ -1488,11 +1488,12 @@ if (!hasSingleInstanceLock) {
         try {
           const response = await backendFetch(
             new URL("/dashboard/api/me/local-tracing", backendUrl).toString(),
+            { signal: AbortSignal.timeout(2_000) },
           );
           if (!response.ok) return {};
           const { project } = await response.json();
           return typeof project === "string" && project
-            ? { LANGSMITH_PROJECT: project }
+            ? { LANGSMITH_PROJECT: project, LANGSMITH_TRACING: "true" }
             : {};
         } catch {
           return {};

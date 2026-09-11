@@ -657,7 +657,8 @@ async def api_get_my_preferences(
 async def api_get_my_local_tracing(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, str]:
-    return {"project": ENV.LANGSMITH_PROJECT.get()}
+    preferences = await get_user_preferences(session["sub"])
+    return {"project": preferences["local_tracing_project"] or ENV.LANGSMITH_PROJECT.get()}
 
 
 @router.put("/me/preferences")
