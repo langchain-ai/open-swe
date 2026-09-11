@@ -222,29 +222,25 @@ function ReviewQueueRepoChip({
   repo,
   repos,
   saving,
+  onSave,
 }: {
   repo: ReviewQueueRepo
   repos: Array<ReviewQueueRepo>
   saving: boolean
+  onSave: (next: Array<ReviewQueueRepo>) => Promise<ReviewQueueReposPayload>
 }) {
-  const qc = useQueryClient()
-  const login = useSession().data?.login ?? null
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
   const [checks, setChecks] = useState<ReviewQueueChecksMode>(repo.checks)
 
   const savePaths = useMutation({
     mutationFn: (paths: Array<string>) =>
-      api.setReviewQueueRepos(
+      onSave(
         repos.map((r) =>
           r.full_name === repo.full_name ? { ...r, paths, checks } : r
         )
       ),
-    onSuccess: (payload: ReviewQueueReposPayload) => {
-      qc.setQueryData(reposQueryKey(login), payload)
-      void qc.invalidateQueries({ queryKey: queueQueryKey(login) })
-      setOpen(false)
-    },
+    onSuccess: () => setOpen(false),
   })
 
   return (
@@ -387,6 +383,7 @@ export function ReviewQueue() {
               repo={repo}
               repos={repos}
               saving={save.isPending}
+              onSave={save.mutateAsync}
             />
             <button
               type="button"
