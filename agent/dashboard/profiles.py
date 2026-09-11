@@ -307,7 +307,7 @@ async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str
     try:
         data = await refresh_user_access_token(refresh_token)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("GitHub token refresh failed for %s", login, exc_info=True)
+        logger.warning("GitHub token refresh failed")
         return None, is_unrecoverable_refresh_error(exc)
     email_value = record.get("email")
     email = email_value if isinstance(email_value, str) else ""
@@ -356,7 +356,7 @@ async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> 
                 "encrypted_gh_refresh_token"
             ):
                 return _decrypt_access_token(latest)
-            logger.info("Dropping dead GitHub authorization for %s; re-login required", login)
+            logger.info("Dropping dead GitHub authorization; re-login required")
             await delete_access_token(login)
             return None
         return access_token
