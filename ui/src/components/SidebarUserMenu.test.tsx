@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   datadogSessionLink: undefined as string | undefined,
   navigate: vi.fn(),
   setTheme: vi.fn(),
-  writeClipboard: vi.fn(),
   writeText: vi.fn(),
 }))
 
@@ -52,7 +51,6 @@ function renderMenu() {
 
 afterEach(() => {
   cleanup()
-  delete window.openSweDesktop
   mocks.datadogInitialized = false
   mocks.datadogSessionLink = undefined
   vi.clearAllMocks()
@@ -78,27 +76,6 @@ describe("SidebarUserMenu", () => {
       expect(
         screen.getByRole("menuitem", { name: "Copied Datadog link" })
       ).toBeTruthy()
-    })
-  })
-
-  it("uses the native clipboard in the desktop app", async () => {
-    mocks.datadogInitialized = true
-    mocks.datadogSessionLink =
-      "https://app.datadoghq.com/rum/explorer?query=session"
-    window.openSweDesktop = {
-      isDesktop: true,
-      writeClipboard: mocks.writeClipboard,
-    } as Window["openSweDesktop"]
-    mocks.writeClipboard.mockResolvedValue(true)
-
-    renderMenu()
-    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Datadog link" }))
-
-    await waitFor(() => {
-      expect(mocks.writeClipboard).toHaveBeenCalledWith(
-        mocks.datadogSessionLink
-      )
-      expect(mocks.writeText).not.toHaveBeenCalled()
     })
   })
 

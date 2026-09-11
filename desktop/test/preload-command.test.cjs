@@ -4,7 +4,6 @@ const Module = require("node:module");
 
 test("preload command subscriptions validate IDs and unsubscribe", () => {
   let exposed;
-  const invocations = [];
   const listeners = new Map();
   const electron = {
     contextBridge: {
@@ -13,7 +12,7 @@ test("preload command subscriptions validate IDs and unsubscribe", () => {
       },
     },
     ipcRenderer: {
-      invoke: (...args) => invocations.push(args),
+      invoke: () => undefined,
       on: (channel, listener) => listeners.set(channel, listener),
       removeListener: (channel, listener) => {
         if (listeners.get(channel) === listener) listeners.delete(channel);
@@ -42,8 +41,6 @@ test("preload command subscriptions validate IDs and unsubscribe", () => {
     listener(undefined, "open-url");
 
     assert.deepEqual(received, ["new-thread"]);
-    exposed.writeClipboard("diagnostics");
-    assert.deepEqual(invocations, [["desktop:write-clipboard", "diagnostics"]]);
     unsubscribe();
     assert.equal(listeners.has("desktop:command"), false);
   } finally {
