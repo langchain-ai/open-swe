@@ -112,7 +112,11 @@ describe("ModelPicker", () => {
 
   it("shows plain Auto when no routed model is known yet", () => {
     render(
-      <ModelPicker models={MODELS} selection={null} onSelectionChange={vi.fn()} />
+      <ModelPicker
+        models={MODELS}
+        selection={null}
+        onSelectionChange={vi.fn()}
+      />
     )
 
     expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
