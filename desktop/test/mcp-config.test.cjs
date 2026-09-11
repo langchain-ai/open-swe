@@ -17,11 +17,11 @@ function temporaryConfig(t) {
   return path.join(directory, "mcp.json");
 }
 
-test("local MCP connections are managed through structured config", (t) => {
+test("local MCP connections are managed through structured config", async (t) => {
   const configPath = temporaryConfig(t);
-  assert.deepEqual(listMcpConnections(configPath), []);
+  assert.deepEqual(await listMcpConnections(configPath), []);
 
-  saveMcpConnection(configPath, {
+  await saveMcpConnection(configPath, {
     name: "local",
     url: "http://127.0.0.1:8080/mcp",
     transport: "streamable_http",
@@ -36,18 +36,18 @@ test("local MCP connections are managed through structured config", (t) => {
     ),
     false,
   );
-  assert.deepEqual(revealMcpHeaders(configPath, "local"), {
+  assert.deepEqual(await revealMcpHeaders(configPath, "local"), {
     Authorization: "Bearer secret",
   });
   if (process.platform !== "win32")
     assert.equal(fs.statSync(configPath).mode & 0o777, 0o600);
 
-  deleteMcpConnection(configPath, "local");
-  assert.deepEqual(listMcpConnections(configPath), []);
+  await deleteMcpConnection(configPath, "local");
+  assert.deepEqual(await listMcpConnections(configPath), []);
 });
 
 for (const allowedTools of [undefined, [], ["search"]]) {
-  test(`edits and toggles preserve local tool policy ${JSON.stringify(allowedTools)} and headers`, (t) => {
+  test(`edits and toggles preserve local tool policy ${JSON.stringify(allowedTools)} and headers`, async (t) => {
     const configPath = temporaryConfig(t);
     const headers = { Authorization: "Bearer secret" };
     fs.writeFileSync(
@@ -70,8 +70,8 @@ for (const allowedTools of [undefined, [], ["search"]]) {
       { enabled: false },
       { enabled: true },
     ]) {
-      saveMcpConnection(configPath, {
-        ...listMcpConnections(configPath)[0],
+      await saveMcpConnection(configPath, {
+        ...(await listMcpConnections(configPath))[0],
         url: "http://localhost:9090/mcp",
         ...update,
       });
@@ -87,15 +87,15 @@ for (const allowedTools of [undefined, [], ["search"]]) {
       assert.equal(saved.enabled, update.enabled);
     }
 
-    saveMcpConnection(configPath, {
-      ...listMcpConnections(configPath)[0],
+    await saveMcpConnection(configPath, {
+      ...(await listMcpConnections(configPath))[0],
       headers: {},
     });
-    assert.deepEqual(revealMcpHeaders(configPath, "local"), {});
+    assert.deepEqual(await revealMcpHeaders(configPath, "local"), {});
   });
 }
 
-test("command MCPs remain visible but cannot be overwritten as URLs", (t) => {
+test("command MCPs remain visible but cannot be overwritten as URLs", async (t) => {
   const configPath = temporaryConfig(t);
   fs.writeFileSync(
     configPath,
@@ -105,32 +105,31 @@ test("command MCPs remain visible but cannot be overwritten as URLs", (t) => {
     { mode: 0o600 },
   );
 
-  assert.equal(listMcpConnections(configPath)[0].local_command, true);
-  assert.throws(
-    () =>
-      saveMcpConnection(configPath, {
-        name: "files",
-        url: "http://localhost:8080/mcp",
-        transport: "streamable_http",
-      }),
+  assert.equal((await listMcpConnections(configPath))[0].local_command, true);
+  await assert.rejects(
+    saveMcpConnection(configPath, {
+      name: "files",
+      url: "http://localhost:8080/mcp",
+      transport: "streamable_http",
+    }),
     /Command-based MCPs/,
   );
-  assert.throws(
-    () => deleteMcpConnection(configPath, "files"),
+  await assert.rejects(
+    deleteMcpConnection(configPath, "files"),
     /Command-based MCPs/,
   );
 });
 
 if (process.platform !== "win32") {
-  test("local MCP configuration rejects unsafe files", (t) => {
+  test("local MCP configuration rejects unsafe files", async (t) => {
     const configPath = temporaryConfig(t);
     fs.writeFileSync(configPath, '{"mcpServers":{}}', { mode: 0o644 });
-    assert.throws(() => listMcpConnections(configPath), /readable only/);
+    await assert.rejects(listMcpConnections(configPath), /readable only/);
 
     fs.unlinkSync(configPath);
     const target = `${configPath}.target`;
     fs.writeFileSync(target, '{"mcpServers":{}}', { mode: 0o600 });
     fs.symlinkSync(target, configPath);
-    assert.throws(() => listMcpConnections(configPath));
+    await assert.rejects(listMcpConnections(configPath));
   });
 }

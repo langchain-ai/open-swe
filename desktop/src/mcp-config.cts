@@ -1,15 +1,15 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-function readDocument(configPath) {
-  let descriptor;
+async function readDocument(configPath) {
+  let handle;
   try {
-    const linkInfo = fs.lstatSync(configPath);
-    descriptor = fs.openSync(
+    const linkInfo = await fs.promises.lstat(configPath);
+    handle = await fs.promises.open(
       configPath,
       fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0),
     );
-    const info = fs.fstatSync(descriptor);
+    const info = await handle.stat();
     if (
       linkInfo.dev !== info.dev ||
       linkInfo.ino !== info.ino ||
@@ -25,7 +25,7 @@ function readDocument(configPath) {
       throw new Error(
         "The MCP configuration must be owned by this user and readable only by them.",
       );
-    const value = JSON.parse(fs.readFileSync(descriptor, "utf8"));
+    const value = JSON.parse(await handle.readFile("utf8"));
     if (
       !value ||
       typeof value !== "object" ||
@@ -44,19 +44,20 @@ function readDocument(configPath) {
       throw new Error("The MCP configuration contains invalid JSON.");
     throw error;
   } finally {
-    if (descriptor !== undefined) fs.closeSync(descriptor);
+    await handle?.close();
   }
 }
 
-function writeDocument(configPath, value) {
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+async function writeDocument(configPath, value) {
+  await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
   const temporaryPath = `${configPath}.${process.pid}.tmp`;
-  fs.writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  fs.renameSync(temporaryPath, configPath);
-  fs.chmodSync(configPath, 0o600);
+  await fs.promises.writeFile(
+    temporaryPath,
+    `${JSON.stringify(value, null, 2)}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  await fs.promises.rename(temporaryPath, configPath);
+  await fs.promises.chmod(configPath, 0o600);
 }
 
 function publicConnection(name, settings) {
@@ -77,20 +78,20 @@ function publicConnection(name, settings) {
   };
 }
 
-function listMcpConnections(configPath) {
-  const { mcpServers } = readDocument(configPath);
+async function listMcpConnections(configPath) {
+  const { mcpServers } = await readDocument(configPath);
   return Object.entries(mcpServers).map(([name, settings]) =>
     publicConnection(name, settings),
   );
 }
 
-function saveMcpConnection(configPath, update) {
+async function saveMcpConnection(configPath, update) {
   const name = update?.name;
   if (typeof name !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(name))
     throw new Error("Invalid MCP connection name.");
   if (!update.url || !["streamable_http", "sse"].includes(update.transport))
     throw new Error("Local MCP connections require a URL and valid transport.");
-  const document = readDocument(configPath);
+  const document = await readDocument(configPath);
   const previous = document.mcpServers[name] || {};
   if (typeof previous.command === "string")
     throw new Error("Command-based MCPs must still be edited in mcp.json.");
@@ -107,20 +108,20 @@ function saveMcpConnection(configPath, update) {
   delete settings.env;
   delete settings.oauth;
   document.mcpServers[name] = settings;
-  writeDocument(configPath, document);
+  await writeDocument(configPath, document);
   return publicConnection(name, settings);
 }
 
-function deleteMcpConnection(configPath, name) {
-  const document = readDocument(configPath);
+async function deleteMcpConnection(configPath, name) {
+  const document = await readDocument(configPath);
   if (typeof document.mcpServers[name]?.command === "string")
     throw new Error("Command-based MCPs must still be edited in mcp.json.");
   delete document.mcpServers[name];
-  writeDocument(configPath, document);
+  await writeDocument(configPath, document);
 }
 
-function revealMcpHeaders(configPath, name) {
-  return readDocument(configPath).mcpServers[name]?.headers || {};
+async function revealMcpHeaders(configPath, name) {
+  return (await readDocument(configPath)).mcpServers[name]?.headers || {};
 }
 
 module.exports = {

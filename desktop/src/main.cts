@@ -454,19 +454,19 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return updateState;
   });
-  ipcMain.handle("desktop:list-mcp-connections", (event) => {
+  ipcMain.handle("desktop:list-mcp-connections", async (event) => {
     requireTrustedDesktopIpc(event);
     return listMcpConnections(mcpConfigPath());
   });
-  ipcMain.handle("desktop:save-mcp-connection", (event, input) => {
+  ipcMain.handle("desktop:save-mcp-connection", async (event, input) => {
     requireTrustedDesktopIpc(event);
     return saveMcpConnection(mcpConfigPath(), input);
   });
-  ipcMain.handle("desktop:delete-mcp-connection", (event, name) => {
+  ipcMain.handle("desktop:delete-mcp-connection", async (event, name) => {
     requireTrustedDesktopIpc(event);
     return deleteMcpConnection(mcpConfigPath(), name);
   });
-  ipcMain.handle("desktop:reveal-mcp-headers", (event, name) => {
+  ipcMain.handle("desktop:reveal-mcp-headers", async (event, name) => {
     requireTrustedDesktopIpc(event);
     return revealMcpHeaders(mcpConfigPath(), name);
   });
