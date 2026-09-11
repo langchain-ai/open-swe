@@ -18,7 +18,7 @@ class _Result:
 class _Connection:
     def __init__(self, rows: list[dict[str, object]], current_person: object) -> None:
         self._rows = rows
-        self._scalars = iter([current_person, len(rows), None])
+        self._scalars = iter([current_person, len(rows), None, None])
 
     async def execute(self, *_args: object, **_kwargs: object) -> _Result:
         return _Result(self._rows)

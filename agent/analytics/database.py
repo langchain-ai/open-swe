@@ -1,11 +1,13 @@
-"""SQLAlchemy async access to the dedicated analytics PostgreSQL datastore."""
+"""SQLAlchemy async access to analytics tables in the deployment PostgreSQL database."""
 
 import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
@@ -16,12 +18,13 @@ logger = logging.getLogger(__name__)
 
 _ENGINE: AsyncEngine | None = None
 _ENGINE_URI: str | None = None
+_WORKSPACE_ID: UUID | None = None
 _MIGRATION_DIR = Path(__file__).with_name("migrations")
 _MIGRATION_LOCK = 557314367248862439
 
 
 def analytics_uri() -> str | None:
-    value = ENV.ANALYTICS_POSTGRES_URI.optional() or ENV.POSTGRES_URI.optional()
+    value = ENV.POSTGRES_URI.optional()
     if value is None:
         return None
     if value.startswith("postgres://"):
@@ -34,7 +37,26 @@ def analytics_uri() -> str | None:
 
 
 def configured() -> bool:
-    return analytics_uri() is not None and ENV.ANALYTICS_WORKSPACE_ID.optional() is not None
+    return analytics_uri() is not None
+
+
+def workspace_id() -> UUID:
+    if _WORKSPACE_ID is None:
+        raise RuntimeError("analytics migrations have not completed")
+    return _WORKSPACE_ID
+
+
+async def collection_started_at(conn: AsyncConnection) -> datetime | None:
+    return await conn.scalar(text("SELECT collection_started_at FROM deployment_metadata"))
+
+
+async def record_capture(conn: AsyncConnection) -> None:
+    await conn.execute(
+        text(
+            "UPDATE deployment_metadata SET collection_started_at = clock_timestamp() "
+            "WHERE collection_started_at IS NULL"
+        )
+    )
 
 
 def engine() -> AsyncEngine:
@@ -70,8 +92,20 @@ async def transaction() -> AsyncIterator[AsyncConnection]:
 
 
 async def migrate() -> None:
+    global _WORKSPACE_ID
     if not configured():
+        logger.info(
+            "Analytics disabled",
+            extra={"analytics_database_setting": "POSTGRES_URI", "analytics_reason": "unset"},
+        )
         return
+    logger.info(
+        "Initializing analytics database",
+        extra={
+            "analytics_database_setting": "POSTGRES_URI",
+            "analytics_schema": "open_swe_analytics",
+        },
+    )
     async with engine().begin() as conn:
         await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _MIGRATION_LOCK})
         await _run_script(conn, "CREATE SCHEMA IF NOT EXISTS open_swe_analytics")
@@ -101,6 +135,21 @@ async def migrate() -> None:
                 {"version": version},
             )
 
+        persisted_workspace = await conn.scalar(
+            text("SELECT workspace_id FROM open_swe_analytics.deployment_metadata")
+        )
+        if persisted_workspace is None:
+            raise RuntimeError("analytics deployment metadata is missing")
+    _WORKSPACE_ID = persisted_workspace
+    logger.info(
+        "Analytics database initialized",
+        extra={
+            "analytics_database_setting": "POSTGRES_URI",
+            "analytics_schema": "open_swe_analytics",
+            "analytics_workspace_id": str(persisted_workspace),
+        },
+    )
+
 
 async def _run_script(conn: AsyncConnection, script: str) -> None:
     """Run trusted multi-statement DDL through asyncpg's simple query protocol."""
@@ -124,11 +173,14 @@ async def readiness() -> dict[str, Any]:
                 dead_letters = await conn.scalar(
                     text("SELECT count(*) FROM outbox WHERE state = 'dead_letter'")
                 )
+                started_at = await collection_started_at(conn)
         return {
             "configured": True,
             "ready": event_count == 0,
             "pending_outbox": int(pending or 0),
             "dead_letters": int(dead_letters or 0),
+            "workspace_id": str(workspace_id()),
+            "collection_started_at": started_at.isoformat() if started_at else None,
         }
     except Exception as exc:  # noqa: BLE001
         logger.warning("Analytics readiness check failed", exc_info=True)
@@ -136,8 +188,9 @@ async def readiness() -> dict[str, Any]:
 
 
 async def close() -> None:
-    global _ENGINE, _ENGINE_URI
+    global _ENGINE, _ENGINE_URI, _WORKSPACE_ID
     if _ENGINE is not None:
         await _ENGINE.dispose()
     _ENGINE = None
     _ENGINE_URI = None
+    _WORKSPACE_ID = None

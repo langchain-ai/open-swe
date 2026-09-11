@@ -38,13 +38,14 @@ async def analytics_db(monkeypatch):
         pytest.skip("TEST_ANALYTICS_POSTGRES_URI is required for PostgreSQL regressions")
     engine = create_async_engine(uri)
     schema = f"analytics_test_{uuid4().hex}"
-    workspace = uuid4()
-    monkeypatch.setenv("ANALYTICS_WORKSPACE_ID", str(workspace))
-    monkeypatch.setenv("ANALYTICS_EPOCH", DAY.isoformat())
     monkeypatch.setenv("ANALYTICS_SUMMARY_VERSION", "1")
     async with engine.begin() as conn:
         for path in sorted(Path(database.__file__).with_name("migrations").glob("*.sql")):
             await database._run_script(conn, path.read_text().replace("open_swe_analytics", schema))
+        workspace = await conn.scalar(
+            text(f"SELECT workspace_id FROM {schema}.deployment_metadata")
+        )
+    monkeypatch.setattr(database, "_WORKSPACE_ID", workspace)
 
     @asynccontextmanager
     async def transaction():
@@ -365,7 +366,7 @@ async def test_emitted_finding_links_to_published_review(analytics_db, monkeypat
             return DAY
 
     monkeypatch.setattr(emitter, "datetime", FixedDatetime)
-    monkeypatch.setenv("ANALYTICS_POSTGRES_URI", "postgresql://localhost/analytics_test")
+    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
     monkeypatch.setattr(emitter, "enqueue", ingestion.ingest)
     await emitter.review_published(
         thread_key="thread",
@@ -405,7 +406,7 @@ async def test_leaderboard_resolves_immutable_identity_after_login_change(
     from agent.analytics import directory
 
     workspace, transaction = analytics_db
-    monkeypatch.setenv("ANALYTICS_POSTGRES_URI", "postgresql://localhost/analytics_test")
+    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
     monkeypatch.setattr(directory, "transaction", transaction)
     current_person = emitter.opaque_person("github", 123)
     other_person = emitter.opaque_person("github", 456)
@@ -455,7 +456,7 @@ async def test_leaderboard_resolves_immutable_identity_after_login_change(
         assert len(result["rows"]) == 1
         assert result["rows"][0]["user"]["github_login"] is None
 
-    monkeypatch.setenv("ANALYTICS_WORKSPACE_ID", str(uuid4()))
+    monkeypatch.setattr(queries, "workspace_id", uuid4)
     result = await queries.usage_leaderboard(
         period="all", limit=1, current_login="new-login", admin=False
     )

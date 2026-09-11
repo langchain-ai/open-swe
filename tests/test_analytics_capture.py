@@ -5,28 +5,23 @@ from uuid import uuid4
 
 import pytest
 
-from agent.analytics import directory, emitter
+from agent.analytics import database, directory, emitter
 
 
 @pytest.fixture
 def capture_config(monkeypatch):
-    monkeypatch.setenv("ANALYTICS_POSTGRES_URI", "postgresql://localhost/analytics_test")
-    monkeypatch.setenv("ANALYTICS_WORKSPACE_ID", str(uuid4()))
+    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
+    monkeypatch.setattr(database, "_WORKSPACE_ID", uuid4())
 
 
-@pytest.mark.parametrize(
-    "configuration", ["disabled", "missing_workspace", "invalid_workspace", "invalid_uri"]
-)
+@pytest.mark.parametrize("configuration", ["disabled", "uninitialized", "invalid_uri"])
 async def test_capture_contains_configuration_errors(monkeypatch, capture_config, configuration):
     if configuration == "disabled":
-        for name in ("ANALYTICS_POSTGRES_URI", "POSTGRES_URI", "ANALYTICS_WORKSPACE_ID"):
-            monkeypatch.delenv(name, raising=False)
-    elif configuration == "missing_workspace":
-        monkeypatch.delenv("ANALYTICS_WORKSPACE_ID")
-    elif configuration == "invalid_workspace":
-        monkeypatch.setenv("ANALYTICS_WORKSPACE_ID", "invalid")
+        monkeypatch.delenv("POSTGRES_URI", raising=False)
+    elif configuration == "uninitialized":
+        monkeypatch.setattr(database, "_WORKSPACE_ID", None)
     else:
-        monkeypatch.setenv("ANALYTICS_POSTGRES_URI", "invalid")
+        monkeypatch.setenv("POSTGRES_URI", "invalid")
     enqueue = AsyncMock()
     monkeypatch.setattr(emitter, "enqueue", enqueue)
 

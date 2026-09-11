@@ -6,6 +6,7 @@ from typing import Literal
 from uuid import UUID
 
 from agent.analytics.capture import fail_soft
+from agent.analytics.database import workspace_id
 from agent.analytics.events import (
     EntryPoint,
     EventName,
@@ -44,10 +45,6 @@ _ENTRY_POINTS = {
     "api": EntryPoint.API,
     "linear": EntryPoint.LINEAR,
 }
-
-
-def workspace_id() -> UUID:
-    return UUID(ENV.ANALYTICS_WORKSPACE_ID.require())
 
 
 def opaque_id(kind: str, value: str | int | None) -> UUID | None:

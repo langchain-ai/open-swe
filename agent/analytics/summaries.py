@@ -151,12 +151,14 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
     }
 
 
-def summary_metadata(*, watermark: datetime | None, completeness: str) -> dict[str, object]:
+def summary_metadata(
+    *, watermark: datetime | None, collection_started_at: datetime | None
+) -> dict[str, object]:
     return {
-        "analytics_epoch": ENV.ANALYTICS_EPOCH.optional(),
+        "analytics_epoch": collection_started_at.isoformat() if collection_started_at else None,
         "summary_version": ENV.ANALYTICS_SUMMARY_VERSION.get_int(1),
         "freshness": "live_current_utc_day_plus_completed_day_summaries",
-        "completeness": completeness,
+        "completeness": "observed_events_only" if collection_started_at else "not_started",
         "data_watermark": watermark.isoformat() if watermark else None,
         "as_of": datetime.now(UTC).isoformat(),
     }

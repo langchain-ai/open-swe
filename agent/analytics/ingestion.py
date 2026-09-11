@@ -1,13 +1,13 @@
 """Idempotent ingestion, projection, and summary invalidation."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC
 from uuid import UUID
 
 from sqlalchemy import BigInteger, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.analytics.database import transaction
+from agent.analytics.database import record_capture, transaction
 from agent.analytics.events import EventEnvelope, EventName
 from agent.config import ENV
 
@@ -42,19 +42,7 @@ def _params(event: EventEnvelope) -> dict[str, object]:
     return data
 
 
-def _epoch() -> datetime:
-    raw = ENV.ANALYTICS_EPOCH.optional()
-    if raw is None:
-        raise RuntimeError("ANALYTICS_EPOCH is required")
-    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        raise ValueError("ANALYTICS_EPOCH must be timezone-aware")
-    return parsed
-
-
 async def ingest(event: EventEnvelope) -> bool:
-    if event.occurred_at < _epoch():
-        raise ValueError("event occurred before the configured analytics epoch")
     async with transaction() as conn:
         subject_id = event.finding_id or event.pr_id
         if event.event_name == EventName.FEEDBACK_SUBMITTED:
@@ -73,6 +61,7 @@ async def ingest(event: EventEnvelope) -> bool:
         if inserted is None:
             return False
         await conn.execute(_INSERT_EVENT, _params(event))
+        await record_capture(conn)
         await conn.execute(
             text(
                 "INSERT INTO additive_event_projection (workspace_id, partition_date, event_name, "

@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy import text
 
-from agent.analytics.database import connection
+from agent.analytics.database import collection_started_at, connection
 from agent.analytics.emitter import workspace_id
 from agent.analytics.summaries import summary_metadata
 from agent.config import ENV
@@ -14,8 +14,7 @@ from agent.config import ENV
 def period_start(period: str | None) -> datetime:
     days = 7 if period == "7d" else 30
     if period == "all":
-        raw = ENV.ANALYTICS_EPOCH.require()
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return datetime.min.replace(tzinfo=UTC)
     return datetime.now(UTC) - timedelta(days=days)
 
 
@@ -138,6 +137,7 @@ async def usage_leaderboard(
             text("SELECT max(recorded_at) FROM events WHERE workspace_id = :workspace_id"),
             {"workspace_id": workspace_id()},
         )
+        started_at = await collection_started_at(conn)
     current_user_rank = None
     for row in rows:
         if row.pop("is_current"):
@@ -149,7 +149,7 @@ async def usage_leaderboard(
         "current_user_rank": current_user_rank,
         "generated_at_ms": int(datetime.now(UTC).timestamp() * 1000),
         "reviewer_stats": await reviewer_stats(start),
-        **summary_metadata(watermark=watermark, completeness="epoch_forward_only"),
+        **summary_metadata(watermark=watermark, collection_started_at=started_at),
     }
 
 
@@ -253,6 +253,7 @@ async def pr_merge_rate_by_model(
             text("SELECT max(recorded_at) FROM events WHERE workspace_id = :workspace_id"),
             {"workspace_id": workspace_id()},
         )
+        started_at = await collection_started_at(conn)
     return {
         "metric": "pr_merge_rate_by_originating_model",
         "definition": "PR-open-date cohorts attributed to the opening run's effective primary model.",
@@ -260,5 +261,5 @@ async def pr_merge_rate_by_model(
         "period": period if period in {"7d", "30d", "all"} else "30d",
         "suppression_threshold": minimum,
         "cohorts": cohorts,
-        **summary_metadata(watermark=watermark, completeness="epoch_forward_only"),
+        **summary_metadata(watermark=watermark, collection_started_at=started_at),
     }

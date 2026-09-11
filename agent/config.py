@@ -317,15 +317,8 @@ ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks
 
 # --- Analytics -------------------------------------------------------------------------------
 ENV.var(
-    "ANALYTICS_POSTGRES_URI",
-    "Dedicated managed PostgreSQL analytics datastore; falls back to POSTGRES_URI when unset.",
-    secret=True,
-)
-ENV.var(
     "POSTGRES_URI", "LangGraph deployment PostgreSQL URI available to custom code.", secret=True
 )
-ENV.var("ANALYTICS_WORKSPACE_ID", "Immutable UUID identifying the analytics workspace.")
-ENV.var("ANALYTICS_EPOCH", "UTC timestamp before which analytics events are rejected.")
 ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")

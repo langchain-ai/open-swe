@@ -9,7 +9,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from agent.analytics.database import configured, transaction
+from agent.analytics.database import configured, record_capture, transaction
 from agent.analytics.events import EventEnvelope
 from agent.analytics.ingestion import ingest
 from agent.config import ENV
@@ -34,7 +34,10 @@ async def enqueue(event: EventEnvelope) -> bool:
                 "event_body": event.model_dump_json(),
             },
         )
-        return result.scalar_one_or_none() is not None
+        inserted = result.scalar_one_or_none() is not None
+        if inserted:
+            await record_capture(conn)
+        return inserted
 
 
 async def _claim(limit: int = 50) -> list[dict[str, Any]]:
