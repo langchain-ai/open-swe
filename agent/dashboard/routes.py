@@ -2023,9 +2023,7 @@ async def api_resolve_all_threads(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, int]:
     return {
-        "resolved": await resolve_all_dashboard_threads(
-            session["sub"], email=session.get("email")
-        )
+        "resolved": await resolve_all_dashboard_threads(session["sub"], email=session.get("email"))
     }
 
 
