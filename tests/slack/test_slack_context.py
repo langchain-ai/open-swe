@@ -1011,6 +1011,9 @@ def _setup_slack_mention_fakes(
             return {"run_id": "run-123"}
 
     class _FakeThreadsClientForProcess:
+        async def get(self, thread_id: str) -> dict:
+            return {"metadata": {"visibility": "public"}}
+
         async def update(self, *, thread_id: str, metadata: dict) -> None:
             captured["metadata_update"] = {"thread_id": thread_id, "metadata": metadata}
 
