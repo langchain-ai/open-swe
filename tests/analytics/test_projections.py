@@ -627,3 +627,29 @@ async def test_feedback_migration_recovers_acknowledged_withdrawals(analytics_db
             .all()
         )
         assert rows == [DAY + timedelta(days=1)] * 2
+
+
+@pytest.mark.parametrize("terminal_first", [True, False])
+async def test_run_start_preserves_preparation_link_in_either_delivery_order(
+    analytics_db, terminal_first
+):
+    workspace, transaction = analytics_db
+    run_id, preparation_id = uuid4(), uuid4()
+    started = event(
+        workspace,
+        EventName.RUN_STARTED,
+        RunStartedPayload(model_attribution_quality="unavailable"),
+        run_id=run_id,
+        preparation_run_id=preparation_id,
+    )
+    completed = event(
+        workspace, EventName.RUN_COMPLETED, RunCompletedPayload(), day=1, run_id=run_id
+    )
+    for item in (completed, started) if terminal_first else (started, completed):
+        await ingestion.ingest(item)
+    async with transaction() as conn:
+        await conn.execute(text("DELETE FROM events"))
+        row = (await conn.execute(text("SELECT * FROM run_projection"))).mappings().one()
+        assert row["preparation_run_id"] == preparation_id
+        assert row["started_at"] == DAY
+        assert row["terminal_at"] == DAY + timedelta(days=1)

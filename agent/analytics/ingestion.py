@@ -122,6 +122,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                         THEN EXCLUDED.model_attribution_quality ELSE run_projection.model_attribution_quality END,
                     entry_point = CASE WHEN run_projection.entry_point = 'unknown'
                         THEN EXCLUDED.entry_point ELSE run_projection.entry_point END,
+                    preparation_run_id = COALESCE(run_projection.preparation_run_id, EXCLUDED.preparation_run_id),
                     thread_id = COALESCE(run_projection.thread_id, EXCLUDED.thread_id),
                     task_id = COALESCE(run_projection.task_id, EXCLUDED.task_id),
                     user_id = COALESCE(run_projection.user_id, EXCLUDED.user_id),

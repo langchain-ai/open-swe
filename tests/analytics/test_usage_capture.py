@@ -247,3 +247,60 @@ async def test_same_github_revision_can_supply_complementary_pr_measurements(ana
     async with transaction() as conn:
         row = (await conn.execute(text("SELECT * FROM pr_usage_projection"))).mappings().one()
         assert (row["additions"], row["deletions"], row["changed_files"]) == (30, 4, 2)
+
+
+@pytest.mark.parametrize("attribute", ["github_login", "email"])
+@pytest.mark.parametrize("provisional_first", [False, True])
+async def test_reassigned_handle_does_not_resolve_through_historical_alias(
+    analytics_db, attribute, provisional_first
+):
+    _, transaction = analytics_db
+    old = "old@example.com" if attribute == "email" else "old-login"
+    new = "new@example.com" if attribute == "email" else "new-login"
+    historical = await directory.resolve_person(**{attribute: old}) if provisional_first else None
+    previous_owner = await directory.resolve_person(immutable_person_key=123, **{attribute: old})
+    await directory.resolve_person(immutable_person_key=123, **{attribute: new})
+    new_owner = await directory.resolve_person(**{attribute: old})
+    assert new_owner != previous_owner
+    assert new_owner != historical
+    assert await directory.resolve_person(**{attribute: old}) == new_owner
+    assert await directory.resolve_person(**{attribute: new}) == previous_owner
+    canonical = await directory.resolve_person(immutable_person_key=456, **{attribute: old})
+    assert canonical != previous_owner
+    async with transaction() as conn:
+        owners = {
+            row["person_id"]: row
+            for row in (await conn.execute(text("SELECT * FROM identity_directory"))).mappings()
+        }
+        assert owners[previous_owner][attribute] == new
+        assert owners[canonical][attribute] == old
+        aliases = dict(
+            (
+                await conn.execute(text("SELECT alias_person_id, person_id FROM identity_aliases"))
+            ).all()
+        )
+        assert aliases[new_owner] == canonical
+        if historical:
+            assert aliases[historical] == previous_owner
+
+
+@pytest.mark.parametrize("replacement_team", [None, "new-team"])
+async def test_identity_upgrade_preserves_team_unless_explicitly_replaced(
+    analytics_db, replacement_team
+):
+    _, transaction = analytics_db
+    provisional = await directory.resolve_person(github_login="person", team_key="team")
+    canonical = await directory.resolve_person(
+        immutable_person_key=123, github_login="person", team_key=replacement_team
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
+        assert row["person_id"] == canonical
+        assert row["team_id"] == identity.opaque_id("team", replacement_team or "team")
+        assert (
+            await conn.scalar(
+                text("SELECT person_id FROM identity_aliases WHERE alias_person_id = :provisional"),
+                {"provisional": provisional},
+            )
+            == canonical
+        )

@@ -1,6 +1,6 @@
 """Protected analytics identity and repository directories."""
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
@@ -135,18 +135,15 @@ async def resolve_person(
             (
                 await conn.execute(
                     text("""
-                    SELECT DISTINCT d.* FROM identity_directory d
-                    LEFT JOIN identity_aliases a ON a.workspace_id = d.workspace_id
-                        AND a.person_id = d.person_id
+                    SELECT d.* FROM identity_directory d
                     WHERE d.workspace_id = :workspace_id AND (
-                        d.person_id = ANY(CAST(:aliases AS uuid[]))
-                        OR a.alias_person_id = ANY(CAST(:aliases AS uuid[]))
+                        d.person_id = :immutable_id
                         OR lower(d.github_login) = :login OR lower(d.email) = :email)
                     ORDER BY d.updated_at DESC, d.person_id
                 """),
                     {
                         "workspace_id": workspace_id(),
-                        "aliases": aliases,
+                        "immutable_id": immutable_id,
                         "login": login,
                         "email": email,
                     },
@@ -163,7 +160,8 @@ async def resolve_person(
                 row["email"] != email if email else True,
             ),
         )
-        person_id = immutable_id or (current[0]["person_id"] if current else aliases[0])
+        # Reused handles need a fresh identity; historical aliases must keep their old owner.
+        person_id = immutable_id or (current[0]["person_id"] if current else uuid4())
         identity_kind = (
             "immutable"
             if immutable_id
@@ -179,10 +177,12 @@ async def resolve_person(
             if row["person_id"] == person_id or row["identity_kind"] == "provisional"
         ]
         old_ids = [row["person_id"] for row in merged if row["person_id"] != person_id]
-        for row in merged:
+        team_id = opaque_id("team", team_key)
+        for row in sorted(merged, key=lambda row: row["person_id"] != person_id):
             login = login or row["github_login"]
             email = email or row["email"]
             display_name = display_name or row["display_name"]
+            team_id = team_id or row["team_id"]
         # Mutable handles can change owners without transferring the previous owner's history.
         await conn.execute(
             text("""
@@ -237,7 +237,7 @@ async def resolve_person(
                 "identity_kind": identity_kind,
                 "display_name": display_name,
                 "email": email,
-                "team_id": opaque_id("team", team_key),
+                "team_id": team_id,
                 "months": ENV.ANALYTICS_PERSON_MONTHS.get_int(13),
             },
         )
