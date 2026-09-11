@@ -81,7 +81,9 @@ async def test_environment_system_threads_cannot_delegate_outside_scope(
         },
     )
     captured = await _capture_create_deep_agent_kwargs()
-    tool_names = {_registered_tool_name(tool) for tool in captured["tools"]}
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    tool_names = {_registered_tool_name(tool) for tool in tools}
     assert not tool_names.intersection(
         {
             "slack_start_new_thread",
