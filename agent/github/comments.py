@@ -341,7 +341,11 @@ async def fetch_issue_comments(
 
 
 async def fetch_pr_comments_since_last_tag(
-    repo_config: dict[str, str], pr_number: int, *, token: str
+    repo_config: dict[str, str],
+    pr_number: int,
+    *,
+    token: str,
+    event_comment: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all PR comments/reviews since the last @open-swe tag.
 
@@ -425,6 +429,16 @@ async def fetch_pr_comments_since_last_tag(
                 "comment_id": r.get("id"),
             }
         )
+
+    if event_comment is not None:
+        all_comments = [
+            c
+            for c in all_comments
+            if c.get("created_at", "") < event_comment["created_at"]
+            and (c.get("type"), c.get("comment_id"))
+            != (event_comment["type"], event_comment["comment_id"])
+        ]
+        all_comments.append(event_comment)
 
     # Sort all comments chronologically
     all_comments.sort(key=lambda c: c.get("created_at", ""))

@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.dashboard.threads.summary import thread_is_private
 from agent.slack.client import (
     append_slack_web_link_footer,
     bind_slack_thread_id,
@@ -16,6 +17,7 @@ from agent.slack.client import (
 )
 from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
 _MESSAGE_MAX_CHARS = 2800
@@ -95,6 +97,15 @@ async def slack_move_thread(
         }
 
     client = langgraph_client()
+    try:
+        metadata = thread_metadata(await client.threads.get(thread_id))
+    except Exception:
+        return {"success": False, "error": "Cannot verify thread credential scope"}
+    if thread_is_private(metadata):
+        return {
+            "success": False,
+            "error": "Private threads cannot be moved; start a separate public thread instead",
+        }
     active = await get_active_slack_thread(client, thread_id, configured_slack)
     if not active:
         return {"success": False, "error": "Current Slack location is unavailable"}

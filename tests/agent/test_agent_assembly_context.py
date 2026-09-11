@@ -58,6 +58,18 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in subagents[0]["middleware"])
 
 
+@pytest.mark.asyncio
+async def test_unknown_scope_omits_workspace_and_personal_mcps():
+    with (
+        patch("agent.server.private_credential_login", side_effect=TimeoutError),
+        patch("agent.server._mcp_tools_for", new_callable=AsyncMock) as mcps,
+        patch("agent.server._notion_tools_for", new_callable=AsyncMock) as notion,
+    ):
+        await _capture_create_deep_agent_kwargs()
+    mcps.assert_not_awaited()
+    notion.assert_not_awaited()
+
+
 class _DummyAgent:
     def with_config(self, config: RunnableConfig) -> _DummyAgent:
         self.config = config

@@ -602,6 +602,9 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             if isinstance(timezone_value, str):
                 user_timezone = timezone_value.strip()
 
+    thread_metadata = await common.authorize_github_thread(
+        thread_id, await _slack_login(user_id, user_email) or ""
+    )
     context_thread_ts = reply_thread_ts or thread_ts
     thread_messages = (
         []
@@ -645,6 +648,14 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
     logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
+    if common.thread_is_private(thread_metadata):
+        source_messages = [
+            message
+            for message in source_messages
+            if common.thread_is_promptable(
+                thread_metadata, logins_by_user_id.get(str(message.get("user") or ""), "")
+            )
+        ]
     context_source = "the beginning of the thread"
     if context_mode == "last_mention":
         context_source = (

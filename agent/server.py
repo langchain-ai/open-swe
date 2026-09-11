@@ -857,7 +857,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ).with_config(bindable_config(config))
 
     profile_login = resolve_github_login(as_json_object(config))
-    credential_login = None if is_desktop_run(cfg) else await private_credential_login(config)
+    credential_login = None
+    credential_scope_known = False
+    if not is_desktop_run(cfg):
+        try:
+            credential_login = await private_credential_login(config)
+            credential_scope_known = True
+        except Exception:
+            logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
@@ -1082,7 +1089,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if not stop_summary_mode and not local_run:
+    if not stop_summary_mode and not local_run and credential_scope_known:
         mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,

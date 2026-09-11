@@ -320,7 +320,7 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
         return True
 
     async def fake_fetch_pr_comments(
-        repo_config: dict[str, str], pr_number: int, *, token: str
+        repo_config: dict[str, str], pr_number: int, *, token: str, event_comment: dict[str, Any]
     ) -> list[dict[str, Any]]:
         fetch_calls.append(token)
         return [
@@ -360,7 +360,15 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
 
     asyncio.run(
         github_webhooks.process_github_pr_comment(
-            {"sender": {"login": "octo", "id": 1}},
+            {
+                "sender": {"login": "octo", "id": 1},
+                "comment": {
+                    "id": 42,
+                    "user": {"login": "octo"},
+                    "body": "@openswe please look",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            },
             "issue_comment",
         )
     )
