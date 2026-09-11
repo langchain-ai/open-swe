@@ -5,6 +5,15 @@ export type AgentStream = UseStreamReturn & { isOffloading?: boolean }
 
 export type AgentThreadTransport = "cloud" | "local"
 
+/**
+ * Liveness of an instance's event stream. `lost` is only ever reached from
+ * `reconnecting`, so a failed run can never be mistaken for a dropped stream.
+ */
+export type StreamConnection =
+  | { status: "live" }
+  | { status: "reconnecting"; attempt: number; retryAt: number }
+  | { status: "lost"; attempt: number }
+
 export interface StreamPoolEntry {
   /** Stable identity for the mounted `useStream` instance. */
   id: string
@@ -14,6 +23,9 @@ export interface StreamPoolEntry {
   /** Created without a thread; its first accepted run is the thread's creation. */
   awaitingCreation: boolean
   lastActiveAt: number
+  connection: StreamConnection
+  /** Bumped to rebuild the SDK controller, which re-hydrates state from scratch. */
+  epoch: number
 }
 
 export interface StreamBinding {
@@ -23,6 +35,29 @@ export interface StreamBinding {
 
 export const IDLE_STREAM_TTL_MS = 60_000
 export const MAX_IDLE_STREAMS = 8
+
+/** 1s doubling to a 5min ceiling spends this budget over roughly 23 minutes. */
+export const MAX_RECONNECT_ATTEMPTS = 12
+
+const RECONNECT_BASE_DELAY_MS = 1_000
+const RECONNECT_MAX_DELAY_MS = 300_000
+
+/**
+ * Grace after the final attempt's delay before the stream is called lost.
+ * langgraphjs#2817: the transport reports nothing when its budget runs out —
+ * `isLoading` stays on and `error` stays unset — so the give-up edge has to be
+ * inferred from the clock rather than observed.
+ */
+export const RECONNECT_GIVE_UP_GRACE_MS = 10_000
+
+export function reconnectDelayMs(attempt: number): number {
+  return Math.min(
+    RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1),
+    RECONNECT_MAX_DELAY_MS
+  )
+}
+
+const LIVE: StreamConnection = { status: "live" }
 
 export interface StreamPoolState {
   entries: Array<StreamPoolEntry>
@@ -39,6 +74,14 @@ export interface StreamPoolState {
   rekey(id: string, threadId: string): void
   /** The server accepted a run on this instance. */
   runAccepted(id: string): void
+  /** The transport is about to retry; `attempt` is 1-based. */
+  streamReconnecting(id: string, attempt: number, now: number): void
+  /** An event stream opened, so the instance is serving again. */
+  streamLive(id: string): void
+  /** The transport spent its retry budget without ever reconnecting. */
+  streamLost(id: string): void
+  /** Rebuild a thread's instance from scratch, re-hydrating its transcript. */
+  retryStream(transport: AgentThreadTransport, threadId: string | null): void
   consumeCreatedThread(): void
   /** Drop idle instances past the TTL or cap; active and running ones stay. */
   sweep(now: number): void
@@ -92,6 +135,8 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
       threadId,
       awaitingCreation: threadId === null,
       lastActiveAt: now,
+      connection: LIVE,
+      epoch: 0,
     }
     set((state) => ({
       activeId: entry.id,
@@ -142,6 +187,70 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
     })
   },
 
+  streamReconnecting(id, attempt, now) {
+    set((state) => ({
+      entries: state.entries.map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              connection: {
+                status: "reconnecting",
+                attempt,
+                retryAt: now + reconnectDelayMs(attempt),
+              },
+            }
+          : entry
+      ),
+    }))
+  },
+
+  streamLive(id) {
+    set((state) => {
+      const entry = state.entries.find((candidate) => candidate.id === id)
+      if (!entry || entry.connection.status === "live") return state
+      return {
+        entries: state.entries.map((candidate) =>
+          candidate.id === id ? { ...candidate, connection: LIVE } : candidate
+        ),
+      }
+    })
+  },
+
+  streamLost(id) {
+    set((state) => {
+      const entry = state.entries.find((candidate) => candidate.id === id)
+      if (entry?.connection.status !== "reconnecting") return state
+      const { attempt } = entry.connection
+      return {
+        entries: state.entries.map((candidate) =>
+          candidate.id === id
+            ? { ...candidate, connection: { status: "lost", attempt } }
+            : candidate
+        ),
+      }
+    })
+  },
+
+  retryStream(transport, threadId) {
+    const target = selectEntryFor(get(), transport, threadId)
+    if (!target) return
+    set((state) => ({
+      entries: state.entries.map((entry) =>
+        entry.id === target.id
+          ? {
+              ...entry,
+              epoch: entry.epoch + 1,
+              connection: {
+                status: "reconnecting",
+                attempt: 1,
+                retryAt: Date.now(),
+              },
+            }
+          : entry
+      ),
+    }))
+  },
+
   consumeCreatedThread() {
     set({ createdThreadId: null })
   },
@@ -183,6 +292,24 @@ export function selectStreamFor(
   transport: AgentThreadTransport,
   threadId: string | null
 ): AgentStream | undefined {
+  const entry = selectEntryFor(state, transport, threadId)
+  return entry ? state.handles[entry.id] : undefined
+}
+
+/** The connection of the instance `selectStreamFor` would return. */
+export function selectConnectionFor(
+  state: StreamPoolState,
+  transport: AgentThreadTransport,
+  threadId: string | null
+): StreamConnection {
+  return selectEntryFor(state, transport, threadId)?.connection ?? LIVE
+}
+
+function selectEntryFor(
+  state: StreamPoolState,
+  transport: AgentThreadTransport,
+  threadId: string | null
+): StreamPoolEntry | undefined {
   const retained =
     threadId === null
       ? undefined
@@ -195,6 +322,5 @@ export function selectStreamFor(
     state.binding.threadId === threadId
       ? state.entries.find((entry) => entry.id === state.activeId)
       : undefined
-  const entry = retained ?? bound
-  return entry ? state.handles[entry.id] : undefined
+  return retained ?? bound
 }

@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -19,18 +20,45 @@ import {
   createLocalGraphClient,
   dashboardFetch,
 } from "@/lib/langgraph-client"
-import { selectStreamFor, useStreamPool } from "./streamPool"
+import {
+  MAX_RECONNECT_ATTEMPTS,
+  RECONNECT_GIVE_UP_GRACE_MS,
+  reconnectDelayMs,
+  selectConnectionFor,
+  selectStreamFor,
+  useStreamPool,
+} from "./streamPool"
 import type { ReactNode } from "react"
 import type {
   AgentStream,
   AgentThreadTransport,
+  StreamConnection,
   StreamPoolEntry,
 } from "./streamPool"
 
-export type { AgentStream, AgentThreadTransport } from "./streamPool"
+export type {
+  AgentStream,
+  AgentThreadTransport,
+  StreamConnection,
+} from "./streamPool"
 
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
+
+/**
+ * Reports every event-stream open against an instance so the transport's
+ * otherwise-silent reconnect loop has an observable "we are serving again"
+ * edge; the SDK fires `onReconnect` before each attempt but nothing on success.
+ */
+function connectionSensingFetch(id: string): typeof fetch {
+  return async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input)
+    if (!url.includes("/stream/events")) return dashboardFetch(input, init)
+    const response = await dashboardFetch(input, init)
+    if (response.ok) useStreamPool.getState().streamLive(id)
+    return response
+  }
+}
 
 const AgentStreamContext = createContext<AgentStream | null>(null)
 
@@ -53,12 +81,20 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
   )
   const pool = useStreamPool.getState
   const [isOffloading, setIsOffloading] = useState(false)
+  const sensingFetch = useMemo(
+    () => connectionSensingFetch(entry.id),
+    [entry.id]
+  )
 
   const stream = useStream({
     client,
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
-    fetch: dashboardFetch,
+    fetch: sensingFetch,
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+    reconnectDelayMs,
+    onReconnect: ({ attempt }) =>
+      pool().streamReconnecting(entry.id, attempt, Date.now()),
     onThreadId: (threadId) => pool().rekey(entry.id, threadId),
     onCreated: () => {
       setIsOffloading(false)
@@ -94,6 +130,17 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     () => publish(entry.id, { ...stream, isOffloading }),
     [entry.id, publish, stream, isOffloading]
   )
+
+  const { connection } = entry
+  useEffect(() => {
+    if (connection.status !== "reconnecting") return
+    if (connection.attempt < MAX_RECONNECT_ATTEMPTS) return
+    const timer = setTimeout(
+      () => pool().streamLost(entry.id),
+      Math.max(0, connection.retryAt - Date.now()) + RECONNECT_GIVE_UP_GRACE_MS
+    )
+    return () => clearTimeout(timer)
+  }, [connection, entry.id, pool])
 
   return null
 }
@@ -145,7 +192,9 @@ export function AgentStreamProvider({
   return (
     <>
       {entries.map((entry) => (
-        <PooledStream key={entry.id} entry={entry} />
+        // langgraphjs#2817: a dead pump can never be reopened on its own
+        // controller, so recovery is a fresh instance under a fresh key.
+        <PooledStream key={`${entry.id}:${entry.epoch}`} entry={entry} />
       ))}
       {stream && (
         <AgentStreamContext.Provider value={stream}>
@@ -154,4 +203,20 @@ export function AgentStreamProvider({
       )}
     </>
   )
+}
+
+/** Liveness of the bound thread's event stream, with its manual retry. */
+export function useAgentStreamConnection(
+  transport: AgentThreadTransport,
+  threadId: string | null
+): { connection: StreamConnection; retry: () => void } {
+  const connection = useStreamPool((state) =>
+    selectConnectionFor(state, transport, threadId)
+  )
+  const retryStream = useStreamPool((state) => state.retryStream)
+  const retry = useCallback(
+    () => retryStream(transport, threadId),
+    [retryStream, threadId, transport]
+  )
+  return { connection, retry }
 }

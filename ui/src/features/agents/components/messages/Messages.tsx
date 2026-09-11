@@ -69,6 +69,8 @@ export const Messages = memo(function MessagesComponent({
   isThinking,
   settingUpSandbox,
   isOffloading = false,
+  reconnectLabel = null,
+  onRetryStream,
   project,
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
@@ -172,6 +174,7 @@ export const Messages = memo(function MessagesComponent({
             {footer}
             <ThinkingSpinner
               isActive={
+                !!reconnectLabel ||
                 isOffloading ||
                 (!!(isThinking || streamIsLoading || isStreaming) &&
                   !(
@@ -180,10 +183,14 @@ export const Messages = memo(function MessagesComponent({
                     lastAgentIndex === visibleMessages.length - 1
                   ))
               }
-              settingUpSandbox={settingUpSandbox && !isOffloading}
-              label={
-                isOffloading ? "Offloading conversation..." : activityLabel
+              settingUpSandbox={
+                settingUpSandbox && !isOffloading && !reconnectLabel
               }
+              label={
+                reconnectLabel ??
+                (isOffloading ? "Offloading conversation..." : activityLabel)
+              }
+              onRetry={reconnectLabel ? onRetryStream : undefined}
             />
           </div>
         </div>
