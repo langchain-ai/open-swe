@@ -140,6 +140,15 @@ def _configurable() -> RunConfig:
         return RunConfig()
 
 
+def _author_attribution_note(author: Any) -> str | None:
+    if not isinstance(author, str) or not author.strip():
+        return None
+    requester = (_configurable().github_login or "").strip()
+    if not requester or author.casefold() == requester.casefold():
+        return None
+    return f"GitHub authored this pull request as `{author}`, not as the requesting actor `{requester}`."
+
+
 def _head_branch_for_repo(owner: str, head: str) -> str | None:
     if ":" not in head:
         return head
@@ -883,7 +892,7 @@ async def _open_pull_request(
                     pr=pr,
                     resolves_thread=resolves_thread,
                 )
-            return {
+            result = {
                 "success": True,
                 "created": True,
                 "url": pr.get("html_url"),
@@ -891,6 +900,10 @@ async def _open_pull_request(
                 "author": (pr.get("user") or {}).get("login"),
                 "token_kind": kind,
             }
+            note = _author_attribution_note(result["author"])
+            if note:
+                result["attribution_note"] = note
+            return result
 
         # A PR for this head branch may already exist — return it so the agent
         # switches to `gh pr edit` for updates instead of erroring out.
@@ -907,7 +920,7 @@ async def _open_pull_request(
                     pr=existing,
                     resolves_thread=resolves_thread,
                 )
-                return {
+                result = {
                     "success": True,
                     "created": False,
                     "url": existing.get("html_url"),
@@ -915,6 +928,10 @@ async def _open_pull_request(
                     "author": (existing.get("user") or {}).get("login"),
                     "token_kind": kind,
                 }
+                note = _author_attribution_note(result["author"])
+                if note:
+                    result["attribution_note"] = note
+                return result
 
         if resp.status_code == 404:
             return _access_failure_payload(

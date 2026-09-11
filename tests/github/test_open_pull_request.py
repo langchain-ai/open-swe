@@ -197,6 +197,7 @@ def test_public_pr_cannot_use_initiator_authority_outside_workspace(
     if workspace_access == "allowed":
         assert result["success"] is True
         assert result["author"] == "Alice"
+        assert "not as the requesting actor `bob`" in result["attribution_note"]
         assert result["token_kind"] == "user"
         assert any(request.method == "POST" for request in requests)
     else:
@@ -243,6 +244,7 @@ def test_uses_user_token_for_slack_with_login(
     assert result["created"] is True
     assert result["url"] == "https://x/pull/1"
     assert result["author"] == "johannes117"
+    assert "attribution_note" not in result
     assert result["token_kind"] == "user"
     assert client.post_calls[0]["headers"]["Authorization"] == "Bearer user-tok"
     assert client.post_calls[0]["json"] == {

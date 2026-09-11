@@ -58,6 +58,9 @@ async def pr_author_login() -> str | None:
         return _private_owner_login(cfg, metadata)
     if metadata.get("owner_type") == "system":
         return None
+    actor = (cfg.github_login or "").strip()
+    if metadata.get("owner_type") == "user" and actor:
+        return actor
     owner = metadata.get("owner_login")
     if isinstance(owner, str) and owner.strip():
         owner = owner.strip()

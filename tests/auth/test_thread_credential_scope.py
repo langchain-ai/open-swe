@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import langgraph_sdk
 import pytest
 
+import agent.credential_scope as credential_scope
 from agent.dashboard import profiles
 from agent.github import thread_token
 from agent.github import token as auth
@@ -80,7 +81,7 @@ async def test_public_pr_is_opened_as_initiator(monkeypatch, thread_metadata, cr
     bot = AsyncMock(return_value="bot-token")
     monkeypatch.setattr(opr, "get_github_app_installation_token", bot)
     assert await opr._resolve_pr_author_token() == ("personal-token", "user")
-    credentials.assert_awaited_once_with("alice")
+    credentials.assert_awaited_once_with(actor)
     bot.assert_not_awaited()
 
 
@@ -91,10 +92,10 @@ async def test_public_pr_preserves_initiator_login_case(
 ):
     opr = importlib.import_module("agent.tools.open_pull_request")
     thread_metadata.update(owner_type="user", owner_login="Alice")
-    credentials.side_effect = lambda login: "personal-token" if login == "Alice" else None
+    credentials.side_effect = lambda login: "personal-token" if login == actor else None
     monkeypatch.setattr("agent.run_config.get_config", lambda: config(login=actor))
     assert await opr._resolve_pr_author_token() == ("personal-token", "user")
-    credentials.assert_awaited_once_with("Alice")
+    credentials.assert_awaited_once_with(actor)
 
 
 @pytest.mark.asyncio
@@ -115,6 +116,31 @@ async def test_older_public_owner_resolves_oauth_key_independently_of_participan
 
     assert await opr._resolve_pr_author_token() == ("personal-token", "user")
     credentials.assert_awaited_once_with("Alice")
+
+
+@pytest.mark.asyncio
+async def test_public_user_thread_uses_requester_for_pr_author(thread_metadata, monkeypatch):
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
+
+    assert await credential_scope.pr_author_login() == "bob"
+
+
+@pytest.mark.asyncio
+async def test_public_user_thread_falls_back_to_owner_without_requester(
+    thread_metadata, monkeypatch
+):
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login=None))
+
+    assert await credential_scope.pr_author_login() == "alice"
+
+
+@pytest.mark.asyncio
+async def test_private_thread_pr_author_remains_owner_only(thread_metadata, monkeypatch):
+    thread_metadata.update(visibility="private", owner_login="alice")
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
+
+    with pytest.raises(RuntimeError, match="private thread owner"):
+        await credential_scope.pr_author_login()
 
 
 @pytest.mark.asyncio
@@ -149,7 +175,7 @@ async def test_user_owned_pr_requires_saved_initiator(monkeypatch, thread_metada
     opr = importlib.import_module("agent.tools.open_pull_request")
     thread_metadata.update(owner_type="user")
     thread_metadata.pop("owner_login")
-    monkeypatch.setattr("agent.run_config.get_config", config)
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login=None))
     with pytest.raises(RuntimeError, match="owner"):
         await opr._resolve_pr_author_token()
     credentials.assert_not_awaited()
