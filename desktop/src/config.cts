@@ -140,25 +140,6 @@ function backendRequestUrl(backendUrl, appRequestUrl) {
   return target.toString();
 }
 
-function backendResponseHeaders(upstream) {
-  const headers = new Headers(upstream);
-  for (const name of [
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-    "content-encoding",
-    "content-length",
-  ]) {
-    headers.delete(name);
-  }
-  return headers;
-}
-
 function localCallbackUrl(navigationUrl, backendUrl) {
   try {
     const target = new URL(navigationUrl);
@@ -206,7 +187,6 @@ module.exports = {
   desktopLoginUrl,
   resolveAppRuntime,
   backendRequestUrl,
-  backendResponseHeaders,
   isAppLoginUrl,
   isAppUrl,
   isConnectProvider,

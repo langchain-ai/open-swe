@@ -56,7 +56,6 @@ const {
   SESSION_COOKIE_NAME,
   appRedirectUrl,
   backendRequestUrl,
-  backendResponseHeaders,
   desktopExchangeUrl,
   connectExchangeUrl,
   connectLoginUrl,
@@ -900,7 +899,7 @@ async function proxyBackendRequest(request) {
 
   const location = upstream.headers.get("location");
   if (location && source.pathname.endsWith("/callback")) {
-    const responseHeaders = backendResponseHeaders(upstream.headers);
+    const responseHeaders = new Headers(upstream.headers);
     responseHeaders.set("location", appRedirectUrl(location));
     return new Response(upstream.body, {
       status: upstream.status,
@@ -908,11 +907,7 @@ async function proxyBackendRequest(request) {
       headers: responseHeaders,
     });
   }
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers: backendResponseHeaders(upstream.headers),
-  });
+  return upstream;
 }
 
 async function storeResponseCookies(targetUrl, response) {
