@@ -433,18 +433,23 @@ async def fetch_pr_comments_since_last_tag(
         )
 
     if event_comment is not None:
+        event_at = event_comment.get("event_at") or event_comment["created_at"]
         all_comments = [
             c
             for c in all_comments
-            if c.get("created_at", "") < event_comment["created_at"]
-            or (
-                event_comment["type"] == "review"
-                and c.get("review_id") == event_comment["comment_id"]
-            )
-            or (
-                c["type"] == event_comment["type"]
-                and c.get("created_at", "") == event_comment["created_at"]
-                and c.get("comment_id", 0) < event_comment["comment_id"]
+            if (c["type"], c.get("comment_id"))
+            != (event_comment["type"], event_comment["comment_id"])
+            and (
+                c.get("created_at", "") < event_at
+                or (
+                    event_comment["type"] == "review"
+                    and c.get("review_id") == event_comment["comment_id"]
+                )
+                or (
+                    c["type"] == event_comment["type"]
+                    and c.get("created_at", "") == event_at
+                    and c.get("comment_id", 0) < event_comment["comment_id"]
+                )
             )
         ]
         all_comments.append(event_comment)
@@ -453,7 +458,7 @@ async def fetch_pr_comments_since_last_tag(
         all_comments = [c for c in all_comments if c["author"].lower() == authorized_login.lower()]
 
     # Sort all comments chronologically
-    all_comments.sort(key=lambda c: c.get("created_at", ""))
+    all_comments.sort(key=lambda c: c.get("event_at") or c.get("created_at", ""))
 
     tag_indices = [
         i for i, comment in enumerate(all_comments) if mentions_open_swe(comment.get("body"))

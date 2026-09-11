@@ -890,6 +890,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         "body": event.get("body", ""),
         "author": event.get("user", {}).get("login", ""),
         "created_at": event.get("submitted_at") or event.get("created_at", ""),
+        "event_at": event.get("updated_at") if payload.get("action") == "edited" else None,
         "type": {
             "issue_comment": "pr_comment",
             "pull_request_review_comment": "review_comment",
