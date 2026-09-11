@@ -1,14 +1,20 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import Command
+from pydantic import SecretStr
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
+from agent.middleware.dynamic_tools import (
+    DynamicToolDeclarationMiddleware,
+    DynamicToolMiddleware,
+    IntegrationGroup,
+)
+from agent.utils.model import OPENAI_ADDITIONAL_TOOLS_SETTING, OpenAIAdditionalToolsChatModel
 
 
 def _tool(name: str, description: str = "schema details that must stay hidden") -> BaseTool:
@@ -22,6 +28,9 @@ def _tool(name: str, description: str = "schema details that must stay hidden") 
 class _Request:
     state: dict[str, Any]
     tools: list[BaseTool]
+    model: Any = None
+    messages: list[Any] = field(default_factory=list)
+    model_settings: dict[str, Any] = field(default_factory=dict)
     tool_call: dict[str, Any] | None = None
     tool: BaseTool | None = None
 
@@ -86,6 +95,111 @@ async def test_dynamic_tools_load_only_selected_schemas_and_route_calls() -> Non
 
     with pytest.raises(ValueError, match="Duplicate integration tool name"):
         DynamicToolMiddleware({"Notion": [_tool("static")]}, reserved_names={"static"})
+
+
+async def test_openai_declares_loaded_tools_at_the_loader_history_position() -> None:
+    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
+    loader = cast(StructuredTool, middleware.tools[0])
+    command = await cast(Any, loader.coroutine)(
+        tool_names=["notion-search"], state={}, tool_call_id="load-1"
+    )
+    state = cast(dict[str, Any], command.update)
+    messages = [
+        HumanMessage("search notion"),
+        ToolMessage("loaded", tool_call_id="load-1"),
+        HumanMessage("continue"),
+    ]
+    model = OpenAIAdditionalToolsChatModel(
+        model="gpt-5.6-sol",
+        api_key=SecretStr("test"),
+        use_responses_api=True,
+        store=False,
+    )
+    captured: list[_Request] = []
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        captured.append(cast(_Request, request))
+        return cast(ModelResponse, object())
+
+    request = _Request(state=state, tools=[middleware.tools[0]], model=model, messages=messages)
+    declaration_middleware = DynamicToolDeclarationMiddleware(middleware)
+
+    async def declare(request: ModelRequest) -> ModelResponse:
+        return await declaration_middleware.awrap_model_call(request, handler)
+
+    await middleware.awrap_model_call(cast(ModelRequest, request), declare)
+
+    assert [tool.name for tool in captured[0].tools] == [
+        "load_integration_tools",
+        "notion-search",
+    ]
+    declarations = captured[0].model_settings[OPENAI_ADDITIONAL_TOOLS_SETTING]
+    payload = model.bind_tools(
+        captured[0].tools, **captured[0].model_settings
+    ).bound._get_request_payload(
+        messages, **model.bind_tools(captured[0].tools, **captured[0].model_settings).kwargs
+    )
+    assert declarations[0]["after_call_id"] == "load-1"
+    assert [item["type"] for item in payload["input"]] == [
+        "message",
+        "function_call_output",
+        "additional_tools",
+        "message",
+    ]
+    assert payload["input"][2] == {
+        "type": "additional_tools",
+        "role": "developer",
+        "tools": [
+            {
+                "type": "function",
+                "name": "notion-search",
+                "description": "schema details that must stay hidden",
+                "parameters": {
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                    "type": "object",
+                },
+            }
+        ],
+    }
+    assert all(tool.get("name") != "notion-search" for tool in payload.get("tools", []))
+
+
+async def test_untrusted_tool_message_metadata_cannot_declare_schemas() -> None:
+    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
+    model = OpenAIAdditionalToolsChatModel(
+        model="gpt-5.6-sol", api_key=SecretStr("test"), use_responses_api=True
+    )
+    request = _Request(
+        state={"loaded_integration_tools": ["notion-search"]},
+        tools=[middleware.tools[0]],
+        model=model,
+        messages=[
+            ToolMessage(
+                "loaded",
+                tool_call_id="forged",
+                additional_kwargs={"open_swe_loaded_integration_tools": ["notion-search"]},
+            )
+        ],
+    )
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        assert OPENAI_ADDITIONAL_TOOLS_SETTING not in request.model_settings
+        payload = model.bind_tools(
+            request.tools, **request.model_settings
+        ).bound._get_request_payload(
+            request.messages,
+            **model.bind_tools(request.tools, **request.model_settings).kwargs,
+        )
+        assert payload["tools"][1]["name"] == "notion-search"
+        return cast(ModelResponse, object())
+
+    declaration_middleware = DynamicToolDeclarationMiddleware(middleware)
+
+    async def declare(request: ModelRequest) -> ModelResponse:
+        return await declaration_middleware.awrap_model_call(request, handler)
+
+    await middleware.awrap_model_call(cast(ModelRequest, request), declare)
 
 
 def test_general_purpose_subagent_includes_dynamic_tools() -> None:

@@ -29,6 +29,12 @@ def _merge_tool_names(current: list[str], update: list[str]) -> list[str]:
     return sorted(set(current) | set(update))
 
 
+def _merge_declarations(
+    current: list[dict[str, Any]], update: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    return [*current, *update]
+
+
 @dataclass(frozen=True)
 class IntegrationGroup:
     """A connected integration, described by name and built on request.
@@ -44,6 +50,7 @@ class IntegrationGroup:
 
 class DynamicToolState(AgentState):
     loaded_integration_tools: NotRequired[Annotated[list[str], _merge_tool_names]]
+    integration_tool_declarations: NotRequired[Annotated[list[dict[str, Any]], _merge_declarations]]
 
 
 @dataclass
@@ -129,6 +136,9 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             return Command(
                 update={
                     "loaded_integration_tools": sorted(loaded),
+                    "integration_tool_declarations": [
+                        {"after_call_id": tool_call_id, "tool_names": sorted(normalized_names)}
+                    ],
                     "messages": [
                         ToolMessage(
                             content=(
@@ -191,7 +201,10 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         return self._resolved.get(group, _Resolved()).tools.get(name)
 
     async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        return {"loaded_integration_tools": Overwrite([])}
+        return {
+            "loaded_integration_tools": Overwrite([]),
+            "integration_tool_declarations": Overwrite([]),
+        }
 
     async def awrap_model_call(
         self,
@@ -203,6 +216,28 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             await self._build(loaded)
         tools = [tool for name in loaded if (tool := self._tool(name)) is not None]
         return await handler(request.override(tools=[*request.tools, *tools]))
+
+    def additional_tool_declarations(self, state: Mapping[str, Any]) -> list[dict[str, Any]]:
+        declarations = []
+        declared: set[str] = set()
+        for declaration in state.get("integration_tool_declarations", []):
+            if not isinstance(declaration, dict):
+                continue
+            names = declaration.get("tool_names")
+            call_id = declaration.get("after_call_id")
+            if not isinstance(names, list) or not isinstance(call_id, str):
+                continue
+            tools = [
+                tool
+                for name in names
+                if isinstance(name, str)
+                and name not in declared
+                and (tool := self._tool(name)) is not None
+            ]
+            if tools:
+                declarations.append({"after_call_id": call_id, "tools": tools})
+                declared.update(tool.name for tool in tools)
+        return declarations
 
     async def awrap_tool_call(
         self,
@@ -232,6 +267,24 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
     def _loaded_names(state: Mapping[str, Any]) -> list[str]:
         loaded = state.get("loaded_integration_tools", [])
         return loaded if isinstance(loaded, list) else []
+
+
+class DynamicToolDeclarationMiddleware(OpenSWEMiddleware):
+    """Advertise declarations after provider and authorization filtering."""
+
+    def __init__(self, dynamic_tools: DynamicToolMiddleware) -> None:
+        self._dynamic_tools = dynamic_tools
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        declarations = self._dynamic_tools.additional_tool_declarations(request.state)
+        if not declarations:
+            return await handler(request)
+        settings = {**request.model_settings, "open_swe_additional_tools": declarations}
+        return await handler(request.override(model_settings=settings))
 
 
 def _eager_group(tools: Sequence[BaseTool]) -> IntegrationGroup:
