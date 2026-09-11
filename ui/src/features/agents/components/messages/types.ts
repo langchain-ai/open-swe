@@ -14,6 +14,7 @@ export interface ApprovalCallbacks {
 
 export type MessagesScrollControl = {
   scrollToBottom: () => void
+  scrollToLatestUserMessage: () => void
 }
 
 export interface MessagesProps extends ApprovalCallbacks {

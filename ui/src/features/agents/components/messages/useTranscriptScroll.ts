@@ -205,5 +205,29 @@ export function useTranscriptScroll({
     return () => observer.disconnect()
   }, [applyPendingRestore, scheduleJumpToBottom])
 
-  return { scrollRef, contentRef, showScrollToBottom, scrollToBottom }
+  const scrollToLatestUserMessage = useCallback(() => {
+    const el = scrollRef.current
+    const message = Array.from(
+      contentRef.current?.querySelectorAll<HTMLElement>(
+        '[data-testid="user-message"]'
+      ) ?? []
+    ).at(-1)
+    if (!el || !message) return
+    state.current.followTail = false
+    state.current.pendingRestoreTop = null
+    cancelScheduledJump()
+    el.scrollTop = Math.min(
+      message.offsetTop - el.clientHeight / 2,
+      maxScrollTop(el)
+    )
+    settle(el, el.scrollTop)
+  }, [cancelScheduledJump, settle])
+
+  return {
+    scrollRef,
+    contentRef,
+    showScrollToBottom,
+    scrollToBottom,
+    scrollToLatestUserMessage,
+  }
 }
