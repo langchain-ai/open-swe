@@ -415,7 +415,7 @@ async def list_dashboard_thread_slack_channels(
     include_resolved: bool = False,
     include_automations: bool = False,
     include_all: bool = False,
-) -> list[dict[str, Any]]:
+) -> list[SlackChannelSummary]:
     candidates = await _collect_thread_candidates(
         langgraph_client(),
         _participant_search_filters(login, email=email, include_all=include_all),

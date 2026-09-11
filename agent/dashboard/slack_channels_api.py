@@ -18,18 +18,16 @@ async def list_thread_slack_channels(
     include_automations: bool = False,
     all: bool = False,
 ) -> list[SlackChannelSummary]:
-    if all and not is_admin(
-        session.get("email") if isinstance(session.get("email"), str) else None,
-        login=session.get("sub") if isinstance(session.get("sub"), str) else None,
-    ):
-        raise HTTPException(403, "admin only")
     login = session.get("sub")
     if not isinstance(login, str):
         raise HTTPException(401, "invalid session")
-    email = session.get("email")
+    raw_email = session.get("email")
+    email = raw_email if isinstance(raw_email, str) else None
+    if all and not is_admin(email, login=login):
+        raise HTTPException(403, "admin only")
     return await list_dashboard_thread_slack_channels(
         login,
-        email=email if isinstance(email, str) else None,
+        email=email,
         include_resolved=include_resolved,
         include_automations=include_automations,
         include_all=all,
