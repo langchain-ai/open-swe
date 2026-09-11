@@ -700,6 +700,20 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
       description="Workspace-wide model defaults. Per-user Cloud Agent selections override the agent defaults."
     >
       <div className="divide-y divide-border">
+        <SettingsRow
+          label="Adaptive model routing"
+          description="Automatically choose a model for each turn, org-wide. Users can still override this in their personal settings."
+          control={
+            <Switch
+              checked={settings.data?.model_routing_enabled ?? false}
+              onCheckedChange={(next) =>
+                settings.data &&
+                save.mutate({ ...settings.data, model_routing_enabled: next })
+              }
+              disabled={!settings.data || save.isPending}
+            />
+          }
+        />
         <RolePicker
           label="Open SWE Agent"
           description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Open SWE Agent."

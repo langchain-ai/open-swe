@@ -74,6 +74,7 @@ from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
+    get_team_model_routing_enabled,
 )
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
@@ -561,6 +562,14 @@ async def _cached_fable_enabled() -> bool:
     )
 
 
+async def _cached_team_model_routing_enabled() -> bool:
+    return await ttl_cache.cached(
+        "team:model-routing-enabled",
+        60,
+        get_team_model_routing_enabled,
+    )
+
+
 async def _cached_profile(profile_login: str | None):
     if not profile_login:
         return None
@@ -930,7 +939,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
+    # User preference overrides the org-wide toggle; None inherits it.
     adaptive_model_routing = profile_model_routing_enabled(profile)
+    if adaptive_model_routing is None:
+        adaptive_model_routing = False if local_run else await _cached_team_model_routing_enabled()
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
