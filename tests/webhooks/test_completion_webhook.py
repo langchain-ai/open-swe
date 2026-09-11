@@ -1,5 +1,5 @@
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -495,14 +495,14 @@ async def test_success_clears_thinking_status_when_no_run_is_left(
 ) -> None:
     client = _FakeActiveRunClient(_slack_metadata(), active=False)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    cleared = AsyncMock()
+    cleared = create_autospec(completion.clear_slack_thread_status)
     monkeypatch.setattr(completion, "clear_slack_thread_status", cleared)
 
     await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "success"}
     )
 
-    cleared.assert_awaited_once_with("C1", "123.45")
+    cleared.assert_awaited_once_with("C1", "123.45", "")
 
 
 @pytest.mark.asyncio
@@ -511,7 +511,7 @@ async def test_success_keeps_thinking_status_while_another_run_is_active(
 ) -> None:
     client = _FakeActiveRunClient(_slack_metadata(), active=True)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    cleared = AsyncMock()
+    cleared = create_autospec(completion.clear_slack_thread_status)
     monkeypatch.setattr(completion, "clear_slack_thread_status", cleared)
 
     await completion.handle_run_completion(
@@ -528,14 +528,14 @@ async def test_error_clears_thinking_status_when_no_run_is_left(
     client = _FakeActiveRunClient(_slack_metadata(), active=False)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     monkeypatch.setattr(completion, "post_slack_thread_reply", AsyncMock(return_value=True))
-    cleared = AsyncMock()
+    cleared = create_autospec(completion.clear_slack_thread_status)
     monkeypatch.setattr(completion, "clear_slack_thread_status", cleared)
 
     await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "error"}
     )
 
-    cleared.assert_awaited_once_with("C1", "123.45")
+    cleared.assert_awaited_once_with("C1", "123.45", "")
 
 
 @pytest.mark.asyncio
