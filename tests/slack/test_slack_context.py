@@ -1645,6 +1645,43 @@ def test_thread_environment_round_trips_through_metadata(
     assert asyncio.run(webhook_common.get_thread_environment("thread-id")) == "staging"
 
 
+def test_thread_model_choice_round_trips_explicit_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(
+        {
+            "metadata": {
+                "model_selection": "explicit",
+                "model": "anthropic:claude-opus-5",
+                "effort": "high",
+            }
+        }
+    )
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) == (
+        "anthropic:claude-opus-5",
+        "high",
+    )
+
+
+def test_thread_model_choice_is_none_for_auto_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(
+        {
+            "metadata": {
+                "model_selection": "auto",
+                "model": "anthropic:claude-opus-5",
+                "effort": "high",
+            }
+        }
+    )
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) is None
+
+
 def test_thread_environment_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     threads = _FakeThreadsClient({"metadata": {}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
