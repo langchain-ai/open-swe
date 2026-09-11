@@ -324,14 +324,25 @@ async def _collect_thread_candidates(
 async def list_unresolved_dashboard_threads(
     login: str, *, email: str | None = None
 ) -> list[ThreadLike]:
-    return await _collect_thread_candidates(
-        langgraph_client(),
-        _participant_search_filters(login, email=email),
-        viewer_login=login,
-        viewer_email=email,
-        resolved=False,
-        surfaced_only=True,
-    )
+    client = langgraph_client()
+    seen: dict[str, ThreadLike] = {}
+    for metadata in _participant_search_filters(login, email=email):
+        offset = 0
+        while batch := await _search_threads_batch(
+            client, metadata, limit=_THREADS_SEARCH_PAGE, offset=offset
+        ):
+            for thread in batch:
+                thread_metadata = _thread_metadata(thread)
+                thread_id = _thread_id(thread)
+                if (
+                    thread_id
+                    and thread_source(thread_metadata) in _SURFACED_SOURCES
+                    and thread_is_readable(thread_metadata, login, email)
+                    and not _is_thread_resolved(thread_metadata)
+                ):
+                    seen.setdefault(thread_id, thread)
+            offset += len(batch)
+    return list(seen.values())
 
 
 async def list_dashboard_threads(

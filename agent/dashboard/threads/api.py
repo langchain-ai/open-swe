@@ -534,10 +534,11 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
     client = langgraph_client()
     threads = await list_unresolved_dashboard_threads(login, email=email)
     now_ms = _now_ms()
-    await asyncio.gather(
-        *(
-            client.threads.update(
-                thread_id=thread["thread_id"],
+
+    async def resolve(thread_id: str) -> None:
+        async with agent_thread_pr_state_lock(client, thread_id):
+            await client.threads.update(
+                thread_id=thread_id,
                 metadata={
                     "resolved": True,
                     "resolved_at_ms": now_ms,
@@ -545,9 +546,8 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
                     "attention_reason": None,
                 },
             )
-            for thread in threads
-        )
-    )
+
+    await asyncio.gather(*(resolve(thread["thread_id"]) for thread in threads))
     return len(threads)
 
 

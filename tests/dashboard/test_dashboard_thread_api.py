@@ -1756,11 +1756,12 @@ async def test_resolve_all_dashboard_threads_marks_each_unresolved_thread(monkey
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads()),
     )
-    monkeypatch.setattr(thread_api, "list_unresolved_dashboard_threads", AsyncMock(return_value=threads))
-
-    count = await thread_api.resolve_all_dashboard_threads(
-        "octocat", email="octocat@example.com"
+    monkeypatch.setattr(
+        thread_api, "list_unresolved_dashboard_threads", AsyncMock(return_value=threads)
     )
+    patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
+
+    count = await thread_api.resolve_all_dashboard_threads("octocat", email="octocat@example.com")
 
     assert count == 2
     assert {thread_id for thread_id, _ in updates} == {"one", "two"}
