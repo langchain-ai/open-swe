@@ -5,6 +5,7 @@ from typing import Any, Literal, NotRequired
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
+from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
@@ -113,5 +114,14 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             if request.state.get("plan_mode")
             else request.state.get("model_route", "balanced")
         )
+        try:
+            config = get_config()
+        except RuntimeError:
+            config = {}
+        if config.get("metadata", {}).get("model_routing_applied"):
+            config["metadata"] = {
+                **(config.get("metadata") or {}),
+                "model_route": route,
+            }
         model = self._models.get(route, self._models["balanced"])
         return await handler(request.override(model=model))
