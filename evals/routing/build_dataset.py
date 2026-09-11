@@ -27,6 +27,8 @@ class RoutingTask(BaseModel):
     # Every route a competent agent could defensibly pick. Scored as a set, so a
     # task that is genuinely on a boundary does not punish either side.
     accepted: list[ExpectedRoute] = Field(min_length=1)
+    # In the smoke subset: cheap to run and collectively covering every tier.
+    smoke: bool = False
     rationale: str = ""
 
 
@@ -40,6 +42,10 @@ def load_tasks() -> list[RoutingTask]:
     if duplicates:
         raise ValueError(f"duplicate task ids: {sorted(duplicates)}")
     return tasks
+
+
+def smoke_task_ids() -> set[str]:
+    return {task.id for task in load_tasks() if task.smoke}
 
 
 def main() -> None:

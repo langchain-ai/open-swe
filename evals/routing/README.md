@@ -50,10 +50,18 @@ The summary reports route accuracy, a confusion list, timeouts, and mean cost.
 ## Run
 
 ```bash
-uv run python -m evals.routing.build_dataset            # once
-uv run python -m evals.routing.run_eval --limit 3       # smoke test
-uv run python -m evals.routing.run_eval                 # full run, ~40 threads
+uv run python -m evals.routing.build_dataset                        # once
+uv run python -m evals.routing.run_eval --smoke --max-concurrency 6 # 6 tasks, ~5 min
+uv run python -m evals.routing.run_eval --max-concurrency 8         # all 40, ~25 min
 ```
+
+The smoke subset is the six tasks marked `"smoke": true` in `tasks.json`. They are the
+cheapest observed task at each tier plus one that should not route at all, so a broken
+guard, a missing tool, or a prompt that stops the agent exiting shows up in minutes. It is
+a wiring check, not a measurement: six examples cannot tell you whether accuracy moved.
+
+Keep it fast by leaving the expensive tasks out. The open-ended security and architecture
+prompts take 50+ model calls each and belong only in the full run.
 
 Threads created by the eval are deleted afterwards unless `--no-cleanup` is passed. Each
 run is cancelled at the routing decision, so the eval never edits the repository or opens

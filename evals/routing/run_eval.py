@@ -18,6 +18,7 @@ from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 from pydantic import BaseModel
 
+from evals.routing.build_dataset import smoke_task_ids
 from evals.routing.judge import (
     aggregate,
     exploration_cost,
@@ -132,6 +133,11 @@ async def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Run only the first N examples.")
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run only the smoke subset: one cheap task per tier, about 5 minutes.",
+    )
     for key in RoutingEvalConfig.model_fields:
         parser.add_argument(f"--{key.replace('_', '-')}", dest=key)
     parser.add_argument("--no-cleanup", action="store_true")
@@ -141,7 +147,15 @@ async def main() -> None:
     logger.info("Starting routing eval", extra={"config": config.model_dump(), "limit": args.limit})
 
     data: str | list[Example] = config.dataset_name
-    if args.limit:
+    if args.smoke:
+        wanted = smoke_task_ids()
+        data = [
+            example
+            for example in Client().list_examples(dataset_name=config.dataset_name)
+            if (example.inputs or {}).get("task_id") in wanted
+        ]
+        logger.info("Smoke subset", extra={"examples": len(data)})
+    elif args.limit:
         data = list(Client().list_examples(dataset_name=config.dataset_name, limit=args.limit))
     try:
         results = await aevaluate(
