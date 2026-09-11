@@ -128,6 +128,7 @@ export interface ThreadsPageParams {
   automationId?: string
   repo?: string
   ownerless?: boolean
+  slackChannelId?: string
   sortBy?: ThreadSortBy
 }
 
@@ -141,6 +142,13 @@ export interface ThreadsPage {
 
 export interface SidebarProject {
   repoFullName: string
+  name: string
+  updatedAt: number
+}
+
+export interface SidebarSlackChannel {
+  id: string
+  teamId: string
   name: string
   updatedAt: number
 }
@@ -229,6 +237,8 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.repo) search.set("repo", params.repo)
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
+  if (params.slackChannelId)
+    search.set("slack_channel_id", params.slackChannelId)
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
@@ -299,6 +309,15 @@ export const agentsApi = {
       `/threads/projects${buildProjectsQuery(params)}`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
+  listThreadSlackChannels: (
+    params: {
+      includeResolved?: boolean
+      includeAutomations?: boolean
+    } = {}
+  ) =>
+    agentsRequest<Array<SidebarSlackChannel>>(
+      `/threads/slack-channels${buildProjectsQuery(params)}`
+    ),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   continueThreadPrivately: (threadId: string) =>

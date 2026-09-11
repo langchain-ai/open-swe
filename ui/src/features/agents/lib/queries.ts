@@ -32,6 +32,10 @@ export const agentThreadKeys = {
     includeResolved: boolean
     includeAutomations: boolean
   }) => ["agent-threads", "lists", "projects", params] as const,
+  slackChannels: (params: {
+    includeResolved: boolean
+    includeAutomations: boolean
+  }) => ["agent-threads", "lists", "slack-channels", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
@@ -486,6 +490,26 @@ export function useSidebarProjects({
   })
 }
 
+export function useSidebarSlackChannels({
+  includeAutomations = false,
+  includeResolved = false,
+  enabled = true,
+}: {
+  includeAutomations?: boolean
+  includeResolved?: boolean
+  enabled?: boolean
+}) {
+  const params = { includeAutomations, includeResolved }
+  return useQuery({
+    queryKey: agentThreadKeys.slackChannels(params),
+    queryFn: () => agentsApi.listThreadSlackChannels(params),
+    enabled,
+    placeholderData: (previous) => previous,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+  })
+}
+
 export function useSidebarActiveThread({
   activeThreadId,
   loadedThreads,
@@ -540,7 +564,7 @@ export function useSidebarRecents({
   sort = "created",
   enabled = true,
 }: {
-  projectMode: boolean
+  projectMode: boolean | "slack"
   includeAutomations?: boolean
   includeResolved?: boolean
   sort?: ChatSort
@@ -549,7 +573,11 @@ export function useSidebarRecents({
   return useSidebarThreadPages(
     {
       ...sidebarPageParams({ includeAutomations, includeResolved }),
-      ...(projectMode ? { ownerless: true } : {}),
+      ...(projectMode === true
+        ? { ownerless: true }
+        : projectMode === "slack"
+          ? { slackChannelId: "none" }
+          : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },
     enabled
@@ -576,6 +604,29 @@ export function useSidebarProjectThreads({
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },
     enabled && Boolean(repoFullName)
+  )
+}
+
+export function useSidebarSlackChannelThreads({
+  channelId,
+  includeAutomations = false,
+  includeResolved = false,
+  sort = "created",
+  enabled = true,
+}: {
+  channelId: string
+  includeAutomations?: boolean
+  includeResolved?: boolean
+  sort?: ChatSort
+  enabled?: boolean
+}) {
+  return useSidebarThreadPages(
+    {
+      ...sidebarPageParams({ includeAutomations, includeResolved }),
+      slackChannelId: channelId,
+      sortBy: sort === "created" ? "created_at" : "updated_at",
+    },
+    enabled && Boolean(channelId)
   )
 }
 

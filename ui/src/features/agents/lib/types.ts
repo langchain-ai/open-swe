@@ -386,6 +386,11 @@ export interface AgentThread {
   traceUrl?: string | null
   sourceUrl?: string | null
   sourceAppUrl?: string | null
+  slackChannel?: {
+    id: string
+    teamId: string
+    name: string
+  } | null
   codeChannelUrl?: string | null
   sandboxId?: string | null
   messages: Array<Message>

@@ -157,6 +157,7 @@ from agent.dashboard.skills import (
     update_organization_skill,
     update_skill,
 )
+from agent.dashboard.slack_channels_api import slack_channels_router
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     TranscriptionSettingsUpdate,
@@ -293,6 +294,7 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 router.include_router(feedback_router)
+router.include_router(slack_channels_router)
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
@@ -2098,13 +2100,17 @@ async def api_list_threads_page(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    slack_channel_id: str | None = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
-    if repo and ownerless:
-        raise HTTPException(400, "repo and ownerless are mutually exclusive")
+    if sum(bool(value) for value in (repo, ownerless, slack_channel_id)) > 1:
+        raise HTTPException(
+            400,
+            "repo, ownerless, and slack_channel_id are mutually exclusive",
+        )
     if repo:
         owner, separator, name = repo.strip().partition("/")
         if not separator or not owner or not name or "/" in name:
@@ -2125,6 +2131,7 @@ async def api_list_threads_page(
         automation_id=automation_id,
         repo=repo,
         ownerless=ownerless,
+        slack_channel_id=slack_channel_id,
         sort_by=sort_by,
     )
 

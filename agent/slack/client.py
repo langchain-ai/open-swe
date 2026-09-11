@@ -1279,6 +1279,21 @@ def normalize_slack_channel_context(
             is_pending_ext_shared if isinstance(is_pending_ext_shared, bool) else None
         ),
         "is_im": is_im if isinstance(is_im, bool) else None,
+        "is_mpim": (
+            channel.get("is_mpim")
+            if isinstance(channel, dict) and isinstance(channel.get("is_mpim"), bool)
+            else None
+        ),
+        "is_private": (
+            channel.get("is_private")
+            if isinstance(channel, dict) and isinstance(channel.get("is_private"), bool)
+            else None
+        ),
+        "is_archived": (
+            channel.get("is_archived")
+            if isinstance(channel, dict) and isinstance(channel.get("is_archived"), bool)
+            else None
+        ),
     }
 
 

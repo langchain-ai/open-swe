@@ -6,7 +6,7 @@ import type { SidebarFilters } from "./sidebarFilter"
 export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
-const ORGANIZE_MODES = ["project", "list"] as const
+const ORGANIZE_MODES = ["project", "slack", "list"] as const
 const CHAT_SORTS = ["created", "updated"] as const
 const PINNED_SORTS = ["updated", "manual"] as const
 

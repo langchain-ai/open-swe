@@ -5,6 +5,7 @@ import {
   FolderIcon,
   FolderOpenIcon,
   GitPullRequestIcon,
+  HashIcon,
   LightningIcon,
   MagnifyingGlassIcon,
   NotePencilIcon,
@@ -22,6 +23,7 @@ import type { SessionUser } from "@/lib/api"
 import type {
   PullRequestSnapshot,
   SidebarProject,
+  SidebarSlackChannel,
 } from "@/features/agents/lib/api"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type {
@@ -73,6 +75,8 @@ import {
   useSidebarProjects,
   useSidebarProjectThreads,
   useSidebarRecents,
+  useSidebarSlackChannels,
+  useSidebarSlackChannelThreads,
 } from "@/features/agents/lib/queries"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
@@ -111,6 +115,11 @@ interface HydratedProjectGroup extends SidebarProjectGroup {
   repoFullName: string | null
   localProjectPath?: string
   updatedAt: number
+  activeThread?: AgentThread
+}
+
+interface HydratedSlackChannel extends SidebarSlackChannel {
+  key: string
   activeThread?: AgentThread
 }
 
@@ -234,12 +243,13 @@ export function AgentsSidebar({
   }, [updateState])
   const updateInstalling = updateState.status === "installing"
   const projectMode = prefs.organize === "project"
+  const slackMode = prefs.organize === "slack"
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
   const pinnedQuery = useSidebarPinnedThreads({ enabled: !localOnly })
   const recentsQuery = useSidebarRecents({
-    projectMode,
+    projectMode: slackMode ? "slack" : projectMode,
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     sort: prefs.sortChats,
@@ -249,6 +259,11 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     enabled: !localOnly && projectMode,
+  })
+  const slackChannelsQuery = useSidebarSlackChannels({
+    includeAutomations,
+    includeResolved: prefs.filters.includeResolved,
+    enabled: !localOnly && slackMode,
   })
   const localThreads = useDesktopLocalThreads({ enabled: isDesktop })
   const localSessions = localThreads.data ?? []
@@ -294,8 +309,11 @@ export function AgentsSidebar({
   const activeInProject = Boolean(
     projectMode && activeThread?.repoFullName.trim()
   )
+  const activeInSlackChannel = Boolean(slackMode && activeThread?.slackChannel)
   const recentThreads = [
-    ...(activeThread && !activeInProject ? [activeThread] : []),
+    ...(activeThread && !activeInProject && !activeInSlackChannel
+      ? [activeThread]
+      : []),
     ...pageThreads.filter((thread) => thread.id !== activeThread?.id),
   ]
   const visibleThreads = [...pinnedThreads, ...recentThreads]
@@ -407,6 +425,30 @@ export function AgentsSidebar({
           })),
       ].sort((left, right) => right.updatedAt - left.updatedAt)
     : []
+  const serverSlackChannels = slackChannelsQuery.data ?? []
+  const activeSlackChannel = activeThread?.slackChannel
+    ? {
+        ...activeThread.slackChannel,
+        updatedAt: activeThread.updatedAt,
+      }
+    : undefined
+  const slackChannels: Array<HydratedSlackChannel> = (
+    activeSlackChannel &&
+    !serverSlackChannels.some(
+      (channel) =>
+        channel.id === activeSlackChannel.id &&
+        channel.teamId === activeSlackChannel.teamId
+    )
+      ? [activeSlackChannel, ...serverSlackChannels]
+      : serverSlackChannels
+  ).map((channel) => ({
+    ...channel,
+    key: `slack:${channel.teamId}:${channel.id}`,
+    activeThread:
+      activeInSlackChannel && activeThread?.slackChannel?.id === channel.id
+        ? activeThread
+        : undefined,
+  }))
   const pinnedProjectKeys = new Set(prefs.pinnedProjectKeys)
   const pinnedGroups = projectGroups.filter((group) =>
     pinnedProjectKeys.has(group.key)
@@ -521,6 +563,7 @@ export function AgentsSidebar({
           }
         >
           <MenuRadioItem value="project">By project</MenuRadioItem>
+          <MenuRadioItem value="slack">By Slack channel</MenuRadioItem>
           <MenuRadioItem value="list">In one list</MenuRadioItem>
         </MenuRadioGroup>
       </MenuGroup>
@@ -620,17 +663,20 @@ export function AgentsSidebar({
     !localOnly &&
     (pinnedQuery.isPending ||
       recentsQuery.isPending ||
-      (projectMode && projectsQuery.isPending))
+      (projectMode && projectsQuery.isPending) ||
+      (slackMode && slackChannelsQuery.isPending))
   const cloudError =
     pinnedQuery.isError ||
     recentsQuery.isError ||
-    (projectMode && projectsQuery.isError)
+    (projectMode && projectsQuery.isError) ||
+    (slackMode && slackChannelsQuery.isError)
   const sourcesLoading = cloudPending || (isDesktop && localThreads.isPending)
   const isEmpty =
     !cloudPending &&
     (!isDesktop || !localThreads.isPending) &&
     filteredPinnedItems.length === 0 &&
     projectGroups.length === 0 &&
+    slackChannels.length === 0 &&
     recents.length === 0
 
   return (
@@ -836,7 +882,67 @@ export function AgentsSidebar({
                 </section>
               )}
 
-            {!projectMode && (
+            {slackMode && (
+              <section className="mb-3">
+                <SidebarSectionHeader
+                  label="Slack channels"
+                  collapsed={sectionCollapsed("slack")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("slack")}
+                  menu={
+                    <SidebarSectionMenu label="Slack channel options">
+                      {viewMenuItems}
+                    </SidebarSectionMenu>
+                  }
+                />
+                {!sectionCollapsed("slack") && (
+                  <>
+                    {slackChannels.map((channel) => (
+                      <SlackChannelGroup
+                        key={channel.key}
+                        channel={channel}
+                        activeKey={activeKey}
+                        collapsed={prefs.collapsedProjectKeys.includes(
+                          channel.key
+                        )}
+                        includeResolved={prefs.filters.includeResolved}
+                        includeAutomations={includeAutomations}
+                        sort={prefs.sortChats}
+                        activeThreadId={activeThreadId}
+                        openThread={openThread}
+                        hydrate={hydrateProjectThreads}
+                        onToggleCollapsed={() =>
+                          toggleProjectCollapsed(channel.key)
+                        }
+                        renderRow={(item, live) => (
+                          <SidebarThreadRow
+                            key={item.key}
+                            {...rowProps(item, live)}
+                            indent
+                          />
+                        )}
+                      />
+                    ))}
+                    {recents.length > 0 && (
+                      <div className="mb-1">
+                        <div className="flex items-center gap-1.5 px-2 py-1 text-sm text-foreground">
+                          <HashIcon className="size-4 shrink-0" />
+                          <span>No Slack channel</span>
+                        </div>
+                        {recents.map((item) => (
+                          <SidebarThreadRow
+                            key={item.key}
+                            {...rowProps(item)}
+                            indent
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+
+            {!projectMode && !slackMode && (
               <section className="mb-3">
                 <SidebarSectionHeader
                   label="Recents"
@@ -927,6 +1033,104 @@ export function AgentsSidebar({
         )}
       </div>
     </SidebarFrame>
+  )
+}
+
+function SlackChannelGroup({
+  channel,
+  activeKey,
+  collapsed,
+  includeResolved,
+  includeAutomations,
+  sort,
+  activeThreadId,
+  openThread,
+  hydrate,
+  onToggleCollapsed,
+  renderRow,
+}: {
+  channel: HydratedSlackChannel
+  activeKey?: string
+  collapsed: boolean
+  includeResolved: boolean
+  includeAutomations: boolean
+  sort: ChatSort
+  activeThreadId?: string
+  openThread: (threadId: string) => void
+  hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
+  onToggleCollapsed: () => void
+  renderRow: (
+    item: SidebarThreadItem,
+    live: PullRequestSnapshot | undefined
+  ) => React.ReactNode
+}) {
+  const query = useSidebarSlackChannelThreads({
+    channelId: channel.id,
+    includeResolved,
+    includeAutomations,
+    sort,
+    enabled: !collapsed,
+  })
+  const cloudThreads = [
+    ...(channel.activeThread ? [channel.activeThread] : []),
+    ...query.items.filter((thread) => thread.id !== channel.activeThread?.id),
+  ]
+  useSeedAgentThreadDetails(cloudThreads, activeThreadId)
+  useRunCompletionNotifier(cloudThreads, activeThreadId, openThread)
+  const threads = sortSidebarThreads(hydrate(cloudThreads), sort)
+  const pullRequestFor = useSidebarPullRequests(threads, true)
+  const active = threads.find((thread) => thread.key === activeKey)
+  const preview = threads.slice(0, PROJECT_PREVIEW_COUNT)
+  const shown =
+    active && !preview.includes(active)
+      ? [...preview.slice(0, -1), active]
+      : preview
+  const loading = query.isFetchingNextPage || (!collapsed && query.isPending)
+  const hasMore = threads.length > PROJECT_PREVIEW_COUNT || query.hasMore
+
+  return (
+    <div className="mb-1">
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-expanded={!collapsed}
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm text-foreground transition-colors hover:bg-sidebar-row-hover"
+      >
+        <HashIcon className="size-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+      </button>
+      {!collapsed && (
+        <>
+          {shown.map((item) => renderRow(item, pullRequestFor(item)))}
+          {shown.length === 0 && loading && (
+            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/70">
+              <CircleNotchIcon className="size-3.5 animate-spin" />
+              Loading chats…
+            </div>
+          )}
+          {query.isError && (
+            <button
+              type="button"
+              onClick={() => void query.refetch()}
+              className="w-full py-1 pr-2.5 pl-6 text-left text-[13px] text-destructive"
+            >
+              Retry loading chats
+            </button>
+          )}
+          {hasMore && (
+            <button
+              type="button"
+              onClick={query.fetchNextPage}
+              disabled={loading}
+              className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+            >
+              {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
+              {loading ? "Loading…" : "Show more"}
+            </button>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 

@@ -27,6 +27,7 @@ from agent.input_messages import (
 from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
+from agent.slack.channels import upsert_slack_channel
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
@@ -809,8 +810,14 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             )
         return
 
+    try:
+        await upsert_slack_channel(channel_id, channel_context, team_id=request.team_id)
+    except Exception:  # noqa: BLE001
+        common.logger.warning("Could not persist Slack channel %s", channel_id, exc_info=True)
+
     slack_thread_context: dict[str, Any] = {
         "channel_id": channel_id,
+        "team_id": request.team_id,
         "channel_context": channel_context,
         "thread_ts": thread_ts,
         "triggering_user_id": user_id,
