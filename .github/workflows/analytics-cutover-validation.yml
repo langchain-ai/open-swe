@@ -1,0 +1,66 @@
+name: Temporary analytics cutover validation
+
+on:
+  pull_request:
+    branches: [open-swe/analytics-v2-ui]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: analytics-cutover-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cutover:
+    name: Preserved Store cutover rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: cutover
+          POSTGRES_DB: cutover_admin
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cutover -d cutover_admin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUN_ANALYTICS_CUTOVER_VALIDATION: "1"
+      TEST_ANALYTICS_POSTGRES_URI: postgresql+asyncpg://cutover@127.0.0.1:5432/cutover_admin?ssl=disable
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
+        with:
+          mode: firewall-free
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
+      - name: Run the cutover rehearsal
+        run: >-
+          uv run --no-sync pytest tests/cutover_validation -q
+          --basetemp=.cutover-validation --junitxml=cutover-results.xml
+      - name: Require execution without skipped tests
+        run: |
+          uv run --no-sync python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("cutover-results.xml").getroot()
+          cases = root.findall(".//testcase")
+          assert cases, "No cutover tests ran"
+          assert not root.findall(".//skipped"), "Cutover validation was skipped"
+          PY
+      - name: Preserve server logs and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: analytics-cutover-validation
+          include-hidden-files: true
+          path: |
+            .cutover-validation/**/*.log
+            cutover-results.xml
