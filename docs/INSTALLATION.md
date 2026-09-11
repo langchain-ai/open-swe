@@ -192,7 +192,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
 ```bash
 SLACK_BOT_TOKEN=""        # OAuth & Permissions → Bot User OAuth Token (xoxb-...)
 SLACK_SIGNING_SECRET=""   # Basic Information → App Credentials → Signing Secret
-SLACK_APP_ID=""           # Basic Information → App ID (A...); Investigate accepts events only from this app
+SLACK_APP_ID=""           # Basic Information → App ID (A...); Incidents accepts events only from this app
 SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack → ⋮ → Copy member ID)
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```
@@ -250,6 +250,26 @@ Open a section when you want that feature; everything above keeps working withou
 **"Sign in with Slack" account linking.** Lets a user link their Slack identity to their GitHub login from **My settings**, so Slack-triggered runs resolve to the right GitHub user through Slack's verified claims. Without it, an admin links people under **Admin → User mappings**. The manifest already registers the OIDC redirect; make sure the `openid`, `email`, and `profile` user scopes are available, then set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from **Basic Information → App Credentials**, and optionally `SLACK_TEAM_ID` (`T...`) to restrict linking to one workspace. When they are unset the link is simply hidden.
 
 **Code channels (early access).** To enable Slack [code channels](https://api.slack.com/partners/code-channels), open **Admin → Slack integration**, turn on **Slack Code Channels**, copy the generated manifest, update the Slack app, and reinstall it. In a code channel the whole channel is one Open SWE session: it answers without an `@`-mention, replies at the channel level by default, reports session status, and keeps the context bar current; the `manage_code_channel` tool covers channel lifecycle, status, views, and canvases. This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`; `slash_command_url` delivers runtime-registered commands to the signed Open SWE endpoint. If your workspace is not enrolled, leave the toggle off.
+
+</details>
+
+<details id="incidents">
+<summary><strong>Incidents</strong></summary>
+
+The **Incidents** dashboard at `/incidents` investigates public internal Slack channels. Each incident uses a persistent, system-owned conversation on the main `agent` graph, with restricted evidence tools and workspace integrations. Responders can maintain a postmortem, prepare a separate status-page draft, and consult retained incident history.
+
+1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**. Incidents needs the `channel_created`, `channel_rename`, `channel_archive`, `message.channels`, and `app_mention` events. The manifest includes the public-channel scopes and `users:read` / `users:read.email` needed for authorized Slack controls.
+2. Set `OBSERVABILITY_AUTHORIZED_EMAILS` to a comma-separated list of responder email addresses. Users in `CONFIGURED_ADMINS` also have access; only admins can change incident settings. Document and history reads recheck current channel access.
+3. To use incident.io, add or reuse a connection under **Admin → Workspace MCPs** with Streamable HTTP at `https://mcp.incident.io/mcp`. Follow [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers) for encrypted header configuration and [incident.io's remote MCP guide](https://docs.incident.io/ai/remote-mcp) for service-actor authentication. Select `incident_show`, `incident_list`, and `resource_show` when available. Select `incident_update` only if responders should be able to request lifecycle changes. Available actions depend on the discovered tool schemas and the selected permissions.
+4. In **Incidents → Settings**, set a channel prefix such as `inc-`, choose analysis limits, and optionally enter the existing workspace MCP connection name as **Default provider connection**. Enable Incidents, then create a matching public channel or rename one into the prefix. Open its detail page to attach an incident.io incident by ID or link; the provider's Slack channel association must match.
+
+Provider status and severity are separate from agent activity: pausing or completing analysis does not update the provider's lifecycle. Responders request provider changes explicitly, and the dashboard shows their delivery outcome and last successful sync. A provider outage does not discard accepted Slack events. Refresh an uncertain provider operation to reconcile it before retrying.
+
+The Open SWE postmortem has immutable revisions recording the author, time, and source. New reports append findings while preserving responder edits; conflicting edits require reloading the current revision. **History** searches retained metadata and postmortems, including incidents whose raw context has expired. Reading external provider history does not enroll channels or start analysis.
+
+Public status-page publishing and provider postmortem writes are unsupported. Saving a status-page draft stores editable text in Open SWE; it does not publish it or copy internal findings into public communications. Code changes and production remediation are outside incident mode.
+
+See [Incidents locally](incidents-local.md) for the isolated preview, runtime behavior, and retention limits.
 
 </details>
 

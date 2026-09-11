@@ -867,6 +867,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(bindable_config(config))
 
+    from agent.incidents.runtime import (
+        IncidentMiddleware,
+        IncidentOffloadingMiddleware,
+        load_incident_session,
+    )
+
+    incident_session = await load_incident_session(config)
     profile_login = resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
@@ -888,8 +895,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             environment_slug=environment_slug(_cfg),
         )
 
-    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-    backend.start()
+    if incident_session is not None:
+        backend: Any = StateBackend()
+    else:
+        backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+        backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization. Personal integrations require verified private ownership.
@@ -1011,7 +1021,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     sender_draft_prs = profile_draft_prs(sender_profile)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
-    if isinstance(thread_settings.get("model_id"), str):
+    if incident_session is not None:
+        repo_instructions = None
+    elif isinstance(thread_settings.get("model_id"), str):
         repo_instructions = thread_settings.get("repo_instructions")
     else:
         async with aphase(thread_id, "factory.repo_instructions"):
@@ -1097,10 +1109,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
+    sandbox_file_downloads = incident_session is None and _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if not stop_summary_mode and not local_run and credential_scope_known:
+    if not stop_summary_mode and not local_run and credential_scope_known and incident_session is None:
         mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
@@ -1171,6 +1183,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    if incident_session is not None:
+        static_tools = incident_session.tools
     static_tools = apply_tool_descriptions(static_tools)
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
@@ -1182,7 +1196,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "MCPs": mcp_tools,
         "Notion": notion_tools,
     }
-    if not stop_summary_mode and not local_run:
+    if not stop_summary_mode and not local_run and incident_session is None:
         browser_tools = load_browser_tools()
         if browser_tools:
             integration_tool_groups["Browser"] = browser_tools
@@ -1265,7 +1279,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model=main_model,
         system_prompt="",
         tools=static_tools,
-        subagents=[
+        subagents=[]
+        if incident_session is not None
+        else [
             _general_purpose_subagent(
                 subagent_model,
                 tools=subagent_tools,
@@ -1282,10 +1298,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
-                ConversationOffloadingMiddleware(
+                IncidentOffloadingMiddleware(main_model, agent_backend, incident_session)
+                if incident_session is not None
+                else ConversationOffloadingMiddleware(
                     main_model, agent_backend, manual=cfg.offload_conversation is True
                 ),
-                PrepareAgentRunMiddleware(
+                IncidentMiddleware(incident_session)
+                if incident_session is not None
+                else PrepareAgentRunMiddleware(
                     credential_login=credential_login,
                     thread_id=thread_id,
                     config=config,
@@ -1305,7 +1325,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *([workspace_skills] if workspace_skills else []),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
-                ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
+                ModelCallLimitMiddleware(
+                    run_limit=incident_session.saved.policy.max_model_calls
+                    if incident_session is not None
+                    else MODEL_CALL_RECURSION_LIMIT,
+                    exit_behavior="end",
+                ),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(
                     excluded=(
@@ -1323,12 +1348,23 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     initial_delay=1.0,
                     max_delay=10.0,
                 ),
-                *([] if local_run else [PullRequestCreationGuardMiddleware()]),
+                *(
+                    []
+                    if local_run or incident_session is not None
+                    else [PullRequestCreationGuardMiddleware()]
+                ),
                 WorkflowPushGuardMiddleware(),
-                refresh_github_proxy_before_model,
-                *([] if stop_summary_mode else [check_message_queue_before_model]),
-                TimeoutWrapupMiddleware(),
-                notify_step_limit_reached,
+                *([] if incident_session is not None else [refresh_github_proxy_before_model]),
+                *(
+                    []
+                    if stop_summary_mode or incident_session is not None
+                    else [check_message_queue_before_model]
+                ),
+                *(
+                    []
+                    if incident_session is not None
+                    else [TimeoutWrapupMiddleware(), notify_step_limit_reached]
+                ),
                 record_run_usage,
                 *model_selection_middleware,
                 *fallback_middleware,

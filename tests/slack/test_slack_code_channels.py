@@ -198,7 +198,7 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
 ) -> None:
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr(
-        "agent.investigations.service.accept_slack_event", AsyncMock(return_value=None)
+        "agent.incidents.service.accept_slack_event", AsyncMock(return_value=None)
     )
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:

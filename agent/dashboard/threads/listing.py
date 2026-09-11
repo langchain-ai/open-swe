@@ -287,7 +287,11 @@ async def _collect_thread_candidates(
                 break
             for thread in batch:
                 metadata = _thread_metadata(thread)
-                if thread_source(metadata) in {"investigate", "investigate_coordinator"}:
+                if thread_source(metadata) in {
+                    "incidents",
+                    "incidents_coordinator",
+                    "incidents_agent",
+                }:
                     continue
                 if metadata.get("visibility", "public") != "public" and (
                     not include_private

@@ -21,7 +21,7 @@ const CODE_CHANNEL_EVENTS = [
 
 describe("slackAppManifest", () => {
   it.each([false, true])(
-    "includes Investigate channel onboarding and history events with Code Channels=%s",
+    "includes Incidents channel onboarding and history events with Code Channels=%s",
     (codeChannelsEnabled) => {
       const manifest = slackAppManifest(codeChannelsEnabled)
       expect(manifest.oauth_config.scopes.bot).toEqual(

@@ -14,8 +14,8 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
 import { Route as EnvironmentsRouteImport } from './routes/environments'
+import { Route as IncidentsRouteImport } from './routes/incidents'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
-import { Route as InvestigateRouteImport } from './routes/investigate'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as ReviewRouteImport } from './routes/review'
@@ -28,9 +28,9 @@ import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
 import { Route as AgentsEnvironmentsRouteImport } from './routes/agents_.environments'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
 import { Route as AgentsSandboxRouteImport } from './routes/agents_.sandbox'
-import { Route as InvestigateIndexRouteImport } from './routes/investigate/index'
-import { Route as InvestigateInvestigationIdRouteImport } from './routes/investigate/$investigationId'
-import { Route as InvestigateSettingsRouteImport } from './routes/investigate/settings'
+import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
+import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
+import { Route as IncidentsSettingsRouteImport } from './routes/incidents/settings'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
 import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
@@ -67,14 +67,14 @@ const EnvironmentsRoute = EnvironmentsRouteImport.update({
   path: '/environments',
   getParentRoute: () => rootRouteImport,
 } as any)
+const IncidentsRoute = IncidentsRouteImport.update({
+  id: '/incidents',
+  path: '/incidents',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const InvestigateRoute = InvestigateRouteImport.update({
-  id: '/investigate',
-  path: '/investigate',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -137,21 +137,20 @@ const AgentsSandboxRoute = AgentsSandboxRouteImport.update({
   path: '/agents/sandbox',
   getParentRoute: () => rootRouteImport,
 } as any)
-const InvestigateIndexRoute = InvestigateIndexRouteImport.update({
+const IncidentsIndexRoute = IncidentsIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => InvestigateRoute,
+  getParentRoute: () => IncidentsRoute,
 } as any)
-const InvestigateInvestigationIdRoute =
-  InvestigateInvestigationIdRouteImport.update({
-    id: '/$investigationId',
-    path: '/$investigationId',
-    getParentRoute: () => InvestigateRoute,
-  } as any)
-const InvestigateSettingsRoute = InvestigateSettingsRouteImport.update({
+const IncidentsIncidentIdRoute = IncidentsIncidentIdRouteImport.update({
+  id: '/$incidentId',
+  path: '/$incidentId',
+  getParentRoute: () => IncidentsRoute,
+} as any)
+const IncidentsSettingsRoute = IncidentsSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => InvestigateRoute,
+  getParentRoute: () => IncidentsRoute,
 } as any)
 const ReviewStylesRoute = ReviewStylesRouteImport.update({
   id: '/review_/styles',
@@ -212,8 +211,8 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
   '/environments': typeof EnvironmentsRoute
+  '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
-  '/investigate': typeof InvestigateRouteWithChildren
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
@@ -225,11 +224,11 @@ export interface FileRoutesByFullPath {
   '/agents/environments': typeof AgentsEnvironmentsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
-  '/investigate/$investigationId': typeof InvestigateInvestigationIdRoute
-  '/investigate/settings': typeof InvestigateSettingsRoute
+  '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/incidents/settings': typeof IncidentsSettingsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
-  '/investigate/': typeof InvestigateIndexRoute
+  '/incidents/': typeof IncidentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -257,11 +256,11 @@ export interface FileRoutesByTo {
   '/agents/environments': typeof AgentsEnvironmentsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
-  '/investigate/$investigationId': typeof InvestigateInvestigationIdRoute
-  '/investigate/settings': typeof InvestigateSettingsRoute
+  '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/incidents/settings': typeof IncidentsSettingsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents': typeof AgentsIndexRoute
-  '/investigate': typeof InvestigateIndexRoute
+  '/incidents': typeof IncidentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -279,8 +278,8 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
   '/environments': typeof EnvironmentsRoute
+  '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
-  '/investigate': typeof InvestigateRouteWithChildren
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
@@ -292,11 +291,11 @@ export interface FileRoutesById {
   '/agents_/environments': typeof AgentsEnvironmentsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/sandbox': typeof AgentsSandboxRoute
-  '/investigate/$investigationId': typeof InvestigateInvestigationIdRoute
-  '/investigate/settings': typeof InvestigateSettingsRoute
+  '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/incidents/settings': typeof IncidentsSettingsRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
-  '/investigate/': typeof InvestigateIndexRoute
+  '/incidents/': typeof IncidentsIndexRoute
   '/agents/$threadId_/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -315,8 +314,8 @@ export interface FileRouteTypes {
     | '/agents'
     | '/cloud-agents'
     | '/environments'
+    | '/incidents'
     | '/integrations'
-    | '/investigate'
     | '/login'
     | '/my-settings'
     | '/review'
@@ -328,11 +327,11 @@ export interface FileRouteTypes {
     | '/agents/environments'
     | '/agents/instructions'
     | '/agents/sandbox'
-    | '/investigate/$investigationId'
-    | '/investigate/settings'
+    | '/incidents/$incidentId'
+    | '/incidents/settings'
     | '/review/styles'
     | '/agents/'
-    | '/investigate/'
+    | '/incidents/'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -360,11 +359,11 @@ export interface FileRouteTypes {
     | '/agents/environments'
     | '/agents/instructions'
     | '/agents/sandbox'
-    | '/investigate/$investigationId'
-    | '/investigate/settings'
+    | '/incidents/$incidentId'
+    | '/incidents/settings'
     | '/review/styles'
     | '/agents'
-    | '/investigate'
+    | '/incidents'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -381,8 +380,8 @@ export interface FileRouteTypes {
     | '/agents'
     | '/cloud-agents'
     | '/environments'
+    | '/incidents'
     | '/integrations'
-    | '/investigate'
     | '/login'
     | '/my-settings'
     | '/review'
@@ -394,11 +393,11 @@ export interface FileRouteTypes {
     | '/agents_/environments'
     | '/agents_/instructions'
     | '/agents_/sandbox'
-    | '/investigate/$investigationId'
-    | '/investigate/settings'
+    | '/incidents/$incidentId'
+    | '/incidents/settings'
     | '/review_/styles'
     | '/agents/'
-    | '/investigate/'
+    | '/incidents/'
     | '/agents/$threadId_/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -416,8 +415,8 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRouteWithChildren
   CloudAgentsRoute: typeof CloudAgentsRoute
   EnvironmentsRoute: typeof EnvironmentsRoute
+  IncidentsRoute: typeof IncidentsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRoute
-  InvestigateRoute: typeof InvestigateRouteWithChildren
   LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
   ReviewRoute: typeof ReviewRoute
@@ -468,18 +467,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EnvironmentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/incidents': {
+      id: '/incidents'
+      path: '/incidents'
+      fullPath: '/incidents'
+      preLoaderRoute: typeof IncidentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/integrations': {
       id: '/integrations'
       path: '/integrations'
       fullPath: '/integrations'
       preLoaderRoute: typeof IntegrationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/investigate': {
-      id: '/investigate'
-      path: '/investigate'
-      fullPath: '/investigate'
-      preLoaderRoute: typeof InvestigateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -566,26 +565,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsSandboxRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/investigate/': {
-      id: '/investigate/'
+    '/incidents/': {
+      id: '/incidents/'
       path: '/'
-      fullPath: '/investigate/'
-      preLoaderRoute: typeof InvestigateIndexRouteImport
-      parentRoute: typeof InvestigateRoute
+      fullPath: '/incidents/'
+      preLoaderRoute: typeof IncidentsIndexRouteImport
+      parentRoute: typeof IncidentsRoute
     }
-    '/investigate/$investigationId': {
-      id: '/investigate/$investigationId'
-      path: '/$investigationId'
-      fullPath: '/investigate/$investigationId'
-      preLoaderRoute: typeof InvestigateInvestigationIdRouteImport
-      parentRoute: typeof InvestigateRoute
+    '/incidents/$incidentId': {
+      id: '/incidents/$incidentId'
+      path: '/$incidentId'
+      fullPath: '/incidents/$incidentId'
+      preLoaderRoute: typeof IncidentsIncidentIdRouteImport
+      parentRoute: typeof IncidentsRoute
     }
-    '/investigate/settings': {
-      id: '/investigate/settings'
+    '/incidents/settings': {
+      id: '/incidents/settings'
       path: '/settings'
-      fullPath: '/investigate/settings'
-      preLoaderRoute: typeof InvestigateSettingsRouteImport
-      parentRoute: typeof InvestigateRoute
+      fullPath: '/incidents/settings'
+      preLoaderRoute: typeof IncidentsSettingsRouteImport
+      parentRoute: typeof IncidentsRoute
     }
     '/review_/styles': {
       id: '/review_/styles'
@@ -691,20 +690,20 @@ const AgentsRouteChildren: AgentsRouteChildren = {
 const AgentsRouteWithChildren =
   AgentsRoute._addFileChildren(AgentsRouteChildren)
 
-interface InvestigateRouteChildren {
-  InvestigateInvestigationIdRoute: typeof InvestigateInvestigationIdRoute
-  InvestigateSettingsRoute: typeof InvestigateSettingsRoute
-  InvestigateIndexRoute: typeof InvestigateIndexRoute
+interface IncidentsRouteChildren {
+  IncidentsIncidentIdRoute: typeof IncidentsIncidentIdRoute
+  IncidentsSettingsRoute: typeof IncidentsSettingsRoute
+  IncidentsIndexRoute: typeof IncidentsIndexRoute
 }
 
-const InvestigateRouteChildren: InvestigateRouteChildren = {
-  InvestigateInvestigationIdRoute: InvestigateInvestigationIdRoute,
-  InvestigateSettingsRoute: InvestigateSettingsRoute,
-  InvestigateIndexRoute: InvestigateIndexRoute,
+const IncidentsRouteChildren: IncidentsRouteChildren = {
+  IncidentsIncidentIdRoute: IncidentsIncidentIdRoute,
+  IncidentsSettingsRoute: IncidentsSettingsRoute,
+  IncidentsIndexRoute: IncidentsIndexRoute,
 }
 
-const InvestigateRouteWithChildren = InvestigateRoute._addFileChildren(
-  InvestigateRouteChildren,
+const IncidentsRouteWithChildren = IncidentsRoute._addFileChildren(
+  IncidentsRouteChildren,
 )
 
 const rootRouteChildren: RootRouteChildren = {
@@ -713,8 +712,8 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsRoute: AgentsRouteWithChildren,
   CloudAgentsRoute: CloudAgentsRoute,
   EnvironmentsRoute: EnvironmentsRoute,
+  IncidentsRoute: IncidentsRouteWithChildren,
   IntegrationsRoute: IntegrationsRoute,
-  InvestigateRoute: InvestigateRouteWithChildren,
   LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,
   ReviewRoute: ReviewRoute,

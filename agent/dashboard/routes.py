@@ -54,7 +54,7 @@ from agent.dashboard.environments import (
     slugify,
 )
 from agent.dashboard.feedback import feedback_router
-from agent.dashboard.investigate_api import router as investigate_router
+from agent.dashboard.incidents_api import router as incidents_router
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -247,6 +247,8 @@ from agent.dashboard.workspace_mcps import (
 )
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.incidents.document_api import router as incident_documents_router
+from agent.incidents.provider_api import router as incident_providers_router
 from agent.mcp import (
     MCPConnection,
     MCPConnectionPublic,
@@ -302,7 +304,9 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 router.include_router(feedback_router)
-router.include_router(investigate_router)
+router.include_router(incidents_router)
+router.include_router(incident_documents_router, prefix="/incidents/documents")
+router.include_router(incident_providers_router, prefix="/incidents/providers")
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"

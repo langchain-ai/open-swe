@@ -124,7 +124,7 @@ const NAV = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
-  { to: "/investigate", label: "Investigate", icon: Radar },
+  { to: "/incidents", label: "Incidents", icon: Radar },
 ] as const
 
 /** Threads shown per project before the group needs a "Show more". */

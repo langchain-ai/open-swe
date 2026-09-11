@@ -45,8 +45,8 @@ class SchedulerState(BaseModel):
 async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, Any]:
     cfg = RunConfig.from_config(config)
     task = state.task or cfg.task
-    if task == "investigate":
-        from agent.investigations import service
+    if task == "incidents":
+        from agent.incidents import service
 
         return {"result": await service.recover()}
     if task == "reconcile":

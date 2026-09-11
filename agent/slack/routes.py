@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 from time import time_ns
+from typing import Literal, TypedDict, cast
 
 from fastapi import APIRouter
 from langgraph_sdk.client import LangGraphClient
@@ -42,6 +43,11 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
 
 router = APIRouter()
+
+
+class DuplicateIncidentResponse(TypedDict):
+    status: Literal["duplicate"]
+
 
 _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
 _MEMBERSHIP_SUBTYPES = frozenset(
@@ -249,7 +255,7 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
 @router.post("/webhooks/slack")
 async def slack_webhook(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> WebhookResponse | ChallengeResponse:
+) -> WebhookResponse | ChallengeResponse | DuplicateIncidentResponse:
     """Handle Slack Event API webhooks for app mentions."""
     body = await request.body()
     _verify_signature(request, body, "events")
@@ -273,11 +279,11 @@ async def slack_webhook(
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
 
-    from agent.investigations import service as investigations
+    from agent.incidents import service as incidents
 
-    investigation_response = await investigations.accept_slack_event(payload)
-    if investigation_response is not None:
-        return investigation_response
+    incident_response = await incidents.accept_slack_event(payload)
+    if incident_response is not None:
+        return cast(WebhookResponse | DuplicateIncidentResponse, incident_response)
 
     event_id = envelope.event_id
     team_id = envelope.team_id or event.team

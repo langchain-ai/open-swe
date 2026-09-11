@@ -276,7 +276,7 @@ ENV.var(
     "Public URL for Slack webhooks and the Sign in with Slack callback; defaults to "
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
-ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Investigate accepts.")
+ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
@@ -432,3 +432,9 @@ ENV.var(
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")
 ENV.var("DEBUG_TRACEMALLOC", "Start tracemalloc to attribute unclosed-session warnings.")
 ENV.var("DEBUG_TRACEMALLOC_FRAMES", "Frames tracemalloc records per allocation.", default="25")
+
+ENV.var(
+    "OBSERVABILITY_AUTHORIZED_EMAILS",
+    "Comma-separated responder emails allowed to access Incidents; admins always have access.",
+    default="",
+)
