@@ -129,6 +129,7 @@ export function AgentThreadView({
     useState(autoFocusComposer)
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const activePlanMode = planMode ?? thread.planMode ?? false
+  const routedModelId = stream.routedModelId ?? null
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
@@ -389,6 +390,7 @@ export function AgentThreadView({
                 activeRun={activeRun}
                 onSubmit={submitMessage}
                 models={models}
+                routedModelId={routedModelId}
                 selection={activeSelection}
                 onSelectionChange={handleSelectionChange}
                 planMode={activePlanMode}

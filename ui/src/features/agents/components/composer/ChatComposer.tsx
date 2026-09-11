@@ -146,6 +146,8 @@ export interface ChatComposerProps {
     usedTokens?: number | null
     contextWindow?: number | null
   }
+  /** Model the Auto router picked for the current run, shown next to `Auto`. */
+  routedModelId?: string | null
 }
 
 function fileToImageChunk(file: File): Promise<ImageChunk | null> {
@@ -267,6 +269,7 @@ export const ChatComposer = memo(function ChatComposer({
   mentionPaths = [],
   skills = [],
   contextUsage,
+  routedModelId,
 }: ChatComposerProps) {
   const [value, setValue] = useState("")
   const [cursor, setCursor] = useState(0)
@@ -911,6 +914,7 @@ export const ChatComposer = memo(function ChatComposer({
                 onSelectionChange={onSelectionChange}
                 open={modelPickerOpen}
                 requireImageSupport={pendingImages.length > 0}
+                routedModelId={routedModelId}
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
               />

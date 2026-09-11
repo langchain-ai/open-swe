@@ -95,6 +95,29 @@ describe("ModelPicker", () => {
     ).toBeTruthy()
   })
 
+  it("shows the routed model next to Auto when routing is on", () => {
+    render(
+      <ModelPicker
+        models={MODELS}
+        selection={null}
+        onSelectionChange={vi.fn()}
+        routedModelId="google_genai:gemini-3.8-flash"
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: /Auto · Gemini 3.8 Flash/ })
+    ).toBeTruthy()
+  })
+
+  it("shows plain Auto when no routed model is known yet", () => {
+    render(
+      <ModelPicker models={MODELS} selection={null} onSelectionChange={vi.fn()} />
+    )
+
+    expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
+  })
+
   it("shows the selected model's context, reasoning and model row", () => {
     const { panel } = openPicker()
 

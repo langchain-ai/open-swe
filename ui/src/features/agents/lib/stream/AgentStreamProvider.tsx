@@ -53,6 +53,7 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
   )
   const pool = useStreamPool.getState
   const [isOffloading, setIsOffloading] = useState(false)
+  const [routedModelId, setRoutedModelId] = useState<string | null>(null)
 
   const stream = useStream({
     client,
@@ -85,14 +86,20 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
       if (payload?.type === "conversation_offloading") {
         setIsOffloading(payload.status === "started")
       }
+      if (
+        payload?.type === "model_routed" &&
+        typeof payload.model_id === "string"
+      ) {
+        setRoutedModelId(payload.model_id)
+      }
     },
     onError: () => setIsOffloading(false),
   })
 
   const publish = useStreamPool((state) => state.publish)
   useLayoutEffect(
-    () => publish(entry.id, { ...stream, isOffloading }),
-    [entry.id, publish, stream, isOffloading]
+    () => publish(entry.id, { ...stream, isOffloading, routedModelId }),
+    [entry.id, publish, stream, isOffloading, routedModelId]
   )
 
   return null

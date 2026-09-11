@@ -84,9 +84,16 @@ export function formatEffort(effort: string): string {
 
 export function formatModelSelection(
   models: Array<ModelOption>,
-  selection: ModelSelection | null
+  selection: ModelSelection | null,
+  /** Model the router picked for this run, shown next to `Auto`. */
+  routedModelId?: string | null
 ): string {
-  if (!selection) return "Auto"
+  if (!selection) {
+    const routed = routedModelId
+      ? models.find((m) => m.id === routedModelId)
+      : undefined
+    return routed ? `Auto · ${routed.label}` : "Auto"
+  }
   const model = models.find((m) => m.id === selection.modelId)
   const modelLabel = model?.label ?? selection.modelId
   return `${modelLabel} ${formatEffort(selection.effort)}`

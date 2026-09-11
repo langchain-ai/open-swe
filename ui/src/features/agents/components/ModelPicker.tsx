@@ -30,6 +30,8 @@ export interface ModelPickerProps {
   /** Controlled open state, so `/model` in the composer can raise the picker. */
   open?: boolean
   onOpenChange?: (next: boolean) => void
+  /** Model the Auto router picked for the current run, shown next to `Auto`. */
+  routedModelId?: string | null
 }
 
 type Pane = "main" | "models"
@@ -112,6 +114,7 @@ export function ModelPicker({
   triggerClassName,
   open: controlledOpen,
   onOpenChange,
+  routedModelId,
 }: ModelPickerProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const open = controlledOpen ?? uncontrolledOpen
@@ -360,7 +363,7 @@ export function ModelPicker({
         )}
       >
         <span className="truncate">
-          {formatModelSelection(models, selection)}
+          {formatModelSelection(models, selection, routedModelId)}
         </span>
         {!pickerDisabled && (
           <ChevronDown className="size-3.5 shrink-0 opacity-60" />

@@ -1,7 +1,11 @@
 import { create } from "zustand"
 import type { UseStreamReturn } from "@langchain/react"
 
-export type AgentStream = UseStreamReturn & { isOffloading?: boolean }
+export type AgentStream = UseStreamReturn & {
+  isOffloading?: boolean
+  /** Model the Auto router picked for the latest run, when known. */
+  routedModelId?: string | null
+}
 
 export type AgentThreadTransport = "cloud" | "local"
 
