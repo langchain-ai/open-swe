@@ -6,6 +6,7 @@ They are decision records, not implementation plans or substitutes for normal is
 review.
 
 - [OEP-0000: OEP purpose and process](0000-process.md)
+- [OEP-0003: Agent-driven model routing through pre-routed mode](0003-pre-routed-mode.md)
 - [Proposal template](TEMPLATE.md)
 
 Anyone may propose an OEP. Read [OEP-0000](0000-process.md) to decide whether an OEP is appropriate

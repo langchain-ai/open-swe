@@ -625,6 +625,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_issue_number: str,
         draft_prs: bool,
         plan_mode: bool,
+        model_routing: bool,
         admin_environments: bool,
         credential_login: str | None = None,
     ) -> None:
@@ -642,6 +643,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
+        self._model_routing = model_routing
         self._admin_environments = admin_environments
 
     def _prepare_config_fingerprint(self) -> Any:
@@ -653,6 +655,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "plan_mode": self._plan_mode,
+            "model_routing": self._model_routing,
             "draft_prs": self._draft_prs,
             "model": self._model_id,
             "effort": self._effort,
@@ -733,6 +736,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "rendered_system_prompt": construct_system_prompt(
                     working_dir=work_dir,
                     source="desktop",
+                    pre_routed_mode=self._model_routing,
                 ),
             }
         async with aphase(self._thread_id, "prepare.github_token"):
@@ -819,6 +823,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 default_repo=prompt_default_repo,
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
+                pre_routed_mode=self._model_routing,
                 repo_custom_instructions=self._repo_instructions,
                 environment_name=environment.name if environment else None,
                 environment_instructions=environment.instructions if environment else None,
@@ -1280,6 +1285,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
+                    model_routing=adaptive_model_routing,
                     admin_environments=admin_thread,
                 ),
                 *([workspace_skills] if workspace_skills else []),

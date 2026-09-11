@@ -2,25 +2,12 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
+from langchain_core.messages import HumanMessage, ToolMessage
 
 from agent.middleware.model_selection import ModelSelectionMiddleware
 
-_TOOLS = [
-    {"name": name}
-    for name in (
-        "exit_pre_routed_mode",
-        "execute",
-        "read_file",
-        "ls",
-        "glob",
-        "edit_file",
-        "write_file",
-        "task",
-        "open_pull_request",
-    )
-]
+_TOOLS = [{"name": name} for name in ("exit_pre_routed_mode", "execute", "read_file", "edit_file")]
 
 
 def _middleware(
@@ -30,11 +17,10 @@ def _middleware(
     return ModelSelectionMiddleware(cast(Any, models), initial_route=initial_route), models
 
 
-async def _invoke(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -> ModelRequest:
+async def _model_call(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -> ModelRequest:
     request = ModelRequest(
         model=MagicMock(),
-        messages=state["messages"],
-        system_message=SystemMessage(content="You are Open SWE."),
+        messages=state.get("messages", []),
         tools=list(_TOOLS),
         state=cast(Any, state),
     )
@@ -48,41 +34,67 @@ async def _invoke(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -
     return seen[0]
 
 
-def _names(request: ModelRequest) -> set[str]:
-    return {tool["name"] for tool in request.tools}
+async def _tool_call(
+    middleware: ModelSelectionMiddleware, state: dict[str, Any], name: str
+) -> tuple[bool, ToolMessage | Any]:
+    request = ToolCallRequest(
+        tool_call={"name": name, "args": {}, "id": "call-1", "type": "tool_call"},
+        tool=cast(Any, MagicMock()),
+        state=cast(Any, state),
+        runtime=cast(Any, MagicMock()),
+    )
+    ran: list[bool] = []
+
+    async def handler(_: ToolCallRequest) -> ToolMessage:
+        ran.append(True)
+        return ToolMessage(content="ok", tool_call_id="call-1")
+
+    result = await middleware.awrap_tool_call(request, handler)
+    return bool(ran), result
 
 
 @pytest.mark.asyncio
-async def test_new_thread_starts_pre_routed_on_the_fast_model_with_read_only_tools() -> None:
+async def test_new_thread_starts_pre_routed_on_the_fast_model_with_the_full_tool_list() -> None:
     middleware, models = _middleware()
     state: dict[str, Any] = {"messages": [HumanMessage(content="Update the README")]}
 
     state.update(await middleware.abefore_agent(cast(Any, state), MagicMock()))
-    routed = await _invoke(middleware, state)
+    routed = await _model_call(middleware, state)
 
-    assert state == {"messages": state["messages"], "pre_routed": True}
+    assert state["pre_routed"] is True
+    assert "model_route" not in state
     assert routed.model is models["fast"]
-    assert _names(routed) == {"exit_pre_routed_mode", "execute", "read_file", "ls", "glob"}
-    assert routed.system_message is not None
-    assert routed.system_message.text.startswith("You are Open SWE.")
-    assert "Pre-routed Mode (ACTIVE)" in routed.system_message.text
+    assert routed.tools == _TOOLS
 
 
 @pytest.mark.asyncio
-async def test_exiting_pre_routed_mode_switches_model_and_restores_tools() -> None:
+async def test_pre_routed_mode_rejects_mutating_tools_but_allows_reads_and_the_exit() -> None:
+    middleware, _ = _middleware()
+    state: dict[str, Any] = {"pre_routed": True}
+
+    ran, result = await _tool_call(middleware, state, "edit_file")
+    assert ran is False
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert "exit_pre_routed_mode" in result.text
+
+    for allowed in ("read_file", "execute", "exit_pre_routed_mode"):
+        ran, _ = await _tool_call(middleware, state, allowed)
+        assert ran is True, allowed
+
+
+@pytest.mark.asyncio
+async def test_routed_thread_uses_its_route_and_refuses_a_second_exit() -> None:
     middleware, models = _middleware()
-    state: dict[str, Any] = {
-        "messages": [HumanMessage(content="Refactor the auth flow")],
-        "pre_routed": False,
-        "model_route": "performance",
-    }
+    state: dict[str, Any] = {"pre_routed": False, "model_route": "performance"}
 
-    routed = await _invoke(middleware, state)
-
-    assert routed.model is models["performance"]
-    assert _names(routed) == {tool["name"] for tool in _TOOLS} - {"exit_pre_routed_mode"}
-    assert routed.system_message is not None
-    assert "Pre-routed Mode" not in routed.system_message.text
+    assert (await _model_call(middleware, state)).model is models["performance"]
+    ran, _ = await _tool_call(middleware, state, "edit_file")
+    assert ran is True
+    ran, result = await _tool_call(middleware, state, "exit_pre_routed_mode")
+    assert ran is False
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
 
 
 @pytest.mark.asyncio
@@ -94,40 +106,35 @@ async def test_stored_route_skips_pre_routed_mode_on_later_runs() -> None:
 
     assert state["pre_routed"] is False
     assert state["model_route"] == "fast"
-    assert (await _invoke(middleware, state)).model is models["fast"]
+    assert (await _model_call(middleware, state)).model is models["fast"]
 
 
 @pytest.mark.asyncio
 async def test_route_committed_in_run_state_wins_over_stored_route() -> None:
     middleware, _ = _middleware(initial_route="fast")
-    state: dict[str, Any] = {"messages": [], "model_route": "balanced"}
 
-    update = await middleware.abefore_agent(cast(Any, state), MagicMock())
+    update = await middleware.abefore_agent(cast(Any, {"model_route": "balanced"}), MagicMock())
 
     assert update == {"model_route": "balanced", "pre_routed": False}
 
 
 @pytest.mark.asyncio
-async def test_plan_mode_uses_performance_and_hides_the_routing_tool() -> None:
+async def test_plan_mode_uses_performance_and_routes_through_exit_plan_mode() -> None:
     middleware, models = _middleware()
-    state: dict[str, Any] = {
-        "messages": [HumanMessage(content="Plan the migration")],
-        "pre_routed": True,
-        "plan_mode": True,
-    }
+    state: dict[str, Any] = {"pre_routed": True, "plan_mode": True}
 
-    routed = await _invoke(middleware, state)
-
-    assert routed.model is models["performance"]
-    assert "exit_pre_routed_mode" not in _names(routed)
-    assert "edit_file" in _names(routed)
-    assert routed.system_message is not None
-    assert "Pre-routed Mode" not in routed.system_message.text
+    assert (await _model_call(middleware, state)).model is models["performance"]
+    ran, result = await _tool_call(middleware, state, "exit_pre_routed_mode")
+    assert ran is False
+    assert isinstance(result, ToolMessage)
+    assert "exit_plan_mode" in result.text
+    ran, _ = await _tool_call(middleware, state, "edit_file")
+    assert ran is True
 
 
 @pytest.mark.asyncio
 async def test_unknown_route_falls_back_to_balanced() -> None:
     middleware, models = _middleware()
-    state: dict[str, Any] = {"messages": [], "pre_routed": False, "model_route": "turbo"}
+    state: dict[str, Any] = {"pre_routed": False, "model_route": "turbo"}
 
-    assert (await _invoke(middleware, state)).model is models["balanced"]
+    assert (await _model_call(middleware, state)).model is models["balanced"]

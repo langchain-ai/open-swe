@@ -1,4 +1,4 @@
-# OEP-0001: Agent-driven model routing through pre-routed mode
+# OEP-0003: Agent-driven model routing through pre-routed mode
 
 - **Authors:** Ramon Nogueira (`@ramon-langchain`)
 - **Status:** Draft
@@ -36,8 +36,13 @@ title that reflects the request's wording rather than what the work turned out t
 **Pre-routed mode is the default starting state of every routed thread.** While it is active:
 
 - The model call runs on the `fast` profile.
-- The tool set is `exit_pre_routed_mode`, `execute`, `read_file`, `ls`, and `glob`. The system
-  prompt instructs the agent not to mutate anything through `execute`.
+- Only `exit_pre_routed_mode`, `execute`, `read_file`, `ls`, and `glob` may be called; any other
+  tool call is rejected with an error result. The system prompt instructs the agent not to
+  mutate anything through `execute`.
+- The tool list and system prompt are identical before and after the exit. Pre-routed mode is
+  described once in the static prompt, and the agent learns it is over from the exit tool's
+  result in the transcript. Hiding tools or swapping prompt sections would invalidate the
+  provider's prompt cache on every exit, including the common `fast` to `fast` case.
 - The system prompt describes the three profiles (`fast`, `balanced`, `performance`) and the
   signals that raise or lower the required capability, and tells the agent to size the whole
   thread, not the first step.
@@ -97,6 +102,9 @@ replaces the seeded placeholder title is preserved.
   wrong.
 - **Exit tool only, no exploration.** One model call, no repository reads. Cheaper, but reproduces
   the classifier's core weakness of routing from prose alone.
+- **Hide disallowed tools while pre-routed.** Matches how plan mode restricts tools, but the
+  tool list is part of the cached prompt prefix, so every exit would re-read the whole prefix.
+  Rejecting calls keeps the same guarantee with a stable prefix.
 
 ## Unresolved questions
 
