@@ -25,7 +25,7 @@ evals/routing/
 | `route_distance` | tiers between agent and label; missing or timed out counts as 3 |
 | `over_routed`, `under_routed` | direction of the miss |
 | `title_format` | 3 to 8 words, under 80 chars, no trailing punctuation or markup |
-| `title_quality` | Opus judge against the title rules the agent is given |
+| `title_quality` | LLM judge against the title rules the agent is given |
 | `model_calls_before_exit`, `tool_calls_before_exit`, `pre_exit_*_tokens`, `seconds_to_decision` | what sizing the task cost |
 | `rejected_tool_calls` | tool calls the pre-routed guard refused; should be 0 |
 
@@ -33,9 +33,11 @@ The summary reports route accuracy, a confusion list, timeouts, and mean cost.
 
 ## Prerequisites
 
-- `LANGSMITH_API_KEY` and `ANTHROPIC_API_KEY` in the environment. The judge calls Anthropic
-  directly.
-- A running `agent` graph with model routing enabled for the eval identity. Local dev works:
+- `LANGSMITH_API_KEY` and `OPENAI_API_KEY` in the environment. The title judge runs on OpenAI
+  (`ROUTING_EVAL_JUDGE_MODEL`, default `gpt-5.6-sol`).
+- A running `agent` graph. The eval turns adaptive routing on for its own identity
+  (`github_login` in the config) through the store, so the org toggle can stay off. Local dev
+  works:
 
   ```bash
   SANDBOX_TYPE=local uv run langgraph dev --no-browser

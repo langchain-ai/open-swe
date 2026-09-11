@@ -250,6 +250,38 @@ async def test_model_routing_is_disabled_by_default() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dashboard_auto_selection_does_not_enable_routing_when_toggles_are_off() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(source="dashboard", model_selection="auto")
+
+    agent = await _capture_create_deep_agent_kwargs(config)
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["metadata"]["model_routing_applied"] is False
+
+
+@pytest.mark.asyncio
+async def test_dashboard_explicit_model_disables_routing_even_when_enabled() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(source="dashboard", model_selection="explicit")
+
+    agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["metadata"]["model_routing_applied"] is False
+
+
+@pytest.mark.asyncio
 async def test_model_routing_preference_is_snapshotted_for_existing_thread() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(

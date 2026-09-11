@@ -37,6 +37,24 @@ def drain_thread_ids() -> set[str]:
     return snapshot
 
 
+_ROUTING_ENABLED_FOR: set[str] = set()
+
+
+async def ensure_routing_enabled(client: Any, login: str) -> None:
+    """Turn adaptive routing on for the eval identity, whatever the org toggle says."""
+    if login in _ROUTING_ENABLED_FOR:
+        return
+    existing: dict[str, Any] = {}
+    try:
+        item = await client.store.get_item(["profiles"], login)
+        value = item.get("value") if isinstance(item, dict) else None
+        existing = dict(value) if isinstance(value, dict) else {}
+    except Exception:  # noqa: BLE001
+        existing = {}
+    await client.store.put_item(["profiles"], login, {**existing, "model_routing_enabled": True})
+    _ROUTING_ENABLED_FOR.add(login)
+
+
 def get_langgraph_url() -> str:
     return os.getenv("LANGGRAPH_URL", DEFAULT_LANGGRAPH_URL)
 
@@ -208,6 +226,7 @@ async def route_task(inputs: dict[str, Any]) -> dict[str, Any]:
     repo = str(inputs.get("repo") or "langchain-ai/open-swe")
     login = get_login()
     client = get_client(url=get_langgraph_url())
+    await ensure_routing_enabled(client, login)
     thread_id = str(uuid.uuid4())
     await client.threads.create(
         thread_id=thread_id, metadata=_thread_metadata(thread_id, prompt, repo, login)

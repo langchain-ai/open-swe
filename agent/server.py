@@ -961,8 +961,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
-    if cfg.source == "dashboard" and cfg.model_selection in {"auto", "explicit"}:
-        adaptive_model_routing = cfg.model_selection == "auto"
+    # A picked model always wins; "auto" defers to the user and org toggles above.
+    if cfg.source == "dashboard" and cfg.model_selection == "explicit":
+        adaptive_model_routing = False
 
     # An explicit per-run model choice is the one thing allowed to move a thread
     # off its stored settings; the new choice is then stored in turn.

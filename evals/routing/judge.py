@@ -9,14 +9,13 @@ just accuracy.
 import os
 from typing import Any
 
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langsmith.schemas import Example, Run
 from pydantic import BaseModel, ConfigDict, Field
 
 from evals.routing.target import RoutingOutcome
 
-JUDGE_MODEL = "claude-opus-4-5"
-JUDGE_BASE_URL = os.environ.get("JUDGE_ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+JUDGE_MODEL = os.environ.get("ROUTING_EVAL_JUDGE_MODEL", "gpt-5.6-sol")
 
 _TIERS = ("fast", "balanced", "performance")
 
@@ -51,17 +50,11 @@ _judge: Any = None
 def _get_judge() -> Any:
     global _judge
     if _judge is None:
-        api_key = os.environ.get("JUDGE_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise RuntimeError("Set ANTHROPIC_API_KEY (or JUDGE_ANTHROPIC_API_KEY) for the judge.")
-        _judge = ChatAnthropic(
-            model=JUDGE_MODEL,
-            temperature=0.0,
-            max_tokens=400,
-            base_url=JUDGE_BASE_URL,
-            api_key=api_key,
-            max_retries=3,
-        ).with_structured_output(TitleVerdict, method="json_schema")
+        if not os.environ.get("OPENAI_API_KEY"):
+            raise RuntimeError("Set OPENAI_API_KEY for the judge.")
+        _judge = ChatOpenAI(model=JUDGE_MODEL, max_retries=3).with_structured_output(
+            TitleVerdict, method="json_schema"
+        )
     return _judge
 
 
