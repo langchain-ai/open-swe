@@ -719,10 +719,15 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     )
 
     mapped_login = await _slack_login(user_id, user_email)
+    thread_model_choice = await common.get_thread_model_choice(thread_id)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
+        resolved_model_id = (
+            thread_model_choice[0]
+            if thread_model_choice
+            else await common.resolve_agent_model_id(mapped_login)
+        )
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
             common.logger.info(
@@ -828,7 +833,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if thread_plan_mode is not None:
         configurable["plan_mode"] = thread_plan_mode
 
-    thread_model_choice = await common.get_thread_model_choice(thread_id)
     if thread_model_choice and not image_model_override:
         configurable["agent_model_id"], configurable["agent_effort"] = thread_model_choice
         configurable["model_selection"] = "explicit"
