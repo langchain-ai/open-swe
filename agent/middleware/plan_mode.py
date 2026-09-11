@@ -28,7 +28,7 @@ class PlanModeState(AgentState):
     plan_mode: NotRequired[bool]
 
 
-def _tool_name(tool: BaseTool | dict[str, Any] | Any) -> str | None:
+def tool_name(tool: BaseTool | dict[str, Any] | Any) -> str | None:
     if isinstance(tool, dict):
         name = tool.get("name")
         return name if isinstance(name, str) else None
@@ -67,7 +67,7 @@ class PlanModeMiddleware(OpenSWEMiddleware):
     def _filter(self, request: ModelRequest) -> ModelRequest:
         if not self._excluded or not self._active(request):
             return request
-        filtered = [t for t in request.tools if _tool_name(t) not in self._excluded]
+        filtered = [t for t in request.tools if tool_name(t) not in self._excluded]
         if len(filtered) == len(request.tools):
             return request
         return request.override(tools=filtered)

@@ -1,4 +1,4 @@
-"""Tool: ``approve_plan``. Approve a reviewed plan and exit plan mode."""
+"""Tool: ``exit_plan_mode``. Approve a reviewed plan, route the thread, and exit plan mode."""
 
 import logging
 from collections.abc import Mapping
@@ -20,20 +20,24 @@ from agent.dashboard.plan_store import (
     make_plan_approver,
     set_plan_status,
 )
+from agent.model_routing import commit_route
 from agent.run_config import RunConfig
+from agent.utils.model import ModelRoute
 
 logger = logging.getLogger(__name__)
 
 
-class ApprovePlanState(TypedDict, total=False):
+class ExitPlanModeState(TypedDict, total=False):
     plan_mode: bool
 
 
-async def approve_plan(
-    state: Annotated[ApprovePlanState | None, InjectedState] = None,
+async def exit_plan_mode(
+    model_route: ModelRoute,
+    title: str,
+    state: Annotated[ExitPlanModeState | None, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command | dict[str, Any]:
-    """Implement the `approve_plan` tool."""
+    """Implement the `exit_plan_mode` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
@@ -56,11 +60,15 @@ async def approve_plan(
             approved_by=_current_approver(cfg),
         )
     except Exception as exc:  # noqa: BLE001
-        logger.exception("approve_plan failed for thread %s", thread_id)
+        logger.exception("exit_plan_mode failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to approve plan: {exc}"}
 
+    routed = await commit_route(
+        thread_id=str(thread_id), cfg=cfg, model_route=model_route, title=title
+    )
     return Command(
         update={
+            **routed,
             "plan_mode": False,
             "messages": [
                 ToolMessage(

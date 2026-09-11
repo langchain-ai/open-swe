@@ -39,6 +39,11 @@ def test_plan_mode_prompt_requests_slack_approval_options() -> None:
     assert "do not send approval buttons" not in prompt
 
 
+async def _fake_commit_route(*, thread_id: str, cfg: Any, model_route: str, title: str) -> dict:
+    del thread_id, cfg, title
+    return {"model_route": model_route, "pre_routed": False}
+
+
 def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     excluded = server.PLAN_MODE_EXCLUDED_TOOLS
     for tool in (
@@ -55,7 +60,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     ):
         assert tool in excluded
     # Read-only tools, plan-file editing tools, and explicit plan approval stay available.
-    assert "approve_plan" not in excluded
+    assert "exit_plan_mode" not in excluded
     assert "list_threads" not in excluded
     assert "get_thread" not in excluded
     assert "read_file" not in excluded
@@ -215,9 +220,9 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     from langchain_core.messages import ToolMessage
     from langgraph.types import Command
 
-    from agent.tools import approve_plan as approve_plan_export
+    from agent.tools import exit_plan_mode as approve_plan_export
 
-    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+    approve_plan_tool = importlib.import_module("agent.tools.exit_plan_mode")
 
     assert callable(approve_plan_export)
 
@@ -276,8 +281,11 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(approve_plan_tool, "get_plan_content", fake_get_content)
     monkeypatch.setattr(approve_plan_tool, "list_plan_comments", fake_list_comments)
     monkeypatch.setattr(approve_plan_tool, "set_plan_status", fake_set_status)
+    monkeypatch.setattr(approve_plan_tool, "commit_route", _fake_commit_route)
 
-    result = await approve_plan_tool.approve_plan(
+    result = await approve_plan_tool.exit_plan_mode(
+        model_route="balanced",
+        title="Ship the approved plan",
         state={"plan_mode": True},
         tool_call_id="call-1",
     )
@@ -308,7 +316,7 @@ async def test_approve_plan_tool_ignores_stale_state_approver(
 
     from langgraph.types import Command
 
-    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+    approve_plan_tool = importlib.import_module("agent.tools.exit_plan_mode")
     saved: dict[str, Any] = {}
 
     monkeypatch.setattr(
@@ -347,8 +355,11 @@ async def test_approve_plan_tool_ignores_stale_state_approver(
     monkeypatch.setattr(approve_plan_tool, "get_plan_content", fake_get_content)
     monkeypatch.setattr(approve_plan_tool, "list_plan_comments", fake_list_comments)
     monkeypatch.setattr(approve_plan_tool, "set_plan_status", fake_set_status)
+    monkeypatch.setattr(approve_plan_tool, "commit_route", _fake_commit_route)
 
-    result = await approve_plan_tool.approve_plan(
+    result = await approve_plan_tool.exit_plan_mode(
+        model_route="balanced",
+        title="Ship the approved plan",
         state={
             "plan_mode": True,
             "plan_approver": {
@@ -379,7 +390,7 @@ async def test_approve_plan_tool_allows_non_owner_configurable_identity(
 
     from langgraph.types import Command
 
-    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+    approve_plan_tool = importlib.import_module("agent.tools.exit_plan_mode")
     saved: dict[str, Any] = {}
     monkeypatch.setattr(
         "agent.run_config.get_config",
@@ -417,8 +428,14 @@ async def test_approve_plan_tool_allows_non_owner_configurable_identity(
     monkeypatch.setattr(approve_plan_tool, "get_plan_content", fake_get_content)
     monkeypatch.setattr(approve_plan_tool, "list_plan_comments", fake_list_comments)
     monkeypatch.setattr(approve_plan_tool, "set_plan_status", fake_set_status)
+    monkeypatch.setattr(approve_plan_tool, "commit_route", _fake_commit_route)
 
-    result = await approve_plan_tool.approve_plan(state={"plan_mode": True}, tool_call_id="call-1")
+    result = await approve_plan_tool.exit_plan_mode(
+        model_route="balanced",
+        title="Ship the approved plan",
+        state={"plan_mode": True},
+        tool_call_id="call-1",
+    )
 
     assert isinstance(result, Command)
     assert saved["approved_by"] == {"id": "other", "name": "other", "source": "linear"}

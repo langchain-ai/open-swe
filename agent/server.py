@@ -149,7 +149,6 @@ from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
 from agent.tools import (
-    approve_plan,
     background_execute,
     background_task,
     create_automation,
@@ -160,6 +159,8 @@ from agent.tools import (
     delete_organization_skill,
     delete_user_skill,
     enter_plan_mode,
+    exit_plan_mode,
+    exit_pre_routed_mode,
     fetch_url,
     get_thread,
     http_request,
@@ -608,7 +609,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         repo_instructions: str | None,
         model_id: str,
         effort: str | None,
-        title_model: BaseChatModel,
+        title_model: BaseChatModel | None,
         source: str,
         user_email: str,
         linear_project_id: str,
@@ -695,17 +696,20 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        schedule_thread_title_generation(
-            thread_id=self._thread_id,
-            messages=state.get("messages") or [],
-            model=self._title_model,
-            client=client,
-        )
+        # With model routing on, the agent titles the thread itself on exiting
+        # pre-routed or plan mode; the background titler is the routing-off path.
+        if self._title_model is not None:
+            schedule_thread_title_generation(
+                thread_id=self._thread_id,
+                messages=state.get("messages") or [],
+                model=self._title_model,
+                client=client,
+            )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
         if is_desktop_run(cfg):
-            if cfg.local_project_path:
+            if cfg.local_project_path and self._title_model is not None:
                 schedule_worktree_branch_rename(
                     worktree_path=cfg.local_project_path,
                     messages=state.get("messages") or [],
@@ -1057,6 +1061,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
+    # A stop summary is one wrap-up turn; sizing it first would spend the whole turn.
+    adaptive_model_routing = adaptive_model_routing and not stop_summary_mode
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     workspace_mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
@@ -1087,7 +1093,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         http_request,
         fetch_url,
         web_search,
-        approve_plan,
+        exit_plan_mode,
+        *([exit_pre_routed_mode] if adaptive_model_routing else []),
         background_execute,
         background_task,
         enter_plan_mode,
@@ -1197,8 +1204,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         }
         model_selection_middleware.append(
             ModelSelectionMiddleware(
-                routing_models,
-                routing_models["fast"],
+                routing_models, initial_route=thread_settings.get("model_route")
             )
         )
     subagent_model = _make_model_or_defer(
@@ -1209,7 +1215,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     subagent_tools = [
         tool
         for tool in static_tools
-        if tool is not background_execute and tool is not background_task
+        if tool is not background_execute
+        and tool is not background_task
+        and tool is not exit_pre_routed_mode
     ]
     title_model = _make_model_or_defer(
         title_model_id,
@@ -1253,7 +1261,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     repo_instructions=repo_instructions,
                     model_id=model_id,
                     effort=profile_effort,
-                    title_model=title_model,
+                    title_model=None if adaptive_model_routing else title_model,
                     source=source,
                     user_email=user_email,
                     linear_project_id=linear_project_id,
