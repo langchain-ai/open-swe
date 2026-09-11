@@ -42,7 +42,7 @@ GitHub and Slack need a public HTTPS hostname that stays the same across restart
    make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev   # or export NGROK_DOMAIN once in your shell
    ```
 
-   `NGROK_DOMAIN` takes only the hostname. If you copy the URL from the ngrok dashboard, strip the leading `https://` and any trailing slash: `https://example.ngrok-free.dev/` becomes `example.ngrok-free.dev`. The GitHub App's **Webhook URL** keeps its full form, though: `https://example.ngrok-free.dev/webhooks/github`.
+   `NGROK_DOMAIN` accepts the bare hostname or a full URL — a pasted `https://example.ngrok-free.dev/` is normalized to the hostname. The GitHub App's **Webhook URL** still needs its full form, though: `https://example.ngrok-free.dev/webhooks/github`.
 
 `make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only `/webhooks/*` is reachable from the internet. That restriction is not optional. Under `langgraph dev` the LangGraph API itself (`/threads`, `/runs`, `/assistants`, `/store`, …) has no authentication at all: the dashboard API checks its session cookie and the webhook endpoints check their signatures, but anyone who can reach port 2024 can read and create threads and runs. A tunnel that forwards the whole port publishes exactly that. Everything except the webhooks stays on `http://localhost:2024`, where you keep opening the dashboard. Check the policy once the backend is up (step 6): `curl https://<name>.ngrok-free.dev/webhooks/slack` answers `{"status":"ok", …}` from the backend, while `/ok` gets ngrok's own 404.
 
