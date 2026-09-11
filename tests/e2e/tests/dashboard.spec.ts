@@ -226,7 +226,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await loginAs(page, SAME_USER);
     await page.goto("/agents");
     const dismissOnboarding = page.getByRole("button", {
-      name: "Maybe later",
+      name: "Later",
     });
     await expect(dismissOnboarding).toBeVisible();
     await dismissOnboarding.click();
@@ -255,7 +255,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await loginAs(page, SAME_USER);
     await page.goto("/agents");
     const dismissOnboarding = page.getByRole("button", {
-      name: "Maybe later",
+      name: "Later",
     });
     if (await dismissOnboarding.isVisible()) await dismissOnboarding.click();
     await page.keyboard.press("Escape");

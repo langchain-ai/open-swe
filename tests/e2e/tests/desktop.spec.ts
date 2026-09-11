@@ -142,7 +142,7 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       default_model?: string | null;
     };
     if (!profile.default_model) {
-      const maybeLater = page.getByRole("button", { name: "Maybe later" });
+      const maybeLater = page.getByRole("button", { name: "Later" });
       await expect(maybeLater).toBeVisible();
       await maybeLater.click();
     }

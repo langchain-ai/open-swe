@@ -53,7 +53,7 @@ export async function dismissOnboardingIfShown(page: Page) {
     !profile.default_model ||
     (session.slack_oauth_enabled && !mapping.slack_user_id);
   if (!needsOnboarding) return;
-  const dismiss = page.getByRole("button", { name: "Maybe later" });
+  const dismiss = page.getByRole("button", { name: "Later" });
   await expect(dismiss).toBeVisible();
   await dismiss.click();
   await expect(dismiss).toBeHidden();
