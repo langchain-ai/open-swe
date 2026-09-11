@@ -542,6 +542,7 @@ async def test_dashboard_agent_excludes_slack_tools() -> None:
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
     assert tool_names.isdisjoint(
         {
+            "slack_accept_untagged_message",
             "slack_add_reaction",
             "slack_attach_html",
             "slack_move_thread",
@@ -571,6 +572,7 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
     assert {
+        "slack_accept_untagged_message",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",
@@ -682,6 +684,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     slack_names = {
         "manage_code_channel",
         "notify_automation_channel",
+        "slack_accept_untagged_message",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",

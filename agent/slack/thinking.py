@@ -309,6 +309,19 @@ async def show_slack_thinking_status(
     """Keep Slack's animated "Thinking..." thread status alive until the run ends."""
     if not await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS):
         return
+    await maintain_slack_thinking_status(
+        client=client,
+        thread_id=thread_id,
+        run_id=run_id,
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+    )
+
+
+async def maintain_slack_thinking_status(
+    *, client: LangGraphClient, thread_id: str, run_id: str, channel_id: str, thread_ts: str
+) -> None:
+    """Refresh and clear an already-displayed Slack thinking status."""
 
     async def refresh() -> None:
         while True:

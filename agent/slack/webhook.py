@@ -810,6 +810,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         "slack_thread": slack_thread_context,
         "user_email": user_email,
         "source": "slack",
+        "untagged_reply": untagged_reply,
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
@@ -949,7 +950,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
                 triggering_user_id=user_id,
                 agent_thread_id=thread_id,
             )
-    if not code_channel and isinstance(run_id, str) and run_id:
+    if explicitly_tagged and not code_channel and isinstance(run_id, str) and run_id:
         await show_slack_thinking_status(
             client=langgraph_client,
             thread_id=thread_id,

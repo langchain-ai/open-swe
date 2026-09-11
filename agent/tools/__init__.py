@@ -48,6 +48,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": "agent.github.tools.search_repo_code",
+    "slack_accept_untagged_message": "agent.slack.tools.accept_untagged_message",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_move_thread": "agent.slack.tools.move_thread",
@@ -106,6 +107,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
+    "slack_accept_untagged_message",
     "slack_add_reaction",
     "slack_attach_html",
     "slack_move_thread",
@@ -121,6 +123,7 @@ __all__ = [
 if TYPE_CHECKING:
     from agent.github.tools.read_repo_file import read_repo_file
     from agent.github.tools.search_repo_code import search_repo_code
+    from agent.slack.tools.accept_untagged_message import slack_accept_untagged_message
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel

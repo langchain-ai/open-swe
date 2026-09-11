@@ -101,6 +101,7 @@ class RunConfig(BaseModel):
     prepare_run_id: str | None = None
     offload_conversation: bool = False
     source: str | None = None
+    untagged_reply: bool = False
     task: str | None = None
     environment: str | None = None
     local_project_path: str | None = None

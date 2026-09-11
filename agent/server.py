@@ -185,6 +185,7 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
+    slack_accept_untagged_message,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -1076,6 +1077,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     slack_tools = [
         manage_code_channel,
+        slack_accept_untagged_message,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
@@ -1113,6 +1115,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         report_platform_issue,
         schedule_thread_wakeup,
         manage_code_channel,
+        slack_accept_untagged_message,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
