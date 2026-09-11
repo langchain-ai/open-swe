@@ -288,12 +288,13 @@ async def test_dispatch_or_queue_interrupts_for_explicit_mention(
     assert await_args.kwargs["multitask_strategy"] == "interrupt"
 
 
-def test_message_update_is_non_explicit_even_when_original_mention_remains() -> None:
-    assert not slack_webhook._is_explicit_slack_request(
+def test_message_update_does_not_interrupt_even_when_the_mention_remains() -> None:
+    assert not slack_webhook._interrupts_active_run(
         "<@BOT> corrected request",
         "BOT",
-        treat_all_messages_as_mentions=False,
+        code_channel=False,
         message_update=True,
+        explicit_request=False,
     )
 
 

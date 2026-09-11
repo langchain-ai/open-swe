@@ -59,16 +59,9 @@ def _slack_request_heading(untagged_reply: bool, message_update: bool = False) -
     return "## Untagged Message" if untagged_reply else "## Latest Mention Request"
 
 
-def _is_explicit_slack_request(
-    text: str,
-    bot_user_id: str,
-    *,
-    treat_all_messages_as_mentions: bool,
-    message_update: bool,
-) -> bool:
-    return not message_update and bool(
-        treat_all_messages_as_mentions
-        or (bot_user_id and f"<@{bot_user_id}>" in text)
+def _mentions_bot(text: str, bot_user_id: str) -> bool:
+    return bool(
+        (bot_user_id and f"<@{bot_user_id}>" in text)
         or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
     )
 
@@ -81,16 +74,11 @@ def _interrupts_active_run(
     message_update: bool,
     explicit_request: bool,
 ) -> bool:
-    return not message_update and (
-        not code_channel
-        or explicit_request
-        or _is_explicit_slack_request(
-            text,
-            bot_user_id,
-            treat_all_messages_as_mentions=False,
-            message_update=False,
-        )
-    )
+    if message_update:
+        return False
+    if not code_channel:
+        return True
+    return explicit_request or _mentions_bot(text, bot_user_id)
 
 
 async def slack_thread_allows_untagged_reply(
