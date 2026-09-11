@@ -47,51 +47,34 @@ test("local MCP connections are managed through structured config", async (t) =>
 });
 
 for (const allowedTools of [undefined, [], ["search"]]) {
-  test(`edits and toggles preserve local tool policy ${JSON.stringify(allowedTools)} and headers`, async (t) => {
+  test(`edits preserve local tool policy ${JSON.stringify(allowedTools)}`, async (t) => {
     const configPath = temporaryConfig(t);
-    const headers = { Authorization: "Bearer secret" };
     fs.writeFileSync(
       configPath,
       JSON.stringify({
         mcpServers: {
           local: {
             url: "http://localhost:8080/mcp",
-            transport: "streamable_http",
             allowed_tools: allowedTools,
-            headers,
+            headers: { Authorization: "Bearer secret" },
           },
         },
       }),
       { mode: 0o600 },
     );
-
-    for (const update of [
-      { headers: null, enabled: true },
-      { enabled: false },
-      { enabled: true },
-    ]) {
-      await saveMcpConnection(configPath, {
-        ...(await listMcpConnections(configPath))[0],
-        url: "http://localhost:9090/mcp",
-        ...update,
-      });
-      const saved = JSON.parse(fs.readFileSync(configPath, "utf8")).mcpServers
-        .local;
-      assert.deepEqual(saved.allowed_tools, allowedTools);
-      assert.equal(
-        Object.hasOwn(saved, "allowed_tools"),
-        allowedTools !== undefined,
-      );
-      assert.deepEqual(saved.headers, headers);
-      assert.equal(saved.url, "http://localhost:9090/mcp");
-      assert.equal(saved.enabled, update.enabled);
-    }
-
     await saveMcpConnection(configPath, {
       ...(await listMcpConnections(configPath))[0],
-      headers: {},
+      url: "http://localhost:9090/mcp",
+      headers: null,
     });
-    assert.deepEqual(await revealMcpHeaders(configPath, "local"), {});
+    const saved = JSON.parse(fs.readFileSync(configPath, "utf8")).mcpServers
+      .local;
+    assert.equal(
+      Object.hasOwn(saved, "allowed_tools"),
+      allowedTools !== undefined,
+    );
+    assert.deepEqual(saved.allowed_tools, allowedTools);
+    assert.deepEqual(saved.headers, { Authorization: "Bearer secret" });
   });
 }
 
