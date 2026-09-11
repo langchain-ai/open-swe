@@ -158,6 +158,16 @@ export interface ProfileUpdate {
   review_draft_prs?: boolean | null
 }
 
+export interface GatewayConfiguration {
+  model_id: string
+  override_enabled: boolean
+  resolution_reason: string
+  endpoint_kind: "direct_provider" | "custom_endpoint" | "langsmith_gateway"
+  endpoint: string | null
+  credential_sources: string[]
+  restart_required: boolean
+}
+
 export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
@@ -787,6 +797,8 @@ export const api = {
   listEnvironmentOptions: () =>
     request<EnvironmentOptionList>("/environments/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  getGatewayConfiguration: () =>
+    request<GatewayConfiguration>("/team-settings/gateway-configuration"),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {
       method: "PUT",

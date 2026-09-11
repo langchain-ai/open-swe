@@ -496,6 +496,50 @@ def test_make_model_gateway_without_key_falls_back_direct(
     assert "api_key" not in captured
 
 
+def test_gateway_configuration_summary_sanitizes_custom_endpoint(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "OPENAI_API_BASE",
+        "https://user:secret@proxy.example:8443/v1?token=secret#fragment",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "never-return-this")
+    monkeypatch.setenv("LC_GATEWAY_KEY", "does-not-enable-langsmith")
+
+    summary = gateway.gateway_configuration_summary(None, "openai:gpt-5.6-sol")
+
+    assert summary == {
+        "model_id": "openai:gpt-5.6-sol",
+        "override_enabled": False,
+        "resolution_reason": "no LangSmith Gateway environment default is set",
+        "endpoint_kind": "custom_endpoint",
+        "endpoint": "https://proxy.example:8443/v1",
+        "credential_sources": ["OPENAI_API_KEY"],
+        "restart_required": False,
+    }
+
+
+def test_gateway_configuration_summary_reports_direct_provider_credential(monkeypatch) -> None:
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "false")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "never-return-this")
+
+    summary = gateway.gateway_configuration_summary(None, "anthropic:claude-opus-5")
+
+    assert summary["endpoint_kind"] == "direct_provider"
+    assert summary["endpoint"] is None
+    assert summary["credential_sources"] == ["ANTHROPIC_API_KEY"]
+
+
+def test_gateway_configuration_summary_reports_inherited_gateway(monkeypatch) -> None:
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "never-return-this")
+
+    summary = gateway.gateway_configuration_summary(None, "anthropic:claude-opus-5")
+
+    assert summary["override_enabled"] is True
+    assert summary["resolution_reason"] == "LANGSMITH_GATEWAY_API_KEY is set"
+    assert summary["endpoint_kind"] == "langsmith_gateway"
+    assert summary["endpoint"] == "https://gateway.smith.langchain.com/anthropic"
+    assert summary["credential_sources"] == ["LANGSMITH_GATEWAY_API_KEY"]
+
+
 def test_gateway_default_follows_the_dedicated_key(monkeypatch) -> None:
     from agent.utils import gateway
 
