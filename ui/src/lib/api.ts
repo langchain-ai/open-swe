@@ -365,6 +365,7 @@ export type ThreadVisibility = "public" | "private"
 export interface UserPreferences {
   default_visibility: ThreadVisibility
   local_tracing_project: string | null
+  default_local_tracing_project: string
 }
 
 export interface Skill {

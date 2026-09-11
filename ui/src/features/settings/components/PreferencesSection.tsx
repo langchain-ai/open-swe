@@ -123,7 +123,10 @@ export function PreferencesSection() {
         control={
           <Input
             className="w-56"
-            placeholder="Shared cloud project"
+            placeholder={
+              preferences.data?.default_local_tracing_project ??
+              "Shared cloud project"
+            }
             defaultValue={preferences.data?.local_tracing_project ?? ""}
             disabled={preferences.isLoading || savePreferences.isPending}
             onBlur={(event) =>
