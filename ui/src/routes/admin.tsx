@@ -28,7 +28,7 @@ import {
   slackManifestPlaceholdersRemain,
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
-import { WorkspaceMCPSection } from "@/features/settings/components/WorkspaceMCPSection"
+import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -64,7 +64,7 @@ function AdminPage() {
       />
 
       <SlackIntegrationSection backendUrl={session.data.api_base_url} />
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
 
       <LLMGatewaySection />
 
