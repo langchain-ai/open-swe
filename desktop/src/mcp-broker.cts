@@ -23,6 +23,7 @@ async function startMcpBroker(backendFetch, getBackendUrl, configPath) {
       return;
     }
     try {
+      request.setEncoding("utf8");
       let body = "";
       for await (const chunk of request) {
         body += chunk;
