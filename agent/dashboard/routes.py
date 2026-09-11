@@ -163,6 +163,7 @@ from agent.dashboard.team_settings import (
     get_team_default_model,
     get_team_default_subagent_model,
     get_team_fable_enabled,
+    get_team_gateway_enabled,
     get_team_settings,
     update_team_transcription_model,
     upsert_team_settings,
@@ -282,6 +283,7 @@ from agent.utils.dashboard_links import (
     dashboard_base_url,
     dashboard_is_same_origin,
 )
+from agent.utils.gateway import gateway_configuration_summary
 from agent.utils.thread_ops import langgraph_client, langgraph_url
 from agent.utils.timing import server_timing_header
 
@@ -965,6 +967,17 @@ async def api_get_team_settings(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_team_settings()
+
+
+@router.get("/team-settings/gateway-configuration")
+async def api_get_gateway_configuration(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    settings = await get_team_settings()
+    model_id = settings.get("default_agent_model")
+    if not isinstance(model_id, str):
+        model_id, _ = await get_team_default_model("agent")
+    return gateway_configuration_summary(await get_team_gateway_enabled(), model_id)
 
 
 @router.put("/team-settings/transcription")

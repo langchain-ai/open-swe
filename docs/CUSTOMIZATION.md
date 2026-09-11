@@ -210,7 +210,9 @@ Routing is opt-in and off by default. Enable it either way:
 | `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
 | `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
 
-The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
+The admin panel (**Admin → LangSmith Gateway override**) exposes a per-workspace override stored in team settings. **Inherit** uses `LANGSMITH_GATEWAY_ENABLED` when explicitly set, otherwise enables the override when `LANGSMITH_GATEWAY_API_KEY` is present, and otherwise disables it. `LC_GATEWAY_KEY` does not participate. Workspace changes apply automatically to newly created model clients, usually within 60 seconds; environment changes require a backend restart.
+
+Disabling this override does not guarantee direct provider access. For OpenAI models, `OPENAI_BASE_URL` (or its legacy alias `OPENAI_API_BASE`) still selects a custom OpenAI-compatible endpoint and `OPENAI_API_KEY` supplies its credential. The endpoint and credential must match; Open SWE does not infer that an arbitrary custom URL is LangSmith Gateway or an internal gateway. The admin panel reports the effective endpoint category and safe credential source names without exposing credential values, URL userinfo, query strings, or fragments.
 
 Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 

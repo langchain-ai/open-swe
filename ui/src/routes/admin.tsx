@@ -482,11 +482,15 @@ function gatewayModeValue(mode: GatewayMode): boolean | null {
   return null
 }
 
-function LLMGatewaySection() {
+export function LLMGatewaySection() {
   const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
     queryFn: api.getTeamSettings,
+  })
+  const configuration = useQuery({
+    queryKey: ["gatewayConfiguration"],
+    queryFn: api.getGatewayConfiguration,
   })
   const [error, setError] = useState<string | null>(null)
 
@@ -494,6 +498,7 @@ function LLMGatewaySection() {
     mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
     onSuccess: (saved) => {
       qc.setQueryData(["teamSettings"], saved)
+      void qc.invalidateQueries({ queryKey: ["gatewayConfiguration"] })
       setError(null)
     },
     onError: (e: Error) => setError(e.message),
@@ -503,13 +508,17 @@ function LLMGatewaySection() {
 
   return (
     <SettingsSection
-      title="LLM Gateway"
-      description="Route agent and reviewer LLM calls through the LangSmith LLM Gateway. It authenticates with the workspace LangSmith API key and resolves provider keys from Provider Secrets, so no provider keys are needed at runtime. Requires the gateway (private beta) enabled for your organization."
+      title="LangSmith Gateway override"
+      description="Overrides supported model calls with the LangSmith Gateway endpoint and credential. Turning it off does not disable custom provider endpoints."
     >
       <div className="divide-y divide-border">
         <SettingsRow
-          label="Route through the gateway"
-          description="Inherit uses the LANGSMITH_GATEWAY_ENABLED deployment default. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly."
+          label="LangSmith Gateway override"
+          description={
+            configuration.data
+              ? `Inherit currently resolves to ${configuration.data.override_enabled ? "enabled" : "disabled"} because ${configuration.data.resolution_reason}. Changes apply automatically to new model clients, usually within 60 seconds; environment changes require a backend restart.`
+              : "Loading the effective deployment configuration…"
+          }
           control={
             <Select
               value={mode}
@@ -535,7 +544,47 @@ function LLMGatewaySection() {
             </Select>
           }
         />
+        {configuration.data && (
+          <div className="space-y-1 px-4 py-3 text-xs text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">
+                Effective endpoint:
+              </span>{" "}
+              {configuration.data.endpoint_kind === "langsmith_gateway"
+                ? "LangSmith Gateway"
+                : configuration.data.endpoint_kind === "custom_endpoint"
+                  ? "Custom endpoint"
+                  : "Direct provider access"}
+              {configuration.data.endpoint
+                ? ` — ${configuration.data.endpoint}`
+                : ""}
+            </p>
+            <p>
+              Credential source:{" "}
+              {configuration.data.credential_sources.join(", ") ||
+                "none detected"}
+              . Endpoint and credential must belong to the same service.
+            </p>
+          </div>
+        )}
       </div>
+      <details className="px-4 py-3 text-xs text-muted-foreground">
+        <summary className="cursor-pointer select-none">
+          Environment precedence and examples
+        </summary>
+        <div className="mt-2 space-y-2 leading-relaxed">
+          <p>
+            Inherit uses LANGSMITH_GATEWAY_ENABLED when explicitly set;
+            otherwise LANGSMITH_GATEWAY_API_KEY enables the override; otherwise
+            it is disabled. LC_GATEWAY_KEY does not affect this decision.
+          </p>
+          <p>
+            Disabled can still use OPENAI_BASE_URL (or OPENAI_API_BASE) with
+            OPENAI_API_KEY. A company proxy URL remains a custom endpoint; Open
+            SWE does not assume it is a LangSmith or internal gateway.
+          </p>
+        </div>
+      </details>
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )

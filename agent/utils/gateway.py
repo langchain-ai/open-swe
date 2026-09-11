@@ -10,6 +10,8 @@ opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
 """
 
 import logging
+from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from agent.config import ENV
 
@@ -89,6 +91,77 @@ def resolve_gateway_enabled(team_value: bool | None) -> bool:
     if team_value is None:
         return gateway_env_default()
     return team_value
+
+
+def _sanitize_endpoint(value: str) -> str:
+    parsed = urlsplit(value)
+    hostname = parsed.hostname or ""
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    return urlunsplit((parsed.scheme, f"{hostname}{port}", parsed.path, "", ""))
+
+
+def gateway_configuration_summary(team_value: bool | None, model_id: str) -> dict[str, Any]:
+    """Safe metadata describing the effective endpoint for an administrator."""
+    explicit = ENV.LANGSMITH_GATEWAY_ENABLED.optional()
+    if team_value is not None:
+        enabled = team_value
+        reason = "workspace setting"
+    elif explicit is not None:
+        enabled = _env_bool(explicit)
+        reason = "LANGSMITH_GATEWAY_ENABLED"
+    elif ENV.LANGSMITH_GATEWAY_API_KEY.is_set():
+        enabled = True
+        reason = "LANGSMITH_GATEWAY_API_KEY is set"
+    else:
+        enabled = False
+        reason = "no LangSmith Gateway environment default is set"
+
+    provider = _provider_of(model_id)
+    path = _GATEWAY_PROVIDER_PATHS.get(provider)
+    credential_sources: list[str] = []
+    endpoint_kind = "direct_provider"
+    endpoint: str | None = None
+    if enabled and path and _langsmith_api_key():
+        endpoint_kind = "langsmith_gateway"
+        endpoint = _sanitize_endpoint(f"{gateway_base_url()}{path}")
+        source = ENV.LANGSMITH_GATEWAY_API_KEY.source() or ENV.LANGSMITH_API_KEY.source()
+        if source:
+            credential_sources.append(source)
+    elif provider == "openai":
+        custom_endpoint = ENV.OPENAI_BASE_URL.optional()
+        if custom_endpoint:
+            endpoint_kind = "custom_endpoint"
+            endpoint = _sanitize_endpoint(custom_endpoint)
+        else:
+            endpoint = OPENAI_PROVIDER_ENDPOINT
+        source = ENV.OPENAI_API_KEY.source()
+        if source:
+            credential_sources.append(source)
+    else:
+        credential = {
+            "anthropic": ENV.ANTHROPIC_API_KEY,
+            "baseten": ENV.BASETEN_API_KEY,
+            "fireworks": ENV.FIREWORKS_API_KEY,
+            "google_genai": ENV.GOOGLE_API_KEY,
+        }.get(provider)
+        source = credential.source() if credential else None
+        if source:
+            credential_sources.append(source)
+
+    return {
+        "model_id": model_id,
+        "override_enabled": enabled,
+        "resolution_reason": reason,
+        "endpoint_kind": endpoint_kind,
+        "endpoint": endpoint,
+        "credential_sources": credential_sources,
+        "restart_required": False,
+    }
+
+
+OPENAI_PROVIDER_ENDPOINT = "https://api.openai.com/v1"
 
 
 def _provider_of(model_id: str) -> str:
