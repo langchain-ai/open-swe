@@ -828,6 +828,11 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if thread_plan_mode is not None:
         configurable["plan_mode"] = thread_plan_mode
 
+    thread_model_choice = await common.get_thread_model_choice(thread_id)
+    if thread_model_choice and not image_model_override:
+        configurable["agent_model_id"], configurable["agent_effort"] = thread_model_choice
+        configurable["model_selection"] = "explicit"
+
     is_first_mention = not await common.thread_exists(thread_id)
     langgraph_client = get_langgraph_client()
     # Pass the login resolved above (from the stable Slack user id) so the thread is
