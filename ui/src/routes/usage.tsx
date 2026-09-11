@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
@@ -46,19 +46,16 @@ function UsagePage() {
     : "30d"
 
   const leaderboard = useQuery({
-    queryKey: ["usageLeaderboard", activePeriod],
-    queryFn: () => api.usageLeaderboard(activePeriod, 10),
-    enabled: !!session.data,
-  })
-  const mergeRate = useQuery({
     queryKey: [
-      "prMergeRateByModel",
+      "usageLeaderboard",
       activePeriod,
       session.data?.login,
       session.data?.is_admin,
     ],
-    queryFn: () => api.prMergeRateByModel(activePeriod, 14),
+    queryFn: () => api.usageLeaderboard(activePeriod, 10),
     enabled: !!session.data,
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
   })
 
   if (session.isLoading) {
@@ -72,37 +69,11 @@ function UsagePage() {
 
   return (
     <AppShell user={session.data} title="Usage" className="max-w-5xl">
-      <SettingsSection
-        title="PR outcomes by opening invocation's configured model"
-        description="PRs are grouped by open date and the opening invocation's configured model. Routing, provider fallback, subagents, and later invocations may use other models, so this does not measure one model's independent success. Open PRs wait 14 days before becoming mature pending; pending is never failure."
-      >
-        {mergeRate.isLoading ? (
-          <div className="space-y-2 p-4">
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
-          </div>
-        ) : mergeRate.isError ? (
-          <p className="p-4 text-xs text-destructive">
-            Failed to load PR merge rate: {mergeRate.error.message}
-          </p>
-        ) : mergeRate.data?.cohorts.length ? (
-          <PRMergeRateTable cohorts={mergeRate.data.cohorts} />
-        ) : (
-          <p className="p-6 text-center text-xs text-muted-foreground">
-            No cohort meets the privacy threshold for this period yet.
-          </p>
-        )}
-        {mergeRate.data ? (
-          <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-            Decided rate excludes pending PRs. Mature share includes mature
-            pending PRs. Cohorts smaller than{" "}
-            {mergeRate.data.suppression_threshold} are suppressed. Data is
-            trustworthy from{" "}
-            {mergeRate.data.analytics_epoch ?? "the configured epoch"};
-            completeness: {mergeRate.data.completeness}.
-          </div>
-        ) : null}
-      </SettingsSection>
+      <PRMergeRateSection
+        period={activePeriod}
+        login={session.data.login}
+        isAdmin={session.data.is_admin}
+      />
 
       <SettingsSection
         title="Agent leaderboard"
@@ -155,7 +126,7 @@ function UsagePage() {
 
       <SettingsSection
         title="Reviewer stats"
-        description="Surfaced, resolved, dismissed, open, and reopened findings are tracked separately."
+        description="Reviewed PRs, surfaced findings, and how those findings were handled."
       >
         {leaderboard.isLoading ? (
           <div className="grid gap-3 p-4 sm:grid-cols-2">
@@ -183,6 +154,103 @@ function UsagePage() {
         </p>
       ) : null}
     </AppShell>
+  )
+}
+
+export function PRMergeRateSection({
+  period,
+  login,
+  isAdmin,
+}: {
+  period: UsageLeaderboardPeriod
+  login: string
+  isAdmin: boolean
+}) {
+  const report = useQuery({
+    queryKey: ["prMergeRateByModel", period, login, isAdmin],
+    queryFn: () => api.prMergeRateByModel(period),
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 503) && count < 2,
+  })
+  const data = report.isError ? undefined : report.data
+  const emptyMessage =
+    data?.status === "not_started"
+      ? "No analytics events have been captured yet."
+      : data?.status === "suppressed"
+        ? "PR groups in this period are too small to show under the privacy threshold."
+        : "No PRs have been recorded for this period yet."
+
+  return (
+    <SettingsSection
+      title="PR outcomes by opening invocation's configured model"
+      description="PRs are grouped by open date and the opening invocation's configured model. Routing, provider fallback, subagents, and later invocations may use other models, so this does not measure one model's independent success."
+    >
+      {report.isPending ? (
+        <div
+          className="space-y-2 p-4"
+          role="status"
+          aria-label="Loading PR outcomes"
+        >
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+        </div>
+      ) : report.isError ? (
+        <div className="space-y-2 p-4 text-xs" role="alert">
+          <p className="text-destructive">
+            {report.error instanceof ApiError && report.error.status === 503
+              ? "PR analytics is unavailable on this deployment."
+              : "Could not load PR outcomes. Try again."}
+          </p>
+          <button
+            type="button"
+            className="underline"
+            onClick={() => report.refetch()}
+          >
+            Retry
+          </button>
+        </div>
+      ) : data?.status === "ready" ? (
+        <PRMergeRateTable cohorts={data.cohorts} />
+      ) : (
+        <p
+          className="p-6 text-center text-xs text-muted-foreground"
+          role="status"
+        >
+          {emptyMessage}
+        </p>
+      )}
+      {data ? (
+        <div className="space-y-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+          <p>
+            Open PRs become mature pending after {data.maturity_days} days;
+            pending is never failure. Decided rate excludes pending PRs. Mature
+            share includes mature pending PRs. Groups smaller than{" "}
+            {data.suppression_threshold} PRs are withheld.
+          </p>
+          <p>
+            {data.collection_started_at
+              ? `Collection began ${new Date(data.collection_started_at).toLocaleString()}. `
+              : "Collection has not started. "}
+            Reports reflect captured events; earlier activity and unconnected
+            sources may be missing.
+          </p>
+          <p>
+            {data.last_processed_at
+              ? `Last event processed ${new Date(data.last_processed_at).toLocaleString()}. `
+              : "No events have been processed yet. "}
+            {data.has_pending_events
+              ? "Some captured events are still waiting to be processed. "
+              : ""}
+            {data.has_failed_events
+              ? "Some events could not be processed. The report may be incomplete."
+              : ""}
+          </p>
+          <p>Report checked {new Date(data.as_of).toLocaleString()}.</p>
+        </div>
+      ) : null}
+    </SettingsSection>
   )
 }
 
@@ -349,11 +417,6 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
       label: "Dismissed",
       value: stats.dismissed_findings,
       helper: "Dismissal is separate from resolution",
-    },
-    {
-      label: "Reopened",
-      value: stats.reopened_findings,
-      helper: "Findings reopened after a terminal state",
     },
   ]
 

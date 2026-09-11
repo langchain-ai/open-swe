@@ -253,11 +253,12 @@ export interface UserMappingsPage {
 export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
 
 export interface AnalyticsMetadata {
-  analytics_epoch: string | null
-  summary_version: number
-  freshness: string
-  completeness: string
-  data_watermark: string | null
+  collection_started_at: string | null
+  last_processed_at: string | null
+  data_source: "event_projections"
+  completeness: "not_started" | "observed_events_only"
+  has_pending_events: boolean
+  has_failed_events: boolean
   as_of: string
 }
 
@@ -299,7 +300,6 @@ export interface ReviewerStatsPayload {
   resolved_after_update: number
   dismissed_findings: number
   unresolved_surfaced_findings: number
-  reopened_findings: number
   resolution_rate: number
   human_replies: number
   severity_counts: Record<string, number>
@@ -307,7 +307,7 @@ export interface ReviewerStatsPayload {
   generated_at_ms: number | null
 }
 
-export interface UsageLeaderboardPayload extends AnalyticsMetadata {
+export interface UsageLeaderboardPayload {
   period: UsageLeaderboardPeriod
   rows: Array<UsageLeaderboardRow>
   total_members: number
@@ -331,6 +331,7 @@ export interface PRMergeRateCohort {
 }
 
 export interface PRMergeRatePayload extends AnalyticsMetadata {
+  status: "ready" | "not_started" | "no_prs" | "suppressed"
   metric: "pr_outcomes_by_opening_invocation_configured_model"
   definition: string
   maturity_days: number
@@ -875,10 +876,10 @@ export const api = {
     })),
   prMergeRateByModel: (
     period: UsageLeaderboardPeriod = "30d",
-    maturityDays = 14
+    maturityDays?: number
   ) =>
     request<PRMergeRatePayload>(
-      `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}&maturity_days=${maturityDays}`
+      `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
     ),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
