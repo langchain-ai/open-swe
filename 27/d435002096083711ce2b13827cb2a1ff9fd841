@@ -1,0 +1,21 @@
+agent/middleware/model_selection.py
+  s_0ad38aaf43974b::t_1a86534a8b735b 40-47
+tests/middleware/test_model_selection.py
+  s_0ad38aaf43974b::t_273e3db4153ac4 17-19,24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "27d435002096083711ce2b13827cb2a1ff9fd841",
+  "prompts": {},
+  "sessions": {
+    "s_0ad38aaf43974b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9150d092-5883-4280-aac5-c374c73a2c42",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
