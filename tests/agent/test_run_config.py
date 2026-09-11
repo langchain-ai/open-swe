@@ -43,6 +43,18 @@ def test_from_config_reads_the_configurable():
     assert RunConfig.from_config(None).thread_id is None
 
 
+def test_invocation_id_accepts_legacy_and_equal_dual_fields():
+    assert RunConfig.parse({"prepare_run_id": "inv-1"}).invocation_id == "inv-1"
+    cfg = RunConfig.parse({"invocation_id": "inv-1", "prepare_run_id": "inv-1"})
+    assert cfg.invocation_id == "inv-1"
+
+
+def test_invocation_id_rejects_conflicting_fields():
+    cfg = RunConfig.parse({"invocation_id": "inv-1", "prepare_run_id": "inv-2"})
+    assert cfg.invocation_id is None
+    assert cfg.prepare_run_id is None
+
+
 def test_nested_source_refs_are_typed():
     cfg = RunConfig.parse(
         {
@@ -85,3 +97,23 @@ def test_bools_are_not_accepted_as_integers():
 
 def test_numeric_strings_still_coerce_to_int():
     assert RunConfig.parse({"pr_number": "7"}).pr_number == 7
+
+
+def test_dump_drops_extras_that_cannot_be_json_encoded():
+    class ProxyUser:
+        pass
+
+    cfg = RunConfig.parse(
+        {
+            "thread_id": "t1",
+            "github_login": "octocat",
+            "langgraph_auth_user": ProxyUser(),
+            "nested": {"user": ProxyUser()},
+            "custom": {"a": 1},
+        }
+    )
+    assert cfg.dump() == {
+        "thread_id": "t1",
+        "github_login": "octocat",
+        "custom": {"a": 1},
+    }

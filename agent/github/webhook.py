@@ -847,6 +847,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     email = await common.email_for_login(github_login) or ""
     if email:
+        thread_metadata = await common.authorize_github_thread(thread_id, github_login)
         github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     else:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
@@ -884,9 +885,35 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         common.logger.warning("No PR number found in payload, skipping")
         return
 
+    event = payload.get("review" if event_type == "pull_request_review" else "comment", {})
+    event_comment = {
+        "body": event.get("body", ""),
+        "author": event.get("user", {}).get("login", ""),
+        "created_at": event.get("submitted_at") or event.get("created_at", ""),
+        "event_at": event.get("updated_at") if payload.get("action") == "edited" else None,
+        "type": {
+            "issue_comment": "pr_comment",
+            "pull_request_review_comment": "review_comment",
+            "pull_request_review": "review",
+        }[event_type],
+        "comment_id": comment_id,
+        "path": event.get("path", ""),
+        "line": event.get("line") or event.get("original_line"),
+    }
+    if not event_comment["created_at"] or not comment_id:
+        return
+    if common.thread_is_private(thread_metadata) and not common.thread_is_promptable(
+        thread_metadata, event_comment["author"]
+    ):
+        return
+
     try:
         comments = await common.fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token
+            repo_config,
+            pr_number,
+            token=github_token,
+            event_comment=event_comment,
+            authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
         )
     except GitHubAuthError:
         github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
@@ -894,7 +921,11 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
             return
         comments = await common.fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token
+            repo_config,
+            pr_number,
+            token=github_token,
+            event_comment=event_comment,
+            authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
         )
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
@@ -1102,6 +1133,25 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     thread_id = github_issue_thread_id(issue_id)
     existing_thread = await common.thread_exists(thread_id)
+    persisted = await common.upsert_agent_thread_metadata(
+        thread_id,
+        source="github",
+        repo_config=repo_config,
+        github_login=github_login,
+        title=title or (f"Issue #{issue_number}" if issue_number else ""),
+        source_context=SourceContext.parse(
+            {
+                "github_issue": {
+                    "id": issue_id,
+                    "number": issue_number,
+                    "title": title,
+                    "url": issue_url,
+                }
+            }
+        ),
+    )
+    if not persisted:
+        raise RuntimeError("Could not persist GitHub issue ownership metadata")
     github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()
     reaction_token = github_token or app_token
@@ -1194,15 +1244,6 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             "url": issue_url,
         },
     }
-
-    await common.upsert_agent_thread_metadata(
-        thread_id,
-        source="github",
-        repo_config=repo_config,
-        github_login=github_login,
-        title=title or (f"Issue #{issue_number}" if issue_number else ""),
-        source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
-    )
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)

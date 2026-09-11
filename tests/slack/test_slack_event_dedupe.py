@@ -162,7 +162,8 @@ def allowed_bot(fake_store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
             "user_id": "U123",
             "app_id": "A123",
             "name": "Release bot",
-            "github_login": "alice",
+            "created_by": "alice",
+            "environment": "backend",
             "owner_email": "alice@example.com",
             "created_at": "2026-09-09T00:00:00Z",
         },
@@ -237,14 +238,14 @@ async def test_bot_allowlist_is_workspace_scoped(allowed_bot: None, team_id: str
     assert tasks.tasks == []
 
 
-async def test_bot_owner_must_still_be_admin(
+async def test_bot_authorization_is_workspace_owned(
     allowed_bot: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "someone-else")
     tasks = _FakeBackgroundTasks()
-    assert (await _post(_bot_payload(), tasks))["status"] == "ignored"
-    assert tasks.tasks == []
+    assert (await _post(_bot_payload(), tasks))["status"] == "accepted"
+    assert len(tasks.tasks) == 1
 
 
 async def test_allowed_bot_dual_delivery_starts_only_one_run(allowed_bot: None) -> None:

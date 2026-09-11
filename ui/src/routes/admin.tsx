@@ -24,9 +24,13 @@ import {
 } from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { slackAppManifestJson } from "@/lib/slack-manifest"
+import {
+  slackAppManifestJson,
+  slackManifestPlaceholdersRemain,
+} from "@/lib/slack-manifest"
+import { dashboardApiBase } from "@/lib/api-base"
 import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
-import { WorkspaceMCPSection } from "@/features/settings/components/WorkspaceMCPSection"
+import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -61,10 +65,10 @@ function AdminPage() {
         )}
       />
 
-      <SlackIntegrationSection>
+      <SlackIntegrationSection backendUrl={session.data.api_base_url}>
         <AllowedSlackBotsSection isAdmin={session.data.is_admin} />
       </SlackIntegrationSection>
-      <WorkspaceMCPSection />
+      <MCPConnectionsSection scope="workspace" />
 
       <LLMGatewaySection />
 
@@ -103,8 +107,10 @@ const SLACK_CODE_CHANNELS_STORAGE_KEY =
   "open-swe.admin.slack-code-channels-enabled"
 
 export function SlackIntegrationSection({
+  backendUrl,
   children,
 }: {
+  backendUrl?: string
   children?: ReactNode
 }) {
   const [enabled, setEnabled] = useState(false)
@@ -125,9 +131,19 @@ export function SlackIntegrationSection({
     window.localStorage.setItem(SLACK_CODE_CHANNELS_STORAGE_KEY, String(next))
   }
 
+  const manifestConfig = {
+    backendUrl:
+      backendUrl ||
+      dashboardApiBase() ||
+      (typeof window === "undefined" ? "" : window.location.origin),
+  }
+  const placeholdersRemain = slackManifestPlaceholdersRemain(manifestConfig)
+
   const copyManifest = async () => {
     try {
-      await navigator.clipboard.writeText(slackAppManifestJson(enabled))
+      await navigator.clipboard.writeText(
+        slackAppManifestJson(enabled, manifestConfig)
+      )
       setCopyState("copied")
     } catch {
       setCopyState("failed")
@@ -161,8 +177,9 @@ export function SlackIntegrationSection({
             App manifest
           </span>
           <span className="text-xs/relaxed text-muted-foreground">
-            Copy the selected manifest, replace its URL/provider placeholders,
-            then paste it into your Slack app settings and reinstall the app.
+            {placeholdersRemain
+              ? "Copy the selected manifest, replace its remaining <…> placeholders, then paste it into your Slack app settings and reinstall the app."
+              : "Copy the selected manifest — its URLs are filled in from this deployment — then paste it into your Slack app settings and reinstall the app."}
           </span>
         </div>
         <Button size="sm" variant="outline" onClick={() => void copyManifest()}>
@@ -690,6 +707,20 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
       description="Workspace-wide model defaults. Per-user Cloud Agent selections override the agent defaults."
     >
       <div className="divide-y divide-border">
+        <SettingsRow
+          label="Adaptive model routing"
+          description="Automatically choose a model for each turn, org-wide. Users can still override this in their personal settings."
+          control={
+            <Switch
+              checked={settings.data?.model_routing_enabled ?? false}
+              onCheckedChange={(next) =>
+                settings.data &&
+                save.mutate({ ...settings.data, model_routing_enabled: next })
+              }
+              disabled={!settings.data || save.isPending}
+            />
+          }
+        />
         <RolePicker
           label="Open SWE Agent"
           description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Open SWE Agent."

@@ -251,6 +251,7 @@ ENV.var("EXTRA_INTERNAL_BOT_LOGINS", "Comma-separated bot logins treated as inte
 ENV.var(
     "ALLOWED_GITHUB_ORGS", "Comma-separated GitHub orgs allowed for webhooks and dashboard login."
 )
+ENV.var("ALLOWED_GITHUB_USERS", "Comma-separated GitHub users allowed to log in to the dashboard.")
 ENV.var("ALLOWED_GITHUB_REPOS", "Comma-separated owner/repo pairs allowed for webhooks.")
 ENV.var("PUBLIC_REPO_ORG_GATE", "Single org whose members may trigger runs on public repos.")
 ENV.var(
@@ -270,7 +271,6 @@ ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention d
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
-ENV.var("LINEAR_API_KEY", "Linear API key.", secret=True)
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
@@ -368,6 +368,30 @@ ENV.var(
 ENV.var("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "Client-side grace past a command's own timeout.")
 ENV.var("SANDBOX_CREATE_EXTRA_JSON", "JSON object merged into the sandbox create body.")
 ENV.var("ENVIRONMENT_SNAPSHOT_PREFIX", "Prefix for environment snapshot names.", default="openswe")
+ENV.var(
+    "OPENSWE_SCRIPT_ROOT",
+    "Where an environment's setup/update scripts and their logs live inside a sandbox. "
+    "The default assumes a sandbox where the agent is root; the local provider runs on a "
+    "developer's own machine, whose filesystem root is not writable.",
+    default="/open-swe/environment",
+)
+ENV.var(
+    "ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",
+    "Deadline for an environment's setup script on a builder sandbox.",
+)
+ENV.var(
+    "ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",
+    "Deadline for an environment's update script on a builder sandbox.",
+)
+ENV.var(
+    "ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",
+    "Deadline for the update script when it runs in a run's own sandbox, before the first "
+    "model call. Tighter than the builder's on purpose.",
+)
+ENV.var(
+    "ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",
+    "Deadline for capturing a builder sandbox as an environment's snapshot.",
+)
 ENV.var("LOCAL_SANDBOX_ROOT_DIR", "Root directory for the local sandbox provider.")
 ENV.var(
     "GIT_CONFIG_GLOBAL",

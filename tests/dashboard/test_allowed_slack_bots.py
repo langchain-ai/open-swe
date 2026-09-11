@@ -21,6 +21,11 @@ def client(
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="test-token"))
+    fake_store.seed(
+        ["environments"],
+        "backend",
+        {"slug": "backend", "name": "Backend", "repos": ["langchain-ai/open-swe"]},
+    )
     app = FastAPI()
     app.include_router(routes.router)
     app.dependency_overrides[routes.require_session] = lambda: {
@@ -77,14 +82,20 @@ def client(
 
 def test_admin_can_add_list_and_remove_bot(client: TestClient) -> None:
     assert client.get("/dashboard/api/slack/allowed-bots").json() == []
-    response = client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": " U123 "})
+    response = client.post(
+        "/dashboard/api/slack/allowed-bots", json={"environment": "backend", "bot_id": " U123 "}
+    )
     assert response.status_code == 200, response.text
     bot = response.json()
-    assert {key: bot[key] for key in ("team_id", "bot_id", "user_id", "github_login", "name")} == {
+    assert {
+        key: bot[key]
+        for key in ("team_id", "bot_id", "user_id", "created_by", "environment", "name")
+    } == {
         "team_id": "T123",
         "bot_id": "B123",
         "user_id": "U123",
-        "github_login": "alice",
+        "created_by": "alice",
+        "environment": "backend",
         "name": "Release bot",
     }
     assert client.get("/dashboard/api/slack/allowed-bots").json() == [bot]
@@ -110,7 +121,9 @@ def test_non_admin_cannot_manage_bots(
 
 @pytest.mark.parametrize("bot_id", ["*", "Release bot", "B123,B456", "UHUMAN", "BOWN", "BMISSING"])
 def test_rejects_invalid_human_and_self_bots(client: TestClient, bot_id: str) -> None:
-    response = client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": bot_id})
+    response = client.post(
+        "/dashboard/api/slack/allowed-bots", json={"environment": "backend", "bot_id": bot_id}
+    )
     assert response.status_code in (400, 422), response.text
     assert client.get("/dashboard/api/slack/allowed-bots").json() == []
 
@@ -128,20 +141,28 @@ def test_cannot_supply_another_execution_identity(client: TestClient) -> None:
 
 def test_duplicate_add_does_not_transfer_ownership(client: TestClient) -> None:
     assert (
-        client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"}).status_code == 200
+        client.post(
+            "/dashboard/api/slack/allowed-bots", json={"environment": "backend", "bot_id": "B123"}
+        ).status_code
+        == 200
     )
     client.app.dependency_overrides[routes.require_session] = lambda: {"sub": "bob"}
-    response = client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"})
+    response = client.post(
+        "/dashboard/api/slack/allowed-bots", json={"environment": "backend", "bot_id": "B123"}
+    )
     assert response.status_code == 409
-    assert client.get("/dashboard/api/slack/allowed-bots").json()[0]["github_login"] == "alice"
+    assert client.get("/dashboard/api/slack/allowed-bots").json()[0]["created_by"] == "alice"
 
 
-def test_owner_must_have_github_authorization(
+def test_system_bot_does_not_require_admin_oauth(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value=None))
     assert (
-        client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"}).status_code == 400
+        client.post(
+            "/dashboard/api/slack/allowed-bots", json={"environment": "backend", "bot_id": "B123"}
+        ).status_code
+        == 200
     )
 
 
@@ -160,6 +181,34 @@ def _member(user_id: str, name: str, **overrides: Any) -> dict[str, Any]:
         },
         **overrides,
     }
+
+
+@pytest.mark.parametrize("environment", ["", "missing", "empty"])
+def test_bot_requires_environment_with_repositories(client, fake_store, environment):
+    fake_store.seed(["environments"], "empty", {"slug": "empty", "repos": []})
+    response = client.post(
+        "/dashboard/api/slack/allowed-bots",
+        json={"bot_id": "B123", "environment": environment},
+    )
+    assert response.status_code in (400, 422)
+    assert client.get("/dashboard/api/slack/allowed-bots").json() == []
+
+
+async def test_legacy_bot_requires_reconfiguration(fake_store):
+    from agent.slack.allowed_bots import resolve_allowed_slack_bot
+
+    fake_store.seed(
+        ["allowed_slack_bots"],
+        "T123:B123",
+        {
+            "team_id": "T123",
+            "bot_id": "B123",
+            "name": "Legacy bot",
+            "github_login": "alice",
+            "created_at": "2026-09-09",
+        },
+    )
+    assert await resolve_allowed_slack_bot("T123", "B123") is None
 
 
 def test_bot_directory_paginates_filters_and_caches(
@@ -250,6 +299,8 @@ def test_selected_bot_is_reverified_at_add_time(
     response = client.get("/dashboard/api/slack/bots")
     assert response.status_code == 200
     assert len(response.json()) == 1
-    response = client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "UHUMAN"})
+    response = client.post(
+        "/dashboard/api/slack/allowed-bots", json={"environment": "backend", "bot_id": "UHUMAN"}
+    )
     assert response.status_code == 400
     assert client.get("/dashboard/api/slack/allowed-bots").json() == []

@@ -417,7 +417,6 @@ async def test_list_workflow_approvals_requires_readable_thread(
         return {"source": "unknown"}
 
     monkeypatch.setattr(workflow_approval_api, "fetch_thread_metadata", fake_metadata)
-    monkeypatch.setattr(workflow_approval_api, "thread_is_readable", lambda metadata: False)
 
     with pytest.raises(HTTPException) as exc:
         await workflow_approval_api.list_workflow_push_approvals(
@@ -448,7 +447,6 @@ async def test_list_workflow_approvals_returns_records(
         }
 
     monkeypatch.setattr(workflow_approval_api, "fetch_thread_metadata", fake_metadata)
-    monkeypatch.setattr(workflow_approval_api, "thread_is_readable", lambda metadata: True)
     monkeypatch.setattr(workflow_approval_api, "get_workflow_push_approvals", fake_approvals)
 
     result = await workflow_approval_api.list_workflow_push_approvals(
@@ -1182,7 +1180,6 @@ async def test_reject_plan_can_mark_revising_without_dispatch(
         dispatched.append((args, kwargs))
 
     monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "thread_is_readable", lambda metadata: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
@@ -1216,7 +1213,6 @@ async def test_reject_plan_rejects_stale_decision(
         statuses.append((status, plan_mode))
 
     monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "thread_is_readable", lambda metadata: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
 
@@ -1248,7 +1244,6 @@ async def test_reject_plan_rejects_shared_content(
         dispatched.append((a, k))
 
     monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "thread_is_readable", lambda metadata: True)
     monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
     monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
 

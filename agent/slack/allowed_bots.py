@@ -1,4 +1,4 @@
-"""Admin-authorized Slack bots and the accounts their runs use."""
+"""Admin-authorized Slack bots and the environments their system threads use."""
 
 import hashlib
 import re
@@ -6,11 +6,10 @@ from typing import Any
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from agent.config import ENV
-from agent.dashboard import profiles
-from agent.dashboard.admin import is_admin
+from agent.dashboard.environments import ENVIRONMENTS
 from agent.store import TypedStore, now_iso
 from agent.utils import ttl_cache
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -20,6 +19,7 @@ class AllowSlackBot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     bot_id: str
+    environment: str = Field(min_length=1)
 
     @field_validator("bot_id")
     @classmethod
@@ -36,8 +36,8 @@ class AllowedSlackBot(BaseModel):
     user_id: str = ""
     app_id: str = ""
     name: str
-    github_login: str
-    owner_email: str | None = None
+    created_by: str = Field(default="", validation_alias=AliasChoices("created_by", "github_login"))
+    environment: str = ""
     created_at: str
 
 
@@ -62,7 +62,7 @@ async def resolve_allowed_slack_bot(
         return None
     if (user_id and user_id != bot.user_id) or (app_id and app_id != bot.app_id):
         return None
-    if not is_admin(bot.owner_email, login=bot.github_login):
+    if not bot.environment:
         return None
     return bot
 
@@ -93,8 +93,9 @@ async def _slack_info(client: httpx2.AsyncClient, method: str, **params: str) ->
 
 async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> AllowedSlackBot:
     login = admin["sub"]
-    if not await profiles.get_valid_access_token(login):
-        raise HTTPException(400, "Connect your GitHub account before allowing a Slack bot.")
+    environment = await ENVIRONMENTS.get(body.environment)
+    if environment is None or not environment.repos:
+        raise HTTPException(400, "Choose an environment with an explicit repository list.")
     token = ENV.SLACK_BOT_TOKEN.get()
     if not token:
         raise HTTPException(400, "Slack is not configured.")
@@ -132,7 +133,7 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
     key = f"{team_id}:{bot_id}"
     if await ALLOWED_SLACK_BOTS.get(key) is not None:
         raise HTTPException(
-            409, "This bot is already allowed. Remove it first to change its owner."
+            409, "This bot is already allowed. Remove it first to change its environment."
         )
     record = AllowedSlackBot(
         team_id=team_id,
@@ -140,8 +141,8 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
         user_id=user_id,
         app_id=bot.get("app_id") or "",
         name=bot.get("name") or bot_id,
-        github_login=login,
-        owner_email=admin.get("email"),
+        created_by=login,
+        environment=environment.slug,
         created_at=now_iso(),
     )
     return await ALLOWED_SLACK_BOTS.put(key, record)

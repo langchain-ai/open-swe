@@ -1248,7 +1248,14 @@ def test_process_github_pr_comment_without_email_skips(
 def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
+    async def persist_owner(*args, **kwargs):
+        captured["owner_persisted"] = True
+        return True
+
+    monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", persist_owner)
+
     async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
+        assert captured.get("owner_persisted") is True
         captured["thread_id"] = thread_id
         captured["email"] = email
         return "user-token"
@@ -1331,7 +1338,14 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
 def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
+    async def persist_owner(*args, **kwargs):
+        captured["owner_persisted"] = True
+        return True
+
+    monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", persist_owner)
+
     async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
+        assert captured.get("owner_persisted") is True
         return "user-token"
 
     async def fake_get_github_app_installation_token() -> str | None:

@@ -4,12 +4,13 @@ import asyncio
 import base64
 import json
 import logging
+import shlex
 from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx2
 from deepagents.backends import LangSmithSandbox
-from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from deepagents.backends.protocol import DeleteResult, ExecuteResponse, SandboxBackendProtocol
 from langsmith.sandbox import (
     AsyncSandboxClient,
     CommandTimeoutError,
@@ -442,6 +443,40 @@ def get_async_sandbox_client() -> AsyncSandboxClient:
     )
 
 
+async def capture_snapshot_with_tag(
+    client: AsyncSandboxClient,
+    sandbox_id: str,
+    name: str,
+    tag: str,
+    *,
+    timeout: int,
+) -> Any:
+    """Capture ``sandbox_id`` as ``name:tag``.
+
+    Snapshots are Docker-style: ``name:tag`` is a mutable pointer at immutable
+    content, so re-capturing a tag moves it rather than colliding. The Python SDK
+    has no ``tag`` parameter yet, so the field is injected into the capture body
+    the same way ``_install_create_extra_fields`` injects sandbox-create fields.
+    Drop this for a plain ``capture_snapshot(..., tag=...)`` once
+    langchain-ai/langsmith-sdk#3447 ships.
+    """
+    # Reaching into the SDK's transport is the whole mechanism: there is no public
+    # seam for a field the client does not model.
+    original_post = client._http.post  # noqa: SLF001
+
+    async def post_with_tag(url: Any, *args: Any, **kwargs: Any) -> Any:
+        payload = kwargs.get("json")
+        if str(url).endswith("/snapshot") and isinstance(payload, dict):
+            kwargs["json"] = {**payload, "tag": tag}
+        return await original_post(url, *args, **kwargs)
+
+    client._http.post = post_with_tag  # noqa: SLF001 # ty: ignore[invalid-assignment]
+    try:
+        return await client.capture_snapshot(sandbox_id, name, timeout=timeout)
+    finally:
+        client._http.post = original_post  # noqa: SLF001 # ty: ignore[invalid-assignment]
+
+
 async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
     client = get_async_sandbox_client()
     try:
@@ -622,6 +657,18 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
+
+    async def adelete(self, file_path: str) -> DeleteResult:
+        quoted = shlex.quote(file_path)
+        exists = await self.aexecute(f"test -e {quoted} || test -L {quoted}")
+        if exists.exit_code is not None and exists.exit_code != 0:
+            return DeleteResult(error=f"Error: '{file_path}' not found")
+        result = await self.aexecute(f"rm -rf {quoted}")
+        if result.exit_code == 0:
+            return DeleteResult(path=file_path)
+        return DeleteResult(
+            error=f"Error deleting file '{file_path}': {result.output.strip() or 'unknown error'}"
+        )
 
     async def aexecute(
         self,

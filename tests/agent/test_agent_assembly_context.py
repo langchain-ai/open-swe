@@ -8,9 +8,11 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 """
 
 import asyncio
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import langgraph_sdk
 import pytest
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
@@ -19,6 +21,90 @@ from langgraph.graph.state import RunnableConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 from agent.server import DesktopAgentState, _registered_tool_name, get_agent
+
+
+@pytest.fixture(autouse=True)
+def saved_thread_scope(monkeypatch):
+    metadata = {"visibility": "private", "owner_login": "octocat"}
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(get=AsyncMock(side_effect=lambda _id: {"metadata": metadata}))
+        ),
+    )
+    return metadata
+
+
+@pytest.mark.asyncio
+async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scope):
+    saved_thread_scope["visibility"] = "public"
+    with patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]) as notion:
+        captured = await _capture_create_deep_agent_kwargs()
+    assert captured["skills"] == ["/organization-skills/", "/bundled-skills/"]
+    assert "/skills/" not in captured["backend"].routes
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    tool_names = {_registered_tool_name(tool) for tool in tools}
+    assert not tool_names.intersection(
+        {"save_user_instructions", "save_user_skill", "delete_user_skill", "read_user_settings"}
+    )
+    notion.assert_awaited_once_with(None)
+    from agent.middleware import WorkspaceSkillsMiddleware
+
+    middleware = cast(list[object], captured["middleware"])
+    assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in middleware)
+    subagents = cast(list[dict], captured["subagents"])
+    assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in subagents[0]["middleware"])
+
+
+async def test_environment_system_threads_cannot_delegate_outside_scope(
+    saved_thread_scope, fake_store
+):
+    saved_thread_scope.update(
+        owner_type="system",
+        visibility="public",
+        environment="backend",
+        system_repositories=["org/repo"],
+        source_context={"slack_thread": {"triggering_bot_id": "B123", "team_id": "T123"}},
+    )
+    fake_store.seed(["environments"], "backend", {"slug": "backend", "repos": ["org/repo"]})
+    fake_store.seed(
+        ["allowed_slack_bots"],
+        "T123:B123",
+        {
+            "team_id": "T123",
+            "bot_id": "B123",
+            "name": "Release bot",
+            "environment": "backend",
+            "created_at": "2026-09-11",
+        },
+    )
+    captured = await _capture_create_deep_agent_kwargs()
+    tool_names = {_registered_tool_name(tool) for tool in captured["tools"]}
+    assert not tool_names.intersection(
+        {
+            "slack_start_new_thread",
+            "request_pr_review",
+            "manage_thread",
+            "list_threads",
+            "get_thread",
+            "publish_environment",
+        }
+    )
+    assert "open_pull_request" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_unknown_scope_omits_workspace_and_personal_mcps():
+    with (
+        patch("agent.server.private_credential_login", side_effect=TimeoutError),
+        patch("agent.server._mcp_tools_for", new_callable=AsyncMock) as mcps,
+        patch("agent.server._notion_tools_for", new_callable=AsyncMock) as notion,
+    ):
+        await _capture_create_deep_agent_kwargs()
+    mcps.assert_not_awaited()
+    notion.assert_not_awaited()
 
 
 class _DummyAgent:
@@ -108,7 +194,10 @@ async def _capture_create_deep_agent_kwargs(
 
 
 @pytest.mark.asyncio
-async def test_existing_thread_reloads_sender_draft_preference_into_run_config() -> None:
+async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
+    saved_thread_scope,
+) -> None:
+    saved_thread_scope["owner_login"] = "draft-preference-owner"
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -158,7 +247,8 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
-        patch("agent.server.load_workspace_mcp_tools", new_callable=AsyncMock, return_value=[]),
+        patch("agent.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
+        patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.load_browser_tools", return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.fallback_model_id_for", return_value=None),
@@ -259,6 +349,8 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
     assert skill.file_data and "name: baby-sit" in skill.file_data["content"]
     artifacts = await backend.aread("/bundled-skills/html-artifacts/SKILL.md")
     assert artifacts.file_data and "name: html-artifacts" in artifacts.file_data["content"]
+    environments = await backend.aread("/bundled-skills/environments/SKILL.md")
+    assert environments.file_data and "name: environments" in environments.file_data["content"]
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
@@ -299,6 +391,17 @@ async def test_desktop_agent_honors_gateway_environment(
     assert isinstance(calls, list)
     assert calls
     assert all(kwargs["use_gateway"] is True for _, kwargs in calls)
+
+
+@pytest.mark.asyncio
+async def test_agent_defaults_missing_run_source_before_prepare() -> None:
+    config = _base_config()
+
+    await _capture_create_deep_agent_kwargs(config)
+
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    assert configurable["source"] == "dashboard"
 
 
 @pytest.mark.asyncio

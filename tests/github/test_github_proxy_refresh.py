@@ -19,6 +19,23 @@ from agent.github.proxy import (
 
 
 @pytest.fixture(autouse=True)
+def unscoped_thread_metadata(monkeypatch):
+    from types import SimpleNamespace
+
+    import langgraph_sdk
+
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(
+                get=AsyncMock(return_value={"metadata": {"visibility": "public"}})
+            )
+        ),
+    )
+
+
+@pytest.fixture(autouse=True)
 def _clear_state() -> Generator[None]:
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
     github_proxy._PROXY_BASE_CONFIGS.clear()
@@ -197,6 +214,23 @@ class TestMaybeRefreshProxyToken:
 
 
 class TestRefreshGithubProxyMiddleware:
+    async def test_scope_revocation_is_not_swallowed(self):
+        from agent.github.system_scope import SystemScopeError
+        from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
+
+        with (
+            patch(
+                "agent.middleware.refresh_github_proxy.get_config",
+                return_value={"configurable": {"thread_id": "thread-9"}},
+            ),
+            patch(
+                "agent.middleware.refresh_github_proxy.maybe_refresh_proxy_token",
+                new=AsyncMock(side_effect=SystemScopeError("revoked")),
+            ),
+            pytest.raises(SystemScopeError, match="revoked"),
+        ):
+            await refresh_github_proxy_before_model.abefore_model(cast(AgentState, {}), MagicMock())
+
     @pytest.mark.asyncio
     async def test_calls_refresh_with_thread_id(self) -> None:
         from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model

@@ -1,7 +1,10 @@
 import asyncio
 import logging
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
+import langgraph_sdk
 import pytest
 
 from agent.github import token as auth
@@ -116,9 +119,10 @@ def _stub_dashboard_store(
     cached: tuple[str | None, str | None] = (None, None),
 ) -> None:
     from agent.dashboard import profiles
+    from agent.github.thread_token import cache_github_token_for_thread
 
-    async def fake_get_from_thread(thread_id: str):
-        return cached
+    if cached[0]:
+        cache_github_token_for_thread("t1", cached[0], cached[1], principal="login:mason-gh")
 
     async def fake_get_valid(login: str):
         return token
@@ -126,7 +130,17 @@ def _stub_dashboard_store(
     async def fake_get_record(login: str):
         return {"token_expires_at": expires_at}
 
-    monkeypatch.setattr(auth, "get_github_token_from_thread", fake_get_from_thread)
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(
+                get=AsyncMock(
+                    return_value={"metadata": {"visibility": "private", "owner_login": "mason-gh"}}
+                )
+            )
+        ),
+    )
     monkeypatch.setattr(profiles, "get_valid_access_token", fake_get_valid)
     monkeypatch.setattr(profiles, "get_oauth_token_record", fake_get_record)
 
@@ -146,8 +160,7 @@ def test_resolve_github_token_slack_uses_dashboard_store(
 def test_resolve_github_token_slack_ignores_stale_thread_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Slack thread ids are shared, so a prior user's cached token must NOT be
-    # returned. Resolution always goes by github_login via the dashboard store.
+    # A private run must refresh its owner token instead of trusting an older cache entry.
     _stub_dashboard_store(
         monkeypatch,
         token="bob-token",
@@ -185,7 +198,7 @@ def test_resolve_github_token_per_user_wins_over_bot_only_mode(
     assert token == "user-tok"
 
 
-def test_resolve_github_token_slack_no_token_falls_back_to_bot_in_bot_only_mode(
+def test_private_slack_no_token_requires_auth_in_bot_only_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_dashboard_store(monkeypatch, token=None)
@@ -196,50 +209,8 @@ def test_resolve_github_token_slack_no_token_falls_back_to_bot_in_bot_only_mode(
 
     monkeypatch.setattr(auth, "_resolve_bot_installation_token", fake_bot)
 
-    token, expires_at = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
-    assert (token, expires_at) == ("bot-tok", None)
-
-
-@pytest.mark.parametrize("state", ["allowed", "removed", "revoked", "wrong-owner"])
-async def test_slack_bot_runtime_requires_current_owner_authorization(
-    monkeypatch: pytest.MonkeyPatch,
-    fake_store,
-    state: str,
-) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "mason-gh")
-    _stub_dashboard_store(monkeypatch, token=None if state == "revoked" else "owner-token")
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
-
-    async def installation_token(thread_id: str):
-        return "installation-token", None
-
-    monkeypatch.setattr(auth, "_resolve_bot_installation_token", installation_token)
-    if state != "removed":
-        fake_store.seed(
-            ["allowed_slack_bots"],
-            "T123:B123",
-            {
-                "team_id": "T123",
-                "bot_id": "B123",
-                "user_id": "U123",
-                "app_id": "A123",
-                "name": "Release bot",
-                "github_login": "mason-gh",
-                "created_at": "2026-09-09",
-            },
-        )
-    config = _slack_config("someone-else" if state == "wrong-owner" else "mason-gh")
-    config["configurable"]["slack_thread"] = {
-        "team_id": "T123",
-        "triggering_bot_id": "B123",
-        "triggering_user_id": "U123",
-        "triggering_bot_app_id": "A123",
-    }
-    if state == "allowed":
-        assert (await auth.resolve_github_token(config, "t1"))[0] == "owner-token"
-    else:
-        with pytest.raises(auth.GitHubUserAuthRequired):
-            await auth.resolve_github_token(config, "t1")
+    with pytest.raises(auth.GitHubUserAuthRequired):
+        asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
 
 
 def _linear_config(github_login: str | None = "mason-gh") -> dict:
@@ -275,7 +246,7 @@ def test_resolve_github_token_linear_no_token_raises(
         asyncio.run(auth.resolve_github_token(_linear_config(), "t1"))
 
 
-def test_resolve_github_token_linear_no_token_falls_back_to_bot_in_bot_only_mode(
+def test_private_linear_no_token_requires_auth_in_bot_only_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_dashboard_store(monkeypatch, token=None)
@@ -286,8 +257,8 @@ def test_resolve_github_token_linear_no_token_falls_back_to_bot_in_bot_only_mode
 
     monkeypatch.setattr(auth, "_resolve_bot_installation_token", fake_bot)
 
-    token, expires_at = asyncio.run(auth.resolve_github_token(_linear_config(), "t1"))
-    assert (token, expires_at) == ("bot-tok", None)
+    with pytest.raises(auth.GitHubUserAuthRequired):
+        asyncio.run(auth.resolve_github_token(_linear_config(), "t1"))
 
 
 @pytest.mark.parametrize("source", ["github"])
@@ -301,6 +272,13 @@ def test_resolve_github_token_bot_only_mode_non_slack_uses_bot(
 
     monkeypatch.setattr(auth, "_resolve_bot_installation_token", fake_bot)
 
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {}}))
+        ),
+    )
     config = {"configurable": {"source": source, "github_login": "octo", "thread_id": "t1"}}
     token, _ = asyncio.run(auth.resolve_github_token(config, "t1"))
     assert token == "bot-tok"

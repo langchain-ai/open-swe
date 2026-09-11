@@ -55,10 +55,12 @@ def test_typed_getters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DEBUG_TRACEMALLOC_FRAMES", "40")
     monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "yes")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", " acme, ,widgets ,")
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", " alice, ,bob ,")
 
     assert ENV.DEBUG_TRACEMALLOC_FRAMES.get_int(25) == 40
     assert ENV.LANGSMITH_GATEWAY_ENABLED.get_bool() is True
     assert ENV.ALLOWED_GITHUB_ORGS.get_list() == ["acme", "widgets"]
+    assert ENV.ALLOWED_GITHUB_USERS.get_list() == ["alice", "bob"]
 
     monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "off")
     assert ENV.LANGSMITH_GATEWAY_ENABLED.get_bool(default=True) is False

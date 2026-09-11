@@ -160,7 +160,7 @@ async def proxy_dashboard_thread_commands(
     # yet. That command lazily creates + stamps + owns the thread (in
     # ``_enrich_run_start_command``); any other command against a missing thread
     # is a 404. On an existing thread, ``run.start`` (the posting path) is open
-    # to any org member and attributed in ``_enrich_run_start_command``. Input
+    # to any allowed user and attributed in ``_enrich_run_start_command``. Input
     # commands on admin threads require an admin; other threads keep unattributed
     # commands such as ``input.respond`` owner-only.
     method = parsed.get("method")
@@ -182,9 +182,9 @@ async def proxy_dashboard_thread_commands(
         if post_command:
             _assert_thread_postable(metadata, login, email)
         else:
-            _assert_thread_readable(metadata)
+            _assert_thread_readable(metadata, login, email)
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            _assert_thread_readable(metadata)
+            _assert_thread_readable(metadata, login, email)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 

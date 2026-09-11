@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from agent.config import ENV
+from agent.github import system_scope
 from agent.github.app import (
     PermissionKey,
     PermissionMap,
@@ -147,7 +148,12 @@ async def refresh_proxy_token(
         token_kwargs["repositories"] = list(effective_repositories)
     if permission_key:
         token_kwargs["permissions"] = dict(permission_key)
-    token, expires_at = await get_github_app_installation_token_with_expiry(**token_kwargs)
+    scoped = await system_scope.system_installation_token(thread_id)
+    token, expires_at = (
+        scoped
+        if scoped is not None
+        else await get_github_app_installation_token_with_expiry(**token_kwargs)
+    )
     if not token:
         logger.warning("Proxy token refresh for thread %s failed: no installation token", thread_id)
         return False

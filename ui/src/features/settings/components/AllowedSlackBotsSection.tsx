@@ -13,6 +13,13 @@ import {
   ComboboxList,
 } from "@/components/ui/combobox"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { api } from "@/lib/api"
 import type { AllowedSlackBot, SlackBotOption } from "@/lib/api"
 
@@ -23,6 +30,7 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
   const [botId, setBotId] = useState("")
   const [search, setSearch] = useState("")
   const [selected, setSelected] = useState<SlackBotOption | null>(null)
+  const [environment, setEnvironment] = useState("")
   const qc = useQueryClient()
   const bots = useQuery({
     queryKey: QUERY_KEY,
@@ -35,6 +43,11 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
     enabled: isAdmin,
     staleTime: 5 * 60 * 1000,
     retry: false,
+  })
+  const environments = useQuery({
+    queryKey: ["environment-options"],
+    queryFn: api.listEnvironmentOptions,
+    enabled: isAdmin,
   })
   const add = useMutation({
     mutationFn: api.allowSlackBot,
@@ -54,7 +67,10 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
   if (!isAdmin) return null
 
   const pending = add.isPending || remove.isPending
-  const error = add.error || remove.error || bots.error
+  const error = add.error || remove.error || bots.error || environments.error
+  const selectedEnvironment = environments.data?.environments.find(
+    (option) => option.slug === environment && (option.repos?.length ?? 0) > 0
+  )
   const alreadyAllowed = (bot: SlackBotOption) =>
     bots.data?.some(
       (allowed) =>
@@ -73,16 +89,24 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
           Allowed bots
         </h3>
         <p className="text-xs/relaxed text-muted-foreground">
-          Choose trusted bots that can start runs by mentioning Open SWE. Each
-          bot runs with the GitHub permissions of the admin who adds it.
+          Choose trusted bots that can start system threads by mentioning Open
+          SWE. Each bot runs as Open SWE in its assigned environment.
         </p>
       </div>
       <form
         onSubmit={(event) => {
           event.preventDefault()
-          if (!botToAdd || pending || bots.isPending || bots.isError) return
+          if (
+            !botToAdd ||
+            !selectedEnvironment ||
+            pending ||
+            bots.isPending ||
+            bots.isError ||
+            environments.isError
+          )
+            return
           remove.reset()
-          add.mutate(botToAdd)
+          add.mutate({ bot_id: botToAdd, environment })
         }}
         className="space-y-3 p-4"
       >
@@ -169,17 +193,64 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
           <Button
             type="submit"
             size="sm"
-            disabled={!botToAdd || pending || bots.isPending || bots.isError}
+            disabled={
+              !botToAdd ||
+              !selectedEnvironment ||
+              pending ||
+              bots.isPending ||
+              bots.isError ||
+              environments.isError
+            }
           >
             {add.isPending ? "Verifying…" : "Allow bot"}
           </Button>
+        </div>
+        <div className="space-y-2">
+          <label
+            htmlFor="allowed-slack-bot-environment"
+            className="text-xs font-medium"
+          >
+            Environment
+          </label>
+          <Select
+            value={environment}
+            onValueChange={(value) => setEnvironment(value ?? "")}
+            disabled={pending || environments.isPending || environments.isError}
+          >
+            <SelectTrigger
+              id="allowed-slack-bot-environment"
+              className="w-full"
+            >
+              <SelectValue placeholder="Choose an environment">
+                {selectedEnvironment?.name}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {environments.data?.environments.map((option) => (
+                <SelectItem
+                  key={option.slug}
+                  value={option.slug}
+                  disabled={!option.repos?.length}
+                >
+                  {option.name}
+                  {!option.repos?.length ? " (no repositories)" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {selectedEnvironment
+              ? `GitHub access: ${selectedEnvironment.repos?.join(", ")}`
+              : "Select an environment with configured repositories to allow this bot."}
+          </p>
         </div>
         <p
           id="allowed-slack-bot-help"
           className="text-xs text-muted-foreground"
         >
-          Runs with your GitHub permissions. Only explicit mentions trigger
-          runs; message edits are ignored.
+          Uses the Open SWE GitHub App with access limited to the environment’s
+          repositories. Only explicit mentions trigger runs; message edits are
+          ignored.
         </p>
         {!manual && directory.error && (
           <div
@@ -235,7 +306,11 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
         <SettingsRow
           key={`${bot.team_id}:${bot.bot_id}`}
           label={bot.name}
-          description={`${bot.bot_id} · Runs as ${bot.github_login}`}
+          description={
+            bot.environment
+              ? `${bot.bot_id} · Runs as Open SWE · ${environments.data?.environments.find((option) => option.slug === bot.environment)?.name ?? bot.environment}`
+              : `${bot.bot_id} · Inactive — remove and add with an environment`
+          }
           control={
             <Button
               size="sm"

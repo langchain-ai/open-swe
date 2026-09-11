@@ -7,6 +7,7 @@ import {
   formatShortcut,
   isHotkeySuppressed,
   isTypingContext,
+  isTypingSafeShortcut,
   shouldIgnoreHotkey,
 } from "./hotkeys"
 
@@ -105,5 +106,12 @@ describe("keyboard shortcut utilities", () => {
     expect(shouldIgnoreHotkey(composing)).toBe(true)
     expect(shouldIgnoreHotkey(repeated)).toBe(true)
     expect(shouldIgnoreHotkey(prevented)).toBe(true)
+  })
+
+  it("classifies modifier combos as typing-safe for hotkey exemption", () => {
+    expect(isTypingSafeShortcut("mod+n")).toBe(true)
+    expect(isTypingSafeShortcut("ctrl+shift+p")).toBe(true)
+    expect(isTypingSafeShortcut("c")).toBe(false)
+    expect(isTypingSafeShortcut("?")).toBe(false)
   })
 })

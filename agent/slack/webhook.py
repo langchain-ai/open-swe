@@ -12,6 +12,7 @@ import httpx2
 from langchain_core.messages.content import create_text_block
 
 from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
+from agent.github.system_scope import validate_system_scope
 from agent.input_messages import (
     InputMessageContext,
     MessageKind,
@@ -30,7 +31,7 @@ from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
-from agent.slack.thinking import stream_slack_thinking_steps
+from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -489,12 +490,33 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
+async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
+    """GitHub login for a Slack user: by Slack id first, then by profile email."""
+    if login := await common.login_for_slack_id(user_id):
+        return login
+    if user_email is None and user_id:
+        slack_user = await common.get_slack_user_info(user_id)
+        profile = slack_user.get("profile") if isinstance(slack_user, dict) else None
+        user_email = profile.get("email") if isinstance(profile, dict) else None
+    return await common.login_for_email(user_email) if user_email else None
+
+
+def _slack_thread_visibility(channel_context: dict[str, Any] | None) -> str:
+    """Bot DMs are private to the person; anything in a channel is collaborative."""
+    if isinstance(channel_context, dict) and channel_context.get("is_im") is True:
+        return "private"
+    return "public"
+
+
 async def _mark_slack_thread_errored(
     thread_id: str, request: SlackRequest, repo: Repo | None
 ) -> None:
-    # Only successful bot initialization can pin the validated execution owner.
-    if not request.triggering_bot_id:
-        try:
+    try:
+        owner_login = await _slack_login(request.user_id)
+        visibility = _slack_thread_visibility(request.channel_context)
+        # An unlinked sender is turned away at the account gate; a private thread
+        # nobody owns would be unreachable, so persist nothing for them.
+        if not request.triggering_bot_id and (visibility == "public" or owner_login):
             clean_text = (
                 common.strip_bot_mention(
                     request.text, request.bot_user_id, bot_username=common.SLACK_BOT_USERNAME
@@ -514,11 +536,13 @@ async def _mark_slack_thread_errored(
                         triggering_event_ts=request.event_ts,
                     )
                 ),
+                visibility=visibility,
+                owner_login=owner_login or "",
             )
-        except Exception:  # noqa: BLE001
-            common.logger.warning(
-                "Could not persist Slack error metadata for thread %s", thread_id, exc_info=True
-            )
+    except Exception:  # noqa: BLE001
+        common.logger.warning(
+            "Could not persist Slack error metadata for thread %s", thread_id, exc_info=True
+        )
 
     try:
         await get_langgraph_client().threads.update(
@@ -578,29 +602,36 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         )
         if allowed_bot is None:
             return
-        # A bot must not switch the credentials of an existing human-owned sandbox.
+        if _slack_thread_visibility(channel_context) == "private":
+            return
+        environment = await ENVIRONMENTS.get(allowed_bot.environment)
+        if environment is None or not environment.repos:
+            raise RuntimeError(
+                "Configure an environment with repositories for this bot in Admin settings."
+            )
+        if repo and repo.full_name.lower() not in {name.lower() for name in environment.repos}:
+            repo = None
+            repo_dict = None
         try:
             existing_thread = await langgraph_client.threads.get(thread_id)
         except Exception as exc:
             if not common.is_not_found_error(exc):
                 raise
         else:
-            opening_slack = SourceContext.from_metadata(
-                existing_thread.get("metadata")
-            ).slack_thread
-            owner = None
-            if opening_slack is not None:
-                owner = (
-                    opening_slack.bot_owner_github_login
-                    if opening_slack.triggering_bot_id
-                    else await common.login_for_slack_id(opening_slack.triggering_user_id)
-                )
-            if not isinstance(owner, str) or owner.lower() != allowed_bot.github_login.lower():
+            existing_metadata = existing_thread.get("metadata") or {}
+            opening_slack = SourceContext.from_metadata(existing_metadata).slack_thread
+            if (
+                existing_metadata.get("owner_type") != "system"
+                or opening_slack is None
+                or opening_slack.triggering_bot_id != allowed_bot.bot_id
+                or opening_slack.team_id != allowed_bot.team_id
+            ):
                 common.logger.info(
-                    "Ignoring Slack bot mention in a thread owned by another account",
+                    "Ignoring Slack bot mention in a thread with another owner",
                     extra={"agent_thread_id": thread_id, "slack_bot_id": allowed_bot.bot_id},
                 )
                 return
+            await validate_system_scope(existing_metadata)
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
         await common.refresh_user_mapping_cache()
@@ -627,6 +658,9 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             if isinstance(timezone_value, str):
                 user_timezone = timezone_value.strip()
 
+    thread_metadata = await common.authorize_github_thread(
+        thread_id, (await _slack_login(user_id, user_email) or "") if allowed_bot is None else ""
+    )
     context_thread_ts = reply_thread_ts or thread_ts
     thread_messages = (
         []
@@ -675,6 +709,16 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
     logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
+    if common.thread_is_private(thread_metadata):
+        context_messages = [
+            message
+            for message in context_messages
+            if common.thread_is_promptable(
+                thread_metadata, logins_by_user_id.get(str(message.get("user") or ""), "")
+            )
+        ]
+        if not message_update:
+            source_messages = context_messages
     context_source = "the beginning of the thread"
     if context_mode == "last_mention":
         context_source = (
@@ -692,8 +736,14 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     # once, so honoring a later tag would change the prompt but not the image. The
     # tag is stripped only when it resolves, so a typo stays visible in the
     # transcript instead of vanishing.
-    environment_slug: str | None = None
-    if is_first_mention:
+    environment_slug: str | None = allowed_bot.environment if allowed_bot else None
+    if allowed_bot is not None:
+        tagged_slug, text_without_tag = parse_environment_tag(clean_text)
+        if tagged_slug and tagged_slug != environment_slug:
+            raise RuntimeError("This bot can only use its admin-configured environment.")
+        if tagged_slug:
+            clean_text = text_without_tag or "(no text in mention)"
+    elif is_first_mention:
         tagged_slug, text_without_tag = parse_environment_tag(clean_text)
         if tagged_slug and await ENVIRONMENTS.get(tagged_slug) is not None:
             environment_slug = tagged_slug
@@ -748,15 +798,16 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         + image_urls_from_links
     )
 
-    mapped_login = (
-        allowed_bot.github_login if allowed_bot else await common.login_for_slack_id(user_id)
-    )
-    if not mapped_login and user_email:
-        mapped_login = await common.login_for_email(user_email)
+    mapped_login = await _slack_login(user_id, user_email) if allowed_bot is None else None
+    thread_model_choice = await common.get_thread_model_choice(thread_id)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
+        resolved_model_id = (
+            thread_model_choice[0]
+            if thread_model_choice
+            else await common.resolve_agent_model_id(mapped_login)
+        )
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
             common.logger.info(
@@ -793,16 +844,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             user_token = None
     has_valid_user_token = bool(user_token)
 
-    if allowed_bot is not None and not has_valid_user_token:
-        await common.post_slack_thread_reply(
-            channel_id,
-            thread_ts,
-            "This bot's owner needs to reconnect GitHub in Open SWE Settings before it can run.",
-            agent_thread_id=thread_id,
-        )
-        return
-
-    if not has_valid_user_token and not common.is_bot_token_only_mode():
+    if allowed_bot is None and not has_valid_user_token:
         # A stored-but-unusable token means "sign in again"; no record at all
         # means the user has never connected GitHub + Slack via the dashboard.
         # Guard the store read like token resolution above so a transient
@@ -848,7 +890,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if allowed_bot is not None:
         slack_thread_context["triggering_bot_id"] = allowed_bot.bot_id
         slack_thread_context["triggering_bot_app_id"] = allowed_bot.app_id
-        slack_thread_context["bot_owner_github_login"] = allowed_bot.github_login
         slack_thread_context["team_id"] = allowed_bot.team_id
     if code_channel and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
@@ -856,7 +897,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     configurable: dict[str, Any] = {
         "repo": repo_dict,
         "slack_thread": slack_thread_context,
-        "user_email": allowed_bot.owner_email if allowed_bot else user_email,
+        "user_email": user_email,
         "source": "slack",
     }
     if mapped_login:
@@ -877,14 +918,17 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if thread_plan_mode is not None:
         configurable["plan_mode"] = thread_plan_mode
 
+    if thread_model_choice and not image_model_override:
+        configurable["agent_model_id"], configurable["agent_effort"] = thread_model_choice
+        configurable["model_selection"] = "explicit"
+
     is_first_mention = not await common.thread_exists(thread_id)
     langgraph_client = get_langgraph_client()
-    if repo_dict:
-        await common.upsert_slack_thread_repo_metadata(thread_id, repo_dict, langgraph_client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
-    await common.upsert_agent_thread_metadata(
+    visibility = _slack_thread_visibility(channel_context)
+    persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
         repo_config=repo_dict,
@@ -893,7 +937,23 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         title=clean_text if is_first_mention else "",
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         environment=environment_slug,
+        visibility=visibility,
+        owner_login=mapped_login or "",
+        owner_type="system" if allowed_bot else "user",
+        system_repositories=list(environment.repos) if allowed_bot else None,
     )
+    if (visibility == "private" or allowed_bot is not None) and not persisted:
+        # Dispatch would create the thread itself, with no metadata and so public.
+        raise RuntimeError("could not persist thread authorization metadata")
+    if allowed_bot is not None:
+        saved = (await langgraph_client.threads.get(thread_id)).get("metadata") or {}
+        opening = SourceContext.from_metadata(saved).slack_thread
+        if opening is None or (opening.team_id, opening.triggering_bot_id) != (
+            allowed_bot.team_id,
+            allowed_bot.bot_id,
+        ):
+            raise RuntimeError("Slack thread ownership changed before dispatch.")
+        await validate_system_scope(saved)
 
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that
@@ -995,3 +1055,11 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
                 triggering_user_id=user_id,
                 agent_thread_id=thread_id,
             )
+    if not code_channel and isinstance(run_id, str) and run_id:
+        await show_slack_thinking_status(
+            client=langgraph_client,
+            thread_id=thread_id,
+            run_id=run_id,
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+        )

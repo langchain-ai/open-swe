@@ -14,14 +14,17 @@ import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
+import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
 import type { AgentThread } from "@/features/agents/lib/types"
 import {
+  useContinueThreadPrivately,
   useDeleteAgentThread,
   usePinAgentThread,
   useResolveAgentThread,
   useSidebarPinnedThreads,
   useSidebarProjects,
 } from "@/features/agents/lib/queries"
+import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -74,6 +77,8 @@ export function AgentThreadHeader({
   thread,
   onRename,
   localThread,
+  visibility,
+  onVisibilityChange,
 }: {
   title?: string | null
   target: "Cloud" | "This Mac"
@@ -81,6 +86,10 @@ export function AgentThreadHeader({
   onRename?: (title: string) => Promise<unknown>
   localThread?: DesktopLocalThreadSummary
   thread?: AgentThread
+  // Visibility of a thread that does not exist yet; existing threads read it
+  // from `thread` and can only continue privately.
+  visibility?: ThreadVisibility
+  onVisibilityChange?: (next: ThreadVisibility) => void
 }) {
   const navigate = useNavigate()
   const refreshLocalThreads = useRefreshLocalThreads()
@@ -94,6 +103,7 @@ export function AgentThreadHeader({
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
   const deleteThread = useDeleteAgentThread()
+  const continuePrivately = useContinueThreadPrivately()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const pinned = localThread
     ? prefs.pinnedLocalIds.includes(localThread.id)
@@ -163,6 +173,38 @@ export function AgentThreadHeader({
     editingRef.current = true
     setDraft(title)
   }
+  const continueThreadPrivately = () => {
+    if (!thread || localThread || continuePrivately.isPending) return
+    setRenameError(null)
+    continuePrivately.mutate(thread.id, {
+      onError: (error) =>
+        setRenameError(
+          error instanceof Error
+            ? error.message
+            : "Could not continue privately"
+        ),
+    })
+  }
+  const visibilityMenu = thread ? (
+    <ThreadVisibilityMenu
+      value={thread.visibility ?? "public"}
+      onChange={(next) => {
+        if (next === "private") continueThreadPrivately()
+      }}
+      disabledValues={thread.visibility === "private" ? ["public"] : []}
+      busy={continuePrivately.isPending}
+    />
+  ) : visibility ? (
+    <ThreadVisibilityMenu
+      value={visibility}
+      onChange={(next) => onVisibilityChange?.(next)}
+      disabledValues={
+        onVisibilityChange
+          ? []
+          : [visibility === "private" ? "public" : "private"]
+      }
+    />
+  ) : null
   const menuItems = (
     <ThreadMenuItems
       thread={thread ?? null}
@@ -290,9 +332,10 @@ export function AgentThreadHeader({
             )}
           </div>
         )}
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-          {target}
-        </span>
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          <span className="text-xs text-muted-foreground">{target}</span>
+          {!localThread && visibilityMenu}
+        </div>
       </div>
     </header>
   )

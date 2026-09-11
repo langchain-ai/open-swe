@@ -6,6 +6,8 @@ import json
 import logging
 import posixpath
 import shlex
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Literal, Protocol, TypeVar
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
@@ -22,7 +24,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from agent.config import ENV
 from agent.dashboard.admin import is_admin
@@ -36,6 +38,11 @@ from agent.dashboard.agent_usage import list_agent_usage_leaderboard
 from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
+)
+from agent.dashboard.environment_refresh import (
+    ensure_refresh_cron,
+    is_refresh_in_flight,
+    start_refresh_run,
 )
 from agent.dashboard.environments import (
     DEFAULT_ENVIRONMENT_SLUG,
@@ -64,7 +71,7 @@ from agent.dashboard.oauth import (
     decode_terminal_ticket,
     desktop_callback_url,
     desktop_handoff_from_state,
-    enforce_org_login_gate,
+    enforce_github_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
@@ -163,6 +170,7 @@ from agent.dashboard.team_settings import (
 from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
+    continue_thread_privately,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
@@ -215,9 +223,21 @@ from agent.dashboard.user_mappings import (
     list_mappings,
     upsert_mapping,
 )
+from agent.dashboard.user_mcps import (
+    delete_user_mcp,
+    discover_user_mcp,
+    get_user_mcp,
+    list_user_mcps,
+    save_user_mcp,
+)
+from agent.dashboard.user_preferences import (
+    UserPreferencesUpdate,
+    get_user_preferences,
+    set_user_preferences,
+)
 from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
-    WorkspaceMCPRoute,
+    MCPRoute,
     delete_workspace_mcp,
     get_workspace_mcp,
     list_workspace_mcps,
@@ -225,7 +245,12 @@ from agent.dashboard.workspace_mcps import (
 )
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
-from agent.mcp import MCPConnectionUpdate
+from agent.mcp import (
+    MCPConnection,
+    MCPConnectionPublic,
+    MCPConnectionUpdate,
+    MCPToolDescription,
+)
 from agent.review.analyzer_cron import remove_continual_cron
 from agent.review.eval_jobs import (
     get_reviewer_eval_status,
@@ -264,7 +289,7 @@ from agent.utils.dashboard_links import (
     dashboard_base_url,
     dashboard_is_same_origin,
 )
-from agent.utils.thread_ops import langgraph_url
+from agent.utils.thread_ops import langgraph_client, langgraph_url
 from agent.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -278,6 +303,12 @@ router.include_router(feedback_router)
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
+# Long enough that a browsing session mints once, short enough that a revoked
+# dashboard session loses access soon after.
+_SERVICE_TOKEN_TTL_SECONDS = 3600
+# A stored token is reused while at least this much of its life is left, so a
+# proxied request never starts with one about to expire mid-connection.
+_SERVICE_TOKEN_MIN_REMAINING_SECONDS = 120
 # Module-level so a local harness can point the browser leg at a fake consent
 # page and still run the real login/callback code.
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
@@ -538,7 +569,7 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
-    await enforce_org_login_gate(login)
+    await enforce_github_login_gate(login)
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
@@ -593,6 +624,7 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "avatar_url": session.get("avatar_url"),
         "is_admin": _session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
+        "api_base_url": _api_base_url(),
     }
 
 
@@ -620,6 +652,21 @@ async def api_delete_my_instructions(
 ) -> Response:
     await delete_user_instructions(session["sub"])
     return Response(status_code=204)
+
+
+@router.get("/me/preferences")
+async def api_get_my_preferences(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_user_preferences(session["sub"])
+
+
+@router.put("/me/preferences")
+async def api_put_my_preferences(
+    body: UserPreferencesUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await set_user_preferences(session["sub"], body)
 
 
 @router.get("/options")
@@ -969,15 +1016,25 @@ async def api_put_team_settings(
     return await upsert_team_settings(update)
 
 
-workspace_mcp_router = APIRouter(route_class=WorkspaceMCPRoute)
+def _reveal_mcp_headers(record: MCPConnection | None) -> JSONResponse:
+    if record is None:
+        raise HTTPException(404, "MCP connection not found")
+    try:
+        headers = record.connection_headers()
+    except ValueError:
+        raise HTTPException(400, "MCP authentication headers could not be decrypted") from None
+    return JSONResponse(content=headers, headers={"Cache-Control": "no-store"})
 
 
-@workspace_mcp_router.get("/workspace-mcps")
+workspace_mcp_router = APIRouter(route_class=MCPRoute)
+
+
+@workspace_mcp_router.get("/workspace-mcps", response_model=list[MCPConnectionPublic])
 async def api_list_workspace_mcps(_admin: dict[str, Any] = _ADMIN_DEP) -> list[dict[str, Any]]:
     return await list_workspace_mcps()
 
 
-@workspace_mcp_router.put("/workspace-mcps/{name}")
+@workspace_mcp_router.put("/workspace-mcps/{name}", response_model=MCPConnectionPublic)
 async def api_save_workspace_mcp(
     name: str,
     update: MCPConnectionUpdate,
@@ -999,17 +1056,12 @@ async def api_reveal_workspace_mcp_headers(
     name: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> JSONResponse:
-    record = await get_workspace_mcp(name)
-    if record is None:
-        raise HTTPException(404, "MCP connection not found")
-    try:
-        headers = record.connection_headers()
-    except ValueError:
-        raise HTTPException(400, "MCP authentication headers could not be decrypted") from None
-    return JSONResponse(content=headers, headers={"Cache-Control": "no-store"})
+    return _reveal_mcp_headers(await get_workspace_mcp(name))
 
 
-@workspace_mcp_router.post("/workspace-mcps/{name}/discover")
+@workspace_mcp_router.post(
+    "/workspace-mcps/{name}/discover", response_model=list[MCPToolDescription]
+)
 async def api_discover_workspace_mcp(
     name: str,
     update: MCPConnectionUpdate | None = None,
@@ -1022,6 +1074,54 @@ async def api_discover_workspace_mcp(
 
 
 router.include_router(workspace_mcp_router)
+
+
+user_mcp_router = APIRouter(route_class=MCPRoute)
+
+
+@user_mcp_router.get("/my-mcps", response_model=list[MCPConnectionPublic])
+async def api_list_my_mcps(session: dict[str, Any] = _SESSION_DEP) -> list[dict[str, Any]]:
+    return await list_user_mcps(session["sub"])
+
+
+@user_mcp_router.put("/my-mcps/{name}", response_model=MCPConnectionPublic)
+async def api_save_my_mcp(
+    name: str,
+    update: MCPConnectionUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    try:
+        return await save_user_mcp(session["sub"], name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@user_mcp_router.delete("/my-mcps/{name}", status_code=204)
+async def api_delete_my_mcp(name: str, session: dict[str, Any] = _SESSION_DEP) -> None:
+    await delete_user_mcp(session["sub"], name)
+
+
+@user_mcp_router.post("/my-mcps/{name}/headers/reveal")
+async def api_reveal_my_mcp_headers(
+    name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> JSONResponse:
+    return _reveal_mcp_headers(await get_user_mcp(session["sub"], name))
+
+
+@user_mcp_router.post("/my-mcps/{name}/discover", response_model=list[MCPToolDescription])
+async def api_discover_my_mcp(
+    name: str,
+    update: MCPConnectionUpdate | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, str]]:
+    try:
+        return await discover_user_mcp(session["sub"], name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+router.include_router(user_mcp_router)
 
 
 class EnabledReviewRepoUpdate(BaseModel):
@@ -1083,18 +1183,21 @@ async def api_create_environment(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Environment:
     try:
-        return await ENVIRONMENTS.create(body, _admin["sub"])
+        record = await ENVIRONMENTS.create(body, _admin["sub"])
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
+    if record.setup_script:
+        await ensure_refresh_cron(record.slug)
+    return record
 
 
 @router.get("/environments/options")
 async def api_environment_options(
-    _session: dict[str, Any] = _SESSION_DEP,
+    session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    """Pickable environments for any signed-in user: names only, no prompts."""
+    """Pickable environments for any signed-in user; refresh logs only for admins."""
     return {
-        "environments": await list_environment_options(),
+        "environments": await list_environment_options(include_logs=_session_is_admin(session)),
         "default_slug": DEFAULT_ENVIRONMENT_SLUG,
     }
 
@@ -1117,9 +1220,36 @@ async def api_update_environment(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Environment:
     try:
-        return await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
+        record = await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    if record.setup_script:
+        await ensure_refresh_cron(record.slug)
+    return record
+
+
+@router.post("/environments/{slug}/refresh")
+async def api_refresh_environment(
+    slug: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    """Start a snapshot rebuild from the environment's scripts.
+
+    Started in the background rather than awaited: a rebuild takes minutes, and
+    the outcome lands on the record for the dashboard to poll.
+    """
+    normalized = _normalized_slug(slug)
+    record = await ENVIRONMENTS.get(normalized)
+    if not record:
+        raise HTTPException(404, "environment not found")
+    if not record.setup_script:
+        raise HTTPException(400, "environment has no setup script to run")
+    if is_refresh_in_flight(record):
+        raise HTTPException(409, "a refresh of this environment is already running")
+    run_id = await start_refresh_run(normalized)
+    if run_id is None:
+        raise HTTPException(502, "could not start the refresh job")
+    return {"started": True, "run_id": run_id}
 
 
 @router.delete("/environments/{slug}")
@@ -2128,6 +2258,101 @@ async def api_thread_terminal_connection(
     }
 
 
+class SandboxServiceToken(BaseModel):
+    """A LangSmith service credential for one port of one sandbox."""
+
+    service_url: str
+    token: str
+    expires_at: str
+
+    def usable_for(self, seconds: float) -> bool:
+        try:
+            expires = datetime.fromisoformat(self.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        return (expires - datetime.now(UTC)).total_seconds() > seconds
+
+
+def _service_token_namespace(sandbox_id: str) -> tuple[str, str]:
+    return ("sandbox_service", sandbox_id)
+
+
+async def _stored_service_token(sandbox_id: str, port: int) -> SandboxServiceToken | None:
+    """The token this deployment already minted for the port, while it stays usable."""
+    try:
+        item = await langgraph_client().store.get_item(
+            _service_token_namespace(sandbox_id), str(port)
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    value = item.get("value") if isinstance(item, Mapping) else None
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        stored = SandboxServiceToken.model_validate(value)
+    except ValidationError:
+        return None
+    return stored if stored.usable_for(_SERVICE_TOKEN_MIN_REMAINING_SECONDS) else None
+
+
+async def _store_service_token(sandbox_id: str, port: int, token: SandboxServiceToken) -> None:
+    try:
+        await langgraph_client().store.put_item(
+            _service_token_namespace(sandbox_id), str(port), token.model_dump()
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not store the sandbox service token", exc_info=True)
+
+
+@router.get("/threads/{thread_id}/service-url")
+async def api_thread_service_url(
+    thread_id: str,
+    port: int,
+    response: Response,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, str]:
+    """Mint a sandbox service credential for the dashboard's service proxy.
+
+    The token, not the ``browser_url`` that carries it, so it stays server-side:
+    the dashboard app attaches it as a header and the browser never holds it.
+    """
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
+        raise HTTPException(400, "sandbox services require a LangSmith sandbox")
+    if isinstance(port, bool) or not 1 <= port <= 65535:
+        raise HTTPException(422, "port must be between 1 and 65535")
+    sandbox_id, _ = await get_dashboard_terminal_sandbox(
+        thread_id, session["sub"], email=session.get("email")
+    )
+    response.headers["Cache-Control"] = "no-store"
+    stored = await _stored_service_token(sandbox_id, port)
+    if stored is not None:
+        return stored.model_dump()
+
+    from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+
+    try:
+        async with get_async_sandbox_client() as client:
+            service = await client.service(
+                sandbox_id, port, expires_in_seconds=_SERVICE_TOKEN_TTL_SECONDS
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Could not mint a sandbox service token",
+            extra={"thread_id": thread_id, "sandbox": sandbox_id, "service_port": port},
+            exc_info=True,
+        )
+        raise HTTPException(502, "could not reach the thread sandbox") from exc
+    minted = SandboxServiceToken(
+        service_url=service.service_url,
+        token=service.token,
+        expires_at=service.expires_at,
+    )
+    await _store_service_token(sandbox_id, port, minted)
+    return minted.model_dump()
+
+
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
     if ENV.SANDBOX_TYPE.get() != "langsmith":
         await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
@@ -2314,6 +2539,14 @@ async def api_rename_thread(
     )
 
 
+@router.post("/threads/{thread_id}/continue-private")
+async def api_continue_thread_privately(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await continue_thread_privately(thread_id, session["sub"], email=session.get("email"))
+
+
 @router.post("/threads/{thread_id}/resolve")
 async def api_resolve_thread(
     thread_id: str,
@@ -2360,7 +2593,7 @@ async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await admin_cancel_dashboard_thread(thread_id)
+    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"], email=_admin.get("email"))
 
 
 @router.delete("/threads/{thread_id}")
