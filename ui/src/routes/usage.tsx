@@ -101,7 +101,7 @@ export function UsageAnalytics({
 
       <SettingsSection
         title="Agent leaderboard"
-        description="Ranked by merged PRs, then agent lines of code, PRs opened, and invocations. A thread can contain multiple invocations."
+        description="Ranked by merged PRs, then agent lines of code, PRs opened, and invocations."
         action={
           <Select
             value={activePeriod}
@@ -204,8 +204,7 @@ function AnalyticsCoverage({ reports }: { reports: AnalyticsMetadata[] }) {
         <time dateTime={latest.reporting_cutover_at}>
           {new Date(latest.reporting_cutover_at).toLocaleString()}
         </time>
-        . All time starts at this cutover. Earlier Store history is not
-        included.
+        .
       </p>
       <p>
         {latest.last_processed_at
@@ -253,8 +252,8 @@ function PRMergeRateSection({
 
   return (
     <SettingsSection
-      title="PR outcomes by opening invocation's configured model"
-      description="PRs are grouped by open date and the opening invocation's configured model. Routing, provider fallback, subagents, and later invocations may use other models, so this does not measure one model's independent success."
+      title="PR outcomes"
+      description="Outcomes for PRs opened during the selected period."
     >
       {report.isPending ? (
         <div
@@ -291,14 +290,49 @@ function PRMergeRateSection({
         </p>
       )}
       {data ? (
-        <div className="space-y-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <p>
-            Open PRs become mature pending after {data.maturity_days} days;
-            pending is never failure. Decided rate excludes pending PRs. Mature
-            share includes mature pending PRs. Groups smaller than{" "}
-            {data.suppression_threshold} PRs are withheld.
-          </p>
-        </div>
+        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+            How these numbers work
+          </summary>
+          <div className="mt-3 space-y-3">
+            <ul className="list-disc space-y-1 pl-4">
+              <li>
+                <strong>Waiting:</strong> still open and less than{" "}
+                {data.maturity_days} days old. These PRs are excluded from both
+                rates.
+              </li>
+              <li>
+                <strong>Mature pending:</strong> still open and at least{" "}
+                {data.maturity_days} days old. They have no final outcome yet.
+              </li>
+              <li>
+                <strong>Decided rate:</strong> the percentage of merged or
+                closed PRs that were merged. Open PRs are excluded.
+              </li>
+              <li>
+                <strong>Mature share:</strong> the percentage merged among
+                merged, closed, and mature pending PRs.
+              </li>
+            </ul>
+            <p>
+              For example, 3 merged PRs, 1 closed without merging, and 1 mature
+              pending PR give a decided rate of 75% (3 of 4) and a mature share
+              of 60% (3 of 5). Waiting PRs do not change either rate.
+            </p>
+            <p>
+              PRs are grouped by the model configured for the run that opened
+              them. Other models may contribute through routing, fallback,
+              subagents, or later runs, so these rates do not measure one
+              model's independent success.
+            </p>
+            {data.suppression_threshold > 1 ? (
+              <p>
+                Groups with fewer than {data.suppression_threshold} PRs are
+                hidden for privacy.
+              </p>
+            ) : null}
+          </div>
+        </details>
       ) : null}
     </SettingsSection>
   )

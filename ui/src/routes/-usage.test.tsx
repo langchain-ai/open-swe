@@ -93,12 +93,6 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
       .getByText(new Date(captured.reporting_cutover_at).toLocaleString())
       .getAttribute("datetime")
   ).toBe(captured.reporting_cutover_at)
-  expect(
-    screen.getByText(
-      /All time starts at this cutover. Earlier Store history is not included./
-    )
-  ).toBeTruthy()
-  expect(screen.getByText(/after 21 days/)).toBeTruthy()
   expect(screen.queryByText(/too small to show/)).toBeNull()
 
   query.mockResolvedValue({
