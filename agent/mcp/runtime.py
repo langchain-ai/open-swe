@@ -134,6 +134,32 @@ def mcp_tool_name(connection_name: str, tool_name: str) -> str:
     return f"{safe[:53]}_{suffix}"
 
 
+async def invoke_mcp_tool(
+    name: str, definition: Tool, connection: Connection, arguments: dict[str, Any]
+) -> Any:
+    async def forward_arguments(
+        request: MCPToolCallRequest,
+        handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
+    ) -> MCPToolCallResult:
+        return await handler(request.override(args=arguments))
+
+    try:
+        tool = convert_mcp_tool_to_langchain_tool(
+            None,
+            definition,
+            connection=connection,
+            tool_interceptors=[forward_arguments],
+        )
+        if not isinstance(tool, StructuredTool) or tool.coroutine is None:
+            raise ToolException("MCP tool has no async implementation")
+        return await asyncio.wait_for(tool.coroutine(), timeout=_TIMEOUT_SECONDS)
+    except ToolException:
+        raise
+    except Exception:
+        logger.warning("MCP call failed", extra={"mcp_name": name})
+        raise ToolException("MCP call failed; check its connection and credentials") from None
+
+
 def _wrap_tool(
     name: str,
     url: str,
@@ -157,22 +183,9 @@ def _wrap_tool(
             if definition.name not in record.allowed_tools:
                 raise ToolException("This tool is no longer allowed by the MCP connection settings")
 
-            async def forward_arguments(
-                request: MCPToolCallRequest,
-                handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
-            ) -> MCPToolCallResult:
-                # Preserve remote arguments named `runtime`, reserved by the adapter.
-                return await handler(request.override(args=arguments))
-
-            fresh = convert_mcp_tool_to_langchain_tool(
-                None,
-                definition,
-                connection=_connection(record, namespace),
-                tool_interceptors=[forward_arguments],
+            return await invoke_mcp_tool(
+                name, definition, _connection(record, namespace), arguments
             )
-            if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
-                raise ToolException("MCP tool has no async implementation")
-            return await asyncio.wait_for(fresh.coroutine(), timeout=_TIMEOUT_SECONDS)
         except ToolException:
             raise
         except Exception:
@@ -220,12 +233,16 @@ async def _load_tools(
 async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> list[BaseTool]:
     """Combine sources in precedence order; later connections replace earlier names entirely."""
     try:
-        catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
-        resolved = {
-            record.name: (source, record)
-            for source, records in zip(sources, catalogs, strict=True)
-            for record in records
-        }
+        if connection_name:
+            match = await _resolve_connection(connection_name, sources)
+            resolved = {connection_name: match} if match else {}
+        else:
+            catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
+            resolved = {
+                record.name: (source, record)
+                for source, records in zip(sources, catalogs, strict=True)
+                for record in records
+            }
     except Exception:
         # Missing scope data must not silently expose a lower-precedence connection.
         logger.warning("MCP settings unavailable")

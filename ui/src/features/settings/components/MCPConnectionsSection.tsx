@@ -146,7 +146,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
         ...connection,
         oauth:
           connection.oauth === undefined ? previous?.oauth : connection.oauth,
-        enabled: previous?.enabled ?? true,
+        enabled: connection.enabled ?? previous?.enabled ?? true,
         allowed_tools: previous?.allowed_tools ?? [],
         existing: Boolean(previous),
       },
@@ -740,6 +740,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
         })}
         {importing ? (
           <MCPImport
+            local={local}
             onImport={([first, ...rest]) => {
               if (!first) return
               setImporting(false)

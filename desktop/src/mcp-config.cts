@@ -95,6 +95,15 @@ async function saveMcpConnection(configPath, update) {
   const previous = document.mcpServers[name] || {};
   if (typeof previous.command === "string")
     throw new Error("Command-based MCPs must still be edited in mcp.json.");
+  if (
+    previous.url &&
+    previous.url !== update.url &&
+    Object.keys(previous.headers || {}).length &&
+    update.headers == null
+  )
+    throw new Error(
+      "Replace or clear authentication headers when changing the server URL.",
+    );
   const settings = {
     ...previous,
     url: update.url,

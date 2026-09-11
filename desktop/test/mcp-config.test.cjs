@@ -62,11 +62,16 @@ for (const allowedTools of [undefined, [], ["search"]]) {
       }),
       { mode: 0o600 },
     );
-    await saveMcpConnection(configPath, {
+    const update = {
       ...(await listMcpConnections(configPath))[0],
       url: "http://localhost:9090/mcp",
       headers: null,
-    });
+    };
+    await assert.rejects(
+      saveMcpConnection(configPath, update),
+      /Replace or clear authentication headers/,
+    );
+    await saveMcpConnection(configPath, { ...update, headers: {} });
     const saved = JSON.parse(fs.readFileSync(configPath, "utf8")).mcpServers
       .local;
     assert.equal(
@@ -74,7 +79,7 @@ for (const allowedTools of [undefined, [], ["search"]]) {
       allowedTools !== undefined,
     );
     assert.deepEqual(saved.allowed_tools, allowedTools);
-    assert.deepEqual(saved.headers, { Authorization: "Bearer secret" });
+    assert.deepEqual(saved.headers, {});
   });
 }
 

@@ -34,7 +34,9 @@ async def desktop_mcp_catalog(login: str) -> dict[str, Any]:
 async def call_desktop_mcp(login: str, request: dict[str, Any]) -> Any:
     if request.get("login") != login:
         raise HTTPException(403, "Desktop account changed; start a new run")
-    for tool in await desktop_mcp_tools(login):
+    name = request.get("metadata", {}).get("mcp_connection")
+    tools = await load_mcp_tools(workspace_mcp_source, user_mcp_source(login), connection_name=name)
+    for tool in tools:
         if tool.name == request.get("name") and tool.metadata == request.get("metadata"):
             return await tool.ainvoke(request.get("arguments", {}))
     raise HTTPException(409, "MCP connection changed or unavailable; start a new run")

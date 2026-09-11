@@ -7,7 +7,7 @@ from cryptography.fernet import Fernet
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from agent.dashboard import workspace_mcps as settings
-from agent.mcp import MCPConnectionUpdate, runtime
+from agent.mcp import MCPConnectionUpdate, prepare_connection, runtime
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.tool_loaders import workspace_mcp as loader
 from agent.utils import ttl_cache
@@ -218,6 +218,19 @@ async def test_remote_arguments_survive_langchain_invocation(fake_store, monkeyp
     assert result.tool_call_id == "call-1"
     assert result.status == "success"
     assert json.loads(result.content[0]["text"]) == {argument: "remote-value"}
+
+
+async def test_connection_selector_uses_targeted_source_lookup():
+    record = await prepare_connection(
+        MCPConnectionUpdate(name="example", url="https://example.com", enabled=False)
+    )
+    source = runtime.MCPSource(
+        namespace=("workspace",),
+        list_connections=AsyncMock(side_effect=AssertionError("loaded catalog")),
+        get_connection=AsyncMock(return_value=record),
+    )
+    assert await runtime.load_mcp_tools(source, connection_name="example") == []
+    source.get_connection.assert_awaited_once_with("example")
 
 
 def test_connection_tool_pairs_cannot_collide():

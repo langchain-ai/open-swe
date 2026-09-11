@@ -44,15 +44,15 @@ async function startMcpBroker(backendFetch, getBackendUrl, configPath) {
           signal: AbortSignal.timeout(60000),
         },
       );
+      const responseBody =
+        request.method === "GET" && upstream.ok
+          ? JSON.stringify({ ...(await upstream.json()), backend })
+          : await upstream.text();
       response.writeHead(upstream.status, {
         "content-type": "application/json",
         "cache-control": "no-store",
       });
-      response.end(
-        request.method === "GET" && upstream.ok
-          ? JSON.stringify({ ...(await upstream.json()), backend })
-          : await upstream.text(),
-      );
+      response.end(responseBody);
     } catch {
       response.writeHead(502).end();
     }

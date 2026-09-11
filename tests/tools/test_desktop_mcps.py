@@ -74,7 +74,7 @@ async def test_cloud_desktop_call_rejects_account_and_scope_changes(monkeypatch)
         args_schema={"type": "object"},
         metadata={"scope": "alice"},
     )
-    monkeypatch.setattr(desktop_mcps, "desktop_mcp_tools", AsyncMock(return_value=[tool]))
+    monkeypatch.setattr(desktop_mcps, "load_mcp_tools", AsyncMock(return_value=[tool]))
     request = {"login": "alice", "name": "search", "metadata": {"scope": "alice"}}
     assert await desktop_mcps.call_desktop_mcp("alice", request) == "result"
     with pytest.raises(HTTPException):

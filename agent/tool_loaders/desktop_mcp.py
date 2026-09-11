@@ -5,15 +5,12 @@ import json
 import logging
 import os
 import stat
-from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 import httpx
-from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langchain_core.tools import BaseTool, ToolException
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.interceptors import MCPToolCallRequest, MCPToolCallResult
 from langchain_mcp_adapters.sessions import Connection
-from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 from mcp.types import Tool
 
 from agent.config import ENV
@@ -103,25 +100,16 @@ def _local_tool(
         if (await asyncio.to_thread(_local_servers)).get(name) != settings:
             raise ToolException("Local MCP configuration changed; start a new run")
 
-        async def forward_arguments(
-            request: MCPToolCallRequest,
-            handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
-        ) -> MCPToolCallResult:
-            return await handler(request.override(args=arguments))
-
-        fresh = convert_mcp_tool_to_langchain_tool(
-            None,
+        return await runtime.invoke_mcp_tool(
+            name,
             Tool(
                 name=tool.name,
                 description=tool.description,
                 inputSchema=cast(dict[str, Any], tool.args_schema),
             ),
-            connection=connection,
-            tool_interceptors=[forward_arguments],
+            connection,
+            arguments,
         )
-        if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
-            raise ToolException("Local MCP tool has no async implementation")
-        return await fresh.coroutine()
 
     return runtime.MCPTool.from_function(
         coroutine=invoke,
