@@ -14,12 +14,15 @@ def _middleware(
     models = {profile: MagicMock(name=profile) for profile in ("fast", "balanced", "performance")}
     structured = AsyncMock(return_value=RouteDecision(model_route=route))
     classifier = MagicMock()
-    classifier.with_structured_output.return_value.ainvoke = structured
+    classifier.tags = None
+    tagged = classifier.model_copy.return_value
+    tagged.with_structured_output.return_value.ainvoke = structured
     middleware = ModelSelectionMiddleware(
         cast(Any, models),
         classifier,
     )
-    classifier.with_structured_output.assert_called_once_with(
+    classifier.model_copy.assert_called_once_with(update={"tags": ["nostream"]})
+    tagged.with_structured_output.assert_called_once_with(
         RouteDecision,
         method="json_schema",
     )

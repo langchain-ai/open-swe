@@ -37,7 +37,14 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         classifier: BaseChatModel,
     ) -> None:
         self._models = dict(models)
-        self._classifier = classifier.with_structured_output(RouteDecision, method="json_schema")
+        # `nostream` keeps the routing decision out of the user-facing message
+        # stream; it stays visible in traces, unlike the offloading summarizer.
+        hidden_classifier = classifier.model_copy(
+            update={"tags": [*(classifier.tags or []), "nostream"]}
+        )
+        self._classifier = hidden_classifier.with_structured_output(
+            RouteDecision, method="json_schema"
+        )
 
     async def abefore_model(
         self,
