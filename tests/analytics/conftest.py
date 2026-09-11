@@ -2,7 +2,6 @@
 
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -41,9 +40,11 @@ async def analytics_db(monkeypatch):
     engine = create_async_engine(uri)
     schema = f"analytics_test_{uuid4().hex}"
     monkeypatch.setenv("ANALYTICS_SUMMARY_VERSION", "1")
+    migrations, scripts = database._load_migrations()
+    scripts = {revision: script.replace("open_swe", schema) for revision, script in scripts.items()}
     async with engine.begin() as conn:
-        for path in sorted(Path(database.__file__).with_name("migrations").glob("*.sql")):
-            await database._run_script(conn, path.read_text().replace("open_swe_analytics", schema))
+        await conn.execute(text(f"CREATE SCHEMA {schema}"))
+        await conn.run_sync(database._upgrade, migrations, scripts, schema)
         workspace = await conn.scalar(
             text(f"SELECT workspace_id FROM {schema}.deployment_metadata")
         )
