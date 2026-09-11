@@ -37,7 +37,11 @@ from e2e_env import (  # noqa: E402
     BOT_USER_ID,
     DEMO_CHANNEL,
     HUMAN_USER,
+    OWNER,
+    REPO,
     REPO_ROOT,
+    SECOND_OWNER,
+    SECOND_REPO,
     TEST_USERS,
 )
 from fastapi import HTTPException, Request  # noqa: E402
@@ -618,6 +622,15 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "changed_files": len(pr["files"]),
         "created_at": pr["created_at"],
     }
+
+
+@app.get("/fake-gh/installation/repositories")
+async def gh_list_installation_repositories() -> JSONResponse:
+    repositories = [
+        {"full_name": f"{OWNER}/{REPO}"},
+        {"full_name": f"{SECOND_OWNER}/{SECOND_REPO}"},
+    ]
+    return JSONResponse({"total_count": len(repositories), "repositories": repositories})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
