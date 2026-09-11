@@ -20,8 +20,9 @@ tokens are never placed in the local backend environment or inherited by agent s
 
 Local model calls also honor `LANGSMITH_GATEWAY_*` configuration. On managed macOS installs, the
 app reads `LC_GATEWAY_KEY` from `launchctl` when no explicit gateway key is configured and enables
-gateway routing for the local backend. Gateway and provider credentials are not inherited by agent
-shell commands.
+gateway routing for the local backend. The local backend traces to the connected cloud deployment's
+`LANGSMITH_PROJECT` by default. Gateway and provider credentials are not inherited by agent shell
+commands.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
