@@ -187,12 +187,15 @@ async def enforce_github_login_gate(login: str) -> None:
     raise HTTPException(403, "your GitHub account is not authorized")
 
 
-def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:
+def issue_session(
+    *, login: str, email: str | None, avatar_url: str | None, desktop: bool = False
+) -> str:
     now = int(time.time())
     payload = {
         "sub": login,
         "email": email,
         "avatar_url": avatar_url,
+        "desktop": desktop,
         "iat": now,
         "exp": now + SESSION_TTL_SECONDS,
     }
@@ -332,6 +335,7 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
         login=login,
         email=email if isinstance(email, str) else None,
         avatar_url=avatar_url if isinstance(avatar_url, str) else None,
+        desktop=True,
     )
 
 

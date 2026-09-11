@@ -642,7 +642,7 @@ export function AgentsSidebar({
         )}
       >
         <Link
-          to={localOnly ? "/agents" : "/my-settings"}
+          to="/my-settings"
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
           <img

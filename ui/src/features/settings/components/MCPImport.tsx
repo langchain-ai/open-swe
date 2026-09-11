@@ -7,7 +7,7 @@ import type { MCPConnectionUpdate, MCPOAuthUpdate } from "@/lib/api"
 export type ImportedMCP = Pick<
   MCPConnectionUpdate,
   "name" | "url" | "transport" | "headers" | "oauth"
->
+> & { enabled?: boolean }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -49,7 +49,7 @@ function parseOAuth(value: unknown, label: string): MCPOAuthUpdate | null {
   return { ...value, token_url: value.token_url, client_id: value.client_id }
 }
 
-export function parseMCPConfig(text: string): ImportedMCP[] {
+export function parseMCPConfig(text: string, local = false): ImportedMCP[] {
   let config: unknown
   try {
     config = JSON.parse(text)
@@ -73,27 +73,34 @@ export function parseMCPConfig(text: string): ImportedMCP[] {
       throw new Error(
         `${label}: local command servers are not supported. Use a remote HTTP or SSE server.`
       )
-    if (
-      Object.keys(server).some(
-        (key) => !["url", "type", "headers", "oauth"].includes(key)
-      )
-    )
+    if (local && "oauth" in server)
+      throw new Error(`${label}: OAuth is not supported for local MCPs.`)
+    const supported = local
+      ? ["url", "type", "transport", "headers", "enabled", "allowed_tools"]
+      : ["url", "type", "headers", "oauth"]
+    if (Object.keys(server).some((key) => !supported.includes(key)))
       throw new Error(
-        `${label}: supported settings are url, type, headers, and oauth.`
+        `${label}: supported settings are ${supported.join(", ")}.`
       )
     if (
       typeof server.url !== "string" ||
-      !server.url.trim().startsWith("https://")
+      (!local && !server.url.trim().startsWith("https://")) ||
+      (local && !/^https?:\/\//.test(server.url.trim()))
     )
-      throw new Error(`${label}: provide an HTTPS server URL.`)
+      throw new Error(
+        `${label}: provide an ${local ? "HTTP or HTTPS" : "HTTPS"} server URL.`
+      )
+    const transport = server.transport ?? server.type
     if (
-      server.type !== undefined &&
-      (typeof server.type !== "string" ||
+      transport !== undefined &&
+      (typeof transport !== "string" ||
         !["http", "streamable_http", "streamable-http", "sse"].includes(
-          server.type
+          transport
         ))
     )
-      throw new Error(`${label}: type must be http or sse.`)
+      throw new Error(
+        `${label}: ${local ? "transport" : "type"} must be http or sse.`
+      )
     let headers: Record<string, string> | undefined
     if (server.headers !== undefined) {
       if (
@@ -110,8 +117,11 @@ export function parseMCPConfig(text: string): ImportedMCP[] {
     return {
       name,
       url: server.url.trim(),
-      transport: server.type === "sse" ? "sse" : "streamable_http",
+      transport: transport === "sse" ? "sse" : "streamable_http",
       headers,
+      ...(local && typeof server.enabled === "boolean"
+        ? { enabled: server.enabled }
+        : {}),
       ...(server.oauth !== undefined
         ? { oauth: parseOAuth(server.oauth, label) }
         : {}),
@@ -122,9 +132,11 @@ export function parseMCPConfig(text: string): ImportedMCP[] {
 export function MCPImport({
   onImport,
   onCancel,
+  local = false,
 }: {
   onImport: (connections: ImportedMCP[]) => void
   onCancel: () => void
+  local?: boolean
 }) {
   const [text, setText] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -134,7 +146,7 @@ export function MCPImport({
       onSubmit={(event) => {
         event.preventDefault()
         try {
-          const connections = parseMCPConfig(text)
+          const connections = parseMCPConfig(text, local)
           setText("")
           onImport(connections)
         } catch (cause) {

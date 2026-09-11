@@ -1089,6 +1089,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
+    if not stop_summary_mode and local_run:
+        from agent.tool_loaders.desktop_mcp import load_desktop_mcp_tools
+
+        mcp_tools = await load_desktop_mcp_tools()
     if not stop_summary_mode and not local_run and credential_scope_known:
         mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(

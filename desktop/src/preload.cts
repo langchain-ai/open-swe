@@ -39,6 +39,13 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   getVersion: () => ipcRenderer.invoke("desktop:version"),
   getUpdateState: () => ipcRenderer.invoke("desktop:update-state"),
+  listMcpConnections: () => ipcRenderer.invoke("desktop:list-mcp-connections"),
+  saveMcpConnection: (input) =>
+    ipcRenderer.invoke("desktop:save-mcp-connection", { ...input }),
+  deleteMcpConnection: (name) =>
+    ipcRenderer.invoke("desktop:delete-mcp-connection", name),
+  revealMcpHeaders: (name) =>
+    ipcRenderer.invoke("desktop:reveal-mcp-headers", name),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
   onUpdateState: (callback) => {
     const listener = (_event, state) => callback(state);

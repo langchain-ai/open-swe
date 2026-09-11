@@ -51,6 +51,12 @@ const { beginLogin } = require("./login-server.cjs");
 const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
 const {
+  deleteMcpConnection,
+  listMcpConnections,
+  revealMcpHeaders,
+  saveMcpConnection,
+} = require("./mcp-config.cjs");
+const {
   APP_ORIGIN,
   APP_URL,
   SESSION_COOKIE_NAME,
@@ -109,6 +115,8 @@ let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
+let mcpBroker = null;
+const { startMcpBroker } = require("./mcp-broker.cjs");
 type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing";
   version?: string;
@@ -210,6 +218,10 @@ function requireTrustedDesktopIpc(event) {
 
 function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json");
+}
+
+function mcpConfigPath() {
+  return path.join(app.getPath("userData"), "mcp.json");
 }
 
 /**
@@ -442,6 +454,22 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return updateState;
   });
+  ipcMain.handle("desktop:list-mcp-connections", async (event) => {
+    requireTrustedDesktopIpc(event);
+    return listMcpConnections(mcpConfigPath());
+  });
+  ipcMain.handle("desktop:save-mcp-connection", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    return saveMcpConnection(mcpConfigPath(), input);
+  });
+  ipcMain.handle("desktop:delete-mcp-connection", async (event, name) => {
+    requireTrustedDesktopIpc(event);
+    return deleteMcpConnection(mcpConfigPath(), name);
+  });
+  ipcMain.handle("desktop:reveal-mcp-headers", async (event, name) => {
+    requireTrustedDesktopIpc(event);
+    return revealMcpHeaders(mcpConfigPath(), name);
+  });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);
     if (updateState.status === "installing") return true;
@@ -454,6 +482,7 @@ function configureDesktopIpc() {
         closeAllTerminals(),
         backendSupervisor?.close(),
         openAiOAuth?.close(),
+        mcpBroker?.close(),
       ]);
       autoUpdater.quitAndInstall(false, true);
       return true;
@@ -1476,6 +1505,11 @@ if (!hasSingleInstanceLock) {
     await openAiOAuth.startBroker().catch((error) => {
       console.warn("Could not start the local OpenAI credential broker", error);
     });
+    mcpBroker = await startMcpBroker(
+      backendFetch,
+      () => backendUrl,
+      path.join(app.getPath("userData"), "mcp.json"),
+    );
     backendSupervisor = new BackendSupervisor({
       isPackaged: app.isPackaged,
       repoRoot: path.resolve(__dirname, "../.."),
@@ -1502,7 +1536,7 @@ if (!hasSingleInstanceLock) {
           return {};
         }
       },
-      providerEnv: () => openAiOAuth?.backendEnv() || {},
+      providerEnv: () => ({ ...openAiOAuth?.backendEnv(), ...mcpBroker?.env }),
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&
         Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
@@ -1539,6 +1573,7 @@ if (!hasSingleInstanceLock) {
       closeAllTerminals(),
       backendSupervisor?.close(),
       openAiOAuth?.close(),
+      mcpBroker?.close(),
     ]).finally(() => {
       app.quit();
     });
