@@ -1,5 +1,5 @@
 from typing import Any, Literal, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -30,6 +30,14 @@ def _middleware(
     return middleware, models, structured
 
 
+def _request(state: dict[str, Any]) -> ModelRequest:
+    runtime = MagicMock()
+    runtime.config = {"configurable": {"thread_id": "thread-1"}}
+    return ModelRequest(
+        model=MagicMock(), messages=state["messages"], state=cast(Any, state), runtime=runtime
+    )
+
+
 async def _run_with_metadata(metadata: dict[str, Any], coro):
     config = RunnableConfig(metadata=metadata)
     token = var_child_runnable_config.set(config)
@@ -45,11 +53,7 @@ async def _invoke(
     state: dict[str, Any],
     metadata: dict[str, Any] | None = None,
 ) -> ModelRequest:
-    request = ModelRequest(
-        model=MagicMock(),
-        messages=state["messages"],
-        state=cast(Any, state),
-    )
+    request = _request(state)
     seen: list[ModelRequest] = []
 
     async def handler(routed: ModelRequest) -> ModelResponse:
@@ -158,25 +162,34 @@ async def test_classifier_failure_falls_back_to_balanced_route() -> None:
 
 
 @pytest.mark.asyncio
-async def test_route_is_reported_in_run_metadata_when_routing_applied() -> None:
+async def test_route_is_reported_in_run_metadata_and_thread_when_routing_applied() -> None:
     middleware, models, _ = _middleware(route="fast")
     state = {"messages": [HumanMessage(content="Update the README")], "model_route": "fast"}
     metadata: dict[str, Any] = {"model_routing_applied": True}
 
-    await _invoke(middleware, state, metadata)
+    with patch("agent.middleware.model_selection.get_client") as get_client:
+        get_client.return_value.threads.update = AsyncMock()
+        await _invoke(middleware, state, metadata)
 
     assert metadata["model_route"] == "fast"
+    get_client.return_value.threads.update.assert_awaited_once_with(
+        thread_id="thread-1",
+        metadata={"last_model_route": "fast"},
+    )
 
 
 @pytest.mark.asyncio
-async def test_route_metadata_is_omitted_when_routing_not_applied() -> None:
+async def test_thread_route_is_not_recorded_when_routing_not_applied() -> None:
     middleware, _, _ = _middleware(route="fast")
     state = {"messages": [HumanMessage(content="Update the README")], "model_route": "fast"}
     metadata: dict[str, Any] = {}
 
-    await _invoke(middleware, state, metadata)
+    with patch("agent.middleware.model_selection.get_client") as get_client:
+        get_client.return_value.threads.update = AsyncMock()
+        await _invoke(middleware, state, metadata)
 
     assert "model_route" not in metadata
+    get_client.return_value.threads.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio

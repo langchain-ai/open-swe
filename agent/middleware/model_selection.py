@@ -7,6 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
+from langgraph_sdk import get_client
 from pydantic import BaseModel
 
 from agent.input_messages import input_message_text, message_sender_id
@@ -16,6 +17,8 @@ from agent.prompts import load_prompt, render_prompt
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "balanced", "performance"]
+
+THREAD_MODEL_ROUTE_KEY = "last_model_route"
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 _PLAN_APPROVED_PREFIX = "Plan mode is now inactive because the plan was approved."
@@ -118,10 +121,27 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             config = get_config()
         except RuntimeError:
             config = {}
-        if config.get("metadata", {}).get("model_routing_applied"):
-            config["metadata"] = {
-                **(config.get("metadata") or {}),
-                "model_route": route,
-            }
+        metadata = config.get("metadata") or {}
+        if metadata.get("model_routing_applied"):
+            metadata = {**metadata, "model_route": route}
+            config["metadata"] = metadata
+            await self._record_thread_route(request, route)
         model = self._models.get(route, self._models["balanced"])
         return await handler(request.override(model=model))
+
+    async def _record_thread_route(self, request: ModelRequest, route: Route) -> None:
+        """Persist the latest selection on the thread for dashboard display."""
+        runtime_config = getattr(getattr(request, "runtime", None), "config", None)
+        configurable = (
+            runtime_config.get("configurable", {}) if isinstance(runtime_config, Mapping) else {}
+        )
+        thread_id = configurable.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            return
+        try:
+            await get_client().threads.update(
+                thread_id=thread_id,
+                metadata={THREAD_MODEL_ROUTE_KEY: route},
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not record model route for thread %s", thread_id, exc_info=True)
