@@ -1,3 +1,4 @@
+import importlib
 from typing import Any
 
 import pytest
@@ -5,7 +6,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool as as_tool
 from langgraph.types import Command
 
-from agent.tools import exit_pre_routed_mode as exit_pre_routed_mode_module
+exit_pre_routed_mode_module = importlib.import_module("agent.tools.exit_pre_routed_mode")
 
 
 async def test_exit_pre_routed_mode_commits_route_and_title(

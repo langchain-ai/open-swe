@@ -22,7 +22,7 @@ from agent.dashboard.plan_store import (
 )
 from agent.model_routing import commit_route
 from agent.run_config import RunConfig
-from agent.utils.model import ModelRoute
+from agent.utils.thread_settings import ModelRoute
 
 logger = logging.getLogger(__name__)
 

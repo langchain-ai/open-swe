@@ -65,7 +65,6 @@ async def close_cached_models() -> None:
                 await result
 
 
-ModelRoute = Literal["fast", "balanced", "performance"]
 OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 # OpenAI's Responses API only returns human-readable reasoning text when a
 # summary is requested; without it, reasoning happens silently (billed in

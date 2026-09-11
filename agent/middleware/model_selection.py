@@ -17,7 +17,7 @@ from langgraph.runtime import Runtime
 from agent.middleware.plan_mode import tool_name
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt
-from agent.utils.model import ModelRoute
+from agent.utils.thread_settings import ModelRoute
 
 EXIT_PRE_ROUTED_MODE_TOOL = "exit_pre_routed_mode"
 PRE_ROUTED_MODE_TOOLS: frozenset[str] = frozenset(

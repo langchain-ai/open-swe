@@ -12,17 +12,18 @@ snapshot, which today means a per-run model override.
 
 import logging
 from collections.abc import Mapping
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from pydantic import TypeAdapter, ValidationError
 
 from agent.utils import ttl_cache
-from agent.utils.model import ModelRoute
 
 logger = logging.getLogger(__name__)
 
 THREAD_SETTINGS_KEY = "agent_settings"
 _CACHE_TTL_SECONDS = 300
+
+ModelRoute = Literal["fast", "balanced", "performance"]
 
 
 class ThreadSettings(TypedDict, total=False):

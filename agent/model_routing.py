@@ -6,8 +6,7 @@ from langgraph_sdk import get_client
 
 from agent.run_config import RunConfig
 from agent.thread_title import name_thread
-from agent.utils.model import ModelRoute
-from agent.utils.thread_settings import store_thread_model_route
+from agent.utils.thread_settings import ModelRoute, store_thread_model_route
 
 
 async def commit_route(

@@ -8,7 +8,7 @@ from langgraph.types import Command
 
 from agent.model_routing import commit_route
 from agent.run_config import RunConfig
-from agent.utils.model import ModelRoute
+from agent.utils.thread_settings import ModelRoute
 
 
 async def exit_pre_routed_mode(

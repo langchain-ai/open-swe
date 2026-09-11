@@ -13,7 +13,7 @@ def sample_tool(value: str) -> str:
 
 def test_render_prompt_requires_all_placeholders() -> None:
     with pytest.raises(KeyError):
-        render_prompt("model-selection.md")
+        render_prompt("system/plan-mode-active.md")
 
 
 def test_load_prompt_rejects_paths_outside_resources() -> None:
