@@ -108,6 +108,8 @@ let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
 let openAiOAuth = null;
+let mcpBroker = null;
+const { startMcpBroker } = require("./mcp-broker.cjs");
 type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing";
   version?: string;
@@ -428,6 +430,7 @@ function configureDesktopIpc() {
         closeAllTerminals(),
         backendSupervisor?.close(),
         openAiOAuth?.close(),
+        mcpBroker?.close(),
       ]);
       autoUpdater.quitAndInstall(false, true);
       return true;
@@ -1450,6 +1453,11 @@ if (!hasSingleInstanceLock) {
     await openAiOAuth.startBroker().catch((error) => {
       console.warn("Could not start the local OpenAI credential broker", error);
     });
+    mcpBroker = await startMcpBroker(
+      backendFetch,
+      () => backendUrl,
+      path.join(app.getPath("userData"), "mcp.json"),
+    );
     backendSupervisor = new BackendSupervisor({
       isPackaged: app.isPackaged,
       repoRoot: path.resolve(__dirname, "../.."),
@@ -1457,7 +1465,7 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
-      providerEnv: () => openAiOAuth?.backendEnv() || {},
+      providerEnv: () => ({ ...openAiOAuth?.backendEnv(), ...mcpBroker?.env }),
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&
         Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
@@ -1494,6 +1502,7 @@ if (!hasSingleInstanceLock) {
       closeAllTerminals(),
       backendSupervisor?.close(),
       openAiOAuth?.close(),
+      mcpBroker?.close(),
     ]).finally(() => {
       app.quit();
     });

@@ -228,6 +228,6 @@ def test_connection_tool_pairs_cannot_collide():
         ("example", "a_b"),
         ("example", "a" * 128),
     ]
-    names = [runtime._tool_name(*pair) for pair in pairs]
+    names = [runtime.mcp_tool_name(*pair) for pair in pairs]
     assert len(set(names)) == len(pairs)
     assert all(len(name) <= 64 for name in names)

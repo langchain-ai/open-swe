@@ -2899,6 +2899,82 @@
         ]
       }
     },
+    "/dashboard/api/desktop/mcps": {
+      "get": {
+        "operationId": "api_desktop_mcps_dashboard_api_desktop_mcps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Desktop Mcps Dashboard Api Desktop Mcps Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Desktop Mcps",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/desktop/mcps/call": {
+      "post": {
+        "operationId": "api_call_desktop_mcp_dashboard_api_desktop_mcps_call_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Request",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Api Call Desktop Mcp Dashboard Api Desktop Mcps Call Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Call Desktop Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/enabled-review-repos": {
       "get": {
         "operationId": "api_list_enabled_review_repos_dashboard_api_enabled_review_repos_get",

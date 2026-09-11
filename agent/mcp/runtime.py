@@ -53,7 +53,7 @@ async def _resolve_connection(
     return None
 
 
-class _MCPTool(StructuredTool):
+class MCPTool(StructuredTool):
     """Forward remote properties without consuming LangChain's reserved keywords."""
 
     def _run(self, /, *args: Any, **kwargs: Any) -> Any:
@@ -127,7 +127,7 @@ async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> l
         raise ValueError(_discovery_error(exc)) from None
 
 
-def _tool_name(connection_name: str, tool_name: str) -> str:
+def mcp_tool_name(connection_name: str, tool_name: str) -> str:
     full_name = f"mcp_{connection_name}_{tool_name}"
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", full_name)
     suffix = hashlib.sha256(json.dumps((connection_name, tool_name)).encode()).hexdigest()[:10]
@@ -179,14 +179,20 @@ def _wrap_tool(
             logger.warning("MCP call failed", extra={"mcp_name": name})
             raise ToolException("MCP call failed; check its connection and credentials") from None
 
-    return _MCPTool.from_function(
+    return MCPTool.from_function(
         coroutine=invoke,
-        name=_tool_name(name, definition.name),
+        name=mcp_tool_name(name, definition.name),
         description=definition.description or definition.name,
         args_schema=definition.inputSchema,
         response_format="content_and_artifact",
         handle_tool_error=True,
-        metadata={"mcp_tool_name": definition.name},
+        metadata={
+            "mcp_tool_name": definition.name,
+            "mcp_connection": name,
+            "mcp_namespace": list(namespace),
+            "mcp_url": url,
+            "mcp_transport": transport,
+        },
     )
 
 

@@ -1073,6 +1073,22 @@ async def api_discover_my_mcp(
         raise HTTPException(400, str(exc)) from None
 
 
+@user_mcp_router.get("/desktop/mcps")
+async def api_desktop_mcps(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+    from agent.dashboard.desktop_mcps import desktop_mcp_catalog
+
+    return await desktop_mcp_catalog(session["sub"])
+
+
+@user_mcp_router.post("/desktop/mcps/call")
+async def api_call_desktop_mcp(
+    request: dict[str, Any], session: dict[str, Any] = _SESSION_DEP
+) -> Any:
+    from agent.dashboard.desktop_mcps import call_desktop_mcp
+
+    return await call_desktop_mcp(session["sub"], request)
+
+
 router.include_router(user_mcp_router)
 
 

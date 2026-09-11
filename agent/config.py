@@ -412,6 +412,9 @@ ENV.var("RUNLOOP_API_KEY", "Runloop API key.", secret=True)
 ENV.var(
     "OPEN_SWE_LOCAL_PROJECTS_FILE", "Allowlist file of local projects the desktop agent may open."
 )
+ENV.var("OPEN_SWE_LOCAL_MCPS_FILE", "Desktop user's local MCP configuration file.")
+ENV.var("OPEN_SWE_DESKTOP_MCP_URL", "Loopback desktop MCP broker URL.")
+ENV.var("OPEN_SWE_DESKTOP_MCP_TOKEN", "Desktop MCP broker token.", secret=True)
 ENV.var("OPEN_SWE_LOCAL_WORKTREES_DIR", "Directory for desktop worktrees.")
 ENV.var("OPEN_SWE_LOCAL_ARTIFACTS_DIR", "Directory for desktop artifacts.")
 ENV.var("OPEN_SWE_LOCAL_AUTH_TOKEN", "Bearer token the desktop backend requires.", secret=True)
