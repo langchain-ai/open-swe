@@ -3,7 +3,7 @@
 - **Authors:** Ramon Nogueira (`@ramon-langchain`), Mukil Loganathan (`@langchain-infra`), Johannes Jolkkonen (`@johannes117`)
 - **Status:** Draft
 - **Created:** 2026-09-08
-- **Discussion:** https://github.com/langchain-ai/open-swe/pulls?q=is%3Apr+OEP-0001
+- **Discussion:** https://github.com/langchain-ai/open-swe/pull/2505
 - **Supersedes:** None
 
 ## Summary
@@ -124,8 +124,14 @@ potentially cause their use.
 
 Audit records should capture the thread kind, credential principal, requesting participant,
 credential source, integration, action, administrative access, creation source, continuation source,
-and result without recording secret material. Immutable thread kinds remove the need for live
-revocation polling or in-place visibility-transition handling.
+and result without recording secret material.
+
+Immutable thread kinds remove only the need to poll a thread's own kind and to handle in-place
+visibility transitions. They do not remove revocation checks on the authority used inside a thread.
+An owner can disconnect an MCP server, revoke an OAuth grant, lose admin privileges, or be disabled
+while the thread and its sandbox stay alive. Ownership, grants, and capabilities must therefore be
+revalidated whenever credentials are resolved and again when a personal tool is invoked, so revoked
+authority stops working immediately rather than persisting for the life of the thread.
 
 ## Alternatives
 
