@@ -509,13 +509,13 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
         return []
 
 
-async def _notion_tools_for(credential_login: str | None) -> list[Any]:
-    if not credential_login:
+async def _notion_tools_for(profile_login: str | None) -> list[Any]:
+    if not profile_login:
         return []
     return await _cached_tool_loader(
-        f"tools:notion:{credential_login}",
+        f"tools:notion:{profile_login}",
         300,
-        lambda: load_notion_tools(credential_login),
+        lambda: load_notion_tools(profile_login),
     )
 
 

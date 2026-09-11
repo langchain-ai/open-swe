@@ -13,6 +13,7 @@ from agent.dashboard import workspace_mcps as settings
 from agent.mcp import MCPConnectionUpdate, runtime
 from agent.mcp import oauth as mcp_oauth
 from agent.mcp import transport as mcp_transport
+from agent.tool_loaders import workspace_mcp as loader
 
 
 @pytest.fixture
@@ -233,7 +234,7 @@ async def test_oauth_works_through_real_mcp_discovery_and_execution(fake_store, 
     fake_store.seed(
         ["workspace_mcps"], record.name, {**record.model_dump(), "allowed_tools": ["search"]}
     )
-    tools = await runtime.load_mcp_tools(settings.workspace_mcp_source)
+    tools = await loader.load_workspace_mcp_tools()
     result = await tools[0].ainvoke({})
     assert result[0]["text"] == "found"
     assert len(oauth_remote["tokens"]) == 1

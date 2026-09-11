@@ -432,11 +432,7 @@ async def fetch_pr_comments_since_last_tag(
 
     if event_comment is not None:
         all_comments = [
-            c
-            for c in all_comments
-            if c.get("created_at", "") < event_comment["created_at"]
-            and (c.get("type"), c.get("comment_id"))
-            != (event_comment["type"], event_comment["comment_id"])
+            c for c in all_comments if c.get("created_at", "") < event_comment["created_at"]
         ]
         all_comments.append(event_comment)
 
