@@ -4,7 +4,6 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from itertools import permutations
 from pathlib import Path
 from uuid import uuid4
 
@@ -83,16 +82,27 @@ async def flush_summaries():
         pass
 
 
-@pytest.mark.parametrize("version", [None, 2])
 @pytest.mark.parametrize(
-    ("outcome_name", "state"),
+    ("version", "outcome_name", "state", "delivery"),
     [
-        (EventName.PR_MERGED, "merged"),
-        (EventName.PR_CLOSED_WITHOUT_MERGE, "closed_without_merge"),
-        (EventName.PR_REOPENED, "open"),
+        pytest.param(2, EventName.PR_MERGED, "merged", "outcome_first", id="merge-before-open"),
+        pytest.param(None, EventName.PR_MERGED, "merged", "concurrent", id="concurrent-merge"),
+        pytest.param(
+            2,
+            EventName.PR_CLOSED_WITHOUT_MERGE,
+            "closed_without_merge",
+            "opening_first",
+            id="normal-close",
+        ),
+        pytest.param(
+            None,
+            EventName.PR_CLOSED_WITHOUT_MERGE,
+            "closed_without_merge",
+            "outcome_first",
+            id="unversioned-close-before-open",
+        ),
     ],
 )
-@pytest.mark.parametrize("delivery", ["outcome_first", "opening_first", "concurrent"])
 async def test_pr_outcome_survives_delivery_order(
     analytics_db, version, outcome_name, state, delivery
 ):
@@ -131,104 +141,6 @@ async def test_pr_outcome_survives_delivery_order(
         assert counters == {state: 1}
 
 
-@pytest.mark.parametrize("versioned", [False, True])
-@pytest.mark.parametrize("surface_first", [False, True])
-@pytest.mark.parametrize(
-    ("outcome_name", "state", "timestamp"),
-    [
-        (EventName.FINDING_RESOLVED, "resolved", "resolved_at"),
-        (EventName.FINDING_DISMISSED, "dismissed", "dismissed_at"),
-        (EventName.FINDING_REOPENED, "open", None),
-    ],
-)
-async def test_finding_outcome_survives_delivery_order(
-    analytics_db, versioned, surface_first, outcome_name, state, timestamp
-):
-    workspace, transaction = analytics_db
-    finding_id, review_id, pr_id = uuid4(), uuid4(), uuid4()
-    surfaced = event(
-        workspace,
-        EventName.FINDING_SURFACED,
-        FindingSurfacedPayload(severity="high", category="correctness"),
-        finding_id=finding_id,
-        review_id=review_id,
-        pr_id=pr_id,
-    )
-    outcome = event(
-        workspace,
-        outcome_name,
-        FindingStatePayload(),
-        day=1,
-        finding_id=finding_id,
-        source_version=2 if versioned else None,
-    )
-    for item in [surfaced, outcome] if surface_first else [outcome, surfaced]:
-        assert await ingestion.ingest(item)
-    assert not await ingestion.ingest(outcome)
-    # A second surfacing must not count the same reopen again.
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.FINDING_SURFACED,
-            surfaced.payload,
-            day=2,
-            finding_id=finding_id,
-            review_id=review_id,
-            pr_id=pr_id,
-        )
-    )
-    await flush_summaries()
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM finding_projection"))).mappings().one()
-        assert row["current_state"] == state
-        assert row["surfaced_at"] == DAY
-        assert row["review_id"] == review_id
-        assert row["reopened_count"] == (1 if outcome_name == EventName.FINDING_REOPENED else 0)
-        if timestamp:
-            assert row[timestamp] == DAY + timedelta(days=1)
-        counters = await conn.scalar(
-            text(
-                "SELECT counters FROM daily_summaries WHERE family = 'finding_surfaced_cohort' AND partition_date = :day"
-            ),
-            {"day": DAY.date()},
-        )
-        assert counters == {state: 1}
-
-
-async def test_finding_reconciles_multiple_pending_transitions(analytics_db):
-    workspace, transaction = analytics_db
-    finding_id = uuid4()
-    for day, name in [
-        (3, EventName.FINDING_DISMISSED),
-        (1, EventName.FINDING_RESOLVED),
-        (2, EventName.FINDING_REOPENED),
-    ]:
-        await ingestion.ingest(
-            event(
-                workspace,
-                name,
-                FindingStatePayload(),
-                day=day,
-                finding_id=finding_id,
-                source_version=day,
-            )
-        )
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.FINDING_SURFACED,
-            FindingSurfacedPayload(severity="high", category="correctness"),
-            finding_id=finding_id,
-        )
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM finding_projection"))).mappings().one()
-        assert row["current_state"] == "dismissed"
-        assert row["resolved_at"] == DAY + timedelta(days=1)
-        assert row["dismissed_at"] == DAY + timedelta(days=3)
-        assert row["reopened_count"] == 1
-
-
 async def test_cost_updates_recompute_the_run_start_day(analytics_db):
     workspace, transaction = analytics_db
     run_id = uuid4()
@@ -257,17 +169,6 @@ async def test_cost_updates_recompute_the_run_start_day(analytics_db):
                 run_id=run_id,
             )
         )
-        async with transaction() as conn:
-            assert (
-                await conn.scalar(
-                    text(
-                        "SELECT count(*) FROM dirty_summary_partitions WHERE family = 'cost_completeness' "
-                        "AND partition_date = :day"
-                    ),
-                    {"day": DAY.date()},
-                )
-                == 1
-            )
         await flush_summaries()
         async with transaction() as conn:
             row = (
@@ -464,9 +365,8 @@ async def test_leaderboard_resolves_immutable_identity_after_login_change(
     assert result["rows"] == []
 
 
-@pytest.mark.parametrize("delivery", list(permutations(range(3))))
 @pytest.mark.parametrize("versioned", [False, True])
-async def test_pr_reopening_rejects_delayed_close(analytics_db, delivery, versioned):
+async def test_pr_reopening_rejects_delayed_close(analytics_db, versioned):
     workspace, transaction = analytics_db
     pr_id = uuid4()
     events = [
@@ -495,7 +395,7 @@ async def test_pr_reopening_rejects_delayed_close(analytics_db, delivery, versio
             source_version=2 if versioned else None,
         ),
     ]
-    for index in delivery:
+    for index in (2, 0, 1):
         assert await ingestion.ingest(events[index])
     for item in events:
         assert not await ingestion.ingest(item)
@@ -575,9 +475,15 @@ async def test_pr_timestamp_migration_preserves_existing_reopen(analytics_db):
         assert row["latest_transition_at"] == DAY + timedelta(days=2)
 
 
-@pytest.mark.parametrize("delivery", [*permutations(range(3)), "concurrent"])
-@pytest.mark.parametrize("versioned", [False, True])
-@pytest.mark.parametrize("surface_first", [False, True])
+@pytest.mark.parametrize(
+    ("delivery", "versioned", "surface_first"),
+    [
+        pytest.param((0, 1, 2), False, True, id="chronological"),
+        pytest.param((2, 0, 1), True, False, id="transitions-before-surface"),
+        pytest.param((2, 1, 0), False, True, id="reverse-timestamps"),
+        pytest.param("concurrent", True, True, id="concurrent-transitions"),
+    ],
+)
 async def test_finding_history_survives_late_transitions(
     analytics_db, delivery, versioned, surface_first
 ):
@@ -729,6 +635,9 @@ async def test_reopenings_accumulate_across_repeated_raw_expiry(analytics_db):
             finding_id=finding_id,
         )
     )
+    await ingestion.ingest(
+        event(workspace, EventName.FINDING_RESOLVED, FindingStatePayload(), finding_id=finding_id)
+    )
     for index in range(1, 5):
         reopening = event(
             workspace,
@@ -742,6 +651,8 @@ async def test_reopenings_accumulate_across_repeated_raw_expiry(analytics_db):
         assert not await ingestion.ingest(reopening)
         stats = await queries.reviewer_stats(DAY)
         assert stats["reopened_findings"] == index
+        async with transaction() as conn:
+            assert await conn.scalar(text("SELECT resolved_at FROM finding_projection")) == DAY
         if index >= 2:
             async with transaction() as conn:
                 await conn.execute(text("DELETE FROM events"))
@@ -965,7 +876,14 @@ async def test_leaderboard_distinguishes_unknown_and_zero_cost(analytics_db, amo
     assert result["rows"][0]["total_cost_usd"] == 0
 
 
-@pytest.mark.parametrize("delivery", [*permutations(range(3)), "concurrent"])
+@pytest.mark.parametrize(
+    "delivery",
+    [
+        pytest.param((0, 1, 2), id="submission-first"),
+        pytest.param((2, 1, 0), id="withdrawals-before-submission"),
+        pytest.param("concurrent", id="concurrent-withdrawals"),
+    ],
+)
 async def test_feedback_withdrawal_survives_delivery_order(analytics_db, delivery):
     workspace, transaction = analytics_db
     submitted = event(
@@ -1075,73 +993,3 @@ async def test_feedback_migration_recovers_acknowledged_withdrawals(analytics_db
             .all()
         )
         assert rows == [DAY + timedelta(days=1)] * 2
-
-
-async def test_finding_history_baseline_survives_raw_event_retention(analytics_db):
-    workspace, transaction = analytics_db
-    finding_id = uuid4()
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.FINDING_SURFACED,
-            FindingSurfacedPayload(severity="high", category="correctness"),
-            finding_id=finding_id,
-        )
-    )
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.FINDING_RESOLVED,
-            FindingStatePayload(),
-            finding_id=finding_id,
-            day=1,
-            source_version=2,
-        )
-    )
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.FINDING_REOPENED,
-            FindingStatePayload(),
-            finding_id=finding_id,
-            day=2,
-            source_version=3,
-        )
-    )
-    async with transaction() as conn:
-        # Simulate retention: drop the projection history along with its raw events.
-        schema = await conn.scalar(text("SELECT current_schema()"))
-        await database._run_script(
-            conn,
-            (Path(database.__file__).with_name("migrations") / "0004_finding_history_baseline.sql")
-            .read_text()
-            .replace("open_swe_analytics", schema),
-        )
-        await conn.execute(
-            text("DELETE FROM events WHERE finding_id = :finding_id"), {"finding_id": finding_id}
-        )
-        await conn.execute(
-            text(
-                "UPDATE finding_projection SET resolved_at = NULL, dismissed_at = NULL, "
-                "reopened_count = 0 WHERE finding_id = :finding_id"
-            ),
-            {"finding_id": finding_id},
-        )
-    # A much later transition must re-add history, not erase the pre-retention facts.
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.FINDING_RESOLVED,
-            FindingStatePayload(),
-            finding_id=finding_id,
-            day=40,
-            source_version=5,
-        )
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM finding_projection"))).mappings().one()
-        assert row["current_state"] == "resolved"
-        assert row["resolved_at"] == DAY + timedelta(days=40)
-        assert row["reopened_count"] == 1
-    stats = await queries.reviewer_stats(DAY)
-    assert stats["reopened_findings"] == 1

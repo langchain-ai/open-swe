@@ -8,7 +8,6 @@ from agent.analytics.events import (
     EventEnvelope,
     EventName,
     RunStartedPayload,
-    _reject_forbidden_fields,
     deterministic_event_id,
 )
 
@@ -20,9 +19,11 @@ def test_event_id_is_deterministic_and_versioned() -> None:
     assert first != deterministic_event_id(workspace, EventName.RUN_STARTED, "run-1", "2")
 
 
-def test_event_rejects_forbidden_nested_fields() -> None:
-    with pytest.raises(ValueError, match="forbidden analytics field"):
-        _reject_forbidden_fields({"safe": [{"prompt": {"text": "secret"}}]})
+def test_event_payload_rejects_unexpected_content() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        RunStartedPayload.model_validate(
+            {"model_attribution_quality": "unavailable", "prompt": {"text": "private content"}}
+        )
 
 
 def test_event_requires_timezone() -> None:

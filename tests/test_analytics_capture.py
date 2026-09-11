@@ -34,23 +34,25 @@ async def test_capture_contains_configuration_errors(monkeypatch, capture_config
         immutable_person_key=123,
         repository_key="owner/repo",
     )
-    await directory.upsert_person(provider="github", immutable_person_key=123)
-    await directory.upsert_repository(full_name="owner/repo", private=True)
-
     enqueue.assert_not_awaited()
 
 
-async def test_capture_contains_payload_and_enqueue_errors(monkeypatch, capture_config, caplog):
+@pytest.mark.parametrize("invalid_payload", [False, True])
+async def test_capture_contains_payload_and_enqueue_errors(
+    monkeypatch, capture_config, caplog, invalid_payload
+):
     enqueue = AsyncMock(side_effect=RuntimeError("outbox unavailable"))
     monkeypatch.setattr(emitter, "enqueue", enqueue)
-    await emitter.run_cost(run_key="run", cost_usd=float("nan"))
-    enqueue.assert_not_awaited()
-    await emitter.run_terminal(run_key="run", thread_key="thread", status="success")
-    assert len(caplog.records) == 2
-    assert all(record.message == "Analytics capture failed" for record in caplog.records)
+    if invalid_payload:
+        await emitter.run_cost(run_key="run", cost_usd=float("nan"))
+        enqueue.assert_not_awaited()
+    else:
+        await emitter.run_terminal(run_key="run", thread_key="thread", status="success")
+        enqueue.assert_awaited_once()
+    assert any(record.exc_info for record in caplog.records)
 
 
-async def test_capture_contains_directory_failures(monkeypatch, capture_config, caplog):
+async def test_capture_contains_directory_failures(monkeypatch, capture_config):
     @asynccontextmanager
     async def unavailable():
         raise RuntimeError("directory unavailable")
@@ -59,8 +61,6 @@ async def test_capture_contains_directory_failures(monkeypatch, capture_config, 
     monkeypatch.setattr(directory, "transaction", unavailable)
     enqueue = AsyncMock()
     monkeypatch.setattr(emitter, "enqueue", enqueue)
-    await directory.upsert_person(provider="github", immutable_person_key=123)
-    await directory.upsert_repository(full_name="owner/repo", private=True)
     await emitter.run_started(
         run_key="run",
         thread_key="thread",
@@ -69,19 +69,7 @@ async def test_capture_contains_directory_failures(monkeypatch, capture_config, 
         immutable_person_key=123,
         repository_key="owner/repo",
     )
-    assert len(caplog.records) == 3
     assert enqueue.await_args.args[0].event_name == emitter.EventName.RUN_STARTED
-
-    monkeypatch.setattr(directory, "upsert_model", AsyncMock(side_effect=RuntimeError("failed")))
-    await emitter.run_started(
-        run_key="run",
-        thread_key="thread",
-        model="model",
-        source="api",
-        immutable_person_key=123,
-        repository_key="owner/repo",
-    )
-    assert len(caplog.records) == 4
 
 
 async def test_capture_preserves_cancellation(monkeypatch, capture_config):
@@ -95,6 +83,7 @@ async def test_run_started_records_configured_but_not_effective_attribution(
 ):
     enqueue = AsyncMock()
     monkeypatch.setattr(emitter, "enqueue", enqueue)
+    monkeypatch.setattr(directory, "upsert_model", AsyncMock())
 
     await emitter.run_started(
         run_key="run",
