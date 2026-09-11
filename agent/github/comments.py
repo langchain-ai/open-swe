@@ -346,6 +346,7 @@ async def fetch_pr_comments_since_last_tag(
     *,
     token: str,
     event_comment: dict[str, Any] | None = None,
+    authorized_login: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all PR comments/reviews since the last @open-swe tag.
 
@@ -412,6 +413,7 @@ async def fetch_pr_comments_since_last_tag(
                 "created_at": c.get("created_at", ""),
                 "type": "review_comment",
                 "comment_id": c.get("id"),
+                "review_id": c.get("pull_request_review_id"),
                 "path": c.get("path", ""),
                 "line": c.get("line") or c.get("original_line"),
             }
@@ -432,9 +434,23 @@ async def fetch_pr_comments_since_last_tag(
 
     if event_comment is not None:
         all_comments = [
-            c for c in all_comments if c.get("created_at", "") < event_comment["created_at"]
+            c
+            for c in all_comments
+            if c.get("created_at", "") < event_comment["created_at"]
+            or (
+                event_comment["type"] == "review"
+                and c.get("review_id") == event_comment["comment_id"]
+            )
+            or (
+                c["type"] == event_comment["type"]
+                and c.get("created_at", "") == event_comment["created_at"]
+                and c.get("comment_id", 0) < event_comment["comment_id"]
+            )
         ]
         all_comments.append(event_comment)
+
+    if authorized_login is not None:
+        all_comments = [c for c in all_comments if c["author"].lower() == authorized_login.lower()]
 
     # Sort all comments chronologically
     all_comments.sort(key=lambda c: c.get("created_at", ""))

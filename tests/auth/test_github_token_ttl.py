@@ -320,7 +320,12 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
         return True
 
     async def fake_fetch_pr_comments(
-        repo_config: dict[str, str], pr_number: int, *, token: str, event_comment: dict[str, Any]
+        repo_config: dict[str, str],
+        pr_number: int,
+        *,
+        token: str,
+        event_comment: dict[str, Any],
+        authorized_login: str | None = None,
     ) -> list[dict[str, Any]]:
         fetch_calls.append(token)
         return [

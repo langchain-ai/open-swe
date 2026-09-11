@@ -649,13 +649,15 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         user_names_by_id[user_id] = user_name
     logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
     if common.thread_is_private(thread_metadata):
-        source_messages = [
+        context_messages = [
             message
-            for message in source_messages
+            for message in context_messages
             if common.thread_is_promptable(
                 thread_metadata, logins_by_user_id.get(str(message.get("user") or ""), "")
             )
         ]
+        if not message_update:
+            source_messages = context_messages
     context_source = "the beginning of the thread"
     if context_mode == "last_mention":
         context_source = (
