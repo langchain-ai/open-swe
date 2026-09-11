@@ -321,6 +321,19 @@ async def _collect_thread_candidates(
     )
 
 
+async def list_unresolved_dashboard_threads(
+    login: str, *, email: str | None = None
+) -> list[ThreadLike]:
+    return await _collect_thread_candidates(
+        langgraph_client(),
+        _participant_search_filters(login, email=email),
+        viewer_login=login,
+        viewer_email=email,
+        resolved=False,
+        surfaced_only=True,
+    )
+
+
 async def list_dashboard_threads(
     login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
 ) -> list[dict[str, Any]]:

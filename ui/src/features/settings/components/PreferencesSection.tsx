@@ -3,6 +3,7 @@ import { useState } from "react"
 
 import type { Theme } from "@/lib/theme"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -17,6 +18,7 @@ import {
   requestNotificationPermission,
   setNotificationsPref,
 } from "@/lib/notifications"
+import { agentsApi } from "@/features/agents/lib/api"
 import { api } from "@/lib/api"
 import type { ThreadVisibility } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
@@ -43,6 +45,10 @@ export function PreferencesSection() {
     mutationFn: (default_visibility: ThreadVisibility) =>
       api.saveMyPreferences({ default_visibility }),
     onSuccess: (data) => qc.setQueryData(["myPreferences"], data),
+  })
+  const archiveThreads = useMutation({
+    mutationFn: agentsApi.resolveAllThreads,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-threads"] }),
   })
   const supported = notificationsSupported()
   const [enabled, setEnabled] = useState(() => notificationsEnabled())
@@ -109,6 +115,34 @@ export function PreferencesSection() {
               ))}
             </SelectContent>
           </Select>
+        }
+      />
+      <SettingsRow
+        label="Archive all threads"
+        description={
+          archiveThreads.error
+            ? `Could not archive threads: ${archiveThreads.error.message}`
+            : archiveThreads.isSuccess
+              ? `${archiveThreads.data.resolved} threads archived.`
+              : "Resolve all threads you have participated in for a clean slate. You can still find them in the resolved view."
+        }
+        control={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={archiveThreads.isPending}
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Archive all your threads? They will remain available in the resolved view."
+                )
+              ) {
+                archiveThreads.mutate()
+              }
+            }}
+          >
+            {archiveThreads.isPending ? "Archiving…" : "Archive all"}
+          </Button>
         }
       />
       <SettingsRow
