@@ -11,7 +11,7 @@ enforced by rejecting disallowed tool calls, not by hiding the tools.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, NotRequired, cast
+from typing import Any, NotRequired, TypedDict, cast
 
 from langchain.agents.middleware.types import (
     AgentState,
@@ -39,6 +39,13 @@ class ModelSelectionState(AgentState):
     plan_mode: NotRequired[bool]
 
 
+class ModelSelectionUpdate(TypedDict, total=False):
+    """The channels this middleware writes, as a partial of ``ModelSelectionState``."""
+
+    model_route: ModelRoute
+    pre_routed: bool
+
+
 class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     state_schema = ModelSelectionState
 
@@ -62,7 +69,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         route = state.get("model_route") or self._initial_route
         # Checked against the state schema, then widened: the base class declares
         # this override as returning a plain dict.
-        update: ModelSelectionState = (
+        update: ModelSelectionUpdate = (
             {"pre_routed": True} if route is None else {"model_route": route, "pre_routed": False}
         )
         return dict(update)
