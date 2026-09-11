@@ -1,6 +1,6 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
-import type { Skill } from "@/lib/api"
+import type { MCPConnection, MCPConnectionUpdate, Skill } from "@/lib/api"
 
 export type DesktopCommandId =
   | "new-thread"
@@ -177,8 +177,10 @@ declare global {
       removeProject: (cwd: string) => Promise<boolean>
       getVersion: () => Promise<string>
       getUpdateState: () => Promise<DesktopUpdateState>
-      getMcpConfig: () => Promise<{ path: string; text: string }>
-      saveMcpConfig: (text: string) => Promise<{ path: string; text: string }>
+      listMcpConnections: () => Promise<Array<MCPConnection>>
+      saveMcpConnection: (input: MCPConnectionUpdate) => Promise<MCPConnection>
+      deleteMcpConnection: (name: string) => Promise<void>
+      revealMcpHeaders: (name: string) => Promise<Record<string, string>>
       installUpdate: () => Promise<boolean>
       onUpdateState: (
         callback: (state: DesktopUpdateState) => void

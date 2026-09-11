@@ -4,39 +4,71 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { readMcpConfig, writeMcpConfig } = require("../build/mcp-config.cjs");
+const {
+  deleteMcpConnection,
+  listMcpConnections,
+  revealMcpHeaders,
+  saveMcpConnection,
+} = require("../build/mcp-config.cjs");
 
-test("MCP config defaults to an empty server list and persists formatted JSON", (t) => {
+function temporaryConfig(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-mcp-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const configPath = path.join(directory, "mcp.json");
+  return path.join(directory, "mcp.json");
+}
 
-  assert.deepEqual(readMcpConfig(configPath), {
-    path: configPath,
-    text: '{\n  "mcpServers": {}\n}\n',
-  });
+test("local MCP connections are managed through structured config", (t) => {
+  const configPath = temporaryConfig(t);
+  assert.deepEqual(listMcpConnections(configPath), []);
 
-  const saved = writeMcpConfig(
-    configPath,
-    '{"mcpServers":{"local":{"command":"node","args":["server.js"]}}}',
-  );
-  assert.equal(saved.text, fs.readFileSync(configPath, "utf8"));
-  assert.deepEqual(JSON.parse(saved.text), {
-    mcpServers: { local: { command: "node", args: ["server.js"] } },
+  saveMcpConnection(configPath, "local", {
+    name: "local",
+    url: "http://127.0.0.1:8080/mcp",
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: [],
+    headers: { Authorization: "Bearer secret" },
   });
+  assert.deepEqual(revealMcpHeaders(configPath, "local"), {
+    Authorization: "Bearer secret",
+  });
+  assert.deepEqual(listMcpConnections(configPath), [
+    {
+      name: "local",
+      url: "http://127.0.0.1:8080/mcp",
+      transport: "streamable_http",
+      enabled: true,
+      allowed_tools: [],
+      header_names: ["Authorization"],
+      revision: "local",
+      updated_at: "",
+      local_command: false,
+    },
+  ]);
   if (process.platform !== "win32")
     assert.equal(fs.statSync(configPath).mode & 0o777, 0o600);
+
+  deleteMcpConnection(configPath, "local");
+  assert.deepEqual(listMcpConnections(configPath), []);
 });
 
-test("MCP config rejects invalid content without replacing the file", (t) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-mcp-"));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const configPath = path.join(directory, "mcp.json");
-  fs.writeFileSync(configPath, '{"mcpServers":{}}\n');
-
-  assert.throws(
-    () => writeMcpConfig(configPath, '{"other":{}}'),
-    /mcpServers object/,
+test("command MCPs remain visible but cannot be overwritten as URLs", (t) => {
+  const configPath = temporaryConfig(t);
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      mcpServers: { files: { command: "node", args: ["server.js"] } },
+    }),
   );
-  assert.equal(fs.readFileSync(configPath, "utf8"), '{"mcpServers":{}}\n');
+
+  assert.equal(listMcpConnections(configPath)[0].local_command, true);
+  assert.throws(
+    () =>
+      saveMcpConnection(configPath, "files", {
+        name: "files",
+        url: "http://localhost:8080/mcp",
+        transport: "streamable_http",
+      }),
+    /Command-based MCPs/,
+  );
 });

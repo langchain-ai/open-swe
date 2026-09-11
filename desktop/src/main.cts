@@ -50,7 +50,12 @@ const {
 const { beginLogin } = require("./login-server.cjs");
 const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
-const { readMcpConfig, writeMcpConfig } = require("./mcp-config.cjs");
+const {
+  deleteMcpConnection,
+  listMcpConnections,
+  revealMcpHeaders,
+  saveMcpConnection,
+} = require("./mcp-config.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -449,15 +454,21 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return updateState;
   });
-  ipcMain.handle("desktop:mcp-config", (event) => {
+  ipcMain.handle("desktop:list-mcp-connections", (event) => {
     requireTrustedDesktopIpc(event);
-    return readMcpConfig(mcpConfigPath());
+    return listMcpConnections(mcpConfigPath());
   });
-  ipcMain.handle("desktop:save-mcp-config", (event, text) => {
+  ipcMain.handle("desktop:save-mcp-connection", (event, input) => {
     requireTrustedDesktopIpc(event);
-    if (typeof text !== "string" || Buffer.byteLength(text) > 1024 * 1024)
-      throw new Error("MCP configuration must be smaller than 1 MB.");
-    return writeMcpConfig(mcpConfigPath(), text);
+    return saveMcpConnection(mcpConfigPath(), input?.name, input);
+  });
+  ipcMain.handle("desktop:delete-mcp-connection", (event, name) => {
+    requireTrustedDesktopIpc(event);
+    return deleteMcpConnection(mcpConfigPath(), name);
+  });
+  ipcMain.handle("desktop:reveal-mcp-headers", (event, name) => {
+    requireTrustedDesktopIpc(event);
+    return revealMcpHeaders(mcpConfigPath(), name);
   });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);

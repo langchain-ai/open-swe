@@ -215,12 +215,13 @@ export interface MCPConnection {
   oauth?: MCPOAuth | null
   revision: string
   updated_at: string
+  local_command?: boolean
 }
 
 export interface MCPConnectionUpdate {
   name: string
   url: string
-  transport: MCPConnection["transport"]
+  transport: "streamable_http" | "sse"
   enabled: boolean
   allowed_tools: string[]
   headers?: Record<string, string> | null
