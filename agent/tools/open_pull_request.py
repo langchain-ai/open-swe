@@ -8,7 +8,7 @@ import httpx2
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.credential_scope import private_credential_login
+from agent.credential_scope import pr_author_login
 from agent.dashboard.agent_usage import record_agent_pr_usage
 from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
@@ -51,8 +51,8 @@ _REPORTED_RESPONSE_HEADERS = (
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
-    """Return the workspace bot token or the verified private owner's token."""
-    login = await private_credential_login()
+    """Use the initiator's OAuth for user-owned threads and the bot for system threads."""
+    login = await pr_author_login()
     if login is None:
         return await get_github_app_installation_token(), "bot"
     from agent.dashboard.profiles import get_valid_access_token

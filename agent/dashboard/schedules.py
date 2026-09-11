@@ -12,10 +12,9 @@ from pydantic import BaseModel, Field, field_validator
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import gate_fable_model, normalize_model_choice
 from agent.dashboard.profiles import get_profile, get_valid_access_token
-from agent.dashboard.repo_access import repo_config_for_user, require_repo_access_for_user
+from agent.dashboard.repo_access import repo_config_for_user, require_repo_access_for_workspace
 from agent.dashboard.team_settings import get_team_fable_enabled
 from agent.dashboard.threads.access import agent_version_metadata, resolve_run_email
-from agent.dashboard.user_mappings import slack_id_for_login
 from agent.dispatch import create_durable_run
 from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
@@ -28,7 +27,6 @@ from agent.slack.client import (
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.utils.thread_ops import langgraph_client
-from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +275,9 @@ async def _create_cron(record: dict[str, Any]) -> str:
         metadata={
             "kind": "agent_schedule",
             "schedule_id": record["id"],
-            "github_login": record.get("created_by"),
+            "created_by": record.get("created_by"),
+            "owner_type": "system",
+            "visibility": "public",
             **agent_version_metadata(),
         },
     )
@@ -473,11 +473,11 @@ def _agent_run_metadata(
         "trigger_kind": "schedule_test" if test_run else "schedule",
         "schedule_id": record["id"],
         "automation_scope": "workspace",
+        "owner_type": "system",
+        "visibility": "public",
         "schedule_name": record.get("name"),
         "schedule_test": test_run,
-        "github_login": record.get("created_by"),
-        PARTICIPANT_LOGINS_KEY: merge_participants(None, record.get("created_by")),
-        "triggering_user_email": record.get("user_email"),
+        "created_by": record.get("created_by"),
         "title": f"{title_prefix}: {record.get('name') or 'Agent'}",
         "base_branch": record.get("base_branch") or "main",
         "branch_prefix": record.get("branch_prefix"),
@@ -508,8 +508,6 @@ async def _agent_run_config(
         {
             "thread_id": thread_id,
             "source": "schedule",
-            "github_login": record.get("created_by"),
-            "user_email": record.get("user_email"),
             "schedule_id": record["id"],
             "schedule_test": test_run,
         },
@@ -553,23 +551,9 @@ async def _launch_agent_schedule_record(
 
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     full_name = _repo_full_name(repo)
-    login = record.get("created_by")
     if full_name:
-        if not (isinstance(login, str) and login):
-            await _put_run_state(
-                record,
-                {
-                    "last_error": "schedule owner unavailable",
-                    "last_error_at": now_iso(),
-                },
-            )
-            return {
-                "status": "unauthorized",
-                "schedule_id": schedule_id,
-                "error": "schedule owner unavailable",
-            }
         try:
-            await require_repo_access_for_user(login, full_name)
+            await require_repo_access_for_workspace(full_name)
         except HTTPException as exc:
             await _put_run_state(
                 record,
@@ -611,11 +595,6 @@ async def _launch_agent_schedule_record(
             "channel_id": slack_channel_id,
             "thread_ts": message_ts,
             "triggering_event_ts": message_ts,
-            "triggering_user_id": await slack_id_for_login(
-                record.get("created_by") if isinstance(record.get("created_by"), str) else None
-            )
-            or "",
-            "triggering_user_email": record.get("user_email") or "",
         }
         await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
 

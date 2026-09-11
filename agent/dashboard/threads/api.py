@@ -493,7 +493,8 @@ async def continue_thread_privately(
         {
             "source": _DASHBOARD_SOURCE,
             "origin": _DASHBOARD_SOURCE,
-            "owner_login": login.strip().lower(),
+            "owner_type": "user",
+            "owner_login": login.strip(),
             "visibility": "private",
             "continued_from_thread_id": thread_id,
             "thread_category": "interactive",

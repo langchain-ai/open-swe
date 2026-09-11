@@ -4,6 +4,7 @@ import httpx2
 from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
+from agent.github.app import get_github_app_installation_token
 from agent.review.styles import normalize_repo_full_name
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
@@ -49,6 +50,23 @@ async def require_repo_access_for_user(login: str, full_name: str) -> str:
         if not token:
             raise HTTPException(401, "github token expired, re-login required") from exc
         await assert_repo_access(full_name, token)
+    return token
+
+
+async def require_repo_access_for_workspace(full_name: str) -> str:
+    token = await get_github_app_installation_token()
+    if not token:
+        raise HTTPException(503, "workspace GitHub App token unavailable")
+    try:
+        await assert_repo_access(full_name, token)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            raise HTTPException(502, "workspace GitHub App token rejected") from exc
+        if exc.status_code in (403, 404):
+            raise HTTPException(
+                exc.status_code, "repository unavailable to the workspace GitHub App"
+            ) from exc
+        raise
     return token
 
 

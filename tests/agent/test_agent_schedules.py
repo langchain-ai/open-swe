@@ -2,12 +2,13 @@ import uuid
 from typing import Any
 from xml.etree import ElementTree
 
+import httpx2
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
 from agent import store as agent_store
-from agent.dashboard import schedules
+from agent.dashboard import repo_access, schedules
 from agent.dashboard.schedules import ScheduleCreateBody, ScheduleUpdateBody
 
 
@@ -115,20 +116,16 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
         owner, name = full_name.split("/", 1)
         return {"owner": owner, "name": name}
 
-    async def fake_require_repo_access_for_user(login: str, full_name: str) -> str:
-        return "gho_token"
-
-    async def fake_slack_id_for_login(login: str | None) -> str | None:
-        return "UALICE" if login == "alice" else None
+    async def fake_require_repo_access_for_workspace(full_name: str) -> str:
+        return "workspace-app-token"
 
     monkeypatch.setattr(schedules, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(schedules, "get_profile", fake_get_profile)
     monkeypatch.setattr(schedules, "resolve_run_email", fake_resolve_run_email)
     monkeypatch.setattr(schedules, "repo_config_for_user", fake_repo_config_for_user)
     monkeypatch.setattr(
-        schedules, "require_repo_access_for_user", fake_require_repo_access_for_user
+        schedules, "require_repo_access_for_workspace", fake_require_repo_access_for_workspace
     )
-    monkeypatch.setattr(schedules, "slack_id_for_login", fake_slack_id_for_login)
 
 
 def test_cron_validation_rejects_non_five_field_expression() -> None:
@@ -597,16 +594,16 @@ async def test_trigger_agent_schedule_preserves_repo_auth_error(fake_client, mon
     }
     await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
 
-    async def expired_token(login: str, full_name: str) -> str:
-        raise HTTPException(401, "github token unavailable, re-login required")
+    async def unavailable_token(full_name: str) -> str:
+        raise HTTPException(503, "workspace GitHub App token unavailable")
 
-    monkeypatch.setattr(schedules, "require_repo_access_for_user", expired_token)
+    monkeypatch.setattr(schedules, "require_repo_access_for_workspace", unavailable_token)
 
     with pytest.raises(HTTPException) as exc:
         await schedules.trigger_agent_schedule("sched_1")
 
-    assert exc.value.status_code == 401
-    assert exc.value.detail == "github token unavailable, re-login required"
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "workspace GitHub App token unavailable"
     assert fake_client.runs.created == []
 
 
@@ -632,22 +629,22 @@ async def test_launch_scheduled_agent_run_skips_when_repo_access_revoked(
     }
     await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
 
-    async def deny_access(login: str, full_name: str) -> str:
-        raise HTTPException(403, "no access to this private repository")
+    async def deny_access(full_name: str) -> str:
+        raise HTTPException(403, "repository unavailable to the workspace GitHub App")
 
-    monkeypatch.setattr(schedules, "require_repo_access_for_user", deny_access)
+    monkeypatch.setattr(schedules, "require_repo_access_for_workspace", deny_access)
 
     result = await schedules.launch_scheduled_agent_run("sched_1")
 
     assert result == {
         "status": "unauthorized",
         "schedule_id": "sched_1",
-        "error": "no access to this private repository",
+        "error": "repository unavailable to the workspace GitHub App",
         "status_code": 403,
     }
     assert fake_client.runs.created == []
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
-    assert stored["last_error"] == "no access to this private repository"
+    assert stored["last_error"] == "repository unavailable to the workspace GitHub App"
 
 
 async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
@@ -684,6 +681,13 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert metadata["origin"] == "schedule"
     assert metadata["thread_category"] == "automation"
     assert metadata["trigger_kind"] == "schedule"
+    assert metadata["owner_type"] == "system"
+    assert metadata["visibility"] == "public"
+    assert "owner_login" not in metadata
+    assert metadata["created_by"] == "alice"
+    assert "github_login" not in metadata
+    assert "participant_logins" not in metadata
+    assert "triggering_user_email" not in metadata
     assert metadata["admin_thread"] is True
     assert metadata["repo_owner"] == "langchain-ai"
     assert metadata["repo_name"] == "open-swe"
@@ -698,6 +702,8 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert run["multitask_strategy"] == "interrupt"
     assert run["if_not_exists"] == "create"
     assert run["config"]["configurable"]["source"] == "schedule"
+    assert "github_login" not in run["config"]["configurable"]
+    assert "user_email" not in run["config"]["configurable"]
     assert run["config"]["configurable"]["admin_thread"] is True
     assert run["config"]["configurable"]["repo"] == record["repo"]
 
@@ -705,6 +711,59 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert stored["last_thread_id"] == thread_id
     assert stored["last_run_id"] == "run_123"
     assert stored["scope"] == "workspace"
+
+
+@pytest.mark.parametrize("creator", [None, "alice"])
+@pytest.mark.parametrize("github_status", [None, 200, 401, 403, 404])
+async def test_system_schedule_can_run_without_user_credentials(
+    fake_client, monkeypatch, creator, github_status
+) -> None:  # noqa: ANN001
+    async def no_user_token(*args: Any, **kwargs: Any) -> str:
+        raise AssertionError("System execution must not use a user's credentials")
+
+    monkeypatch.setattr(schedules, "get_valid_access_token", no_user_token)
+    monkeypatch.setattr(repo_access, "get_valid_access_token", no_user_token)
+
+    async def app_token() -> str | None:
+        return "workspace-app-token" if github_status is not None else None
+
+    monkeypatch.setattr(repo_access, "get_github_app_installation_token", app_token)
+
+    async def github(request: httpx2.Request) -> httpx2.Response:
+        assert request.headers["Authorization"] == "Bearer workspace-app-token"
+        assert str(request.url) == "https://api.github.com/repos/langchain-ai/open-swe"
+        assert github_status is not None
+        return httpx2.Response(github_status, json={})
+
+    http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
+    monkeypatch.setattr(repo_access.httpx2, "AsyncClient", lambda **kwargs: http_client)
+    record = {
+        "id": "sched_system",
+        "prompt": "Check dependencies",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "enabled": True,
+    }
+    if creator:
+        record["created_by"] = creator
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_system", record)
+
+    result = await schedules.launch_scheduled_agent_run("sched_system")
+
+    if github_status != 200:
+        assert result["status"] == "unauthorized"
+        assert result["status_code"] == {None: 503, 401: 502, 403: 403, 404: 404}[github_status]
+        assert "workspace GitHub App" in result["error"]
+        assert not fake_client.threads.created
+        assert not fake_client.runs.created
+        return
+
+    assert result["status"] == "started"
+    metadata = fake_client.threads.created[0]["metadata"]
+    assert metadata["owner_type"] == "system"
+    assert "owner_login" not in metadata
+    configurable = fake_client.runs.created[0]["config"]["configurable"]
+    assert "github_login" not in configurable
+    assert "user_email" not in configurable
 
 
 async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_thread(
@@ -778,7 +837,8 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     slack_thread = metadata["source_context"]["slack_thread"]
     assert slack_thread["channel_id"] == "C0123456789"
     assert slack_thread["thread_ts"] == "1784302353.900029"
-    assert slack_thread["triggering_user_id"] == "UALICE"
+    assert not slack_thread.get("triggering_user_id")
+    assert not slack_thread.get("triggering_user_email")
     run = fake_client.runs.created[0]
     assert run["config"]["configurable"]["slack_thread"] == slack_thread
     prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])

@@ -100,12 +100,21 @@ def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _Rout
     monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **_kwargs: client)
 
 
-def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -> None:
+def _set_config(
+    monkeypatch: pytest.MonkeyPatch,
+    configurable: dict[str, Any],
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
     configurable.setdefault("thread_id", "pr-thread")
     metadata = (
-        {"visibility": "public"}
-        if configurable.get("source") == "github"
-        else {"visibility": "private", "owner_login": configurable.get("github_login")}
+        metadata
+        if metadata is not None
+        else (
+            {"visibility": "public"}
+            if configurable.get("source") == "github"
+            else {"visibility": "private", "owner_login": configurable.get("github_login")}
+        )
     )
     monkeypatch.setattr(
         langgraph_sdk,
@@ -132,8 +141,15 @@ def _open(base: str = "main") -> dict[str, Any]:
     )
 
 
-def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+@pytest.mark.parametrize("visibility", ["public", "private"])
+def test_uses_user_token_for_slack_with_login(
+    monkeypatch: pytest.MonkeyPatch, visibility: str
+) -> None:
+    _set_config(
+        monkeypatch,
+        {"source": "slack", "github_login": "johannes117"},
+        metadata={"visibility": visibility, "owner_type": "user", "owner_login": "johannes117"},
+    )
 
     from agent.dashboard import profiles
 
@@ -224,8 +240,12 @@ def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) 
     assert client.post_calls[0]["headers"]["Authorization"] == "Bearer user-tok"
 
 
-def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
+def test_system_thread_uses_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {"source": "github", "github_login": "johannes117"},
+        metadata={"visibility": "public", "owner_type": "system"},
+    )
 
     from agent.dashboard import profiles
 

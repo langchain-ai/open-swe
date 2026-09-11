@@ -748,8 +748,10 @@ async def upsert_agent_thread_metadata(
         "visibility" not in existing_meta and existing_meta.get("created_at_ms") is None
     ):
         metadata["visibility"] = visibility
-        if owner_login.strip():
-            metadata["owner_login"] = owner_login.strip().lower()
+        metadata["owner_type"] = "user"
+        initiating_login = owner_login.strip() or sender_login.strip()
+        if initiating_login:
+            metadata["owner_login"] = initiating_login
 
     try:
         if existing is None:

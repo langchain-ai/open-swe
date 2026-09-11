@@ -227,9 +227,9 @@ On LangGraph Platform, set them under the deployment's environment variables; sa
 
 **Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Team settings, User mappings, Sandbox, Environments, …) appear. Set **Admin → Team settings → Default repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
 
-**Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Runs it starts act as the GitHub App until the Slack user is linked to a GitHub login, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
+**Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Public runs use the workspace GitHub App for agent operations, and user-owned PRs are opened as the thread's initiating GitHub user. Link the Slack user to a GitHub login before starting the thread, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
 
-**GitHub.** GitHub-triggered conversations are public and use the GitHub App installation identity; the commenter must still have a linked account, and an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
+**GitHub.** GitHub-triggered conversations are public. Agent GitHub operations use the App installation identity, while PRs use the initiating commenter's OAuth. The commenter must have a linked account; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
 
 ---
 
@@ -350,10 +350,18 @@ Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `
 
 ### Thread credential scope
 
-Public threads, including threads without visibility metadata, use the
-GitHub App installation identity for GitHub operations and PR creation. They load
-workspace MCP connections and organization skills. Personal Notion connections,
-user skills, and user custom instructions are available only in a private thread
+Public threads use the GitHub App installation identity for agent GitHub
+operations. PRs from user-owned threads are opened with the original initiator's
+stored GitHub OAuth token, even when another participant starts the run. If that
+token is unavailable, the initiator must sign in again; PR creation does not fall
+back to the bot. System-owned threads, including scheduled automations, open PRs
+as the GitHub App. Existing threads without recorded ownership retain bot PR
+authorship. Scheduled runs check repository access with the workspace GitHub App.
+They record the automation creator for auditing but do not require that person's
+OAuth token or inject their GitHub login or email as the agent's execution identity.
+
+Public threads load workspace MCP connections and organization skills. Personal
+Notion connections, user skills, and user custom instructions are available only in a private thread
 started by its immutable owner. The same ownership check applies when a personal
 MCP tool refreshes its credentials at execution time.
 
