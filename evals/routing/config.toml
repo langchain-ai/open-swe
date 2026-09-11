@@ -1,0 +1,17 @@
+dataset_name = "openswe-routing-v1"
+experiment_prefix = "openswe-routing"
+max_concurrency = 3
+
+# LangSmith tracing project for eval runs, kept apart from the deployment's project.
+langsmith_project = "open-swe-evals"
+
+# Leave blank to use LANGGRAPH_URL or local dev on :2024.
+langgraph_url = ""
+assistant_id = "agent"
+
+# Identity the eval posts as. Needs no dashboard profile; the agent falls back to
+# team defaults for it.
+github_login = "routing-eval"
+
+# Per-example ceiling. A run that never calls exit_pre_routed_mode is cancelled here.
+timeout_seconds = 600

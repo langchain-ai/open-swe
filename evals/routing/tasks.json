@@ -1,0 +1,242 @@
+[
+  {
+    "id": "fast-typo-docs",
+    "expected_route": "fast",
+    "prompt": "Fix every occurrence of the misspelling 'recieve' in docs/*.md and open a PR.",
+    "rationale": "Explicit target, mechanical edit, trivially verifiable."
+  },
+  {
+    "id": "fast-bump-desktop-version",
+    "expected_route": "fast",
+    "prompt": "Bump the version in desktop/package.json to the next patch version and open a PR titled with the new version.",
+    "rationale": "One field, one file, reversible."
+  },
+  {
+    "id": "fast-editorconfig",
+    "expected_route": "fast",
+    "prompt": "Add a .editorconfig at the repo root: 2-space indentation for TypeScript and JSON, 4-space for Python, LF line endings.",
+    "rationale": "New standalone file with explicit contents."
+  },
+  {
+    "id": "fast-agents-md-bullet",
+    "expected_route": "fast",
+    "prompt": "In AGENTS.md, add a bullet under Conventions saying that unit tests never make network calls. Open a PR.",
+    "rationale": "Single documented edit."
+  },
+  {
+    "id": "fast-run-lint",
+    "expected_route": "fast",
+    "prompt": "Run `make lint` and tell me whether it passes. Do not change any files.",
+    "rationale": "Status check, no edits."
+  },
+  {
+    "id": "fast-list-workflows",
+    "expected_route": "fast",
+    "prompt": "List every GitHub Actions workflow under .github/workflows with the events that trigger it.",
+    "rationale": "Extraction from a small, explicit set of files."
+  },
+  {
+    "id": "fast-find-prompt-text",
+    "expected_route": "fast",
+    "prompt": "Which prompt file under agent/resources/prompts contains the text 'Plan mode is active'? Give me the path and line number.",
+    "rationale": "Direct lookup."
+  },
+  {
+    "id": "fast-gitignore-logs",
+    "expected_route": "fast",
+    "prompt": "Make sure `logs/` is ignored by git. Add it to .gitignore if it is missing and open a PR; otherwise tell me it is already there.",
+    "rationale": "Explicit target with a one-line check."
+  },
+  {
+    "id": "fast-rename-constant-single-file",
+    "expected_route": "fast",
+    "prompt": "In evals/reviewer/run_eval.py rename the constant DEFAULT_LANGSMITH_PROJECT to DEFAULT_EVAL_PROJECT and update its uses inside that same file. Run ruff and open a PR.",
+    "rationale": "Localized rename with an explicit scope and lint as verification."
+  },
+  {
+    "id": "fast-count-tools",
+    "expected_route": "fast",
+    "prompt": "How many tools are registered in agent/tools/__init__.py? List their names alphabetically.",
+    "rationale": "Extraction from one file."
+  },
+  {
+    "id": "fast-recent-commits",
+    "expected_route": "fast",
+    "prompt": "Give me the last 20 commit subjects on main as a markdown bullet list.",
+    "rationale": "Mechanical git operation."
+  },
+  {
+    "id": "fast-readme-pnpm",
+    "expected_route": "fast",
+    "prompt": "Update the installation section of INSTALLATION.md to state that pnpm is required for the ui, desktop and tests/e2e workspaces. Open a PR.",
+    "rationale": "Small documented edit with a clear target."
+  },
+  {
+    "id": "balanced-save-plan-paths",
+    "expected_route": "balanced",
+    "prompt": "The save_plan tool only accepts paths directly under /workspace/plans. Make it also accept an absolute path anywhere under the sandbox home, normalize it, and add tests covering both forms.",
+    "rationale": "Bounded behavior change across a tool and its tests."
+  },
+  {
+    "id": "balanced-eval-dry-run",
+    "expected_route": "balanced",
+    "prompt": "Add a --dry-run flag to evals/reviewer/run_eval.py that prints the fully resolved config as JSON and exits without touching LangSmith or LangGraph. Cover it with a test.",
+    "rationale": "Small feature touching config resolution, argument parsing and tests."
+  },
+  {
+    "id": "balanced-title-limit-env",
+    "expected_route": "balanced",
+    "prompt": "Thread titles are capped at 80 characters in agent/thread_title.py. Make the cap configurable via an environment variable, keep 80 as the default, and extend tests/test_thread_title.py.",
+    "rationale": "Ordinary change with existing tests to update."
+  },
+  {
+    "id": "balanced-dev-mock-anthropic",
+    "expected_route": "balanced",
+    "prompt": "tests/e2e/dev-mock.sh assumes an OpenAI key. Work out what it takes to run it against Anthropic instead, make the script support both, and document it in tests/e2e/README.md.",
+    "rationale": "Bounded investigation plus a scripted change and docs."
+  },
+  {
+    "id": "balanced-structured-logging",
+    "expected_route": "balanced",
+    "prompt": "Every logger call in agent/desktop_branch.py interpolates values into the message. Convert them to static messages with values in `extra`, following AGENTS.md, and make sure no `extra` key collides with LogRecord fields.",
+    "rationale": "Multi-site refactor within one module with a documented convention."
+  },
+  {
+    "id": "balanced-plan-mode-dict-tool-test",
+    "expected_route": "balanced",
+    "prompt": "PlanModeMiddleware filters tools by name and accepts tools given as dicts. Add unit tests proving dict tools and BaseTool instances are both filtered, and that a tool without a name passes through.",
+    "rationale": "Test-only work requiring reading the middleware's contract."
+  },
+  {
+    "id": "balanced-oeps-endpoint",
+    "expected_route": "balanced",
+    "prompt": "Add a dashboard API endpoint that lists the OEPs in the oeps/ directory with number, title and status parsed from each file's header. Include tests.",
+    "rationale": "New endpoint with parsing, following existing dashboard route patterns."
+  },
+  {
+    "id": "balanced-render-prompt-error",
+    "expected_route": "balanced",
+    "prompt": "Make render_prompt in agent/prompts.py raise an error that names the missing placeholder and the prompt file instead of a bare KeyError, and update tests/test_prompts.py.",
+    "rationale": "Small semantic change with a test contract to preserve."
+  },
+  {
+    "id": "balanced-e2e-web-search-script",
+    "expected_route": "balanced",
+    "prompt": "Add a scripted scenario to tests/e2e/fake_llm.py that calls the web_search tool, and a Playwright spec asserting the search result card renders in the transcript.",
+    "rationale": "Multi-file implementation across the fake model and E2E specs."
+  },
+  {
+    "id": "balanced-make-e2e-one",
+    "expected_route": "balanced",
+    "prompt": "Add a Makefile target `e2e-one SPEC=<file>` that runs a single browser E2E spec from tests/e2e with the same environment the CI job uses. Document it in tests/e2e/README.md.",
+    "rationale": "Requires understanding the CI job and the e2e runner, but bounded."
+  },
+  {
+    "id": "balanced-admin-routing-validation",
+    "expected_route": "balanced",
+    "prompt": "On the admin settings page in ui/, warn inline when the fast, balanced and performance routing models are set to the same model. Add a component test.",
+    "rationale": "UI change with a test in an existing component."
+  },
+  {
+    "id": "balanced-dedupe-plan-tools",
+    "expected_route": "balanced",
+    "prompt": "agent/tools/enter_plan_mode.py and agent/tools/exit_plan_mode.py both resolve the thread id and plan status in slightly different ways. Extract the shared pieces into one helper module and keep behavior identical. Existing tests must pass.",
+    "rationale": "Behavior-preserving refactor with a test net."
+  },
+  {
+    "id": "balanced-stale-threads-script",
+    "expected_route": "balanced",
+    "prompt": "Write a script under scripts/ that lists LangGraph threads whose latest run ended in error more than N days ago and prints them as CSV with thread id, title and error time.",
+    "rationale": "Standalone script against a known API."
+  },
+  {
+    "id": "balanced-github-token-retry",
+    "expected_route": "balanced",
+    "prompt": "Add retries with exponential backoff to the GitHub token refresh in agent/github/token.py for 5xx responses only, with tests for the retry and the give-up paths.",
+    "rationale": "Ordinary reliability fix with clear acceptance criteria."
+  },
+  {
+    "id": "performance-tenant-rate-limiting",
+    "expected_route": "performance",
+    "prompt": "Design and implement per-organization rate limiting for run starts across the dashboard, Slack and GitHub webhooks, with a shared budget store and graceful degradation when the store is unavailable.",
+    "rationale": "Cross-component architecture with consequential failure modes."
+  },
+  {
+    "id": "performance-sandbox-race",
+    "expected_route": "performance",
+    "prompt": "Two runs starting on the same thread within a second can end up with two sandboxes. Find the root cause in agent/sandboxes and fix it without introducing a global lock.",
+    "rationale": "Novel root-cause reasoning under a design constraint."
+  },
+  {
+    "id": "performance-planner-executor-split",
+    "expected_route": "performance",
+    "prompt": "Propose and implement splitting the agent graph into a planner subgraph and an executor subgraph while keeping existing threads' transcripts and checkpoints working.",
+    "rationale": "Architecture change with compatibility constraints."
+  },
+  {
+    "id": "performance-metadata-migration",
+    "expected_route": "performance",
+    "prompt": "Migrate per-thread agent settings from LangGraph thread metadata to the LangGraph Store, including a backfill for existing threads, dual-read during rollout, and a rollback plan.",
+    "rationale": "Data migration with rollout and rollback judgment."
+  },
+  {
+    "id": "performance-slack-wrong-thread",
+    "expected_route": "performance",
+    "prompt": "Slack replies sometimes land in the wrong thread when a code channel is promoted while a run is in progress. Investigate across agent/slack and the dashboard threads code and fix the underlying cause.",
+    "rationale": "Conflicting evidence across components; subtle concurrency."
+  },
+  {
+    "id": "performance-incremental-review",
+    "expected_route": "performance",
+    "prompt": "Make the reviewer graph incremental: re-review only files changed since the last reviewed sha and reconcile findings already published on the PR, resolving ones that no longer apply.",
+    "rationale": "Semantic reconciliation logic with high-stakes user-visible output."
+  },
+  {
+    "id": "performance-repo-authorization",
+    "expected_route": "performance",
+    "prompt": "Introduce an authorization model where organization admins restrict which repositories each user may target, enforced consistently in the dashboard API, every webhook, and the agent's git tools.",
+    "rationale": "Security boundary spanning several entry points."
+  },
+  {
+    "id": "performance-offloading-redesign",
+    "expected_route": "performance",
+    "prompt": "Redesign conversation offloading so summaries preserve tool-result provenance and keep the prompt prefix cache-friendly. Change the middleware and the transcript UI accordingly.",
+    "rationale": "Architectural tradeoffs across middleware and UI."
+  },
+  {
+    "id": "performance-multi-repo-runs",
+    "expected_route": "performance",
+    "prompt": "Support a single thread that clones and opens PRs in two repositories, with PRs cross-linked and a clean rollback if the second PR fails to open.",
+    "rationale": "Multi-repository judgment with partial-failure handling."
+  },
+  {
+    "id": "performance-sandbox-path-audit",
+    "expected_route": "performance",
+    "prompt": "Audit the sandbox file API for path traversal and symlink escapes, write regression tests for each vector you find, and fix them.",
+    "rationale": "Consequential security work with weak upfront specification."
+  },
+  {
+    "id": "none-hello",
+    "expected_route": "none",
+    "prompt": "hello! just checking you're online",
+    "rationale": "No code work; answer directly and stay pre-routed."
+  },
+  {
+    "id": "none-thanks",
+    "expected_route": "none",
+    "prompt": "Thanks, that was helpful. Nothing else for now.",
+    "rationale": "Conversation close; nothing to route."
+  },
+  {
+    "id": "none-what-is-open-swe",
+    "expected_route": "none",
+    "prompt": "In two sentences, what is Open SWE?",
+    "rationale": "Answerable from the system prompt without touching the repo."
+  },
+  {
+    "id": "none-which-model",
+    "expected_route": "none",
+    "prompt": "Which model profile are you running on right now?",
+    "rationale": "Meta question about the session; no routing needed."
+  }
+]
