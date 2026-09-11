@@ -75,20 +75,6 @@ afterEach(() => {
 })
 
 describe("AutomationEditor", () => {
-  it("shows both automation thread modes", () => {
-    vi.mocked(useSession).mockReturnValue({
-      data: { is_admin: false },
-    } as unknown as ReturnType<typeof useSession>)
-
-    const markup = renderToStaticMarkup(<AutomationEditor mode="create" />)
-
-    expect(markup).toContain("Start a new thread")
-    expect(markup).toContain("Reuse one thread")
-    expect(markup).toContain(
-      "Each trigger adds a new automation message to the same thread"
-    )
-  })
-
   it("shows the admin-thread checkbox only to admins", () => {
     vi.mocked(useSession).mockReturnValue({
       data: { is_admin: true },

@@ -851,15 +851,14 @@ async def test_launch_scheduled_agent_run_reuses_thread_and_injects_each_trigger
     first_created_at = fake_client.threads.items[first["thread_id"]]["metadata"]["created_at_ms"]
     second = await schedules.launch_scheduled_agent_run("sched_1")
 
-    expected_thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:automation:sched_1"))
-    assert first["thread_id"] == expected_thread_id
-    assert second["thread_id"] == expected_thread_id
+    reused_thread_id = first["thread_id"]
+    assert second["thread_id"] == reused_thread_id
     assert [run["thread_id"] for run in fake_client.runs.created] == [
-        expected_thread_id,
-        expected_thread_id,
+        reused_thread_id,
+        reused_thread_id,
     ]
     assert len(fake_client.threads.items) == 1
-    assert fake_client.threads.items[expected_thread_id]["metadata"]["created_at_ms"] == (
+    assert fake_client.threads.items[reused_thread_id]["metadata"]["created_at_ms"] == (
         first_created_at
     )
     assert len(fake_client.runs.created) == 2
@@ -899,6 +898,108 @@ async def test_launch_reused_automation_skips_concurrent_launch(fake_client) -> 
         "error": "automation launch already in progress",
     }
     assert fake_client.runs.created == []
+
+
+async def test_launch_reused_automation_reports_lock_failure_as_error(
+    fake_client, monkeypatch
+) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Daily report",
+        "prompt": "Summarize updates",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "thread_mode": "reuse",
+        "model": "Default",
+        "effort": None,
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    async def fail_acquire(schedule_id: str) -> str | None:
+        raise RuntimeError("langgraph unavailable")
+
+    monkeypatch.setattr(schedules, "_acquire_automation_launch_lock", fail_acquire)
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result["status"] == "error"
+    assert fake_client.runs.created == []
+    state = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
+    assert state["last_error"] == "failed to acquire automation launch lock"
+    assert state["last_error_at"]
+
+
+async def test_launch_reused_automation_clears_stale_thread_metadata(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "name": "Daily report",
+        "prompt": "Summarize updates",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "thread_mode": "reuse",
+        "model": "Default",
+        "effort": None,
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:automation:sched_1"))
+    fake_client.threads.items[thread_id] = {
+        "metadata": {
+            "admin_thread": True,
+            "repo_owner": "langchain-ai",
+            "repo_name": "open-swe",
+        }
+    }
+
+    await schedules.launch_scheduled_agent_run("sched_1")
+
+    metadata = fake_client.threads.items[thread_id]["metadata"]
+    assert metadata["admin_thread"] is False
+    assert metadata["repo_owner"] is None
+    assert metadata["repo_name"] is None
+
+
+async def test_update_agent_schedule_aborts_when_detach_fails(fake_client) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Daily",
+        "prompt": "Run daily",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "thread_mode": "reuse",
+        "model": "Default",
+        "effort": None,
+        "enabled": True,
+        "cron_id": "cron_old",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    async def fail_get(thread_id: str) -> None:
+        raise RuntimeError("langgraph unavailable")
+
+    fake_client.threads.get_hook = fail_get
+
+    with pytest.raises(HTTPException):
+        await schedules.update_agent_schedule(
+            "sched_1",
+            "alice",
+            ScheduleUpdateBody(thread_mode="new"),
+            email="alice@example.com",
+        )
+
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["thread_mode"] == "reuse"
 
 
 async def test_launch_reused_slack_automation_keeps_one_slack_thread(

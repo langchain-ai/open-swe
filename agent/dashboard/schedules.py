@@ -3,8 +3,6 @@
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -214,34 +212,29 @@ async def _get_run_state(schedule_id: str) -> dict[str, Any] | None:
     return await get_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
 
 
-@asynccontextmanager
-async def _automation_launch_lock(schedule_id: str) -> AsyncIterator[bool]:
-    client = langgraph_client()
+async def _acquire_automation_launch_lock(schedule_id: str) -> str | None:
+    """Lock id for the launch, or ``None`` when another launch already holds it."""
     lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:automation-launch:{schedule_id}"))
     try:
-        await client.threads.create(
+        await langgraph_client().threads.create(
             thread_id=lock_id,
             if_exists="raise",
             ttl=_AUTOMATION_LAUNCH_LOCK_TTL_MINUTES,
         )
     except ConflictError:
-        yield False
-        return
+        return None
+    return lock_id
+
+
+async def _release_automation_launch_lock(lock_id: str) -> None:
+    try:
+        await langgraph_client().threads.delete(lock_id)
     except Exception:
         logger.warning(
-            "Failed to acquire automation launch lock for %s", schedule_id, exc_info=True
+            "Failed to release automation launch lock",
+            extra={"lock_id": lock_id},
+            exc_info=True,
         )
-        yield False
-        return
-    try:
-        yield True
-    finally:
-        try:
-            await client.threads.delete(lock_id)
-        except Exception:
-            logger.warning(
-                "Failed to release automation launch lock for %s", schedule_id, exc_info=True
-            )
 
 
 async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
@@ -398,9 +391,14 @@ async def _detach_reusable_slack_thread(schedule_id: str) -> None:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not load reusable automation thread %s", thread_id)
-        return
+    except Exception as exc:
+        if getattr(exc, "status_code", None) == 404:
+            return
+        logger.exception(
+            "Failed to load reusable automation thread",
+            extra={"automation_thread_id": thread_id},
+        )
+        raise HTTPException(502, "failed to detach automation slack thread") from exc
     metadata = thread.get("metadata")
     context = SourceContext.from_metadata(metadata)
     if context.slack_thread is None:
@@ -489,9 +487,10 @@ async def update_agent_schedule(
         await _delete_cron(existing.get("cron_id"))
         updated["cron_id"] = None
 
-    updated = await _put_schedule(updated)
     if detach_reusable_slack:
         await _detach_reusable_slack_thread(schedule_id)
+
+    updated = await _put_schedule(updated)
     return _schedule_summary(updated, await _get_run_state(schedule_id))
 
 
@@ -570,15 +569,22 @@ def _agent_run_metadata(
         "created_at_ms": created_ms,
         "updated_at_ms": created_ms,
     }
+    # Reused threads merge metadata on update, so cleared fields must be written explicitly.
+    reuse_thread = _thread_mode(record) == "reuse"
     if repo and repo.get("owner") and repo.get("name"):
         metadata["repo_owner"] = repo["owner"]
         metadata["repo_name"] = repo["name"]
+    elif reuse_thread:
+        metadata["repo_owner"] = None
+        metadata["repo_name"] = None
     if slack_thread:
         metadata["source_context"] = SourceContext.parse({"slack_thread": slack_thread}).dump()
-    elif _thread_mode(record) == "reuse":
+    elif reuse_thread:
         metadata["source_context"] = None
     if admin_thread:
         metadata["admin_thread"] = True
+    elif reuse_thread:
+        metadata["admin_thread"] = False
     return metadata
 
 
@@ -631,16 +637,30 @@ async def _agent_run_config(
 async def _launch_agent_schedule_record(
     record: dict[str, Any], *, test_run: bool = False
 ) -> dict[str, Any]:
-    if _thread_mode(record) == "reuse":
-        async with _automation_launch_lock(record["id"]) as acquired:
-            if not acquired:
-                return {
-                    "status": "busy",
-                    "schedule_id": record["id"],
-                    "error": "automation launch already in progress",
-                }
-            return await _launch_agent_schedule_record_unlocked(record, test_run=test_run)
-    return await _launch_agent_schedule_record_unlocked(record, test_run=test_run)
+    if _thread_mode(record) != "reuse":
+        return await _launch_agent_schedule_record_unlocked(record, test_run=test_run)
+
+    schedule_id = record["id"]
+    try:
+        lock_id = await _acquire_automation_launch_lock(schedule_id)
+    except Exception:
+        error = "failed to acquire automation launch lock"
+        logger.exception(
+            "Failed to acquire automation launch lock",
+            extra={"schedule_id": schedule_id},
+        )
+        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+        return {"status": "error", "schedule_id": schedule_id, "error": error}
+    if lock_id is None:
+        return {
+            "status": "busy",
+            "schedule_id": schedule_id,
+            "error": "automation launch already in progress",
+        }
+    try:
+        return await _launch_agent_schedule_record_unlocked(record, test_run=test_run)
+    finally:
+        await _release_automation_launch_lock(lock_id)
 
 
 async def _launch_agent_schedule_record_unlocked(
