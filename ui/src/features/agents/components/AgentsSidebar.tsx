@@ -673,7 +673,7 @@ export function AgentsSidebar({
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
+          className="flex w-full items-center gap-2.5 rounded-md bg-sidebar-primary/10 px-2.5 py-1.5 text-sm font-medium text-sidebar-primary transition-colors hover:bg-sidebar-primary/20"
         >
           <NotePencilIcon className="size-4" />
           New Thread
