@@ -88,7 +88,7 @@ Give each deployment its own GitHub App, or at least a distinct mention handle (
 
 ## 4. Model providers and API keys
 
-Open SWE calls models through [LangChain](https://python.langchain.com/) chat models named `provider:model`, so any provider you give a key for is available. Set at least one:
+Open SWE calls models through [LangChain](https://python.langchain.com/) chat models named `provider:model`, so any provider you give a key for is available. Set at least one — with the gateway (below), no provider key is needed at all:
 
 | Provider | Variable | Notes |
 |---|---|---|
