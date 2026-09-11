@@ -433,7 +433,7 @@ async def slack_webhook(
     if event.is_from_bot or updated_message.is_from_bot:
         return ignored("Event from a bot")
 
-    if {event.get("subtype"), updated_message.get("subtype")} & _MEMBERSHIP_SUBTYPES:
+    if {event.subtype, updated_message.subtype} & _MEMBERSHIP_SUBTYPES:
         if in_code_channel and await common.claim_slack_event(event_id, channel_id, event_ts):
             background_tasks.add_task(_queue_channel_housekeeping, channel_id, text)
         return {"status": "ignored", "reason": "Slack channel housekeeping, not a request"}
