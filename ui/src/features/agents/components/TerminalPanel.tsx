@@ -87,6 +87,14 @@ function TerminalViewport({
   useEffect(() => {
     latestStateRef.current = state
   }, [state])
+  // Read through refs: naming these as dependencies would tear down and
+  // recreate the surface whenever the parent re-renders.
+  const onOpenFileRef = useRef(onOpenFile)
+  const activeRef = useRef(active)
+  useEffect(() => {
+    onOpenFileRef.current = onOpenFile
+    activeRef.current = active
+  }, [onOpenFile, active])
 
   useEffect(() => {
     const mount = mountRef.current
@@ -125,12 +133,13 @@ function TerminalViewport({
           else window.open(text, "_blank", "noopener,noreferrer")
           return
         }
-        if (target.kind !== "local" || !onOpenFile) return
+        const openFile = onOpenFileRef.current
+        if (target.kind !== "local" || !openFile) return
         const path = text.replace(/:\d+(?::\d+)?$/, "")
         void window.openSweDesktop
-          ?.resolveLocalProjectPath({ localSessionId: target.sessionId, path })
+          ?.resolveLocalProjectPath({ localSessionId: targetId, path })
           .then((relativePath) => {
-            if (relativePath) onOpenFile(relativePath)
+            if (relativePath) openFile(relativePath)
           })
           .catch(() => {})
       },
@@ -148,7 +157,7 @@ function TerminalViewport({
           version: latestState.version,
         }
         if (latestState.buffer) created.resetAndWrite(latestState.buffer)
-        if (active) created.focus()
+        if (activeRef.current) created.focus()
       })
       .catch((cause: unknown) => {
         if (!disposed) {
