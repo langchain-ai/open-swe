@@ -6,6 +6,7 @@ const {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
   backendRequestUrl,
+  backendResponseHeaders,
   desktopExchangeUrl,
   desktopLoginUrl,
   connectExchangeUrl,
@@ -203,6 +204,20 @@ test("maps desktop API requests to the selected backend", () => {
     ),
     "https://backend.example/dashboard/api/auth/login?desktop=true",
   );
+});
+
+test("removes stale framing from proxied backend responses", () => {
+  const headers = backendResponseHeaders(
+    new Headers({
+      "content-encoding": "gzip",
+      "content-length": "12",
+      "content-type": "application/json",
+      "transfer-encoding": "chunked",
+    }),
+  );
+  assert.deepEqual(Object.fromEntries(headers), {
+    "content-type": "application/json",
+  });
 });
 
 test("localizes backend OAuth callbacks and post-login redirects", () => {
