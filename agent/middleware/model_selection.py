@@ -1,6 +1,6 @@
 import logging
-from collections.abc import Awaitable, Callable, Mapping
-from typing import Literal, NotRequired
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Any, Literal, NotRequired
 
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
+from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt, render_prompt
 
@@ -17,6 +18,30 @@ Route = Literal["fast", "balanced", "performance"]
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 _PLAN_APPROVED_PREFIX = "Plan mode is now inactive because the plan was approved."
+
+
+def _latest_human_task(messages: Sequence[Any]) -> str:
+    """The user's own request, skipping injected context envelopes.
+
+    Context blocks (sender metadata, dynamic context) are appended as
+    ``HumanMessage``s after the real input, so the newest ``HumanMessage`` is
+    usually machine-authored. Only ``kind="human"`` envelopes carry a request.
+    """
+    plain = ""
+    for message in reversed(messages):
+        if not isinstance(message, HumanMessage):
+            continue
+        content = message.content
+        if message_sender_id(content, kind="human") is not None:
+            if authored := input_message_text(content):
+                return authored
+            continue
+        text = message.text
+        if plain or not isinstance(text, str) or "<dynamic-context" in text:
+            continue
+        if "<input-message" not in text:
+            plain = text
+    return plain
 
 
 class RouteDecision(BaseModel):
@@ -66,10 +91,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             ),
             "",
         )
-        task = approved_plan or next(
-            (message.text for message in reversed(messages) if isinstance(message, HumanMessage)),
-            "",
-        )
+        task = approved_plan or _latest_human_task(messages)
         route: Route = "balanced"
         try:
             decision = await self._classifier.ainvoke(
