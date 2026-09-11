@@ -1,10 +1,12 @@
 """Tests for GitHub proxy auth configuration."""
 
 import base64
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
+import langgraph_sdk
 import pytest
 from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
@@ -600,8 +602,17 @@ class TestRefreshProxyOnSandboxReuse:
         )
 
     @pytest.mark.asyncio
-    async def test_refreshes_proxy_for_cached_langsmith_sandbox(self) -> None:
+    async def test_refreshes_proxy_for_cached_langsmith_sandbox(self, monkeypatch) -> None:
         """Cached sandboxes should get a fresh proxy token before git operations."""
+        monkeypatch.setattr(
+            langgraph_sdk,
+            "get_client",
+            lambda: SimpleNamespace(
+                threads=SimpleNamespace(
+                    get=AsyncMock(return_value={"metadata": {"visibility": "public"}})
+                )
+            ),
+        )
         config = self._execution_config()
         mock_sandbox = MagicMock(id="sandbox-cached", aexecute=AsyncMock())
         mock_sandbox.aexecute = AsyncMock()
@@ -675,8 +686,19 @@ class TestRefreshProxyOnSandboxReuse:
             )
 
     @pytest.mark.asyncio
-    async def test_refreshes_proxy_when_reconnecting_to_existing_langsmith_sandbox(self) -> None:
+    async def test_refreshes_proxy_when_reconnecting_to_existing_langsmith_sandbox(
+        self, monkeypatch
+    ) -> None:
         """Reconnected sandboxes should also get a fresh proxy token."""
+        monkeypatch.setattr(
+            langgraph_sdk,
+            "get_client",
+            lambda: SimpleNamespace(
+                threads=SimpleNamespace(
+                    get=AsyncMock(return_value={"metadata": {"visibility": "public"}})
+                )
+            ),
+        )
         config = self._execution_config()
         mock_sandbox = MagicMock(id="sandbox-existing", aexecute=AsyncMock())
         mock_sandbox.aexecute = AsyncMock()

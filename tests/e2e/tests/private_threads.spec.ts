@@ -44,7 +44,9 @@ test("private threads are owner-only and visibility is fixed at creation", async
     await page.request.post("/control/login", { data: { login: "alice" } });
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
-    await expect(page.getByLabel("Visibility")).toHaveValue("private");
+    await expect(
+      page.getByRole("button", { name: "Thread visibility" }),
+    ).toHaveText(/Private/);
     const editor = page.getByTestId("composer-editor");
     await editor.fill("Private planning notes");
     await editor.press("Enter");
@@ -58,7 +60,14 @@ test("private threads are owner-only and visibility is fixed at creation", async
         return response.ok() ? (await response.json()).visibility : null;
       })
       .toBe("private");
-    await expect(page.getByText("Private", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Thread visibility" }).click();
+    await expect(
+      page.getByRole("menuitemradio", { name: "Private" }),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect(
+      page.getByRole("menuitemradio", { name: "Workspace" }),
+    ).toBeDisabled();
+    await page.keyboard.press("Escape");
 
     // Visibility cannot be changed in place; the PATCH only knows titles.
     const flip = await page.request.patch(
@@ -72,8 +81,8 @@ test("private threads are owner-only and visibility is fixed at creation", async
 
     // A shared thread continues privately as a new thread; the source is untouched.
     await page.goto(`/agents/${sharedId}`);
-    await page.getByRole("button", { name: "Thread actions" }).click();
-    await page.getByRole("menuitem", { name: "Continue privately" }).click();
+    await page.getByRole("button", { name: "Thread visibility" }).click();
+    await page.getByRole("menuitemradio", { name: "Private" }).click();
     await expect(page).toHaveURL(new RegExp(`/agents/(?!${sharedId})[^/]+$`));
     continuedId = new URL(page.url()).pathname.split("/").pop()!;
     const continued = await (

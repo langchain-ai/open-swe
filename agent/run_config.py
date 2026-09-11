@@ -27,6 +27,7 @@ from typing import Annotated, Any, Self
 
 from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
+from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from agent.invocation import resolve_invocation_id
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
@@ -143,6 +144,7 @@ class RunConfig(BaseModel):
     # Model selection
     agent_model_id: str | None = None
     agent_effort: str | None = None
+    model_selection: str | None = None
     reviewer_model_id: str | None = None
     reviewer_reasoning_effort: str | None = None
     reviewer_subagent_model_id: str | None = None
@@ -235,8 +237,22 @@ class RunConfig(BaseModel):
         return cls.from_config(get_config())
 
     def dump(self) -> dict[str, Any]:
-        """The JSON value to store, preserving exactly the keys that were set."""
-        return self.model_dump(mode="json", exclude_unset=True)
+        """The JSON value to store, preserving exactly the keys that were set.
+
+        LangGraph Platform puts a ``ProxyUser`` in ``langgraph_auth_user``, so an
+        extra can be any object; dropping it beats raising and losing the rest.
+        """
+        try:
+            return self.model_dump(mode="json", exclude_unset=True)
+        except PydanticSerializationError:
+            logger.warning("Dropping unserializable configurable keys", exc_info=True)
+        encoded: dict[str, Any] = {}
+        for key, value in self.model_dump(exclude_unset=True).items():
+            try:
+                encoded[key] = to_jsonable_python(value)
+            except PydanticSerializationError:
+                continue
+        return encoded
 
     def get(self, key: str) -> Any:
         """Value for ``key``, whether it is a declared field or an extra."""

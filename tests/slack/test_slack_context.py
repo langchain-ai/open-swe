@@ -163,6 +163,8 @@ def test_upsert_accumulates_participants_and_pins_source_context(
     assert metadata["participant_logins"] == {"commenter-gh": True, "first-gh": True}
     assert metadata["source_context"] == opening_context
     assert metadata["title"] == metadata["title_seed"] == "first-gh"
+    assert metadata["owner_type"] == "user"
+    assert metadata["owner_login"] == "first-gh"
 
 
 def test_upsert_stamps_visibility_and_owner_only_on_creation(
@@ -185,7 +187,7 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
         )
     )
     assert created["visibility"] == "private"
-    assert created["owner_login"] == "alice"
+    assert created["owner_login"] == "Alice"
 
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
@@ -194,7 +196,24 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
     )
     metadata = cast(dict, threads.thread)["metadata"]
     assert metadata["visibility"] == "private"
-    assert metadata["owner_login"] == "alice"
+    assert metadata["owner_login"] == "Alice"
+
+
+@pytest.mark.parametrize("source", ["github", "linear"])
+def test_upsert_keeps_original_github_initiator(
+    monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    threads = _FakeThreadsClient({"metadata": {}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    for login in ("FirstUser", "second-user"):
+        asyncio.run(
+            webhook_common.upsert_agent_thread_metadata(
+                "thread-id", source=source, github_login=login
+            )
+        )
+    metadata = cast(dict, threads.thread)["metadata"]
+    assert metadata["owner_type"] == "user"
+    assert metadata["owner_login"] == "FirstUser"
 
 
 def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyPatch) -> None:

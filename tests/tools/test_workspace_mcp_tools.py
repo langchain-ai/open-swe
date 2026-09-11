@@ -227,45 +227,23 @@ async def test_remote_arguments_survive_langchain_invocation(fake_store, monkeyp
     assert json.loads(result.content[0]["text"]) == {argument: "remote-value"}
 
 
-async def test_personal_mcps_load_only_in_the_owners_private_thread(monkeypatch):
+async def test_personal_mcps_load_for_private_credential_owner(monkeypatch):
     load = AsyncMock(return_value=["mcp_example_search"])
     monkeypatch.setattr(server, "load_mcp_tools", load)
-    threads = {
-        "private": {"metadata": {"visibility": "private", "owner_login": "outsider"}},
-        "shared": {"metadata": {"visibility": "public", "owner_login": "outsider"}},
-    }
-
-    async def get_thread(*, thread_id):
-        return threads[thread_id]
-
-    monkeypatch.setattr(server.client.threads, "get", get_thread)
 
     def namespaces():
         return [source.namespace for source in load.call_args.args]
 
-    assert await server._mcp_tools_for("shared", None) == ["mcp_example_search"]
+    assert await server._mcp_tools_for(None) == ["mcp_example_search"]
     assert namespaces() == [("workspace_mcps",)]
-    await server._mcp_tools_for("private", "outsider")
+    await server._mcp_tools_for("OUTSIDER")
     assert namespaces() == [("workspace_mcps",), ("user_mcps", "outsider")]
-    await server._mcp_tools_for("private", "OUTSIDER")
-    assert namespaces() == [("workspace_mcps",), ("user_mcps", "outsider")]
-    # A collaborative thread, another user's private thread, or an unreadable
-    # thread never loads personal credentials.
-    for thread_id, login in (
-        ("shared", "outsider"),
-        ("private", "someone-else"),
-        ("missing", "outsider"),
-    ):
-        await server._mcp_tools_for(thread_id, login)
-        assert namespaces() == [("workspace_mcps",)]
 
 
-async def test_personal_notion_follows_the_same_private_thread_gate(monkeypatch):
-    monkeypatch.setattr(server, "_personal_tools_allowed", AsyncMock(return_value=False))
+async def test_personal_notion_loads_for_private_credential_owner(monkeypatch):
     monkeypatch.setattr(server, "load_notion_tools", AsyncMock(return_value=["notion"]))
-    assert await server._notion_tools_for("shared", "notion-owner") == []
-    server._personal_tools_allowed.return_value = True
-    assert await server._notion_tools_for("private", "notion-owner") == ["notion"]
+    assert await server._notion_tools_for(None) == []
+    assert await server._notion_tools_for("notion-owner") == ["notion"]
 
 
 def test_connection_tool_pairs_cannot_collide():

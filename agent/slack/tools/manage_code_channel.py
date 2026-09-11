@@ -7,7 +7,9 @@ from agent.slack.client import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
     get_active_slack_thread,
+    invite_to_slack_channel,
     slack_thread_mutation_lock,
+    slack_user_ids,
 )
 from agent.slack.code_channels import (
     CODE_CHANNEL_SESSION_TS,
@@ -58,6 +60,7 @@ async def manage_code_channel(
         "archive",
     ],
     title: str = "",
+    invite: list[str] | None = None,
     team_id: str = "",
     is_private: bool = False,
     status: SessionStatus = "active",
@@ -105,6 +108,7 @@ async def manage_code_channel(
             active,
             await _code_channel_title(client, thread_id, title),
             cfg.repo.model_dump() if cfg.repo else None,
+            invite=invite or [],
             team_id=team_id,
             is_private=is_private,
         )
@@ -267,6 +271,7 @@ async def _create(
     title: str,
     repo: dict[str, Any] | None,
     *,
+    invite: list[str],
     team_id: str = "",
     is_private: bool = False,
 ) -> dict[str, Any]:
@@ -342,6 +347,12 @@ async def _create(
         }
 
     warnings: list[str] = []
+    invited: list[str] = []
+    invitees = slack_user_ids(invite)
+    if invitees:
+        invited, invite_error = await invite_to_slack_channel(channel_id, invitees)
+        if invite_error:
+            warnings.append(f"Could not invite {invite_error}")
     _, status_error = await set_session_status_result(channel_id, "processing")
     if status_error:
         warnings.append(f"Could not set processing status: {status_error}")
@@ -361,6 +372,7 @@ async def _create(
         "action": "create",
         "channel_id": channel_id,
         "dashboard_url": dashboard_thread_url(thread_id),
+        "invited": invited,
     }
     if warnings:
         result["warnings"] = warnings

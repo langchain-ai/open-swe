@@ -989,16 +989,27 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     command = {
         "method": "run.start",
         "params": {
+            "metadata": {
+                "owner_login": "attacker",
+                "owner_type": "system",
+                "visibility": "private",
+                "system_authorization": {
+                    "schedule_id": "admin-schedule",
+                    "invocation_id": "stolen",
+                },
+            },
             "config": {
                 "configurable": {
                     "github_login": "attacker",
                     "user_email": "attacker@example.com",
                     "source": "github",
+                    "invocation_id": "stolen",
+                    "prepare_run_id": "stolen",
                     "repo": {"owner": "evil", "name": "repo"},
                     "agent_model_id": _VISION_MODEL,
                     "agent_effort": "medium",
                 }
-            }
+            },
         },
     }
 
@@ -1018,10 +1029,27 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     assert configurable["github_login"] == "octocat"
     assert configurable["user_email"] == "octocat@example.com"
     assert configurable["source"] == "dashboard"
+    assert configurable["invocation_id"] != "stolen"
+    assert not (
+        {"owner_login", "owner_type", "visibility", "system_authorization"}
+        & enriched["params"]["metadata"].keys()
+    )
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
     assert updates[-1]["model"] == _VISION_MODEL
+
+    offloaded = await thread_runs._enrich_run_start_command(
+        "tid",
+        "octocat",
+        {
+            "method": "run.start",
+            "params": {"config": {"configurable": {"offload_conversation": True}}},
+        },
+        metadata=updates[-1],
+    )
+    assert offloaded["params"]["config"]["configurable"]["model_selection"] == "explicit"
+    assert updates[-1]["model_selection"] == "explicit"
 
 
 async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch) -> None:

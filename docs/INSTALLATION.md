@@ -227,9 +227,9 @@ On LangGraph Platform, set them under the deployment's environment variables; sa
 
 **Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Team settings, User mappings, Sandbox, Environments, …) appear. Set **Admin → Team settings → Default repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
 
-**Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Runs it starts act as the GitHub App until the Slack user is linked to a GitHub login, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
+**Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Public runs use the workspace GitHub App for agent operations, and user-owned PRs are opened as the thread's initiating GitHub user. Link the Slack user to a GitHub login before starting the thread, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
 
-**GitHub.** Signing in once is also what lets GitHub-triggered runs act as you: they run as the commenting user and need the token the sign-in stored; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
+**GitHub.** GitHub-triggered conversations are public. Agent GitHub operations use the App installation identity, while PRs use the initiating commenter's OAuth. The commenter must have a linked account; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
 
 ---
 
@@ -252,23 +252,10 @@ Open a section when you want that feature; everything above keeps working withou
 Open SWE listens for Linear comments that mention `@openswe`.
 
 1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** only **Comments → Create**.
-2. **Settings → API → Personal API keys → New API key** with **All access**, saved as `LINEAR_API_KEY`.
-3. Map Linear teams and projects to repositories in `agent/linear/team_repo_map.py`:
+2. Add a Linear MCP server named `linear` under **Admin → Workspace MCPs** and select the tools Open SWE may use. Include `save_comment` (or `create_comment` if offered) so the backend can post run, authentication, and sandbox failure notices even after the agent stops.
+3. Set a workspace default repository under **Open SWE Agent**. Add a `repo:owner/name` token or GitHub URL to a Linear comment when the issue belongs to another repository.
 
-```python
-LINEAR_TEAM_TO_REPO = {
-    "My Team": {"owner": "my-org", "name": "my-repo"},
-    "Engineering": {
-        "projects": {
-            "backend": {"owner": "my-org", "name": "backend"},
-            "frontend": {"owner": "my-org", "name": "frontend"},
-        },
-        "default": {"owner": "my-org", "name": "monorepo"},
-    },
-}
-```
-
-A `repo:owner/name` token or GitHub URL in the comment overrides the mapping. **Verify:** comment `@openswe what files are in this repo?` on an issue in a mapped team.
+**Verify:** comment `@openswe what files are in this repo?` on an issue, adding `repo:owner/name` when needed.
 
 </details>
 
@@ -281,7 +268,7 @@ The bundled dashboard needs none of this. Read on only if the dashboard is deplo
 
 **Mount prefix.** If the server runs under a LangGraph `http.mount_prefix`, the Platform image builds the UI for that prefix automatically; locally pass it to the build (`DASHBOARD_BASE_PATH=/<prefix>/ make build-dashboard`) and keep `LANGGRAPH_URL` on the mounted URL.
 
-**Datadog RUM.** Set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building. Optional: `VITE_DATADOG_SITE` (default `datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay masks all content and telemetry strips query strings and fragments. `VITE_` values are public in the bundle; use a client token, never an API or application key.
+**Datadog RUM.** Set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building. Optional: `VITE_DATADOG_SITE` (default `us5.datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay masks all content and telemetry strips query strings and fragments. `VITE_` values are public in the bundle; use a client token, never an API or application key.
 
 </details>
 
@@ -347,6 +334,34 @@ Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `
 - The URL configured in GitHub, Slack, or Linear must be the deployment's URL; GitHub shows each delivery and its response under the App's **Advanced** tab. A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
 - Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create for Linear.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+
+### Thread credential scope
+
+Public threads use the GitHub App installation identity for agent GitHub
+operations. PRs from user-owned threads are opened with the original initiator's
+stored GitHub OAuth token, even when another participant starts the run. If that
+token is unavailable, the initiator must sign in again; PR creation does not fall
+back to the bot. Public PR creation first verifies that the target repository is
+accessible through the configured workspace installation. System-owned threads, including scheduled automations, open PRs
+as the GitHub App. Existing threads without recorded ownership retain bot PR
+authorship. Scheduled runs check repository access with the workspace GitHub App.
+They record the automation creator for auditing but do not require that person's
+OAuth token or inject their GitHub login or email as the agent's execution identity.
+Admin schedules retain their management tools through authorization tied to the
+scheduled invocation. The graph and tools recheck the creator's current admin
+status; later participants do not inherit that authorization. Automation management
+from these system runs also uses workspace credentials.
+
+Public threads load workspace MCP connections and organization skills. Personal
+Notion connections, user skills, and user custom instructions are available only in a private thread
+started by its immutable owner. The same ownership check applies when a personal
+MCP tool refreshes its credentials at execution time.
+
+Private threads use their owner's stored GitHub OAuth token for server-side
+GitHub operations and PR creation. If that token is unavailable, the owner must
+sign in again; the run does not fall back to the bot. Sandbox GitHub proxy access
+continues to use the GitHub App installation token in both kinds of thread.
+User identity and membership checks still apply to public runs.
 
 ### GitHub authentication errors
 
