@@ -776,10 +776,7 @@ async def test_system_schedule_can_run_without_user_credentials(
     configurable = fake_client.runs.created[0]["config"]["configurable"]
     assert "github_login" not in configurable
     assert "user_email" not in configurable
-    assert metadata["system_authorization"] == {
-        "schedule_id": "sched_system",
-        "invocation_id": configurable["invocation_id"],
-    }
+    assert "system_authorization" not in metadata
 
 
 async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
@@ -852,41 +849,6 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     monkeypatch.setenv("CONFIGURED_ADMINS", "bob")
     assert await server._admin_thread(run_config, None) is False
     assert (await environments.list_environments())["ok"] is False
-
-
-async def test_authorized_system_schedule_rejects_a_different_invocation(
-    fake_client,
-) -> None:  # noqa: ANN001
-    from agent.run_config import RunConfig
-
-    record = {"id": "sched_1", "created_by": "alice"}
-    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
-    fake_client.threads.created.append(
-        {
-            "thread_id": "thread-1",
-            "metadata": {
-                "owner_type": "system",
-                "visibility": "public",
-                "system_authorization": {
-                    "schedule_id": "sched_1",
-                    "invocation_id": "invocation-1",
-                },
-            },
-        }
-    )
-    fake_client.threads.get = AsyncMock(return_value=fake_client.threads.created[0])
-
-    assert (
-        await schedules.authorized_system_schedule(
-            RunConfig(
-                thread_id="thread-1",
-                source="schedule",
-                schedule_id="sched_1",
-                invocation_id="invocation-2",
-            )
-        )
-        is None
-    )
 
 
 async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_thread(

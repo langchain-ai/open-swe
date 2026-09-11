@@ -6,7 +6,7 @@ import logging
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
@@ -19,7 +19,6 @@ from agent.dashboard.agent_overrides import resolve_login_from_email_async
 from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.plan_store import get_plan_content, list_plan_comments
-from agent.dashboard.schedules import authorized_system_schedule
 from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -39,7 +38,6 @@ from agent.dashboard.workflow_approval import (
 )
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
-from agent.run_config import RunConfig
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.utils.dashboard_links import (
@@ -59,6 +57,7 @@ from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_
 
 logger = logging.getLogger(__name__)
 
+_ACTOR_UNAUTHORIZED = object()
 ThreadScope = Literal["all", "interactive", "automation"]
 ThreadAction = Literal[
     "send_message",
@@ -110,7 +109,7 @@ def _config() -> dict[str, Any]:
     return as_json_object(config)
 
 
-async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
+async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | object | None:
     config = _config()
     configurable = as_json_object(config.get("configurable"))
     email_value = configurable.get("user_email")
@@ -120,31 +119,18 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     if not login:
         login = await resolve_login_from_email_async(email)
     if not login:
-        try:
-            record = await authorized_system_schedule(RunConfig.from_config(config))
-        except Exception:
-            return None
-        if record is None:
-            return None
-        schedule_id = record.get("id")
-        if not isinstance(schedule_id, str) or not schedule_id:
-            return None
-        login = record.get("created_by")
-        if not isinstance(login, str) or not login.strip():
-            return None
-        login = login.strip()
-        email_value = record.get("user_email")
-        email = (
-            email_value.strip() if isinstance(email_value, str) and email_value.strip() else None
-        )
+        return _ACTOR_UNAUTHORIZED if email else None
     current_login = _latest_state_github_login(state)
-    if current_login and current_login.lower() != login.lower():
-        login = current_login
-        email = None
+    if current_login is not None:
+        if not current_login:
+            return None
+        if current_login.lower() != login.lower():
+            login = current_login
+            email = None
     try:
         await enforce_github_login_gate(login)
     except HTTPException:
-        return None
+        return _ACTOR_UNAUTHORIZED
     return _Actor(login=login, email=email, name=login)
 
 
@@ -247,8 +233,9 @@ async def list_threads(
 ) -> dict[str, Any]:
     """Implement the `list_threads` tool."""
     actor = await _actor(state)
-    if actor is None:
+    if actor is _ACTOR_UNAUTHORIZED:
         return _failure("No verified triggering user is available")
+    actor = cast(_Actor | None, actor)
     requested = (
         participant.strip() if isinstance(participant, str) and participant.strip() else None
     )
@@ -302,15 +289,19 @@ async def list_threads(
     pr_ref = parse_github_pr_url(normalized_query)
     search_query = pr_ref.url if pr_ref else normalized_query or None
     filter_participant_login = (
-        requested if requested and requested.lower() != actor.login.lower() else None
+        requested
+        if requested and (actor is None or requested.lower() != actor.login.lower())
+        else None
     )
     try:
         page = await list_dashboard_threads_page(
-            actor.login,
-            email=actor.email,
+            actor.login if actor else "",
+            email=actor.email if actor else None,
             limit=limit,
             offset=offset,
-            include_all=all_users or (admin_threads is True and requested is None),
+            include_all=(actor is None and requested is None)
+            or all_users
+            or (admin_threads is True and requested is None),
             resolved=resolved,
             viewed=viewed,
             source=source,
@@ -320,7 +311,7 @@ async def list_threads(
             automation_id=automation_id,
             filter_participant_login=filter_participant_login,
             surfaced_only=True,
-            include_private=await _private_thread_context(actor),
+            include_private=actor is not None and await _private_thread_context(actor),
             admin_threads=admin_threads,
         )
     except HTTPException as exc:
@@ -485,8 +476,8 @@ def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
         sender_id = message_sender_id(_message_content(message))
         if isinstance(sender_id, str) and sender_id.startswith("github:"):
             login = sender_id.removeprefix("github:").strip()
-            return login or None
-        return None
+            return login or ""
+        return ""
     return None
 
 
@@ -628,7 +619,7 @@ async def _private_thread_context(actor: _Actor) -> bool:
 
 
 async def _authorized_locator(
-    locator: str, actor: _Actor, *, admin_override: bool = False
+    locator: str, actor: _Actor | None, *, admin_override: bool = False
 ) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
     langsmith_locator = parse_langsmith_locator(locator)
     slack_locator = parse_slack_thread_url(locator)
@@ -655,8 +646,8 @@ async def _authorized_locator(
     try:
         summary = await get_dashboard_thread(
             thread_id,
-            actor.login,
-            email=actor.email,
+            actor.login if actor else None,
+            email=actor.email if actor else None,
             mark_viewed=False,
         )
     except HTTPException as exc:
@@ -668,14 +659,14 @@ async def _authorized_locator(
         thread_id = resolved
         summary = await get_dashboard_thread(
             thread_id,
-            actor.login,
-            email=actor.email,
+            actor.login if actor else None,
+            email=actor.email if actor else None,
             mark_viewed=False,
         )
     if (
         summary.get("visibility") == "private"
         and not admin_override
-        and not await _private_thread_context(actor)
+        and (actor is None or not await _private_thread_context(actor))
     ):
         raise HTTPException(404, "thread not found")
     return thread_id, summary
@@ -739,8 +730,9 @@ async def get_thread(
 ) -> dict[str, Any]:
     """Implement the `get_thread` tool."""
     actor = await _actor(state)
-    if actor is None:
+    if actor is _ACTOR_UNAUTHORIZED:
         return _failure("No verified triggering user is available")
+    actor = cast(_Actor | None, actor)
     locator = thread_id.strip()
     try:
         resolved = await _authorized_locator(locator, actor)
@@ -773,7 +765,7 @@ async def get_thread(
     latest_run = runs[0] if runs else None
     plan = _compact_plan(plan_content or {}, plan_comments)
     running = summary.get("status") == "running"
-    can_delete_plan_comment = any(
+    can_delete_plan_comment = actor is not None and any(
         comment.get("author_login") == actor.login for comment in plan_comments
     )
     cost = await _thread_cost(thread_id, latest_run)
@@ -808,7 +800,7 @@ async def get_thread(
         "langsmith": _langsmith_identifiers(summary.get("traceUrl"), locator),
         "slack": slack_locator and _slack_identifiers(locator),
         "available_actions": _available_actions(
-            admin=actor.admin,
+            admin=actor is None or actor.admin,
             admin_thread=summary.get("adminThread") is True,
             running=running,
             resolved=summary.get("resolved") is True,
@@ -843,7 +835,7 @@ def _message_args(
 
 async def _send_message(
     thread_id: str,
-    actor: _Actor,
+    actor: _Actor | None,
     message: str,
     summary: Mapping[str, Any],
     *,
@@ -860,7 +852,10 @@ async def _send_message(
     )
     try:
         queued_summary = await send_dashboard_message(
-            thread_id, actor.login, body, email=actor.email
+            thread_id,
+            actor.login if actor else None,
+            body,
+            email=actor.email if actor else None,
         )
         return {"success": True, "mode": "queued", "thread": _list_item(queued_summary)}
     except HTTPException as exc:
@@ -880,9 +875,9 @@ async def _send_message(
     }
     status_code, content, _ = await proxy_dashboard_thread_commands(
         thread_id,
-        actor.login,
+        actor.login if actor else None,
         json.dumps(command).encode(),
-        email=actor.email,
+        email=actor.email if actor else None,
     )
     try:
         payload = json.loads(content) if content else None
@@ -976,8 +971,9 @@ async def manage_thread(
 ) -> dict[str, Any]:
     """Implement the `manage_thread` tool."""
     actor = await _actor(state)
-    if actor is None:
+    if actor is _ACTOR_UNAUTHORIZED:
         return _failure("No verified triggering user is available")
+    actor = cast(_Actor | None, actor)
     thread_id = thread_id.strip()
     if not thread_id:
         return _failure("thread_id is required")
@@ -996,7 +992,7 @@ async def manage_thread(
     )
     if unexpected:
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
-    if action == "admin_cancel" and not actor.admin:
+    if action == "admin_cancel" and (actor is None or not actor.admin):
         return _failure("Only workspace admins can cancel another user's thread")
     if action == "delete" and not confirm:
         return _failure("delete requires confirm=true")
@@ -1007,9 +1003,14 @@ async def manage_thread(
         model_id, effort = validated
 
     try:
+        session = (
+            actor.session
+            if actor
+            else {"sub": "system:workspace", "name": "Open SWE", "_workspace_context": True}
+        )
         # Private threads are only reachable from the owner's private context.
         # admin_cancel is the exception, so its response must not leak details.
-        admin_override = action == "admin_cancel" and actor.admin
+        admin_override = action == "admin_cancel" and actor is not None and actor.admin
         resolved = await _authorized_locator(thread_id, actor, admin_override=admin_override)
         if isinstance(resolved, dict):
             return resolved
@@ -1025,9 +1026,13 @@ async def manage_thread(
                 plan_mode=plan_mode,
             )
         if action == "cancel":
-            thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
+            thread = await cancel_dashboard_thread(
+                thread_id, actor.login if actor else None, email=actor.email if actor else None
+            )
             return {"success": True, "thread": _list_item(thread)}
         if action == "admin_cancel":
+            if actor is None:
+                return _failure("admin_cancel requires a user identity")
             thread = await admin_cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
             if summary.get("visibility") == "private":
                 return {
@@ -1038,13 +1043,15 @@ async def manage_thread(
         if action in {"resolve", "unresolve"}:
             thread = await resolve_dashboard_thread(
                 thread_id,
-                actor.login,
+                actor.login if actor else None,
                 resolved=action == "resolve",
-                email=actor.email,
+                email=actor.email if actor else None,
             )
             return {"success": True, "thread": _list_item(thread)}
         if action == "delete":
-            await delete_dashboard_thread(thread_id, actor.login, email=actor.email)
+            await delete_dashboard_thread(
+                thread_id, actor.login if actor else None, email=actor.email if actor else None
+            )
             return {"success": True, "deleted": True, "thread_id": thread_id}
         if action == "add_plan_comment":
             if error := _required(comment, "comment", action):
@@ -1054,7 +1061,7 @@ async def manage_thread(
             result = await plan_api.post_plan_comment(
                 thread_id,
                 plan_api.CommentBody(body=comment or ""),
-                session=actor.session,
+                session=session,
             )
             return {"success": True, "comment": result}
         if action == "delete_plan_comment":
@@ -1063,7 +1070,7 @@ async def manage_thread(
             result = await plan_api.remove_plan_comment(
                 thread_id,
                 comment_id or "",
-                session=actor.session,
+                session=session,
             )
             return {"success": True, **result}
         if action == "update_plan":
@@ -1080,7 +1087,7 @@ async def manage_thread(
             if content_format != existing_format:
                 return _failure(f"existing plan format is {existing_format}")
             update = plan_api.PlanUpdate(**{content_format: content})
-            result = await plan_api.update_plan(thread_id, update, session=actor.session)
+            result = await plan_api.update_plan(thread_id, update, session=session)
             return {
                 "success": True,
                 "status": result.get("status"),
@@ -1089,7 +1096,7 @@ async def manage_thread(
                 "plan_url": dashboard_plan_url(thread_id),
             }
         if action == "approve_plan":
-            result = await plan_api.approve_plan(thread_id, session=actor.session)
+            result = await plan_api.approve_plan(thread_id, session=session)
             return {"success": True, **result}
         if action == "request_plan_changes":
             if len(comment or "") > _MAX_COMMENT_CHARS:
@@ -1098,9 +1105,9 @@ async def manage_thread(
                 await plan_api.post_plan_comment(
                     thread_id,
                     plan_api.CommentBody(body=comment),
-                    session=actor.session,
+                    session=session,
                 )
-            result = await plan_api.reject_plan(thread_id, session=actor.session)
+            result = await plan_api.reject_plan(thread_id, session=session)
             return {"success": True, **result}
         if action in {"approve_workflow_push", "reject_workflow_push"}:
             if error := _required(fingerprint, "fingerprint", action):
@@ -1110,7 +1117,7 @@ async def manage_thread(
                 if action == "approve_workflow_push"
                 else workflow_approval_api.reject_workflow_push
             )
-            result = await handler(thread_id, fingerprint or "", session=actor.session)
+            result = await handler(thread_id, fingerprint or "", session=session)
             return {"success": True, **result}
         return _failure(f"unsupported action: {action}")
     except HTTPException as exc:

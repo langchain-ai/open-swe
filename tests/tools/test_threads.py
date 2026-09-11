@@ -41,60 +41,27 @@ async def test_actor_uses_only_trusted_run_configuration(monkeypatch: pytest.Mon
     )
 
 
-async def test_actor_authorizes_the_current_system_schedule(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = {
-        "configurable": {
-            "thread_id": "thread-1",
-            "source": "schedule",
-            "schedule_id": "schedule-1",
-            "invocation_id": "invocation-1",
-        }
-    }
-    monkeypatch.setattr(threads_tool, "get_config", lambda: config)
-    authorize = AsyncMock(
-        return_value={
-            "id": "schedule-1",
-            "name": "CI fixer",
-            "created_by": "trusted-user",
-            "user_email": "trusted@example.com",
-        }
-    )
-    monkeypatch.setattr(threads_tool, "authorized_system_schedule", authorize)
-
-    actor = await threads_tool._actor()
-
-    assert actor == threads_tool._Actor(
-        login="trusted-user",
-        email="trusted@example.com",
-        name="trusted-user",
-    )
-    authorize.assert_awaited_once()
-
-
-async def test_actor_rejects_a_system_schedule_without_a_creator(
+async def test_actor_drops_configured_user_for_latest_system_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         threads_tool,
         "get_config",
-        lambda: {
-            "configurable": {
-                "thread_id": "thread-1",
-                "source": "schedule",
-                "schedule_id": "schedule-1",
-                "invocation_id": "invocation-1",
+        lambda: {"configurable": {"github_login": "thread-owner"}},
+    )
+    state = {
+        "messages": [
+            {
+                "type": "human",
+                "content": (
+                    '<input-message sender="system:workspace" surface="automation" kind="system">'
+                    "<content>Continue</content></input-message>"
+                ),
             }
-        },
-    )
-    monkeypatch.setattr(
-        threads_tool,
-        "authorized_system_schedule",
-        AsyncMock(return_value={"id": "schedule-1"}),
-    )
+        ]
+    }
 
-    assert await threads_tool._actor() is None
+    assert await threads_tool._actor(state) is None
 
 
 async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -125,7 +92,22 @@ async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.M
     assert actor == threads_tool._Actor(login="reviewer", email=None, name="reviewer")
 
 
-async def test_list_threads_denies_actor_outside_allowed_org(
+async def test_list_threads_without_actor_uses_public_workspace_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=None))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+
+    result = await threads_tool.list_threads()
+
+    assert result["success"] is True
+    page.assert_awaited_once()
+    assert page.await_args.kwargs["include_all"] is True
+    assert page.await_args.kwargs["include_private"] is False
+
+
+async def test_list_threads_treats_unavailable_actor_as_workspace_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -438,6 +420,39 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
     assert result["plan"]["comments"] == []
     assert result["state"]["message_count"] == 1
     client.runs.list.assert_awaited_once_with("thread-1", limit=threads_tool._MAX_RUNS + 1)
+
+
+async def test_get_thread_without_actor_reads_public_workspace_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _DetailClient()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=None))
+    get_dashboard_thread = AsyncMock(return_value={"id": "thread-1", "status": "finished"})
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value=None))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+
+    result = await threads_tool.get_thread("thread-1")
+
+    assert result["success"] is True
+    get_dashboard_thread.assert_awaited_once_with("thread-1", None, email=None, mark_viewed=False)
+
+
+async def test_get_thread_without_actor_rejects_private_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(side_effect=HTTPException(404, "thread not found")),
+    )
+
+    result = await threads_tool.get_thread("thread-1")
+
+    assert result == {"success": False, "error": "thread not found", "status_code": 404}
 
 
 async def test_get_thread_accepts_dashboard_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -988,6 +1003,27 @@ async def test_manage_thread_rejects_invalid_model_before_thread_access(
         "error": "model_id and effort are not a supported combination",
     }
     get_thread.assert_not_awaited()
+
+
+async def test_manage_thread_without_actor_sends_workspace_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "thread-1", "planMode": False}),
+    )
+    send = AsyncMock(return_value={"id": "thread-1", "status": "running", "messages": []})
+    monkeypatch.setattr(threads_tool, "send_dashboard_message", send)
+
+    result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
+
+    assert result["success"] is True
+    body = send.await_args.args[2]
+    assert send.await_args.args[:2] == ("thread-1", None)
+    assert send.await_args.kwargs == {"email": None}
+    assert body.content == "Continue"
 
 
 async def test_manage_thread_queues_message_for_busy_thread(

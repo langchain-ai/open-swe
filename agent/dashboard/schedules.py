@@ -473,10 +473,11 @@ def _admin_thread_enabled(record: dict[str, Any]) -> bool:
     )
 
 
-async def authorized_system_schedule(cfg: RunConfig) -> dict[str, Any] | None:
-    """Verify a system schedule grant against its saved invocation."""
+async def authorized_admin_schedule(cfg: RunConfig) -> dict[str, Any] | None:
+    """Verify a system admin grant against its saved invocation and current schedule."""
     if (
         cfg.source != "schedule"
+        or cfg.admin_thread is not True
         or not cfg.thread_id
         or not cfg.invocation_id
         or cfg.github_login
@@ -495,14 +496,7 @@ async def authorized_system_schedule(cfg: RunConfig) -> dict[str, Any] | None:
         or schedule_id != cfg.schedule_id
     ):
         return None
-    return await get_agent_schedule(schedule_id)
-
-
-async def authorized_admin_schedule(cfg: RunConfig) -> dict[str, Any] | None:
-    """Verify a system admin grant against its saved invocation and current schedule."""
-    if cfg.admin_thread is not True:
-        return None
-    record = await authorized_system_schedule(cfg)
+    record = await get_agent_schedule(schedule_id)
     return record if record and _admin_thread_enabled(record) else None
 
 
@@ -660,10 +654,11 @@ async def _launch_agent_schedule_record(
         test_run=test_run,
         admin_thread=admin_thread,
     )
-    metadata["system_authorization"] = {
-        "schedule_id": schedule_id,
-        "invocation_id": run_config["configurable"]["invocation_id"],
-    }
+    if admin_thread:
+        metadata["system_authorization"] = {
+            "schedule_id": schedule_id,
+            "invocation_id": run_config["configurable"]["invocation_id"],
+        }
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     input_context: InputMessageContext = {

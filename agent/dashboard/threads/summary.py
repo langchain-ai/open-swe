@@ -126,9 +126,11 @@ def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) ->
 
 
 def _assert_thread_postable(
-    metadata: Mapping[str, Any], login: str, email: str | None = None
+    metadata: Mapping[str, Any], login: str | None, email: str | None = None
 ) -> None:
     _assert_thread_promptable(metadata, login)
+    if login is None and metadata.get("visibility", "public") == "public":
+        return
     if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
         email, login=login
     ):

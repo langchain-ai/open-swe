@@ -52,6 +52,7 @@ async def approve_workflow_push(
         metadata,
         "The workflow-file push approval was approved. Retry the blocked git push now; do not alter workflow files before pushing.",
         plan_mode=False,
+        workspace_context=session.get("_workspace_context") is True,
     )
     return {"status": "approved", "fingerprint": fingerprint}
 
