@@ -24,9 +24,10 @@ starts. It has three problems:
   repository.
 - **It is invisible and unaccountable.** The agent does not know which profile it is on or why,
   and nothing in the transcript records the decision. Users cannot see or contest it.
-- **It duplicates work the agent is about to do anyway.** The agent's first turn already reads the
-  request and the relevant files. A second model call that guesses from the prompt alone is both
-  redundant and worse informed.
+- **It throws its own work away.** The classifier is a separate model call with its own prompt.
+  Its input is the request text truncated to 8,000 characters, its output is a bare route, and
+  neither enters the thread. The agent's first turn then starts cold and reads the same request
+  and the same files the classifier was guessing about.
 
 Thread titling has the same shape: a separate model call over the first message, producing a
 title that reflects the request's wording rather than what the work turned out to be.
@@ -51,6 +52,15 @@ title that reflects the request's wording rather than what the work turned out t
 thread's stored settings. Later model calls in the run and all later runs on the thread use the
 chosen profile with the full tool set. The decision is final for the thread; there is no
 mid-thread upgrade.
+
+**The sizing turn is the first turn of the work.** Exiting pre-routed mode appends a tool result
+and changes which model handles the next call. Nothing else changes: the message history is not
+trimmed, summarized, or forked. Every file the agent read and every command it ran while sizing
+the task is already in the context the chosen profile continues from, so the routed model resumes
+from an understanding of the repository it would otherwise have had to build for itself. This is
+the property that makes an exploratory sizing turn affordable at all, and it is the one the
+classifier cannot have: a decision made in a separate call can only be carried forward as a
+single word.
 
 **Plan mode carries the same decision.** A thread that starts in plan mode skips pre-routed
 mode, runs planning on `performance`, and routes when the plan is approved: `approve_plan`
@@ -106,8 +116,31 @@ replaces the seeded placeholder title is preserved.
   tool list is part of the cached prompt prefix, so every exit would re-read the whole prefix.
   Rejecting calls keeps the same guarantee with a stable prefix.
 
+## Costs
+
+Against the classifier's single small call, a sizing turn is expensive in absolute terms: on
+open-ended tasks the agent has been observed spending 30 to 56 model calls and up to 1.8M input
+tokens before it routes. The prompt asks it to read only enough to size the work and to exit on
+the higher profile when torn rather than read further, which is guidance, not a bound.
+
+The comparison is not "one call against thirty", because the thirty are inherited. What is
+genuinely spent is the difference between what the agent read to *decide* and what it needed to
+*finish* — reads that serve only the routing decision. On a well-scoped task that difference is
+near zero. On an open-ended one it is not, and nothing in this proposal bounds it.
+
+Two smaller regressions come with it. The decision is no longer guaranteed to happen: an agent
+that never calls the exit tool stays on `fast` with the restricted tool set, though any
+disallowed call returns an error naming the exit tool, so the failure is loud rather than
+silent. And routing quality now depends on the model backing the `fast` profile, which makes
+every routing decision for every thread.
+
 ## Unresolved questions
 
+- How to bound the sizing turn. The leading option is a hard cap in the middleware: after N tool
+  calls while pre-routed, collapse the tool list to `exit_pre_routed_mode` alone so the next
+  model call has to decide. This invalidates the cached prefix at the cap, which is acceptable
+  because the runs that reach it are the expensive ones. N is unknown; the eval's
+  `tool_calls_before_exit` distribution should set it.
 - Whether dashboard and Slack plan approval should route the thread directly instead of sending
   it through pre-routed mode with the approved plan as input.
 - Whether the `title` argument on `save_plan` should be required in plan mode rather than
