@@ -60,8 +60,9 @@ function listMcpConnections(configPath) {
   );
 }
 
-function saveMcpConnection(configPath, name, update) {
-  if (!/^[a-z][a-z0-9_-]{0,31}$/.test(name) || update?.name !== name)
+function saveMcpConnection(configPath, update) {
+  const name = update?.name;
+  if (typeof name !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(name))
     throw new Error("Invalid MCP connection name.");
   if (!update.url || !["streamable_http", "sse"].includes(update.transport))
     throw new Error("Local MCP connections require a URL and valid transport.");

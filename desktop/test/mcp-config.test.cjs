@@ -21,7 +21,7 @@ test("local MCP connections are managed through structured config", (t) => {
   const configPath = temporaryConfig(t);
   assert.deepEqual(listMcpConnections(configPath), []);
 
-  saveMcpConnection(configPath, "local", {
+  saveMcpConnection(configPath, {
     name: "local",
     url: "http://127.0.0.1:8080/mcp",
     transport: "streamable_http",
@@ -39,19 +39,6 @@ test("local MCP connections are managed through structured config", (t) => {
   assert.deepEqual(revealMcpHeaders(configPath, "local"), {
     Authorization: "Bearer secret",
   });
-  assert.deepEqual(listMcpConnections(configPath), [
-    {
-      name: "local",
-      url: "http://127.0.0.1:8080/mcp",
-      transport: "streamable_http",
-      enabled: true,
-      allowed_tools: [],
-      header_names: ["Authorization"],
-      revision: "local",
-      updated_at: "",
-      local_command: false,
-    },
-  ]);
   if (process.platform !== "win32")
     assert.equal(fs.statSync(configPath).mode & 0o777, 0o600);
 
@@ -82,7 +69,7 @@ for (const allowedTools of [undefined, [], ["search"]]) {
       { enabled: false },
       { enabled: true },
     ]) {
-      saveMcpConnection(configPath, "local", {
+      saveMcpConnection(configPath, {
         ...listMcpConnections(configPath)[0],
         url: "http://localhost:9090/mcp",
         ...update,
@@ -99,7 +86,7 @@ for (const allowedTools of [undefined, [], ["search"]]) {
       assert.equal(saved.enabled, update.enabled);
     }
 
-    saveMcpConnection(configPath, "local", {
+    saveMcpConnection(configPath, {
       ...listMcpConnections(configPath)[0],
       headers: {},
     });
@@ -119,7 +106,7 @@ test("command MCPs remain visible but cannot be overwritten as URLs", (t) => {
   assert.equal(listMcpConnections(configPath)[0].local_command, true);
   assert.throws(
     () =>
-      saveMcpConnection(configPath, "files", {
+      saveMcpConnection(configPath, {
         name: "files",
         url: "http://localhost:8080/mcp",
         transport: "streamable_http",

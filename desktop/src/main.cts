@@ -460,7 +460,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:save-mcp-connection", (event, input) => {
     requireTrustedDesktopIpc(event);
-    return saveMcpConnection(mcpConfigPath(), input?.name, input);
+    return saveMcpConnection(mcpConfigPath(), input);
   });
   ipcMain.handle("desktop:delete-mcp-connection", (event, name) => {
     requireTrustedDesktopIpc(event);

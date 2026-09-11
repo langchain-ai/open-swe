@@ -221,7 +221,7 @@ export interface MCPConnection {
 export interface MCPConnectionUpdate {
   name: string
   url: string
-  transport: "streamable_http" | "sse"
+  transport: MCPConnection["transport"]
   enabled: boolean
   allowed_tools: string[]
   headers?: Record<string, string> | null

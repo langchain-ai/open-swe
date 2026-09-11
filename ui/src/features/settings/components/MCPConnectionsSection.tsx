@@ -700,10 +700,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
                         await client.save({
                           name: connection.name,
                           url: connection.url,
-                          transport:
-                            connection.transport === "sse"
-                              ? "sse"
-                              : "streamable_http",
+                          transport: connection.transport,
                           enabled: !connection.enabled,
                           allowed_tools: connection.allowed_tools,
                         })

@@ -5,7 +5,6 @@ import { AccountSection } from "@/features/settings/components/AccountSection"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
-import { LocalMCPSection } from "@/features/settings/components/LocalMCPSection"
 import { PersonalInstructionsSection } from "@/features/settings/components/PersonalInstructionsSection"
 import { PreferencesSection } from "@/features/settings/components/PreferencesSection"
 import { PullRequestsSection } from "@/features/settings/components/PullRequestsSection"
@@ -62,7 +61,7 @@ function MySettingsPage() {
             Settings for local runs on this computer.
           </p>
         </header>
-        <LocalMCPSection />
+        <MCPConnectionsSection scope="local" />
         <DesktopVersionSection />
       </main>
     )
@@ -79,7 +78,9 @@ function MySettingsPage() {
       <PullRequestsSection />
       <ConnectionsSection user={session.data} />
       <MCPConnectionsSection scope="user" />
-      <LocalMCPSection />
+      {typeof window !== "undefined" && window.openSweDesktop && (
+        <MCPConnectionsSection scope="local" />
+      )}
       <PersonalInstructionsSection />
       <DesktopVersionSection />
     </AppShell>
