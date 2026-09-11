@@ -296,6 +296,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 ...modelConfigurable(activeSelection),
               },
             },
+            multitaskStrategy: "enqueue",
           }
         )
         return true
@@ -479,7 +480,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
                   : prompt
                 if (!isRunning) {
-                  await submit(text, images)
+                  // Not awaited: `stream.submit` resolves when the run
+                  // completes, and holding the composer for the whole run
+                  // would block the next message.
+                  void submit(text, images)
                   return
                 }
                 try {

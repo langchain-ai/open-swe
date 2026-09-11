@@ -175,14 +175,29 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
 
     await typeIntoComposer(
       page,
-      "E2E_DESKTOP_LOCAL please add a greet() helper and open a PR",
+      "E2E_DESKTOP_LOCAL E2E_BUSY_HOLD:12 please add a greet() helper and open a PR",
     );
+
+    // The fake model holds the run's reply for 12s once the PR exists, giving
+    // the composer a streaming window: a follow-up sent there must queue and
+    // then run, not be blocked until the run ends.
+    await expect
+      .poll(async () => {
+        const response = await request.get("/mock/github/data");
+        if (!response.ok()) return [];
+        return response.json();
+      })
+      .toMatchObject([{ title: "Add greet() helper", draft: true }]);
+    await typeIntoComposer(page, "one more tweak please");
+    await expect(
+      page.getByTestId("queued-message").filter({ hasText: "one more tweak" }),
+    ).toBeVisible();
 
     await expect(page).toHaveURL(/open-swe:\/\/app\/agents\/local\//);
     await expect(page.getByText(/Done! I added/)).toBeVisible();
     await expect(
       sidebar.getByRole("link", {
-        name: /E2E_DESKTOP_LOCAL please add a greet\(\) helper and open a PR/,
+        name: /E2E_DESKTOP_LOCAL E2E_BUSY_HOLD:12 please add a greet\(\) helper and open a PR/,
       }),
     ).toBeVisible();
     const prLink = page.getByRole("link", {
@@ -221,6 +236,12 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       path: screenshot,
       contentType: "image/png",
     });
+
+    // The held run drains the queued follow-up and answers it (the fake
+    // model's follow-up script): proof the mid-run submit reached the agent.
+    await expect(
+      page.getByText(/anything else you'd like changed/),
+    ).toBeVisible();
   } finally {
     await context.tracing.stop({ path: trace }).catch(() => {});
     if (existsSync(trace)) {
