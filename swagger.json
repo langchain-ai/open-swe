@@ -624,6 +624,73 @@
         "type": "object"
       },
       "JsonValue": {},
+      "MCPConnectionPublic": {
+        "description": "Connection settings safe to return to the dashboard; credentials stay server-side.",
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Tools",
+            "type": "array"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "header_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Header Names",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "oauth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPOAuth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          },
+          "transport": {
+            "default": "streamable_http",
+            "enum": [
+              "streamable_http",
+              "sse"
+            ],
+            "title": "Transport",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url",
+          "revision",
+          "updated_at"
+        ],
+        "title": "MCPConnectionPublic",
+        "type": "object"
+      },
       "MCPConnectionUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -690,6 +757,49 @@
         "title": "MCPConnectionUpdate",
         "type": "object"
       },
+      "MCPOAuth": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "grant_type": {
+            "const": "client_credentials",
+            "default": "client_credentials",
+            "title": "Grant Type",
+            "type": "string"
+          },
+          "scope": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Scope",
+            "type": "string"
+          },
+          "token_endpoint_auth_method": {
+            "default": "client_secret_post",
+            "enum": [
+              "client_secret_post",
+              "client_secret_basic"
+            ],
+            "title": "Token Endpoint Auth Method",
+            "type": "string"
+          },
+          "token_url": {
+            "maxLength": 2048,
+            "title": "Token Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_url",
+          "client_id"
+        ],
+        "title": "MCPOAuth",
+        "type": "object"
+      },
       "MCPOAuthUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -744,6 +854,24 @@
           "client_id"
         ],
         "title": "MCPOAuthUpdate",
+        "type": "object"
+      },
+      "MCPToolDescription": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MCPToolDescription",
         "type": "object"
       },
       "PlanRejection": {
@@ -1987,6 +2115,23 @@
         "title": "UserInstructionsUpdate",
         "type": "object"
       },
+      "UserPreferencesUpdate": {
+        "properties": {
+          "default_visibility": {
+            "enum": [
+              "public",
+              "private"
+            ],
+            "title": "Default Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "default_visibility"
+        ],
+        "title": "UserPreferencesUpdate",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -3208,6 +3353,80 @@
         ]
       }
     },
+    "/dashboard/api/me/preferences": {
+      "get": {
+        "operationId": "api_get_my_preferences_dashboard_api_me_preferences_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get My Preferences Dashboard Api Me Preferences Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get My Preferences",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "api_put_my_preferences_dashboard_api_me_preferences_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPreferencesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Put My Preferences Dashboard Api Me Preferences Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Put My Preferences",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/my-credentials/notion": {
       "delete": {
         "operationId": "disconnect_my_notion_dashboard_api_my_credentials_notion_delete",
@@ -3286,6 +3505,244 @@
           }
         ],
         "summary": "Get My Mapping",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps": {
+      "get": {
+        "operationId": "api_list_my_mcps_dashboard_api_my_mcps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MCPConnectionPublic"
+                  },
+                  "title": "Response Api List My Mcps Dashboard Api My Mcps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List My Mcps",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps/{name}": {
+      "delete": {
+        "operationId": "api_delete_my_mcp_dashboard_api_my_mcps__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete My Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "api_save_my_mcp_dashboard_api_my_mcps__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPConnectionPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Save My Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps/{name}/discover": {
+      "post": {
+        "operationId": "api_discover_my_mcp_dashboard_api_my_mcps__name__discover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MCPConnectionUpdate"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MCPToolDescription"
+                  },
+                  "title": "Response Api Discover My Mcp Dashboard Api My Mcps  Name  Discover Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Discover My Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps/{name}/headers/reveal": {
+      "post": {
+        "operationId": "api_reveal_my_mcp_headers_dashboard_api_my_mcps__name__headers_reveal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reveal My Mcp Headers",
         "tags": [
           "dashboard"
         ]
@@ -7158,6 +7615,55 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/continue-private": {
+      "post": {
+        "operationId": "api_continue_thread_privately_dashboard_api_threads__thread_id__continue_private_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Continue Thread Privately Dashboard Api Threads  Thread Id  Continue Private Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Continue Thread Privately",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/feedback": {
       "get": {
         "operationId": "get_thread_feedback_dashboard_api_threads__thread_id__feedback_get",
@@ -8181,8 +8687,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/components/schemas/MCPConnectionPublic"
                   },
                   "title": "Response Api List Workspace Mcps Dashboard Api Workspace Mcps Get",
                   "type": "array"
@@ -8270,9 +8775,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Save Workspace Mcp Dashboard Api Workspace Mcps  Name  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/MCPConnectionPublic"
                 }
               }
             },
@@ -8337,10 +8840,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": {
-                      "type": "string"
-                    },
-                    "type": "object"
+                    "$ref": "#/components/schemas/MCPToolDescription"
                   },
                   "title": "Response Api Discover Workspace Mcp Dashboard Api Workspace Mcps  Name  Discover Post",
                   "type": "array"

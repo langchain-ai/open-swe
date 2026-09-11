@@ -32,6 +32,11 @@ export function modelConfigurable(
     | null
     | undefined
 ): Record<string, unknown> {
-  if (!selection?.modelId || !selection.effort) return {}
-  return { agent_model_id: selection.modelId, agent_effort: selection.effort }
+  if (!selection?.modelId || !selection.effort)
+    return { model_selection: "auto" }
+  return {
+    agent_model_id: selection.modelId,
+    agent_effort: selection.effort,
+    model_selection: "explicit",
+  }
 }

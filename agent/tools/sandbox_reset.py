@@ -46,7 +46,7 @@ class SandboxResetParams(BaseModel):
 )
 async def sandbox_reset(**create_options: Any) -> dict[str, Any]:
     """Implement the `sandbox_reset` tool."""
-    if error := require_admin("reset sandboxes"):
+    if error := await require_admin("reset sandboxes"):
         return {"success": False, "error": error}
 
     cfg = configurable()

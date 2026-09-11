@@ -69,6 +69,7 @@ GITHUB_APP_CLIENT_SECRET=""
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"   # one double-quoted line, \n between the PEM lines
 GITHUB_WEBHOOK_SECRET=""
 GITHUB_APP_INSTALLATION_ID=""
+ALLOWED_GITHUB_USERS=""         # your GitHub login; required unless ALLOWED_GITHUB_ORGS is set
 
 SLACK_BOT_TOKEN=""              # step 4: OAuth & Permissions → Bot User OAuth Token (xoxb-...)
 SLACK_SIGNING_SECRET=""         # Basic Information → App Credentials
@@ -113,7 +114,7 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 
 ## 7. Verify it works
 
-**Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages appear. Set **Admin → Team settings → Default repository**, then start a task from the composer.
+**Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages appear. Set **Admin → Global defaults → Default Repository**, then start a task from the composer.
 
 **Slack.** With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@open_swe_you what's in the repo?`. It replies in a thread; ngrok's inspector at `http://localhost:4040` shows the event arriving.
 
