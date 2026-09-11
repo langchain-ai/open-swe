@@ -1743,6 +1743,34 @@ async def test_thread_summary_defaults_to_not_resolved() -> None:
     assert summary["resolvedAt"] is None
 
 
+async def test_resolve_all_dashboard_threads_marks_each_unresolved_thread(monkeypatch) -> None:
+    updates: list[tuple[str, dict[str, object]]] = []
+    threads = [{"thread_id": "one"}, {"thread_id": "two"}]
+
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append((thread_id, metadata))
+
+    patch_thread_module(
+        monkeypatch,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+    monkeypatch.setattr(
+        thread_api, "list_unresolved_dashboard_threads", AsyncMock(return_value=threads)
+    )
+    patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
+
+    count = await thread_api.resolve_all_dashboard_threads("octocat", email="octocat@example.com")
+
+    assert count == 2
+    assert {thread_id for thread_id, _ in updates} == {"one", "two"}
+    assert all(metadata["resolved"] is True for _, metadata in updates)
+    thread_api.list_unresolved_dashboard_threads.assert_awaited_once_with(
+        "octocat", email="octocat@example.com"
+    )
+
+
 async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
     updates: list[dict[str, object]] = []
 
