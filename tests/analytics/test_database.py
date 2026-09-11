@@ -4,7 +4,6 @@ import asyncio
 import os
 import sys
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -73,19 +72,10 @@ async def test_migration_preserves_existing_workspace_and_history(deployment_db,
     old_workspace = uuid4()
     run_id = uuid4()
     captured_at = datetime(2026, 9, 1, tzinfo=UTC)
+    migrations, scripts = database._load_migrations()
     async with database.engine().begin() as conn:
-        for path in sorted(Path(database.__file__).with_name("migrations").glob("*.sql")):
-            version = int(path.name.split("_", 1)[0])
-            if version >= 7:
-                continue
-            await database._run_script(conn, path.read_text())
-            await conn.execute(
-                text(
-                    "INSERT INTO schema_migrations (version) VALUES (:version) "
-                    "ON CONFLICT DO NOTHING"
-                ),
-                {"version": version},
-            )
+        await conn.execute(text("CREATE SCHEMA open_swe"))
+        await conn.run_sync(database._upgrade, migrations, scripts, "open_swe", "0006")
         await conn.execute(
             text("INSERT INTO run_projection (workspace_id, run_id) VALUES (:workspace, :run)"),
             {"workspace": old_workspace, "run": run_id},
