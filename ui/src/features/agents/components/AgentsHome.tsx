@@ -493,13 +493,15 @@ export function AgentsHome({
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {session.data && !routePending && <OnboardingDialog />}
-        {optimisticDraftThread && (
-          <AgentThreadHeader
-            title={optimisticDraftThread.title}
-            target={runTarget === "local" ? "This Mac" : "Cloud"}
-            panelCollapsed={panelCollapsed}
-          />
-        )}
+        <AgentThreadHeader
+          title={optimisticDraftThread?.title}
+          target={runTarget === "local" ? "This Mac" : "Cloud"}
+          panelCollapsed={panelCollapsed}
+          visibility={runTarget === "cloud" ? visibility : undefined}
+          onVisibilityChange={
+            submittedDraft ? undefined : setVisibilityOverride
+          }
+        />
         {optimisticDraftThread ? (
           <Messages
             messages={optimisticDraftThread.messages}
@@ -521,30 +523,6 @@ export function AgentsHome({
           </div>
         )}
         <AgentComposerDock>
-          {runTarget === "cloud" && !submittedDraft && (
-            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <label htmlFor="thread-visibility">Visibility</label>
-              <select
-                id="thread-visibility"
-                value={visibility}
-                onChange={(event) =>
-                  setVisibilityOverride(
-                    event.target.value as "public" | "private"
-                  )
-                }
-                className="rounded-md border border-border bg-background px-2 py-1 text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="private">Private · only you</option>
-                <option value="public">Workspace</option>
-              </select>
-              <span>
-                {visibility === "private"
-                  ? "Only you can view or prompt it; your personal integrations are available."
-                  : "Anyone in the workspace can view and prompt it; personal integrations stay off."}{" "}
-                Visibility cannot change later.
-              </span>
-            </div>
-          )}
           {localError && (
             <div className="mb-3 w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {localError}
