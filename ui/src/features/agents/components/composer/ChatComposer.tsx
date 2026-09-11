@@ -492,6 +492,7 @@ export const ChatComposer = memo(function ChatComposer({
     applyPrompt("", 0)
     setPendingImages([])
     setDictationError(null)
+    queueMicrotask(() => editorRef.current?.focus())
     try {
       await onSubmit?.(trimmed, images)
     } catch {
