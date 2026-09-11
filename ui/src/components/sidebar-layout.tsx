@@ -102,6 +102,7 @@ interface SidebarFrameProps {
   setWidth: (next: number) => void
   collapsed: boolean
   toggle: () => void
+  inert?: boolean
   className?: string
   children: React.ReactNode
 }
@@ -111,6 +112,7 @@ export function SidebarFrame({
   setWidth,
   collapsed,
   toggle,
+  inert = false,
   className,
   children,
 }: SidebarFrameProps) {
@@ -123,6 +125,7 @@ export function SidebarFrame({
         type="button"
         aria-label="Expand sidebar"
         data-sidebar-expand=""
+        inert={inert}
         onClick={toggle}
         className={cn(
           "fixed top-2 left-2 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -137,6 +140,7 @@ export function SidebarFrame({
   return (
     <aside
       data-sidebar-frame=""
+      inert={inert}
       style={{ width }}
       className={cn(
         "relative flex h-svh shrink-0 flex-col",

@@ -124,9 +124,15 @@ test.describe("Plan review", () => {
         .getByText("Add greet() helper"),
     ).toBeVisible({ timeout: 30_000 });
     await expect(owner.getByTestId("plan-review")).toHaveCount(0);
-    await expect(owner.locator('[data-sidebar="sidebar"]')).toBeHidden();
+    await expect(owner.locator("[data-sidebar-frame]")).toHaveAttribute(
+      "inert",
+      "",
+    );
     await owner.getByText("Back to conversation").click();
     await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
+    await expect(owner.locator("[data-sidebar-frame]")).not.toHaveAttribute(
+      "inert",
+    );
     await ownerCtx.close();
 
     const collabCtx = await browser.newContext();
