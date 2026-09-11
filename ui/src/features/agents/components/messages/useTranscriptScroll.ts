@@ -209,7 +209,7 @@ export function useTranscriptScroll({
     const el = scrollRef.current
     const message = Array.from(
       contentRef.current?.querySelectorAll<HTMLElement>(
-        '[data-testid="user-message"]'
+        '[data-testid="user-message"], [data-testid="queued-message"]'
       ) ?? []
     ).at(-1)
     if (!el || !message) return
