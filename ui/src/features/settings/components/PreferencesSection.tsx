@@ -119,7 +119,7 @@ export function PreferencesSection() {
       />
       <SettingsRow
         label="Local tracing project"
-        description="Project used for new local desktop runs. Leave blank to use the shared cloud project."
+        description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
         control={
           <Input
             className="w-56"
