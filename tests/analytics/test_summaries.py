@@ -199,10 +199,11 @@ async def test_additive_migration_preserves_expired_and_unsummarized_totals(
         script = (
             (Path(database.__file__).with_name("migrations") / "0006_additive_event_projection.sql")
             .read_text()
-            .replace("open_swe_analytics", schema)
+            .replace("open_swe", schema)
         )
-        await database._run_script(conn, script)
-        await database._run_script(conn, script)
+        raw = await conn.get_raw_connection()
+        await raw.driver_connection.execute(script)
+        await raw.driver_connection.execute(script)
         rows = (
             await conn.execute(
                 text(
