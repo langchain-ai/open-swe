@@ -155,7 +155,8 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
 
     metadata = client.threads.create.call_args.kwargs["metadata"]
     assert metadata["visibility"] == "private"
-    assert metadata["owner_login"] == "bob"
+    assert metadata["owner_type"] == "user"
+    assert metadata["owner_login"] == "Bob"
     assert metadata["source"] == metadata["origin"] == "dashboard"
     assert metadata["continued_from_thread_id"] == "private-thread"
     assert metadata["title"] == "Fix the flaky build"

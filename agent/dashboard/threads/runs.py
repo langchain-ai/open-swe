@@ -243,7 +243,8 @@ async def _create_dashboard_thread_record(
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "origin": _DASHBOARD_SOURCE,
-        "owner_login": login.strip().lower(),
+        "owner_type": "user",
+        "owner_login": login.strip(),
         "visibility": visibility,
         "thread_category": "interactive",
         "trigger_kind": "user",
@@ -653,7 +654,7 @@ async def _enrich_run_start_command(
             **{
                 key: value
                 for key, value in run_metadata.items()
-                if key not in {"visibility", "owner_login"}
+                if key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
             },
             **agent_version_metadata(),
         },
