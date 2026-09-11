@@ -2,8 +2,30 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 function readDocument(configPath) {
+  let descriptor;
   try {
-    const value = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const linkInfo = fs.lstatSync(configPath);
+    descriptor = fs.openSync(
+      configPath,
+      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0),
+    );
+    const info = fs.fstatSync(descriptor);
+    if (
+      linkInfo.dev !== info.dev ||
+      linkInfo.ino !== info.ino ||
+      !info.isFile()
+    )
+      throw new Error("The MCP configuration must be a file.");
+    if (
+      process.platform !== "win32" &&
+      ((typeof process.getuid === "function" &&
+        info.uid !== process.getuid()) ||
+        (info.mode & 0o077) !== 0)
+    )
+      throw new Error(
+        "The MCP configuration must be owned by this user and readable only by them.",
+      );
+    const value = JSON.parse(fs.readFileSync(descriptor, "utf8"));
     if (
       !value ||
       typeof value !== "object" ||
@@ -21,6 +43,8 @@ function readDocument(configPath) {
     if (error instanceof SyntaxError)
       throw new Error("The MCP configuration contains invalid JSON.");
     throw error;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
   }
 }
 
@@ -89,6 +113,8 @@ function saveMcpConnection(configPath, update) {
 
 function deleteMcpConnection(configPath, name) {
   const document = readDocument(configPath);
+  if (typeof document.mcpServers[name]?.command === "string")
+    throw new Error("Command-based MCPs must still be edited in mcp.json.");
   delete document.mcpServers[name];
   writeDocument(configPath, document);
 }

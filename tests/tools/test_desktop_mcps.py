@@ -36,6 +36,7 @@ async def test_local_mcp_forwards_reserved_runtime(monkeypatch):
 async def test_desktop_local_override_and_revocation(tmp_path, monkeypatch):
     path = tmp_path / "mcp.json"
     path.write_text(json.dumps({"mcpServers": {"example": {"enabled": False}}}))
+    path.chmod(0o600)
     monkeypatch.setenv("OPEN_SWE_LOCAL_MCPS_FILE", str(path))
     definition = {
         "name": "remote",
@@ -53,6 +54,15 @@ async def test_desktop_local_override_and_revocation(tmp_path, monkeypatch):
     path.write_text(json.dumps({"mcpServers": {"example": {"enabled": False}}}))
     assert "changed" in await tools[0].ainvoke({})
     assert request.await_count == 2
+
+
+async def test_malformed_local_mcp_is_ignored(tmp_path, monkeypatch):
+    path = tmp_path / "mcp.json"
+    path.write_text(json.dumps({"mcpServers": {"broken": None}}))
+    path.chmod(0o600)
+    monkeypatch.setenv("OPEN_SWE_LOCAL_MCPS_FILE", str(path))
+    monkeypatch.setattr(desktop_mcp, "_cloud_request", AsyncMock(side_effect=RuntimeError))
+    assert await desktop_mcp.load_desktop_mcp_tools() == []
 
 
 async def test_cloud_desktop_call_rejects_account_and_scope_changes(monkeypatch):

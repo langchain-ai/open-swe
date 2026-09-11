@@ -1073,8 +1073,19 @@ async def api_discover_my_mcp(
         raise HTTPException(400, str(exc)) from None
 
 
+def _desktop_session(request: Request, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+    if session.get("desktop") is not True or request.headers.get("origin") != "open-swe://app":
+        raise HTTPException(403, "Desktop session required")
+    return session
+
+
+_DESKTOP_SESSION_DEP = Depends(_desktop_session)
+
+
 @user_mcp_router.get("/desktop/mcps")
-async def api_desktop_mcps(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+async def api_desktop_mcps(
+    session: dict[str, Any] = _DESKTOP_SESSION_DEP,
+) -> dict[str, Any]:
     from agent.dashboard.desktop_mcps import desktop_mcp_catalog
 
     return await desktop_mcp_catalog(session["sub"])
@@ -1082,7 +1093,8 @@ async def api_desktop_mcps(session: dict[str, Any] = _SESSION_DEP) -> dict[str, 
 
 @user_mcp_router.post("/desktop/mcps/call")
 async def api_call_desktop_mcp(
-    request: dict[str, Any], session: dict[str, Any] = _SESSION_DEP
+    request: dict[str, Any],
+    session: dict[str, Any] = _DESKTOP_SESSION_DEP,
 ) -> Any:
     from agent.dashboard.desktop_mcps import call_desktop_mcp
 

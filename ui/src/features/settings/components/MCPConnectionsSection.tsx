@@ -715,7 +715,12 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || readOnly}
+                    title={
+                      readOnly
+                        ? "Delete command-based MCPs in mcp.json"
+                        : undefined
+                    }
                     onClick={() =>
                       run(async () => {
                         await client.remove(connection.name)

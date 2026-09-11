@@ -62,6 +62,7 @@ for (const allowedTools of [undefined, [], ["search"]]) {
           },
         },
       }),
+      { mode: 0o600 },
     );
 
     for (const update of [
@@ -101,6 +102,7 @@ test("command MCPs remain visible but cannot be overwritten as URLs", (t) => {
     JSON.stringify({
       mcpServers: { files: { command: "node", args: ["server.js"] } },
     }),
+    { mode: 0o600 },
   );
 
   assert.equal(listMcpConnections(configPath)[0].local_command, true);
@@ -113,4 +115,22 @@ test("command MCPs remain visible but cannot be overwritten as URLs", (t) => {
       }),
     /Command-based MCPs/,
   );
+  assert.throws(
+    () => deleteMcpConnection(configPath, "files"),
+    /Command-based MCPs/,
+  );
 });
+
+if (process.platform !== "win32") {
+  test("local MCP configuration rejects unsafe files", (t) => {
+    const configPath = temporaryConfig(t);
+    fs.writeFileSync(configPath, '{"mcpServers":{}}', { mode: 0o644 });
+    assert.throws(() => listMcpConnections(configPath), /readable only/);
+
+    fs.unlinkSync(configPath);
+    const target = `${configPath}.target`;
+    fs.writeFileSync(target, '{"mcpServers":{}}', { mode: 0o600 });
+    fs.symlinkSync(target, configPath);
+    assert.throws(() => listMcpConnections(configPath));
+  });
+}

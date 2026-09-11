@@ -3,8 +3,9 @@
 import asyncio
 import json
 import logging
+import os
+import stat
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -23,9 +24,28 @@ logger = logging.getLogger(__name__)
 
 def _local_servers() -> dict[str, Any]:
     path = ENV.OPEN_SWE_LOCAL_MCPS_FILE.optional()
-    if not path or not Path(path).exists():
+    if not path:
         return {}
-    data = json.loads(Path(path).read_text())
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        link_info = os.lstat(path)
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        return {}
+    try:
+        info = os.fstat(descriptor)
+        if (
+            (info.st_dev, info.st_ino) != (link_info.st_dev, link_info.st_ino)
+            or not stat.S_ISREG(info.st_mode)
+            or (hasattr(os, "getuid") and (info.st_uid != os.getuid() or info.st_mode & 0o077))
+        ):
+            raise PermissionError("Local MCP configuration must be private and owned by this user")
+        with os.fdopen(descriptor) as stream:
+            descriptor = -1
+            data = json.load(stream)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     servers = data["mcpServers"]
     if not isinstance(servers, dict):
         raise ValueError("mcpServers must be an object")
@@ -130,15 +150,19 @@ async def load_desktop_mcp_tools() -> list[BaseTool]:
     except Exception:
         logger.warning("Cloud MCPs unavailable for desktop")
     for name, settings in local.items():
-        if settings.get("enabled", True) is False:
-            continue
-        connection = {
-            key: value for key, value in settings.items() if key not in {"enabled", "allowed_tools"}
-        }
-        connection.setdefault(
-            "transport", "stdio" if "command" in connection else "streamable_http"
-        )
         try:
+            if not isinstance(settings, dict):
+                raise ValueError("MCP settings must be an object")
+            if settings.get("enabled", True) is False:
+                continue
+            connection = {
+                key: value
+                for key, value in settings.items()
+                if key not in {"enabled", "allowed_tools"}
+            }
+            connection.setdefault(
+                "transport", "stdio" if "command" in connection else "streamable_http"
+            )
             discovered = await asyncio.wait_for(
                 MultiServerMCPClient({name: cast(Connection, connection)}).get_tools(), 30
             )

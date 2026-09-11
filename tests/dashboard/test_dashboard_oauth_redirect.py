@@ -271,7 +271,9 @@ def test_desktop_login_hands_the_session_back_over_loopback(monkeypatch) -> None
             headers={"origin": "open-swe://app"},
         )
         assert exchange.status_code == 200
-        assert decode_session(exchange.json()["session"])["sub"] == "alice"
+        desktop_session = decode_session(exchange.json()["session"])
+        assert desktop_session["sub"] == "alice"
+        assert desktop_session["desktop"] is True
 
         forged = client.post(
             "/dashboard/api/auth/desktop/exchange",
