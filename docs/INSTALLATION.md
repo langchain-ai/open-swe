@@ -354,11 +354,16 @@ Public threads use the GitHub App installation identity for agent GitHub
 operations. PRs from user-owned threads are opened with the original initiator's
 stored GitHub OAuth token, even when another participant starts the run. If that
 token is unavailable, the initiator must sign in again; PR creation does not fall
-back to the bot. System-owned threads, including scheduled automations, open PRs
+back to the bot. Public PR creation first verifies that the target repository is
+accessible through the configured workspace installation. System-owned threads, including scheduled automations, open PRs
 as the GitHub App. Existing threads without recorded ownership retain bot PR
 authorship. Scheduled runs check repository access with the workspace GitHub App.
 They record the automation creator for auditing but do not require that person's
 OAuth token or inject their GitHub login or email as the agent's execution identity.
+Admin schedules retain their management tools through authorization tied to the
+scheduled invocation. The graph and tools recheck the creator's current admin
+status; later participants do not inherit that authorization. Automation management
+from these system runs also uses workspace credentials.
 
 Public threads load workspace MCP connections and organization skills. Personal
 Notion connections, user skills, and user custom instructions are available only in a private thread

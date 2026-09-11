@@ -13,7 +13,7 @@ from agent.tool_loaders import notion_mcp
 
 @pytest.fixture
 def thread_metadata(monkeypatch):
-    metadata = {"visibility": "public", "owner_login": "alice"}
+    metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
     get_thread = AsyncMock(side_effect=lambda _id: {"metadata": metadata})
     monkeypatch.setattr(
         langgraph_sdk,
@@ -93,6 +93,26 @@ async def test_public_pr_preserves_initiator_login_case(
     thread_metadata.update(owner_type="user", owner_login="Alice")
     credentials.side_effect = lambda login: "personal-token" if login == "Alice" else None
     monkeypatch.setattr("agent.run_config.get_config", lambda: config(login=actor))
+    assert await opr._resolve_pr_author_token() == ("personal-token", "user")
+    credentials.assert_awaited_once_with("Alice")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("actor", ["Alice", "bob"])
+async def test_older_public_owner_resolves_oauth_key_independently_of_participant(
+    monkeypatch, thread_metadata, credentials, actor
+):
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    thread_metadata.pop("owner_type")
+    credentials.side_effect = lambda login: "personal-token" if login == "Alice" else None
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login=actor))
+    monkeypatch.setattr(
+        profiles,
+        "search_all_values",
+        AsyncMock(return_value=[{"login": "Bob"}, {"login": "Alice"}]),
+        raising=False,
+    )
+
     assert await opr._resolve_pr_author_token() == ("personal-token", "user")
     credentials.assert_awaited_once_with("Alice")
 

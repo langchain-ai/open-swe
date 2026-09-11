@@ -1,8 +1,6 @@
 """Admin-thread tools for managing environments.
 
-Wired into the agent only for admin threads (see ``agent/server.py``). Every tool
-re-checks the triggering user against ``CONFIGURED_ADMINS`` so a thread whose
-metadata says "admin" cannot act on behalf of someone who is not one.
+Wired into admin threads; each tool rechecks user or system authorization.
 """
 
 import logging
@@ -16,8 +14,8 @@ from agent.tools.admin_gate import require_admin
 logger = logging.getLogger(__name__)
 
 
-def _require_admin() -> str | None:
-    return require_admin("manage environments")
+async def _require_admin() -> str | None:
+    return await require_admin("manage environments")
 
 
 # Deliberately narrower than the record: the agent has no use for authorship
@@ -85,7 +83,7 @@ async def list_environments() -> dict[str, Any]:
     Returns:
         ``{"ok": True, "environments": [...]}``.
     """
-    if error := _require_admin():
+    if error := await _require_admin():
         return {"ok": False, "error": error}
     records = await store.ENVIRONMENTS.list_all()
     return {
@@ -114,7 +112,7 @@ async def publish_environment(
     clear_create_params: bool = False,
 ) -> dict[str, Any]:
     """Implement the `publish_environment` tool."""
-    if error := _require_admin():
+    if error := await _require_admin():
         return {"ok": False, "error": error}
     sizing = {
         "mem_bytes": mem_bytes,
@@ -224,7 +222,7 @@ async def publish_environment(
 
 async def refresh_environment_start(name: str) -> dict[str, Any]:
     """Implement the `refresh_environment_start` tool."""
-    if error := _require_admin():
+    if error := await _require_admin():
         return {"status": "error", "error": error}
     try:
         slug = store.slugify(name)
@@ -235,7 +233,7 @@ async def refresh_environment_start(name: str) -> dict[str, Any]:
 
 async def delete_environment(name: str) -> dict[str, Any]:
     """Implement the `delete_environment` tool."""
-    if error := _require_admin():
+    if error := await _require_admin():
         return {"ok": False, "error": error}
     try:
         slug = store.slugify(name)

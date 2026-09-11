@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx2
 import langgraph_sdk
 import pytest
 
@@ -60,6 +61,8 @@ class _FakeClient:
         self, url: str, *, headers: dict[str, str], params: dict[str, str] | None = None
     ) -> _FakeResponse:
         self.get_calls.append({"url": url, "headers": headers, "params": params})
+        if url.endswith("/installation/repositories"):
+            return _FakeResponse(200, {"repositories": [{"full_name": "langchain-ai/open-swe"}]})
         if self._get is not None:
             return self._get
         return _FakeResponse(200, {"name": "ok"})
@@ -141,6 +144,67 @@ def _open(base: str = "main") -> dict[str, Any]:
     )
 
 
+@pytest.mark.parametrize(
+    "workspace_access", ["allowed", "other_account", "unavailable", "no_token"]
+)
+def test_public_pr_cannot_use_initiator_authority_outside_workspace(
+    monkeypatch: pytest.MonkeyPatch, workspace_access: str
+) -> None:
+    _set_config(
+        monkeypatch,
+        {"source": "slack", "github_login": "bob"},
+        metadata={"visibility": "public", "owner_type": "user", "owner_login": "Alice"},
+    )
+    monkeypatch.setattr(
+        "agent.dashboard.profiles.get_valid_access_token", AsyncMock(return_value="alice-token")
+    )
+    monkeypatch.setattr(
+        opr,
+        "get_github_app_installation_token",
+        AsyncMock(return_value=None if workspace_access == "no_token" else "workspace-token"),
+    )
+    monkeypatch.setattr(opr, "_record_pr_telemetry", AsyncMock())
+    monkeypatch.setattr(opr, "get_plan_content", AsyncMock(return_value=None))
+    requests: list[httpx2.Request] = []
+
+    async def github(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        if request.url.path == "/installation/repositories":
+            assert request.headers["Authorization"] == "Bearer workspace-token"
+            if workspace_access == "unavailable":
+                return httpx2.Response(503)
+            if request.url.params["page"] == "1":
+                return httpx2.Response(
+                    200,
+                    json={
+                        "repositories": [{"full_name": f"workspace/repo-{i}"} for i in range(100)]
+                    },
+                )
+            full_name = (
+                "langchain-ai/open-swe" if workspace_access == "allowed" else "other/open-swe"
+            )
+            return httpx2.Response(200, json={"repositories": [{"full_name": full_name}]})
+        # OAuth has broader access, including branches already pushed by someone else.
+        assert request.headers["Authorization"] == "Bearer alice-token"
+        if request.method == "POST":
+            return httpx2.Response(201, json={"number": 1, "user": {"login": "Alice"}})
+        return httpx2.Response(200, json={"name": "existing-branch", "private": False})
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
+    monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **kwargs: client)
+    result = _open()
+
+    if workspace_access == "allowed":
+        assert result["success"] is True
+        assert result["author"] == "Alice"
+        assert result["token_kind"] == "user"
+        assert any(request.method == "POST" for request in requests)
+    else:
+        assert result["success"] is False
+        assert "workspace" in result["error"]
+        assert all(request.headers["Authorization"] != "Bearer alice-token" for request in requests)
+
+
 @pytest.mark.parametrize("visibility", ["public", "private"])
 def test_uses_user_token_for_slack_with_login(
     monkeypatch: pytest.MonkeyPatch, visibility: str
@@ -160,7 +224,8 @@ def test_uses_user_token_for_slack_with_login(
     monkeypatch.setattr(profiles, "get_valid_access_token", fake_user_token)
 
     async def fail_bot() -> str | None:
-        raise AssertionError("bot token should not be used when a user token exists")
+        assert visibility == "public", "private PRs should not need workspace credentials"
+        return "workspace-token"
 
     monkeypatch.setattr(opr, "get_github_app_installation_token", fail_bot)
 
@@ -440,6 +505,7 @@ def _open_with_body(body: str) -> dict[str, Any]:
 
 
 def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda: _coro(("tok", "user")))
 
 

@@ -80,3 +80,15 @@ async def repo_config_for_user(login: str, full_name: str | None) -> dict[str, s
     await require_repo_access_for_user(login, normalized)
     owner, name = normalized.split("/", 1)
     return {"owner": owner, "name": name}
+
+
+async def repo_config_for_workspace(full_name: str | None) -> dict[str, str] | None:
+    if not isinstance(full_name, str) or not full_name.strip():
+        return None
+    try:
+        normalized = normalize_repo_full_name(full_name)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await require_repo_access_for_workspace(normalized)
+    owner, name = normalized.split("/", 1)
+    return {"owner": owner, "name": name}

@@ -8,7 +8,7 @@ import httpx2
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.credential_scope import pr_author_login
+from agent.credential_scope import pr_author_login, private_credential_login
 from agent.dashboard.agent_usage import record_agent_pr_usage
 from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
@@ -61,6 +61,29 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     if not token:
         raise GitHubUserAuthRequired(RunConfig.from_runtime().source or "private", login)
     return token, "user"
+
+
+async def _workspace_has_repository(client: httpx2.AsyncClient, owner: str, repo: str) -> bool:
+    token = await get_github_app_installation_token()
+    if not token:
+        return False
+    page = 1
+    while True:
+        response = await client.get(
+            f"{GITHUB_API}/installation/repositories",
+            headers=_auth_headers(token),
+            params={"per_page": "100", "page": str(page)},
+        )
+        if response.status_code != 200:
+            return False
+        repositories = response.json().get("repositories", [])
+        if any(
+            item.get("full_name", "").lower() == f"{owner}/{repo}".lower() for item in repositories
+        ):
+            return True
+        if len(repositories) < 100:
+            return False
+        page += 1
 
 
 def _auth_headers(token: str) -> dict[str, str]:
@@ -806,6 +829,22 @@ async def _open_pull_request(
         )
 
     async with httpx2.AsyncClient(timeout=30.0) as client:
+        if (
+            kind == "user"
+            and await private_credential_login() is None
+            and not await _workspace_has_repository(client, owner, repo)
+        ):
+            return _access_failure_payload(
+                owner=owner,
+                repo=repo,
+                head=head,
+                base=base,
+                token_kind=kind,
+                http_status=None,
+                reason="Could not verify the target repository belongs to the workspace GitHub App installation",
+                branch_pushed=None,
+                failed_step="workspace_repo",
+            )
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,

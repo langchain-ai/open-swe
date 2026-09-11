@@ -640,7 +640,7 @@ async def _enrich_run_start_command(
             **{
                 key: value
                 for key, value in run_metadata.items()
-                if key not in {"visibility", "owner_type", "owner_login"}
+                if key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
             },
             **agent_version_metadata(),
         },

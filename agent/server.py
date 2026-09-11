@@ -65,6 +65,7 @@ from agent.dashboard.options import (
     gate_fable_model,
     model_supports_effort,
 )
+from agent.dashboard.schedules import authorized_admin_schedule
 from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
@@ -471,6 +472,8 @@ def environment_slug(cfg: RunConfig) -> str | None:
 
 async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
     cfg = RunConfig.from_config(config)
+    if cfg.source == "schedule":
+        return await authorized_admin_schedule(cfg) is not None
     login = profile_login or cfg.github_login
     if is_admin(cfg.user_email, login=login):
         return True
@@ -482,7 +485,8 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
 
     The dashboard only stamps ``admin_thread`` for an admin session, but the flag
     is re-checked here against ``CONFIGURED_ADMINS`` so a thread cannot carry the
-    capability to a non-admin who later messages it.
+    capability to a non-admin who later messages it. Scheduled runs instead verify
+    the saved authorization for their specific invocation.
     """
     return RunConfig.from_config(config).admin_thread is True and await _workspace_admin(
         config, profile_login

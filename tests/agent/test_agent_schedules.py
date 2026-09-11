@@ -1,5 +1,6 @@
 import uuid
 from typing import Any
+from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import httpx2
@@ -73,6 +74,10 @@ class _FakeThreads:
     async def update(self, **kwargs: Any) -> None:
         self.updated.append(kwargs)
 
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        thread = next(item for item in self.created if item["thread_id"] == thread_id)
+        return {"metadata": thread["metadata"]}
+
 
 class _FakeRuns:
     def __init__(self) -> None:
@@ -125,6 +130,9 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(schedules, "repo_config_for_user", fake_repo_config_for_user)
     monkeypatch.setattr(
         schedules, "require_repo_access_for_workspace", fake_require_repo_access_for_workspace
+    )
+    monkeypatch.setattr(
+        repo_access, "require_repo_access_for_workspace", fake_require_repo_access_for_workspace
     )
 
 
@@ -764,6 +772,78 @@ async def test_system_schedule_can_run_without_user_credentials(
     configurable = fake_client.runs.created[0]["config"]["configurable"]
     assert "github_login" not in configurable
     assert "user_email" not in configurable
+
+
+async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    from agent import server
+    from agent.run_config import RunConfig
+    from agent.tools import automations, environments, organization_skills
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
+    monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
+    record = {
+        "id": "admin-schedule",
+        "prompt": "Manage workspace environments",
+        "enabled": True,
+        "admin_thread": True,
+        "created_by": "alice",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, record["id"], record)
+    await schedules.launch_scheduled_agent_run(record["id"])
+    run_config = fake_client.runs.created[0]["config"]
+    monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
+
+    assert await server._admin_thread(run_config, None) is True
+    assert RunConfig.from_config(run_config).github_login is None
+    assert RunConfig.from_config(run_config).user_email is None
+    monkeypatch.setattr(environments.store.ENVIRONMENTS, "list_all", AsyncMock(return_value=[]))
+    assert (await environments.list_environments())["ok"] is True
+    assert (await automations.list_automations())["ok"] is True
+    await organization_skills.save_organization_skill("system-check", "Check", "instructions")
+    assert (await organization_skills.delete_organization_skill("system-check"))["ok"] is True
+
+    async def no_personal_access(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("A system admin must use workspace credentials and defaults")
+
+    for name in (
+        "get_valid_access_token",
+        "get_profile",
+        "repo_config_for_user",
+        "resolve_run_email",
+    ):
+        monkeypatch.setattr(schedules, name, no_personal_access)
+    child = await automations.create_automation(
+        "Check workspace repos", "0 9 * * *", repo="langchain-ai/open-swe", admin_thread=True
+    )
+    assert child["ok"] is True
+    child_id = child["automation"]["id"]
+    changed = await automations.update_automation(child_id, repo="langchain-ai/another-repo")
+    assert changed["ok"] is True
+    assert changed["automation"]["repo"] == "langchain-ai/another-repo"
+
+    # A later invocation or human reply cannot inherit the scheduled grant.
+    original = dict(run_config["configurable"])
+    for patch in (
+        {"invocation_id": "new-run", "prepare_run_id": "new-run"},
+        {"source": "dashboard", "github_login": "bob"},
+        {"github_login": "bob"},
+        {"schedule_id": "another-schedule"},
+    ):
+        run_config["configurable"] = {**original, **patch}
+        assert await server._admin_thread(run_config, None) is False
+        assert (await environments.list_environments())["ok"] is False
+
+    run_config["configurable"] = original
+    metadata = fake_client.threads.created[0]["metadata"]
+    metadata["owner_type"] = "user"
+    assert await server._admin_thread(run_config, None) is False
+    assert (await environments.list_environments())["ok"] is False
+    metadata["owner_type"] = "system"
+    monkeypatch.setenv("CONFIGURED_ADMINS", "bob")
+    assert await server._admin_thread(run_config, None) is False
+    assert (await environments.list_environments())["ok"] is False
 
 
 async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_thread(

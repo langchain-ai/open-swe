@@ -30,7 +30,14 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.encryption import decrypt_token, encrypt_token
-from agent.store import delete_value, get_value, now_iso, put_value, search_values
+from agent.store import (
+    delete_value,
+    get_value,
+    now_iso,
+    put_value,
+    search_all_values,
+    search_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +136,18 @@ async def get_profile(login: str) -> dict[str, Any] | None:
 async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
     """The raw encrypted-token record, for callers that need its expiry metadata."""
     return await get_value(OAUTH_TOKENS_NAMESPACE, login)
+
+
+async def resolve_oauth_login(login: str) -> str | None:
+    """Recover the stored OAuth key when older thread metadata lost its casing."""
+    if await get_oauth_token_record(login):
+        return login
+    matches = {
+        candidate
+        for record in await search_all_values(OAUTH_TOKENS_NAMESPACE)
+        if isinstance(candidate := record.get("login"), str) and candidate.lower() == login.lower()
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:

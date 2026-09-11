@@ -5,6 +5,7 @@ from typing import Any
 
 import langgraph_sdk
 
+from agent.dashboard.profiles import resolve_oauth_login
 from agent.run_config import RunConfig
 from agent.utils.json_types import thread_metadata
 
@@ -62,10 +63,7 @@ async def pr_author_login() -> str | None:
         owner = owner.strip()
         if metadata.get("owner_type") == "user":
             return owner
-        login = (cfg.github_login or "").strip()
-        # Older owner metadata was lowercased; keep the OAuth storage key when
-        # the initiator themselves resumes that thread.
-        return login if login.lower() == owner.lower() else owner
+        return await resolve_oauth_login(owner) or owner
     if metadata.get("owner_type") == "user":
         raise RuntimeError("User-owned thread has no GitHub owner for PR creation")
     return None
