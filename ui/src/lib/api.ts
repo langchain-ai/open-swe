@@ -252,6 +252,17 @@ export interface UserMappingsPage {
 
 export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
 
+export interface AnalyticsMetadata {
+  reporting_cutover_at: string
+  collection_started_at: string | null
+  last_processed_at: string | null
+  data_source: "event_projections"
+  completeness: "not_started" | "observed_events_only"
+  has_pending_events: boolean
+  has_failed_events: boolean
+  as_of: string
+}
+
 export interface UsageLeaderboardRow {
   rank: number
   user: {
@@ -297,13 +308,37 @@ export interface ReviewerStatsPayload {
   generated_at_ms: number | null
 }
 
-export interface UsageLeaderboardPayload {
+export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   rows: Array<UsageLeaderboardRow>
   total_members: number
   current_user_rank: number | null
   generated_at_ms: number | null
   reviewer_stats: ReviewerStatsPayload
+}
+
+export interface PRMergeRateCohort {
+  model_id: string | null
+  model_attribution_quality: "effective" | "configured" | "unavailable"
+  merged: number
+  closed_without_merge: number
+  mature_pending: number
+  waiting: number
+  cohort_size: number
+  decided_denominator: number
+  decided_merge_rate: number | null
+  mature_denominator: number
+  mature_cohort_merge_share: number | null
+}
+
+export interface PRMergeRatePayload extends AnalyticsMetadata {
+  status: "ready" | "not_started" | "no_prs" | "suppressed"
+  metric: "pr_outcomes_by_opening_invocation_configured_model"
+  definition: string
+  maturity_days: number
+  period: UsageLeaderboardPeriod
+  suppression_threshold: number
+  cohorts: PRMergeRateCohort[]
 }
 
 export interface Repository {
@@ -862,6 +897,13 @@ export const api = {
           row.avg_invocation_seconds ?? row.avg_run_seconds ?? 0,
       })),
     })),
+  prMergeRateByModel: (
+    period: UsageLeaderboardPeriod = "30d",
+    maturityDays?: number
+  ) =>
+    request<PRMergeRatePayload>(
+      `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
+    ),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
