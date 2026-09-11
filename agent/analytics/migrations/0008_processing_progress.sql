@@ -1,4 +1,4 @@
-SET search_path TO open_swe_analytics, public;
+SET search_path TO open_swe, public;
 
 ALTER TABLE deployment_metadata ADD COLUMN last_processed_at timestamptz;
 

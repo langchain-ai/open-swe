@@ -1,4 +1,4 @@
-SET search_path TO open_swe_analytics, public;
+SET search_path TO open_swe, public;
 
 -- Finding history must survive raw-event retention: the projection rebuild in
 -- ingestion derives resolved/dismissed/reopen history from the events table,

@@ -1,4 +1,4 @@
-SET search_path TO open_swe_analytics, public;
+SET search_path TO open_swe, public;
 
 CREATE TABLE deployment_metadata (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),

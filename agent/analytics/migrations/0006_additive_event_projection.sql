@@ -1,4 +1,4 @@
-SET search_path TO open_swe_analytics, public;
+SET search_path TO open_swe, public;
 
 CREATE TABLE IF NOT EXISTS additive_event_projection (
     workspace_id uuid NOT NULL,

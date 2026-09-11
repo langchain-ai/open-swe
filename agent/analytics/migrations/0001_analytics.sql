@@ -1,10 +1,5 @@
-CREATE SCHEMA IF NOT EXISTS open_swe_analytics;
-SET search_path TO open_swe_analytics, public;
-
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version integer PRIMARY KEY,
-    applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
-);
+CREATE SCHEMA IF NOT EXISTS open_swe;
+SET search_path TO open_swe, public;
 
 CREATE TABLE IF NOT EXISTS event_ids (
     event_id uuid PRIMARY KEY,
@@ -291,5 +286,3 @@ $$;
 DROP TRIGGER IF EXISTS events_immutable ON events;
 CREATE TRIGGER events_immutable BEFORE UPDATE ON events
 FOR EACH ROW EXECUTE FUNCTION reject_event_mutation();
-
-INSERT INTO schema_migrations(version) VALUES (1) ON CONFLICT DO NOTHING;

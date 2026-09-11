@@ -5,11 +5,15 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
+from operator import attrgetter
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import make_url, text
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from sqlalchemy import Connection, make_url, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from agent.config import ENV
@@ -21,6 +25,8 @@ _ENGINE_URI: str | None = None
 _WORKSPACE_ID: UUID | None = None
 _MIGRATION_DIR = Path(__file__).with_name("migrations")
 _MIGRATION_LOCK = 557314367248862439
+_SCHEMA = "open_swe"
+_MIGRATIONS: ScriptDirectory | None = None
 
 
 def analytics_uri() -> str | None:
@@ -130,14 +136,14 @@ def engine() -> AsyncEngine:
 @asynccontextmanager
 async def connection() -> AsyncIterator[AsyncConnection]:
     async with engine().connect() as conn:
-        await conn.execute(text("SET search_path TO open_swe_analytics, public"))
+        await conn.execute(text(f"SET search_path TO {_SCHEMA}, public"))
         yield conn
 
 
 @asynccontextmanager
 async def transaction() -> AsyncIterator[AsyncConnection]:
     async with engine().begin() as conn:
-        await conn.execute(text("SET LOCAL search_path TO open_swe_analytics, public"))
+        await conn.execute(text(f"SET LOCAL search_path TO {_SCHEMA}, public"))
         yield conn
 
 
@@ -151,43 +157,15 @@ async def migrate() -> None:
         return
     logger.info(
         "Initializing analytics database",
-        extra={
-            "analytics_database_setting": "POSTGRES_URI",
-            "analytics_schema": "open_swe_analytics",
-        },
+        extra={"analytics_database_setting": "POSTGRES_URI", "analytics_schema": _SCHEMA},
     )
+    migrations, scripts = await asyncio.to_thread(_load_migrations)
     async with engine().begin() as conn:
         await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _MIGRATION_LOCK})
-        await _run_script(conn, "CREATE SCHEMA IF NOT EXISTS open_swe_analytics")
-        await _run_script(
-            conn,
-            "CREATE TABLE IF NOT EXISTS open_swe_analytics.schema_migrations "
-            "(version integer PRIMARY KEY, applied_at timestamptz NOT NULL "
-            "DEFAULT clock_timestamp())",
-        )
-        paths = await asyncio.to_thread(lambda: sorted(_MIGRATION_DIR.glob("*.sql")))
-        for path in paths:
-            version = int(path.name.split("_", 1)[0])
-            applied = await conn.scalar(
-                text(
-                    "SELECT EXISTS (SELECT 1 FROM open_swe_analytics.schema_migrations "
-                    "WHERE version = :version)"
-                ),
-                {"version": version},
-            )
-            if applied:
-                continue
-            await _run_script(conn, await asyncio.to_thread(path.read_text))
-            await conn.execute(
-                text(
-                    "INSERT INTO open_swe_analytics.schema_migrations (version) VALUES (:version) "
-                    "ON CONFLICT DO NOTHING"
-                ),
-                {"version": version},
-            )
-
+        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {_SCHEMA}"))
+        await conn.run_sync(_upgrade, migrations, scripts)
         persisted_workspace = await conn.scalar(
-            text("SELECT workspace_id FROM open_swe_analytics.deployment_metadata")
+            text(f"SELECT workspace_id FROM {_SCHEMA}.deployment_metadata")
         )
         if persisted_workspace is None:
             raise RuntimeError("analytics deployment metadata is missing")
@@ -196,19 +174,43 @@ async def migrate() -> None:
         "Analytics database initialized",
         extra={
             "analytics_database_setting": "POSTGRES_URI",
-            "analytics_schema": "open_swe_analytics",
+            "analytics_schema": _SCHEMA,
             "analytics_workspace_id": str(persisted_workspace),
         },
     )
 
 
-async def _run_script(conn: AsyncConnection, script: str) -> None:
-    """Run trusted multi-statement DDL through asyncpg's simple query protocol."""
-    raw = await conn.get_raw_connection()
-    driver_connection = raw.driver_connection
-    if driver_connection is None:
-        raise RuntimeError("analytics migration requires an asyncpg driver connection")
-    await driver_connection.execute(script)
+def _load_migrations() -> tuple[ScriptDirectory, dict[str, str]]:
+    global _MIGRATIONS
+    if _MIGRATIONS is None:
+        _MIGRATIONS = ScriptDirectory(str(_MIGRATION_DIR))
+        list(_MIGRATIONS.walk_revisions())
+    scripts = {
+        path.name.split("_", 1)[0]: path.read_text()
+        for path in sorted(_MIGRATION_DIR.glob("*.sql"))
+    }
+    return _MIGRATIONS, scripts
+
+
+def _upgrade(
+    conn: Connection,
+    migrations: ScriptDirectory,
+    scripts: dict[str, str],
+    schema: str = _SCHEMA,
+    revision: str = "head",
+) -> None:
+    conn.exec_driver_sql(f"SET LOCAL search_path TO {schema}, public")
+    upgrade_revisions = attrgetter("_upgrade_revs")(migrations)
+    context = MigrationContext.configure(
+        connection=conn,
+        opts={
+            "fn": lambda current, _: upgrade_revisions(revision, current),
+            "version_table_schema": schema,
+            "transaction_per_migration": True,
+        },
+    )
+    with Operations.context(context):
+        context.run_migrations(migration_scripts=scripts)
 
 
 async def readiness() -> dict[str, Any]:

@@ -1,4 +1,4 @@
-SET search_path TO open_swe_analytics, public;
+SET search_path TO open_swe, public;
 
 CREATE TABLE feedback_withdrawal_projection (
     workspace_id uuid NOT NULL,

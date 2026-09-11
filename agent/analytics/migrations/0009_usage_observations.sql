@@ -1,4 +1,4 @@
-SET search_path TO open_swe_analytics, public;
+SET search_path TO open_swe, public;
 
 ALTER TABLE latest_cost_projection ALTER COLUMN observation_revision TYPE bigint;
 CREATE INDEX IF NOT EXISTS outbox_run_events_idx
@@ -72,5 +72,3 @@ CREATE TABLE IF NOT EXISTS run_cost_refresh (
     scheduled_at timestamptz NOT NULL,
     PRIMARY KEY (workspace_id, run_id)
 );
-
-INSERT INTO schema_migrations(version) VALUES (9) ON CONFLICT DO NOTHING;
