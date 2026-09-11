@@ -86,7 +86,6 @@ def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
     labels = {
         "ls": ("Inspecting repository files", "Repository directory"),
         "open_pull_request": ("Opening pull request", "GitHub operation"),
-        "request_pr_review": ("Starting pull request review", "GitHub operation"),
         "save_plan": ("Publishing implementation plan", "Plan artifact"),
         "analyzePlan": ("Checking implementation security", "Security analysis"),
     }

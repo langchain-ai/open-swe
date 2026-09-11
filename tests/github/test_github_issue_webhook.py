@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import hmac
-import importlib
 import json
 import logging
 from typing import cast
@@ -16,11 +15,8 @@ from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
 from agent.slack.client import GitHubPrRef
 from agent.slack.request import SlackRequest
-from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
 from agent.webhooks import common as webhook_common
-
-request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
@@ -1146,55 +1142,6 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     # A live status comment is posted on dispatch so the PR shows "reviewing".
     status_comment_kwargs = cast(dict[str, object], captured["status_comment_kwargs"])
     assert status_comment_kwargs["pr_number"] == 1244
-
-
-async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    async def fake_trigger_pr_review_from_ref(
-        pr_ref: GitHubPrRef,
-        *,
-        source: str,
-        github_login: str = "",
-        github_user_id: int | None = None,
-        slack_channel_id: str = "",
-        slack_thread_ts: str = "",
-    ) -> dict[str, object]:
-        captured["pr_ref"] = pr_ref
-        captured["source"] = source
-        captured["github_login"] = github_login
-        captured["github_user_id"] = github_user_id
-        captured["slack_channel_id"] = slack_channel_id
-        captured["slack_thread_ts"] = slack_thread_ts
-        return {"success": True, "thread_id": "thread-id"}
-
-    monkeypatch.setattr(
-        request_pr_review_module, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref
-    )
-    monkeypatch.setattr(
-        request_pr_review_module,
-        "get_config",
-        lambda: {
-            "configurable": {
-                "source": "github",
-                "github_login": "octocat",
-                "github_user_id": 123,
-                "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
-            }
-        },
-    )
-
-    result = await request_pr_review_tool("https://github.com/langchain-ai/open-swe/pull/1244")
-
-    pr_ref = captured["pr_ref"]
-    assert isinstance(pr_ref, GitHubPrRef)
-    assert pr_ref.number == 1244
-    assert captured["source"] == "github"
-    assert captured["github_login"] == "octocat"
-    assert captured["github_user_id"] == 123
-    assert captured["slack_channel_id"] == "C123"
-    assert captured["slack_thread_ts"] == "1700000000.000100"
-    assert result["success"] is True
 
 
 def test_process_github_pr_comment_without_email_skips(

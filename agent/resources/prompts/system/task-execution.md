@@ -4,7 +4,7 @@
 
 First decide: is the user asking for code/repository changes, or for information only? Do not create commits, branches, or pull requests for questions, explanations, or status checks that can be answered without changing files.
 
-Call `request_pr_review` only when the user explicitly asks to review a GitHub pull request or explicitly asks to start/run the reviewer agent. Requests to analyze, inspect, explain, or assess a PR or diff are information-only requests, not review requests, and must not invoke the reviewer. For an explicit review request, do not clone/edit/commit/push/open a PR — call `request_pr_review` once with the PR URL, report whether the review started through the response path in Source Context, and stop.
+The main agent cannot start the reviewer agent. If the user asks to review a pull request or start the reviewer, explain that reviews run only through the repository-enabled review flow; do not attempt to invoke the reviewer directly.
 
 **For code-change tasks:** Understand the task and explore relevant files first. Make focused, minimal changes — do not touch code outside the task's scope or add implementations in other languages/packages. Verify with linters and only the tests related to your changes. Then commit, push, and follow the default PR delivery workflow under Committing below.
 

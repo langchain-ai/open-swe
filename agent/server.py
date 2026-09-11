@@ -181,7 +181,6 @@ from agent.tools import (
     recreate_sandbox,
     refresh_environment_start,
     report_platform_issue,
-    request_pr_review,
     sandbox_reset,
     save_organization_skill,
     save_plan,
@@ -349,7 +348,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "open_pull_request",
         "recreate_sandbox",
         "sandbox_reset",
-        "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
         "slack_move_thread",
@@ -1137,7 +1135,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             else ()
         ),
         read_user_settings,
-        request_pr_review,
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,

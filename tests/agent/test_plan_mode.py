@@ -47,7 +47,6 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         "manage_thread",
         "open_pull_request",
         "recreate_sandbox",
-        "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
         "slack_move_thread",
