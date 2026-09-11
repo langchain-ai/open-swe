@@ -177,6 +177,8 @@ declare global {
       removeProject: (cwd: string) => Promise<boolean>
       getVersion: () => Promise<string>
       getUpdateState: () => Promise<DesktopUpdateState>
+      getMcpConfig: () => Promise<{ path: string; text: string }>
+      saveMcpConfig: (text: string) => Promise<{ path: string; text: string }>
       installUpdate: () => Promise<boolean>
       onUpdateState: (
         callback: (state: DesktopUpdateState) => void

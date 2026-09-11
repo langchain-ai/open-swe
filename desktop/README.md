@@ -33,7 +33,8 @@ Local threads can use workspace and personal cloud MCPs through the signed-in de
 session. Cloud credentials stay on the server; signing out or switching accounts revokes
 calls from an existing run. The backend must include the desktop MCP endpoints.
 
-Configure local servers in `mcp.json` inside Electron's user-data directory (on macOS,
+Configure local servers under **Settings → Local MCPs** in the desktop app. The UI reads
+and writes `mcp.json` inside Electron's user-data directory (on macOS,
 `~/Library/Application Support/Open SWE/`, or `Open SWE Development/` for development):
 
 ```json

@@ -50,6 +50,7 @@ const {
 const { beginLogin } = require("./login-server.cjs");
 const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
+const { readMcpConfig, writeMcpConfig } = require("./mcp-config.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -212,6 +213,10 @@ function requireTrustedDesktopIpc(event) {
 
 function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json");
+}
+
+function mcpConfigPath() {
+  return path.join(app.getPath("userData"), "mcp.json");
 }
 
 /**
@@ -443,6 +448,16 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:update-state", (event) => {
     requireTrustedDesktopIpc(event);
     return updateState;
+  });
+  ipcMain.handle("desktop:mcp-config", (event) => {
+    requireTrustedDesktopIpc(event);
+    return readMcpConfig(mcpConfigPath());
+  });
+  ipcMain.handle("desktop:save-mcp-config", (event, text) => {
+    requireTrustedDesktopIpc(event);
+    if (typeof text !== "string" || Buffer.byteLength(text) > 1024 * 1024)
+      throw new Error("MCP configuration must be smaller than 1 MB.");
+    return writeMcpConfig(mcpConfigPath(), text);
   });
   ipcMain.handle("desktop:install-update", async (event) => {
     requireTrustedDesktopIpc(event);
