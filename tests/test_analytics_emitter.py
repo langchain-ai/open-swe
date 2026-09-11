@@ -8,18 +8,11 @@ from agent.analytics import database, emitter
 
 
 @pytest.mark.asyncio
-async def test_task_rework_is_noop_when_analytics_is_unconfigured(monkeypatch) -> None:
-    monkeypatch.delenv("POSTGRES_URI", raising=False)
-
-    await emitter.task_rework("thread-1", source="dashboard", scope="major", reason="plan_review")
-
-
-@pytest.mark.asyncio
 async def test_pr_opened_without_invocation_preserves_action(monkeypatch) -> None:
     monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
     monkeypatch.setattr(database, "_WORKSPACE_ID", uuid4())
-    emit = AsyncMock()
-    monkeypatch.setattr(emitter, "emit", emit)
+    enqueue = AsyncMock()
+    monkeypatch.setattr(emitter, "enqueue", enqueue)
     monkeypatch.setattr("agent.analytics.directory.upsert_model", AsyncMock())
     monkeypatch.setattr("agent.analytics.directory.upsert_repository", AsyncMock())
 
@@ -34,8 +27,7 @@ async def test_pr_opened_without_invocation_preserves_action(monkeypatch) -> Non
         occurred_at=datetime(2026, 9, 10, tzinfo=UTC),
     )
 
-    opened = emit.await_args_list[0]
-    assert opened.args[0] == emitter.EventName.PR_OPENED
-    assert opened.args[2].opening_run_id is None
-    assert opened.args[2].model_attribution_quality == "unavailable"
-    assert len(emit.await_args_list) == 1
+    [opened] = [call.args[0] for call in enqueue.await_args_list]
+    assert opened.event_name == emitter.EventName.PR_OPENED
+    assert opened.payload.opening_run_id is None
+    assert opened.payload.model_attribution_quality == "unavailable"

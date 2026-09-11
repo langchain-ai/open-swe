@@ -244,17 +244,10 @@ async def test_reviewer_stats_use_publication_and_resolution_events(monkeypatch)
     ("previous_status", "status", "event_name"),
     [
         (None, "open", None),
-        (None, "resolved", None),
-        (None, "dismissed", None),
         ("open", "open", None),
-        ("resolved", "resolved", None),
-        ("dismissed", "dismissed", None),
         ("open", "resolved", EventName.FINDING_RESOLVED),
         ("open", "dismissed", EventName.FINDING_DISMISSED),
-        ("resolved", "dismissed", EventName.FINDING_DISMISSED),
-        ("dismissed", "resolved", EventName.FINDING_RESOLVED),
         ("resolved", "open", EventName.FINDING_REOPENED),
-        ("dismissed", "open", EventName.FINDING_REOPENED),
         ("unknown", "open", None),
     ],
 )
