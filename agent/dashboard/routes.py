@@ -651,7 +651,10 @@ async def api_delete_my_instructions(
 async def api_get_my_preferences(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_user_preferences(session["sub"])
+    return {
+        **await get_user_preferences(session["sub"]),
+        "default_local_tracing_project": ENV.LANGSMITH_PROJECT.get(),
+    }
 
 
 @router.put("/me/preferences")
@@ -659,7 +662,10 @@ async def api_put_my_preferences(
     body: UserPreferencesUpdate,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await set_user_preferences(session["sub"], body)
+    return {
+        **await set_user_preferences(session["sub"], body),
+        "default_local_tracing_project": ENV.LANGSMITH_PROJECT.get(),
+    }
 
 
 @router.get("/options")

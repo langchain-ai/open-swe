@@ -1483,6 +1483,25 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
+      tracingEnv: async () => {
+        if (!backendUrl) return {};
+        try {
+          const response = await backendFetch(
+            new URL("/dashboard/api/me/preferences", backendUrl).toString(),
+            { signal: AbortSignal.timeout(2_000) },
+          );
+          if (!response.ok) return {};
+          const preferences = await response.json();
+          const project =
+            preferences.local_tracing_project ||
+            preferences.default_local_tracing_project;
+          return project
+            ? { LANGSMITH_PROJECT: project, LANGSMITH_TRACING: "true" }
+            : {};
+        } catch {
+          return {};
+        }
+      },
       providerEnv: () => openAiOAuth?.backendEnv() || {},
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&

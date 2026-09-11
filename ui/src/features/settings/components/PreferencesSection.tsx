@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import {
   notificationsEnabled,
@@ -42,8 +43,7 @@ export function PreferencesSection() {
     queryFn: api.getMyPreferences,
   })
   const savePreferences = useMutation({
-    mutationFn: (default_visibility: ThreadVisibility) =>
-      api.saveMyPreferences({ default_visibility }),
+    mutationFn: api.saveMyPreferences,
     onSuccess: (data) => qc.setQueryData(["myPreferences"], data),
   })
   const archiveThreads = useMutation({
@@ -101,7 +101,13 @@ export function PreferencesSection() {
         control={
           <Select
             value={preferences.data?.default_visibility ?? "private"}
-            onValueChange={(v) => v && savePreferences.mutate(v)}
+            onValueChange={(v) =>
+              v &&
+              savePreferences.mutate({
+                ...preferences.data!,
+                default_visibility: v,
+              })
+            }
             disabled={preferences.isLoading || savePreferences.isPending}
           >
             <SelectTrigger className="w-40">
@@ -115,6 +121,27 @@ export function PreferencesSection() {
               ))}
             </SelectContent>
           </Select>
+        }
+      />
+      <SettingsRow
+        label="Local tracing project"
+        description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
+        control={
+          <Input
+            className="w-56"
+            placeholder={
+              preferences.data?.default_local_tracing_project ??
+              "Shared cloud project"
+            }
+            defaultValue={preferences.data?.local_tracing_project ?? ""}
+            disabled={preferences.isLoading || savePreferences.isPending}
+            onBlur={(event) =>
+              savePreferences.mutate({
+                ...preferences.data!,
+                local_tracing_project: event.target.value.trim() || null,
+              })
+            }
+          />
         }
       />
       <SettingsRow
