@@ -12,6 +12,7 @@ import {
 
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
+import type { TerminalSplitDirection } from "@/features/agents/lib/terminalState"
 import { MAX_TERMINALS_PER_GROUP } from "@/features/agents/lib/terminalState"
 import { cn } from "@/lib/utils"
 import { useAttachedTerminal } from "@/features/agents/lib/terminalSession"
@@ -286,19 +287,25 @@ export function TerminalActions({
     : (terminalIds[0] ?? "")
   const atSplitLimit = terminalIds.length >= MAX_TERMINALS_PER_GROUP
 
+  // Splits follow the focused group, which can differ from the visible tab.
+  const split = (direction: TerminalSplitDirection) => {
+    if (activeTerminalId) terminals.focus(activeTerminalId)
+    terminals.split(direction)
+  }
+
   return (
     <div className="flex shrink-0 items-center">
       <ActionButton
         label={`Split horizontally${atSplitLimit ? " (maximum 4)" : ""}`}
         disabled={atSplitLimit}
-        onClick={() => terminals.split("horizontal")}
+        onClick={() => split("horizontal")}
       >
         <SquareSplitHorizontal className="size-3.5" />
       </ActionButton>
       <ActionButton
         label={`Split vertically${atSplitLimit ? " (maximum 4)" : ""}`}
         disabled={atSplitLimit}
-        onClick={() => terminals.split("vertical")}
+        onClick={() => split("vertical")}
       >
         <SquareSplitVertical className="size-3.5" />
       </ActionButton>
