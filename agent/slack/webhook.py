@@ -29,7 +29,7 @@ from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
-from agent.slack.thinking import stream_slack_thinking_steps
+from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -949,3 +949,11 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
                 triggering_user_id=user_id,
                 agent_thread_id=thread_id,
             )
+    if not code_channel and isinstance(run_id, str) and run_id:
+        await show_slack_thinking_status(
+            client=langgraph_client,
+            thread_id=thread_id,
+            run_id=run_id,
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+        )
