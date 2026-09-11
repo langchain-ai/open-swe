@@ -154,7 +154,7 @@ function CloudAgentsPage() {
             description="Automatically choose a model for each turn; turn this off to always use your default model"
             control={
               <Switch
-                checked={profile.data?.model_routing_enabled ?? false}
+                checked={profile.data?.model_routing_enabled ?? true}
                 onCheckedChange={(v) => persist({ model_routing_enabled: v })}
                 disabled={profile.isLoading || save.isPending}
               />

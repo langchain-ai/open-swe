@@ -35,12 +35,9 @@ export async function typeIntoComposer(page: Page, text: string) {
   await editor.press("Enter");
 }
 
-// A fresh user lands on the default-model dialog, whose backdrop swallows
+// The Slack onboarding dialog (where Sign in with Slack is enabled) swallows
 // clicks on the composer behind it.
 export async function dismissOnboardingIfShown(page: Page) {
-  const profile = (await (
-    await page.request.get("/dashboard/api/profile")
-  ).json()) as { default_model?: string };
   const mapping = (await (
     await page.request.get("/dashboard/api/my-mapping")
   ).json()) as { slack_user_id?: string };
@@ -49,11 +46,9 @@ export async function dismissOnboardingIfShown(page: Page) {
   ).json()) as {
     slack_oauth_enabled?: boolean;
   };
-  const needsOnboarding =
-    !profile.default_model ||
-    (session.slack_oauth_enabled && !mapping.slack_user_id);
+  const needsOnboarding = session.slack_oauth_enabled && !mapping.slack_user_id;
   if (!needsOnboarding) return;
-  const dismiss = page.getByRole("button", { name: "Later" });
+  const dismiss = page.getByRole("button", { name: "Don't ask again" });
   await expect(dismiss).toBeVisible();
   await dismiss.click();
   await expect(dismiss).toBeHidden();

@@ -192,9 +192,32 @@ async def test_model_routing_is_applied_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_model_routing_is_disabled_by_default() -> None:
+async def test_model_routing_is_enabled_by_default() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config)
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" in middleware_names
+    assert config["metadata"]["model_routing_applied"] is True
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert [model for model, _ in calls] == [
+        "openai:gpt-5.6-sol",
+        "google_genai:gemini-3.8-flash",
+        "openai:gpt-5.6-sol",
+        "anthropic:claude-opus-5",
+        "openai:gpt-5.6-sol",
+        "openai:gpt-5.6-luna",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_is_disabled_by_explicit_profile() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(
+        config, profile={"model_routing_enabled": False}
+    )
 
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])

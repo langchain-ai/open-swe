@@ -917,7 +917,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
         subagent_effort = thread_settings.get("subagent_effort")
-        adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
+        adaptive_model_routing = thread_settings.get("model_routing_enabled", True)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
     # An explicit per-run model choice is the one thing allowed to move a thread

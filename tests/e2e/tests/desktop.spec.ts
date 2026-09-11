@@ -133,19 +133,7 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       },
     );
 
-    const profileResponse = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/dashboard/api/profile",
-    );
     await page.goto("open-swe://app/agents");
-    const profile = (await (await profileResponse).json()) as {
-      default_model?: string | null;
-    };
-    if (!profile.default_model) {
-      const maybeLater = page.getByRole("button", { name: "Later" });
-      await expect(maybeLater).toBeVisible();
-      await maybeLater.click();
-    }
 
     await expect(
       page.getByRole("button", { name: /Cloud threads, \d+/ }),
