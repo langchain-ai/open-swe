@@ -138,8 +138,9 @@ def exploration_cost(run: Run, example: Example) -> dict[str, Any]:
             {"key": "model_calls_before_exit", "score": outcome.model_calls_before_exit},
             {"key": "tool_calls_before_exit", "score": outcome.tool_calls_before_exit},
             {"key": "rejected_tool_calls", "score": outcome.rejected_tool_calls},
-            {"key": "pre_exit_input_tokens", "score": outcome.input_tokens},
-            {"key": "pre_exit_output_tokens", "score": outcome.output_tokens},
+            # Thousands, because LangSmith rejects a feedback score above 99999.9999.
+            {"key": "pre_exit_input_ktokens", "score": round(outcome.input_tokens / 1000, 2)},
+            {"key": "pre_exit_output_ktokens", "score": round(outcome.output_tokens / 1000, 2)},
             {"key": "seconds_to_decision", "score": outcome.seconds_to_decision},
             {"key": "timed_out", "score": int(outcome.timed_out)},
         ]
@@ -202,7 +203,10 @@ def aggregate(runs: list[Run], examples: list[Example]) -> dict[str, Any]:
                 "key": "mean_tool_calls_before_exit",
                 "score": mean([o.tool_calls_before_exit for o in routed]),
             },
-            {"key": "mean_pre_exit_input_tokens", "score": mean([o.input_tokens for o in routed])},
+            {
+                "key": "mean_pre_exit_input_ktokens",
+                "score": mean([o.input_tokens / 1000 for o in routed]),
+            },
             {
                 "key": "mean_seconds_to_decision",
                 "score": mean([o.seconds_to_decision for o in routed]),

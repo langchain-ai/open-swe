@@ -2,8 +2,8 @@
   {
     "id": "fast-typo-docs",
     "expected_route": "fast",
-    "prompt": "Fix every occurrence of the misspelling 'recieve' in docs/*.md and open a PR.",
-    "rationale": "Explicit target, mechanical edit, trivially verifiable."
+    "prompt": "In AGENTS.md, change every occurrence of the word 'sandbox' to 'sandbox environment' in the Project section only. Open a PR.",
+    "rationale": "Explicit file, explicit scope, mechanical edit."
   },
   {
     "id": "fast-bump-desktop-version",

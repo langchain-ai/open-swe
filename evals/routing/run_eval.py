@@ -10,6 +10,7 @@ import logging
 import os
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from langgraph_sdk import get_client
@@ -27,7 +28,12 @@ from evals.routing.judge import (
     title_quality,
     under_routed,
 )
-from evals.routing.target import drain_thread_ids, get_langgraph_url, route_task
+from evals.routing.target import (
+    RoutingOutcome,
+    drain_thread_ids,
+    get_langgraph_url,
+    route_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +85,47 @@ async def _cleanup(thread_ids: set[str]) -> None:
             logger.warning("Could not delete eval thread", extra={"thread": thread_id})
 
 
+_COLUMNS = ("task", "expected", "actual", "calls", "tools", "ktok", "secs", "title")
+
+
+async def _print_table(results: Any) -> None:
+    """Print the outcome of every example locally, so results do not need a UI trip."""
+    rows: list[tuple[str, ...]] = []
+    async for row in results:
+        outputs = row["run"].outputs or {}
+        reference = (row["example"].outputs or {}) if row["example"] else {}
+        outcome = RoutingOutcome.model_validate(outputs) if outputs else None
+        actual = (
+            (outcome.route or ("none" if outcome.finished_without_exit else "timeout"))
+            if outcome
+            else "error"
+        )
+        rows.append(
+            (
+                str((row["example"].inputs or {}).get("task_id", "?")),
+                str(reference.get("expected_route", "?")),
+                actual,
+                str(outcome.model_calls_before_exit) if outcome else "-",
+                str(outcome.tool_calls_before_exit) if outcome else "-",
+                f"{outcome.input_tokens / 1000:.1f}" if outcome else "-",
+                f"{outcome.seconds_to_decision:.0f}" if outcome else "-",
+                (outcome.title or "")[:48] if outcome else "",
+            )
+        )
+    if not rows:
+        return
+    widths = [
+        max(len(str(cell)) for cell in column) for column in zip(_COLUMNS, *rows, strict=True)
+    ]
+    line = "  ".join(head.ljust(width) for head, width in zip(_COLUMNS, widths, strict=True))
+    print("\n" + line)
+    print("  ".join("-" * width for width in widths))
+    for row_cells in rows:
+        print("  ".join(cell.ljust(width) for cell, width in zip(row_cells, widths, strict=True)))
+    matched = sum(1 for row_cells in rows if row_cells[1] == row_cells[2])
+    print(f"\nroute accuracy {matched}/{len(rows)}")
+
+
 async def main() -> None:
     logging.basicConfig(level=os.environ.get("ROUTING_EVAL_LOG_LEVEL", "INFO"))
     load_dotenv()
@@ -96,7 +143,7 @@ async def main() -> None:
     if args.limit:
         data = list(Client().list_examples(dataset_name=config.dataset_name, limit=args.limit))
     try:
-        await aevaluate(
+        results = await aevaluate(
             route_task,
             data=data,
             evaluators=[
@@ -112,6 +159,7 @@ async def main() -> None:
             experiment_prefix=config.experiment_prefix,
             max_concurrency=config.max_concurrency,
         )
+        await _print_table(results)
     finally:
         if not args.no_cleanup:
             await _cleanup(drain_thread_ids())
