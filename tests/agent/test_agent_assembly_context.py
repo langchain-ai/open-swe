@@ -554,6 +554,42 @@ async def test_dashboard_agent_excludes_slack_tools() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["slack", "schedule"])
+async def test_non_dashboard_agent_excludes_question_feedback_tool(source: str) -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable["source"] = source
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(subagents, list)
+
+    assert "mark_question_answered" not in {_registered_tool_name(tool) for tool in tools}
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert "mark_question_answered" not in {
+        _registered_tool_name(tool) for tool in general_purpose["tools"]
+    }
+
+
+@pytest.mark.asyncio
+async def test_dashboard_question_feedback_tool_is_parent_only() -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(subagents, list)
+
+    assert "mark_question_answered" in {_registered_tool_name(tool) for tool in tools}
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert "mark_question_answered" not in {
+        _registered_tool_name(tool) for tool in general_purpose["tools"]
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["slack", "schedule"])
 async def test_slack_source_context_includes_slack_tools(source: str) -> None:
     config = _base_config()
     configurable = config.get("configurable")
