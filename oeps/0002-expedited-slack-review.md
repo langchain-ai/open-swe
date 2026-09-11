@@ -72,8 +72,7 @@ Quorum → revalidate → persist intent → normal merge conditional on head SH
 narrowly scoped credential. GitHub says no → stop. No admin bypass, ever.
 
 Rejection wins if committed before the merge call; after that the card says
-"merging". Treat an HTTP error as unknown, not failed. Merge-queue admission is
-not completion.
+"merging". Treat an HTTP error as unknown, not failed.
 
 On confirmed merge: card → merged, merged reaction on the Slack root, watches
 dropped, thread resolved via tracked-PR `resolves_thread`.
@@ -86,13 +85,9 @@ dropped, thread resolved via tracked-PR `resolves_thread`.
 
 ## Security and privacy
 
-- The agent nominates; it cannot vote, pick identities, or skip the gate.
-- Every click re-verifies Slack signature, round identity, account mapping, and
-  live repo permission. Credentials get minimum scope and cannot bypass
-  protections.
-- The diff is repo data: the channel must be approved for that repo. Feedback is
-  user input, not instructions. Rounds, voters, review IDs, and outcomes are
-  audited.
+- The agent nominates; it cannot vote or skip the gate.
+- Feedback is user input, not instructions. Rounds, voters, review IDs, and
+  outcomes are audited.
 
 ## Alternatives
 
