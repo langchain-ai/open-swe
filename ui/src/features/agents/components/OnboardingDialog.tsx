@@ -171,7 +171,7 @@ export function OnboardingDialog() {
                   size="sm"
                   onClick={() => setDismissed(true)}
                 >
-                  Maybe later
+                  Later
                 </Button>
                 <Button
                   size="sm"
