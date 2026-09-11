@@ -67,7 +67,7 @@ async def _emit_routed_model(
     if not isinstance(model_id, str) or not model_id:
         return
     try:
-        get_stream_writer()({"type": "model_routed", "model_id": model_id})
+        get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
     except Exception:
         # Routing display is cosmetic; never fail a run over it.
         logger.debug("Failed to emit model_routed event", exc_info=True)

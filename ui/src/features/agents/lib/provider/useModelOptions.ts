@@ -85,16 +85,40 @@ export function formatEffort(effort: string): string {
 export function formatModelSelection(
   models: Array<ModelOption>,
   selection: ModelSelection | null,
-  /** Model the router picked for this run, shown next to `Auto`. */
-  routedModelId?: string | null
+  /** Route/model the router picked for this run, shown for Auto. */
+  routed?: { route?: string; modelId?: string | null } | null
 ): string {
   if (!selection) {
-    const routed = routedModelId
-      ? models.find((m) => m.id === routedModelId)
-      : undefined
-    return routed ? `Auto · ${routed.label}` : "Auto"
+    const route = routed?.route
+    if (route === "fast" || route === "balanced" || route === "performance") {
+      return `Auto ${formatRoute(route)}`
+    }
+    return "Auto"
   }
   const model = models.find((m) => m.id === selection.modelId)
   const modelLabel = model?.label ?? selection.modelId
   return `${modelLabel} ${formatEffort(selection.effort)}`
+}
+
+const ROUTE_LABELS: Record<"fast" | "balanced" | "performance", string> = {
+  fast: "Fast",
+  balanced: "Balanced",
+  performance: "Performance",
+}
+
+export function formatRoute(
+  route: "fast" | "balanced" | "performance"
+): string {
+  return ROUTE_LABELS[route]
+}
+
+/** The model label behind the Auto router's latest pick, for hover display. */
+export function routedModelLabel(
+  models: Array<ModelOption>,
+  routed?: { modelId?: string | null } | null
+): string | null {
+  const model = routed?.modelId
+    ? models.find((m) => m.id === routed.modelId)
+    : undefined
+  return model?.label ?? null
 }

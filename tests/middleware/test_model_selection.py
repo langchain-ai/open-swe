@@ -153,7 +153,13 @@ async def test_routed_model_id_is_streamed_for_the_ui(monkeypatch: pytest.Monkey
 
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
-    assert events == [{"type": "model_routed", "model_id": "openai:gpt-5.6-sol"}]
+    assert events == [
+        {
+            "type": "model_routed",
+            "route": "fast",
+            "model_id": "openai:gpt-5.6-sol",
+        }
+    ]
 
 
 @pytest.mark.asyncio
