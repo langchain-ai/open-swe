@@ -100,6 +100,7 @@ async def test_capture_start_survives_delivery_retention_and_restart(deployment_
     assert await asyncio.gather(*(outbox.enqueue(event) for event in events)) == [True, True]
     async with database.connection() as conn:
         started_at = await database.collection_started_at(conn)
+    assert started_at is not None
     assert before <= started_at <= datetime.now(UTC)
     assert await outbox.deliver_batch() == 2
     assert not await outbox.enqueue(events[0])
