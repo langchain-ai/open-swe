@@ -107,6 +107,7 @@ from agent.middleware import (
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
+    ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
@@ -1277,6 +1278,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *([workspace_skills] if workspace_skills else []),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
+                ValidateImageReadsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(
