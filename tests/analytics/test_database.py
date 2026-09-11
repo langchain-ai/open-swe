@@ -8,9 +8,28 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from blockbuster import BlockBuster
 from sqlalchemy import make_url, text
 
 from agent.analytics import database
+
+
+async def test_migrations_allow_nonblocking_startup_and_restart(deployment_db):
+    detector = BlockBuster()
+    identities = []
+    for _ in range(2):
+        # asyncpg checks local password/SSL files when opening a new connection.
+        async with database.engine().connect():
+            pass
+        detector.activate()
+        try:
+            await database.migrate()
+            identities.append(database.workspace_id())
+            assert (await database.readiness())["ready"]
+        finally:
+            detector.deactivate()
+        await database.close()
+    assert identities[0] == identities[1]
 
 
 async def test_replicas_and_restarts_preserve_identity_without_starting_collection(deployment_db):
@@ -113,12 +132,14 @@ async def test_connection_uri_rejects_ambiguous_ssl_modes(monkeypatch, query):
 
 async def test_reporting_activation_is_shared_and_preserved_across_restarts(deployment_db):
     await database.migrate()
-    before = datetime.now(UTC)
+    async with database.connection() as conn:
+        before = await conn.scalar(text("SELECT clock_timestamp()"))
     await asyncio.gather(*(database.activate_reporting() for _ in range(4)))
     async with database.connection() as conn:
         metadata = await database.reporting_metadata(conn)
+        after = await conn.scalar(text("SELECT clock_timestamp()"))
     cutover = datetime.fromisoformat(metadata["reporting_cutover_at"])
-    assert before <= cutover <= datetime.now(UTC)
+    assert before <= cutover <= after
     assert metadata["collection_started_at"] is None
     assert metadata["completeness"] == "not_started"
 
