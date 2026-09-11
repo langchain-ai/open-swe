@@ -1,4 +1,4 @@
-"""Idempotent ingestion and durable event projections."""
+"""Idempotent ingestion, projection, and summary invalidation."""
 
 import json
 from datetime import UTC
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.analytics.database import record_capture, transaction
 from agent.analytics.events import EventEnvelope, EventName
+from agent.analytics.summaries import mark_dirty
 from agent.config import ENV
 
 _INSERT_ID = text(
@@ -92,6 +93,7 @@ async def ingest(event: EventEnvelope) -> bool:
             },
         )
         await _project(conn, event)
+        await mark_dirty(conn, event)
         await conn.execute(
             text("UPDATE deployment_metadata SET last_processed_at = clock_timestamp()")
         )
