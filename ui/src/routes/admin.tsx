@@ -29,6 +29,8 @@ import {
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
+import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import { useRepos } from "@/lib/profile"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -677,13 +679,8 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
     queryKey: ["teamSettings"],
     queryFn: api.getTeamSettings,
   })
+  const repos = useRepos()
   const [error, setError] = useState<string | null>(null)
-  const [defaultRepoDraft, setDefaultRepoDraft] = useState("")
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setDefaultRepoDraft(settings.data?.default_repo ?? "")
-  }, [settings.data?.default_repo])
 
   const save = useMutation({
     mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
@@ -822,22 +819,23 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
         />
         <SettingsRow
           label="Default Repository"
-          description="Global fallback used when a run has no explicit repo and the user has no profile default. Use owner/repo."
+          description="Global fallback used when a run has no explicit repo and the user has no profile default."
           control={
-            <Input
-              className="w-56"
-              placeholder="owner/repo"
-              value={defaultRepoDraft}
-              onChange={(e) => setDefaultRepoDraft(e.target.value)}
-              onBlur={() =>
-                settings.data &&
-                save.mutate({
-                  ...settings.data,
-                  default_repo: defaultRepoDraft.trim() || null,
-                })
-              }
-              disabled={!settings.data || save.isPending}
-            />
+            <div className="w-56">
+              <RepoSelector
+                repos={repos.data?.repositories}
+                selectedRepo={settings.data?.default_repo ?? null}
+                onRepoChange={(repo) =>
+                  settings.data &&
+                  save.mutate({ ...settings.data, default_repo: repo })
+                }
+                placeholder="Pick a repository…"
+                emptySelectionLabel="No default repository"
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                dropdownClassName="w-56"
+                disabled={!settings.data || save.isPending}
+              />
+            </div>
           }
         />
         <RolePicker
