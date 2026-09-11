@@ -4,7 +4,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.analytics import database
+from agent.analytics import database, queries
 from agent.dashboard import routes
 
 
@@ -32,3 +32,39 @@ async def test_analytics_readiness_requires_admin(monkeypatch) -> None:
         assert admin.json() == {"configured": True, "ready": True}
 
     readiness.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failure", ["disabled", "invalid_uri", "uninitialized", "database_down"])
+async def test_pr_report_unavailability_is_distinct_from_empty_data(monkeypatch, failure):
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[routes.require_session] = lambda: {"sub": "user"}
+    if failure == "disabled":
+        monkeypatch.delenv("POSTGRES_URI", raising=False)
+    else:
+        monkeypatch.setenv(
+            "POSTGRES_URI", "invalid" if failure == "invalid_uri" else "postgresql://localhost/test"
+        )
+    error = (
+        ConnectionError("database down")
+        if failure == "database_down"
+        else RuntimeError("not migrated")
+    )
+    monkeypatch.setattr(queries, "pr_merge_rate_by_model", AsyncMock(side_effect=error))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/dashboard/api/analytics/pr-merge-rate-by-model")
+    assert response.status_code == 503
+    assert response.json() == {"detail": "PR analytics is unavailable on this deployment."}
+
+
+async def test_pr_report_requires_session_before_checking_availability(monkeypatch):
+    app = FastAPI()
+    app.include_router(routes.router)
+    monkeypatch.delenv("POSTGRES_URI", raising=False)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/dashboard/api/analytics/pr-merge-rate-by-model")
+    assert response.status_code == 401

@@ -7,7 +7,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.analytics.database import transaction
-from agent.config import ENV
 
 _LATENCY_BOUNDS_MS = [60_000, 300_000, 900_000, 3_600_000, 14_400_000, 86_400_000, 604_800_000]
 
@@ -148,17 +147,4 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
         "histogram_counts": histogram_counts,
         "completeness": json.dumps({"status": "complete"}),
         "data_watermark": watermark,
-    }
-
-
-def summary_metadata(
-    *, watermark: datetime | None, collection_started_at: datetime | None
-) -> dict[str, object]:
-    return {
-        "analytics_epoch": collection_started_at.isoformat() if collection_started_at else None,
-        "summary_version": ENV.ANALYTICS_SUMMARY_VERSION.get_int(1),
-        "freshness": "live_current_utc_day_plus_completed_day_summaries",
-        "completeness": "observed_events_only" if collection_started_at else "not_started",
-        "data_watermark": watermark.isoformat() if watermark else None,
-        "as_of": datetime.now(UTC).isoformat(),
     }
