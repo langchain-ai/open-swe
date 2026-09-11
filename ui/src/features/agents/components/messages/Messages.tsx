@@ -81,8 +81,13 @@ export const Messages = memo(function MessagesComponent({
   onAutoApprove,
   onOpenFile,
 }: MessagesProps) {
-  const { scrollRef, contentRef, showScrollToBottom, scrollToBottom } =
-    useTranscriptScroll({ scrollKey, messages, isStreaming })
+  const {
+    scrollRef,
+    contentRef,
+    showScrollToBottom,
+    scrollToBottom,
+    scrollToLatestUserMessage,
+  } = useTranscriptScroll({ scrollKey, messages, isStreaming })
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
@@ -96,11 +101,11 @@ export const Messages = memo(function MessagesComponent({
 
   useEffect(() => {
     if (!scrollControlRef) return
-    scrollControlRef.current = { scrollToBottom }
+    scrollControlRef.current = { scrollToBottom, scrollToLatestUserMessage }
     return () => {
       scrollControlRef.current = null
     }
-  }, [scrollToBottom, scrollControlRef])
+  }, [scrollToBottom, scrollToLatestUserMessage, scrollControlRef])
 
   useEffect(() => {
     onShowScrollToBottomChange?.(showScrollToBottom)
@@ -129,7 +134,9 @@ export const Messages = memo(function MessagesComponent({
           <div
             ref={contentRef}
             className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
-            style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
+            style={{
+              paddingBottom: `calc(${bottomInset}px + ${isStreaming ? "50vh" : "0px"})`,
+            }}
           >
             {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {

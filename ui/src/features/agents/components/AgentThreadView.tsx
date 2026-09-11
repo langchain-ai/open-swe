@@ -134,7 +134,6 @@ export function AgentThreadView({
   )
   const submitMessage = useCallback(
     async (content: string, images: Array<ImageChunk>) => {
-      scrollControlRef.current?.scrollToBottom()
       if (planFeedbackPending) await rejectPlan(thread.id, false)
       await sendMessage.mutateAsync({
         content,
@@ -143,6 +142,9 @@ export function AgentThreadView({
         effort: activeSelection?.effort ?? null,
         plan_mode: activePlanMode,
       })
+      requestAnimationFrame(() =>
+        scrollControlRef.current?.scrollToLatestUserMessage()
+      )
       setPlanFeedbackPending(false)
     },
     [
