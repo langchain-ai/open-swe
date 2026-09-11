@@ -99,6 +99,22 @@ class _RoutingClient:
         return _FakeResponse(200, {"name": "ok"})
 
 
+class _SequenceClient(_RoutingClient):
+    def __init__(self, *, post: _FakeResponse, responses: list[_FakeResponse]) -> None:
+        super().__init__(post=post, get_routes={})
+        self._responses = responses
+
+    async def get(
+        self, url: str, *, headers: dict[str, str], params: dict[str, str] | None = None
+    ) -> _FakeResponse:
+        self.get_calls.append({"url": url, "headers": headers, "params": params})
+        if url.endswith("/installation/repositories"):
+            return _FakeResponse(200, {"repositories": [{"full_name": "langchain-ai/open-swe"}]})
+        if self._responses:
+            return self._responses.pop(0)
+        return _FakeResponse(200, {"name": "ok"})
+
+
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _RoutingClient) -> None:
     monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **_kwargs: client)
 
@@ -404,6 +420,80 @@ def test_error_surfaced_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert set(result) == {"success", "error"}
     assert "403" in result["error"]
     assert "PR created: no" in result["error"]
+
+
+def test_rate_limited_preflight_retries_and_returns_distinct_failure(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+    _stub_token(monkeypatch)
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    rate_limited = _FakeResponse(
+        403,
+        {"message": "API rate limit exceeded"},
+        headers={"x-ratelimit-remaining": "0", "retry-after": "0"},
+    )
+    client = _SequenceClient(post=_FakeResponse(201, {}), responses=[rate_limited] * 3)
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is False
+    assert "github_installation_rate_limited" in caplog.text
+    assert "transient" in result["error"]
+    assert "retry-after=0" in result["error"]
+    assert len(client.get_calls) == 3
+
+
+def test_rate_limited_preflight_succeeds_on_retry_and_opens_pr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+    _stub_token(monkeypatch)
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    rate_limited = _FakeResponse(
+        403,
+        {"message": "API rate limit exceeded"},
+        headers={"x-ratelimit-remaining": "0", "retry-after": "0"},
+    )
+    client = _SequenceClient(
+        post=_FakeResponse(201, {"html_url": "https://x/pull/1", "number": 1, "user": {}}),
+        responses=[
+            rate_limited,
+            _FakeResponse(200, {"name": "repo"}),
+            _FakeResponse(200, {"name": "main"}),
+            _FakeResponse(200, {"name": "open-swe/feature"}),
+        ],
+    )
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is True
+    assert result["created"] is True
+    assert len(client.post_calls) == 1
+
+
+def test_access_denied_preflight_keeps_existing_access_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+    _stub_token(monkeypatch)
+    client = _RoutingClient(
+        post=_FakeResponse(201, {}),
+        get_routes={
+            "/repos/langchain-ai/open-swe": _FakeResponse(
+                403, {"message": "Resource not accessible"}
+            )
+        },
+    )
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is False
+    assert "not installed on, granted access" in result["error"]
+    assert "transient" not in result["error"]
 
 
 def test_404_create_returns_actionable_access_diagnostic(

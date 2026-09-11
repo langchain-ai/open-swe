@@ -1,6 +1,8 @@
 """Open a GitHub pull request using the thread's credential scope."""
 
+import asyncio
 import logging
+import time
 from typing import Any
 from urllib.parse import quote
 
@@ -34,9 +36,12 @@ logger = logging.getLogger(__name__)
 GITHUB_API = "https://api.github.com"
 _REFERENCES_HEADING = "## References"
 _ACCESS_FAILURE_CODE = "github_app_access_missing_or_repo_not_found"
+_RATE_LIMIT_FAILURE_CODE = "github_installation_rate_limited"
 _BRANCH_FAILURE_CODE = "github_pr_branch_not_visible"
 _PREFLIGHT_FAILURE_CODE = "github_pr_preflight_failed"
 _RESPONSE_BODY_LIMIT = 800
+_RATE_LIMIT_RETRY_CAP = 60.0
+_RATE_LIMIT_RETRIES = 2
 _REPORTED_RESPONSE_HEADERS = (
     "location",
     "retry-after",
@@ -104,6 +109,41 @@ def _github_message(resp: httpx2.Response) -> str:
         if isinstance(message, str) and message.strip():
             return message.strip()
     return resp.text.strip() or f"HTTP {resp.status_code}"
+
+
+def _is_rate_limited(resp: httpx2.Response) -> bool:
+    if resp.status_code != 403:
+        return False
+    if resp.headers.get("x-ratelimit-remaining") == "0":
+        return True
+    message = _github_message(resp).lower()
+    return any(
+        phrase in message
+        for phrase in ("api rate limit exceeded", "secondary rate limit", "abuse detection")
+    )
+
+
+def _rate_limit_delay(resp: httpx2.Response) -> float:
+    delays: list[float] = []
+    retry_after = resp.headers.get("retry-after")
+    if retry_after:
+        try:
+            delays.append(max(0.0, float(retry_after)))
+        except ValueError:
+            pass
+    reset = resp.headers.get("x-ratelimit-reset")
+    if reset:
+        try:
+            delays.append(max(0.0, float(reset) - time.time()))
+        except ValueError:
+            pass
+    return min([*delays, _RATE_LIMIT_RETRY_CAP])
+
+
+def _rate_limit_hint(resp: httpx2.Response) -> str:
+    reset = resp.headers.get("x-ratelimit-reset") or "not provided"
+    retry_after = resp.headers.get("retry-after") or "not provided"
+    return f"x-ratelimit-reset={reset}, retry-after={retry_after}"
 
 
 def _github_response_summary(resp: httpx2.Response | None) -> str:
@@ -264,6 +304,38 @@ def _access_failure_payload(
     )
 
 
+def _rate_limit_failure_payload(
+    *,
+    owner: str,
+    repo: str,
+    head: str,
+    base: str,
+    token_kind: str,
+    http_status: int | None,
+    reason: str,
+    branch_pushed: bool | None,
+    failed_step: str,
+    response: httpx2.Response,
+) -> dict[str, Any]:
+    return _failure_payload(
+        code=_RATE_LIMIT_FAILURE_CODE,
+        owner=owner,
+        repo=repo,
+        head=head,
+        base=base,
+        token_kind=token_kind,
+        http_status=http_status,
+        reason=reason,
+        likely_cause=(
+            "GitHub installation rate-limit exhaustion is transient; retry this call after "
+            f"the reset ({_rate_limit_hint(response)})"
+        ),
+        branch_pushed=branch_pushed,
+        failed_step=failed_step,
+        response=response,
+    )
+
+
 def _branch_failure_payload(
     *,
     owner: str,
@@ -297,7 +369,12 @@ def _branch_failure_payload(
 
 
 async def _github_get(client: httpx2.AsyncClient, token: str, path: str) -> httpx2.Response:
-    return await client.get(f"{GITHUB_API}{path}", headers=_auth_headers(token))
+    for attempt in range(_RATE_LIMIT_RETRIES + 1):
+        response = await client.get(f"{GITHUB_API}{path}", headers=_auth_headers(token))
+        if not _is_rate_limited(response) or attempt == _RATE_LIMIT_RETRIES:
+            return response
+        await asyncio.sleep(_rate_limit_delay(response))
+    raise AssertionError("unreachable")
 
 
 async def _preflight_pr_access(
@@ -311,6 +388,19 @@ async def _preflight_pr_access(
     base: str,
 ) -> dict[str, Any] | None:
     repo_resp = await _github_get(client, token, f"/repos/{owner}/{repo}")
+    if _is_rate_limited(repo_resp):
+        return _rate_limit_failure_payload(
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind=token_kind,
+            http_status=repo_resp.status_code,
+            reason="GitHub rate-limited the repository access preflight",
+            branch_pushed=None,
+            failed_step="preflight_repo",
+            response=repo_resp,
+        )
     if repo_resp.status_code in {403, 404}:
         return _access_failure_payload(
             owner=owner,
@@ -356,6 +446,19 @@ async def _preflight_pr_access(
             http_status=base_resp.status_code,
             branch=base,
             branch_role="base",
+            response=base_resp,
+        )
+    if _is_rate_limited(base_resp):
+        return _rate_limit_failure_payload(
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind=token_kind,
+            http_status=base_resp.status_code,
+            reason="GitHub rate-limited the base branch access preflight",
+            branch_pushed=None,
+            failed_step="preflight_base_branch",
             response=base_resp,
         )
     if base_resp.status_code in {401, 403}:
@@ -406,6 +509,19 @@ async def _preflight_pr_access(
             http_status=head_resp.status_code,
             branch=head_branch,
             branch_role="head",
+            response=head_resp,
+        )
+    if _is_rate_limited(head_resp):
+        return _rate_limit_failure_payload(
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind=token_kind,
+            http_status=head_resp.status_code,
+            reason="GitHub rate-limited the head branch access preflight",
+            branch_pushed=False,
+            failed_step="preflight_head_branch",
             response=head_resp,
         )
     if head_resp.status_code in {401, 403}:
