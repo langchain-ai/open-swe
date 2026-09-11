@@ -266,9 +266,8 @@ async def test_pr_timestamp_migration_preserves_existing_reopen(analytics_db):
         migration = (
             Path(database.__file__).with_name("migrations") / "0002_pr_transition_timestamp.sql"
         )
-        await database._run_script(
-            conn, migration.read_text().replace("open_swe_analytics", schema)
-        )
+        raw = await conn.get_raw_connection()
+        await raw.driver_connection.execute(migration.read_text().replace("open_swe", schema))
     await ingestion.ingest(
         event(
             workspace,
@@ -614,9 +613,8 @@ async def test_feedback_migration_recovers_acknowledged_withdrawals(analytics_db
         migration = (
             Path(database.__file__).with_name("migrations") / "0003_feedback_withdrawals.sql"
         )
-        await database._run_script(
-            conn, migration.read_text().replace("open_swe_analytics", schema)
-        )
+        raw = await conn.get_raw_connection()
+        await raw.driver_connection.execute(migration.read_text().replace("open_swe", schema))
     await ingestion.ingest(submissions[1])
     for item in withdrawals:
         assert not await ingestion.ingest(item)
