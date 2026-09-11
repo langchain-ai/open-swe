@@ -106,6 +106,7 @@ export interface SessionUser {
   avatar_url: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
+  api_base_url?: string
 }
 
 export interface ModelOption {
