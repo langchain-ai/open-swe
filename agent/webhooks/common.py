@@ -23,7 +23,11 @@ from agent.dashboard.agent_overrides import (
 from agent.dashboard.agent_usage import update_agent_pr_usage_from_webhook
 from agent.dashboard.enabled_repos import is_review_repo_enabled
 from agent.dashboard.oauth import build_settings_url
-from agent.dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
+from agent.dashboard.options import (
+    default_vision_model_pair,
+    model_supports_images,  # noqa: F401
+    normalize_model_choice,
+)
 from agent.dashboard.profiles import (  # noqa: F401
     get_profile,
     get_valid_access_token,
@@ -195,6 +199,7 @@ __all__ = [
     "resolve_slack_channel_context",
     "get_thread_metadata_safe",
     "get_thread_environment",
+    "get_thread_model_choice",
     "get_thread_plan_mode",
     "is_not_found_error",
     "is_pr_diff_unchanged_since_last_review",
@@ -765,6 +770,22 @@ async def get_thread_plan_mode(thread_id: str) -> bool | None:
         return None
     value = metadata.get("plan_mode")
     return value if isinstance(value, bool) else None
+
+
+async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
+    """Return the explicit model choice persisted for a thread, if any."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if not is_not_found_error(exc):
+            logger.warning("Failed to fetch model metadata for thread %s", thread_id)
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict) or metadata.get("model_selection") != "explicit":
+        return None
+    model_id, effort = normalize_model_choice(metadata.get("model"), metadata.get("effort"))
+    return (model_id, effort) if model_id and effort else None
 
 
 async def get_thread_environment(thread_id: str) -> str | None:

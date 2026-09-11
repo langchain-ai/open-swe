@@ -890,6 +890,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         "body": event.get("body", ""),
         "author": event.get("user", {}).get("login", ""),
         "created_at": event.get("submitted_at") or event.get("created_at", ""),
+        "event_at": event.get("updated_at") if payload.get("action") == "edited" else None,
         "type": {
             "issue_comment": "pr_comment",
             "pull_request_review_comment": "review_comment",
@@ -908,7 +909,11 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     try:
         comments = await common.fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token, event_comment=event_comment
+            repo_config,
+            pr_number,
+            token=github_token,
+            event_comment=event_comment,
+            authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
         )
     except GitHubAuthError:
         github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
@@ -916,14 +921,12 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
             return
         comments = await common.fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token, event_comment=event_comment
+            repo_config,
+            pr_number,
+            token=github_token,
+            event_comment=event_comment,
+            authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
         )
-    if common.thread_is_private(thread_metadata):
-        comments = [
-            item
-            for item in comments
-            if common.thread_is_promptable(thread_metadata, str(item.get("author") or ""))
-        ]
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return

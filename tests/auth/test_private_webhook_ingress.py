@@ -52,6 +52,96 @@ async def test_github_batch_ends_at_authorized_event(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_review_batch_keeps_same_second_inline_and_ignores_non_owner_tags(monkeypatch):
+    from agent.github import comments
+
+    event = {
+        "body": "@open-swe address review",
+        "author": "alice",
+        "type": "review",
+        "comment_id": 90,
+        "created_at": "2026-01-01T00:00:02Z",
+    }
+    monkeypatch.setattr(
+        comments,
+        "_fetch_paginated",
+        AsyncMock(
+            side_effect=[
+                [
+                    {
+                        "id": 1,
+                        "body": "Alice context",
+                        "user": {"login": "alice"},
+                        "created_at": "2026-01-01T00:00:00Z",
+                    },
+                    {
+                        "id": 2,
+                        "body": "@open-swe Bob",
+                        "user": {"login": "bob"},
+                        "created_at": "2026-01-01T00:00:01Z",
+                    },
+                ],
+                [
+                    {
+                        "id": 3,
+                        "body": "inline fix",
+                        "user": {"login": "alice"},
+                        "created_at": event["created_at"],
+                        "pull_request_review_id": 90,
+                    },
+                    {
+                        "id": 4,
+                        "body": "other review",
+                        "user": {"login": "alice"},
+                        "created_at": event["created_at"],
+                        "pull_request_review_id": 91,
+                    },
+                ],
+                [],
+            ]
+        ),
+    )
+    result = await fetch_pr_comments_since_last_tag(
+        {}, 1, token="test", event_comment=event, authorized_login="alice"
+    )
+    assert [c["body"] for c in result] == ["Alice context", "inline fix", event["body"]]
+
+
+@pytest.mark.asyncio
+async def test_edited_github_trigger_keeps_context_since_previous_tag(monkeypatch):
+    from agent.github import comments
+
+    event = {
+        "body": "@open-swe revised request",
+        "author": "alice",
+        "type": "pr_comment",
+        "comment_id": 1,
+        "created_at": "2026-01-01T00:00:01Z",
+        "event_at": "2026-01-01T00:00:05Z",
+    }
+    records = [
+        {
+            "id": index,
+            "body": body,
+            "user": {"login": "alice"},
+            "created_at": f"2026-01-01T00:00:0{index}Z",
+        }
+        for index, body in [
+            (1, "@open-swe stale trigger"),
+            (2, "@open-swe previous invocation"),
+            (3, "Do not delete customer data"),
+            (6, "Future context"),
+        ]
+    ]
+    monkeypatch.setattr(comments, "_fetch_paginated", AsyncMock(side_effect=[records, [], []]))
+    result = await fetch_pr_comments_since_last_tag(
+        {}, 1, token="test", event_comment=event, authorized_login="alice"
+    )
+    assert [c["body"] for c in result] == ["Do not delete customer data", event["body"]]
+    assert result[-1] == event
+
+
+@pytest.mark.asyncio
 async def test_private_slack_edit_rejects_non_owner(monkeypatch):
     client = SimpleNamespace(
         threads=SimpleNamespace(

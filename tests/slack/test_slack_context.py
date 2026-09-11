@@ -1063,11 +1063,36 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
 
 
+@pytest.mark.parametrize("private", [False, True])
 def test_process_slack_mention_runs_without_a_repository(
     monkeypatch: pytest.MonkeyPatch,
+    private: bool,
 ) -> None:
+    from unittest.mock import AsyncMock
+
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
+    if private:
+        monkeypatch.setattr(
+            webhook_common,
+            "authorize_github_thread",
+            AsyncMock(return_value={"visibility": "private", "owner_login": "mason-gh"}),
+        )
+        monkeypatch.setattr(
+            slack_webhooks,
+            "_slack_logins_by_user_id",
+            AsyncMock(return_value={"U123": "mason-gh", "U456": "bob"}),
+        )
+        monkeypatch.setattr(
+            webhook_common,
+            "fetch_slack_thread_messages",
+            AsyncMock(
+                return_value=[
+                    {"ts": "1700000000.000150", "text": "Teammate instruction", "user": "U456"},
+                    {"ts": "1700000000.000200", "text": "<@UBOT> hello", "user": "U123"},
+                ]
+            ),
+        )
 
     async def fake_thread_exists(thread_id: str) -> bool:
         return True
@@ -1094,6 +1119,8 @@ def test_process_slack_mention_runs_without_a_repository(
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
     assert kwargs["config"]["configurable"]["repo"] is None
+    if private:
+        assert "Teammate instruction" not in str(kwargs["input"]["messages"])
     prompt_message = next(
         message
         for message in kwargs["input"]["messages"]
@@ -1646,6 +1673,43 @@ def test_thread_environment_round_trips_through_metadata(
     assert threads.thread is not None
     assert threads.thread["metadata"]["environment"] == "staging"
     assert asyncio.run(webhook_common.get_thread_environment("thread-id")) == "staging"
+
+
+def test_thread_model_choice_round_trips_explicit_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(
+        {
+            "metadata": {
+                "model_selection": "explicit",
+                "model": "anthropic:claude-opus-5",
+                "effort": "high",
+            }
+        }
+    )
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) == (
+        "anthropic:claude-opus-5",
+        "high",
+    )
+
+
+def test_thread_model_choice_is_none_for_auto_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(
+        {
+            "metadata": {
+                "model_selection": "auto",
+                "model": "anthropic:claude-opus-5",
+                "effort": "high",
+            }
+        }
+    )
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) is None
 
 
 def test_thread_environment_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
