@@ -165,7 +165,8 @@ async def migrate() -> None:
             "(version integer PRIMARY KEY, applied_at timestamptz NOT NULL "
             "DEFAULT clock_timestamp())",
         )
-        for path in sorted(_MIGRATION_DIR.glob("*.sql")):
+        paths = await asyncio.to_thread(lambda: sorted(_MIGRATION_DIR.glob("*.sql")))
+        for path in paths:
             version = int(path.name.split("_", 1)[0])
             applied = await conn.scalar(
                 text(
@@ -176,7 +177,7 @@ async def migrate() -> None:
             )
             if applied:
                 continue
-            await _run_script(conn, path.read_text())
+            await _run_script(conn, await asyncio.to_thread(path.read_text))
             await conn.execute(
                 text(
                     "INSERT INTO open_swe_analytics.schema_migrations (version) VALUES (:version) "
