@@ -596,6 +596,18 @@ async def mock_github_pr(owner: str, repo: str, number: int) -> HTMLResponse:  #
 
 
 # --- fake GitHub REST API (open_pull_request hits this) --------------------
+@app.get("/fake-gh/installation/repositories")
+async def gh_installation_repositories() -> JSONResponse:
+    return JSONResponse(
+        {
+            "repositories": [
+                {"full_name": "fakeorg/demo"},
+                {"full_name": "anotherorg/companion"},
+            ]
+        }
+    )
+
+
 def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
     return {
         "number": pr["number"],
