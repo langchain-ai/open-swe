@@ -1,5 +1,10 @@
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
 import pytest
 
+from agent.analytics import database, emitter
+from agent.analytics.events import EventName
 from agent.dashboard import agent_usage
 from agent.utils.run_usage import RunUsageSummary
 
@@ -232,6 +237,73 @@ async def test_reviewer_stats_use_publication_and_resolution_events(monkeypatch)
     assert stats["surfaced_findings"] == 1
     assert stats["addressed_findings"] == 1
     assert stats["resolved_after_update"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("previous_status", "status", "event_name"),
+    [
+        (None, "open", None),
+        (None, "resolved", None),
+        (None, "dismissed", None),
+        ("open", "open", None),
+        ("resolved", "resolved", None),
+        ("dismissed", "dismissed", None),
+        ("open", "resolved", EventName.FINDING_RESOLVED),
+        ("open", "dismissed", EventName.FINDING_DISMISSED),
+        ("resolved", "dismissed", EventName.FINDING_DISMISSED),
+        ("dismissed", "resolved", EventName.FINDING_RESOLVED),
+        ("resolved", "open", EventName.FINDING_REOPENED),
+        ("dismissed", "open", EventName.FINDING_REOPENED),
+        ("unknown", "open", None),
+    ],
+)
+async def test_finding_analytics_only_emit_persisted_state_transitions(
+    monkeypatch, previous_status, status, event_name
+):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_000_000)
+    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
+    monkeypatch.setattr(database, "_WORKSPACE_ID", uuid4())
+    enqueue = AsyncMock()
+    monkeypatch.setattr(emitter, "enqueue", enqueue)
+    finding = {
+        "id": "finding-1",
+        "status": previous_status,
+        "severity": "high",
+        "category": "correctness",
+        "first_seen_sha": "initial",
+        "last_confirmed_sha": "initial",
+        "pr": {"owner": "langchain-ai", "name": "open-swe", "number": 1},
+        "interactions": [],
+    }
+    if previous_status is not None:
+        await agent_usage.record_reviewer_publication(
+            thread_id="review-thread",
+            owner="langchain-ai",
+            repo="open-swe",
+            pr_number=1,
+            head_sha="initial",
+            findings=[finding],
+        )
+    enqueue.reset_mock()
+
+    finding.update(status=status, last_confirmed_sha="next")
+    await agent_usage.record_reviewer_finding_state("review-thread", finding)
+    finding.update(last_confirmed_sha="later", interactions=[{"kind": "human_reply"}])
+    await agent_usage.record_reviewer_finding_state("review-thread", finding)
+
+    events = [call.args[0] for call in enqueue.await_args_list]
+    assert [event.event_name for event in events] == ([event_name] if event_name else [])
+    records = await agent_usage._all(agent_usage.REVIEW_FINDING_NAMESPACE)
+    if previous_status is None:
+        assert records == []
+    else:
+        assert len(records) == 1
+        assert records[0]["status"] == status
+        assert records[0]["last_confirmed_sha"] == "later"
+        assert records[0]["human_replies"] == 1
 
 
 @pytest.mark.asyncio

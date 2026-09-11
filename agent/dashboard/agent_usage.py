@@ -722,15 +722,22 @@ async def record_reviewer_finding_state(thread_id: str, finding: Mapping[str, An
 
     async with _write_lock(REVIEW_FINDING_NAMESPACE, key):
         existing = await _get(REVIEW_FINDING_NAMESPACE, key)
-        if existing:
-            await _client().store.put_item(REVIEW_FINDING_NAMESPACE, key, update(existing))
+        if not existing:
+            return
+        previous_status = existing.get("status") or "open"
+        value = update(existing)
+        await _client().store.put_item(REVIEW_FINDING_NAMESPACE, key, value)
+    status = value["status"]
+    if status == previous_status or status not in {"open", "resolved", "dismissed"}:
+        return
+    if status == "open" and previous_status not in {"resolved", "dismissed"}:
+        return
     pr = as_json_object(finding.get("pr"))
     owner = str(pr.get("owner") or finding.get("owner") or "")
     repo = str(pr.get("name") or finding.get("repo") or "")
     number = pr.get("number") or finding.get("pr_number")
     head_sha = str(finding.get("last_confirmed_sha") or "")
     if owner and repo and isinstance(number, int):
-        status = str(finding.get("status") or "open")
         await finding_transition(
             thread_key=thread_id,
             finding_key=finding_id,
