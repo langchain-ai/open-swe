@@ -45,7 +45,10 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
-import { useShowInDiffRequests } from "@/features/agents/lib/showInDiff"
+import {
+  useShowInDiffRequests,
+  useShowInDiffScopeFallback,
+} from "@/features/agents/lib/showInDiff"
 import {
   modelConfigurable,
   promptMessage,
@@ -216,6 +219,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
+  useShowInDiffScopeFallback({
+    target: revealTarget,
+    files,
+    loaded: !diff.isPending && !diff.error,
+    scope,
+    branchScopeAvailable,
+    onScopeChange: (next) => selectScope(threadRef, next),
+  })
   const messages = useMemo(() => {
     const live = streamMessagesToUi(
       stream.messages,

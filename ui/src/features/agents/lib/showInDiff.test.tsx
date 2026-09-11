@@ -4,9 +4,11 @@ import { renderHook } from "@testing-library/react"
 import { AIMessage, ToolMessage } from "@langchain/core/messages"
 import type { BaseMessage } from "@langchain/core/messages"
 
+import type { ShowInDiffTarget } from "@/features/agents/lib/showInDiff"
 import {
   parseShowInDiffArtifact,
   useShowInDiffRequests,
+  useShowInDiffScopeFallback,
 } from "@/features/agents/lib/showInDiff"
 
 function request(toolCallId: string, artifact: unknown): ToolMessage {
@@ -107,5 +109,63 @@ describe("useShowInDiffRequests", () => {
     })
     expect(onShow).toHaveBeenCalledTimes(1)
     expect(onShow).toHaveBeenCalledWith({ path: "b.py", line: 1, side: "new" })
+  })
+})
+
+describe("useShowInDiffScopeFallback", () => {
+  const reveal: ShowInDiffTarget = {
+    path: "agent/server.py",
+    line: 42,
+    side: "new",
+  }
+
+  function render(
+    props: Partial<Parameters<typeof useShowInDiffScopeFallback>[0]>
+  ) {
+    const onScopeChange = vi.fn()
+    const initialProps = {
+      target: reveal,
+      files: [] as Array<{ filePath: string }>,
+      loaded: true,
+      scope: "working-tree" as const,
+      branchScopeAvailable: true,
+      onScopeChange,
+      ...props,
+    }
+    const view = renderHook(
+      (next: typeof initialProps) => useShowInDiffScopeFallback(next),
+      { initialProps }
+    )
+    return { ...view, onScopeChange, initialProps }
+  }
+
+  it("switches scope when the loaded scope lacks the file", () => {
+    const { onScopeChange } = render({})
+    expect(onScopeChange).toHaveBeenCalledWith("branch")
+  })
+
+  it("stays put when the file is in the loaded scope", () => {
+    const { onScopeChange } = render({
+      files: [{ filePath: "agent/server.py" }],
+    })
+    expect(onScopeChange).not.toHaveBeenCalled()
+  })
+
+  it("waits for the scope's diff before deciding", () => {
+    const { onScopeChange, rerender, initialProps } = render({ loaded: false })
+    expect(onScopeChange).not.toHaveBeenCalled()
+    rerender({ ...initialProps, loaded: true })
+    expect(onScopeChange).toHaveBeenCalledWith("branch")
+  })
+
+  it("switches only once per request", () => {
+    const { onScopeChange, rerender, initialProps } = render({})
+    rerender({ ...initialProps, scope: "branch" })
+    expect(onScopeChange).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not reach for a branch scope the thread cannot show", () => {
+    const { onScopeChange } = render({ branchScopeAvailable: false })
+    expect(onScopeChange).not.toHaveBeenCalled()
   })
 })

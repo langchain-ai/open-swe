@@ -3,6 +3,7 @@ import { DownloadIcon } from "lucide-react"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { ShowInDiffTarget } from "@/features/agents/lib/showInDiff"
+import { useShowInDiffScopeFallback } from "@/features/agents/lib/showInDiff"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
   useAgentThreadBranchDiff,
@@ -99,6 +100,15 @@ export function AgentGitPanel({
           refetch: turnDiff.refetch,
         }
   const files = useMemo(() => toPanelFiles(diff.files), [diff.files])
+
+  useShowInDiffScopeFallback({
+    target: revealTarget,
+    files,
+    loaded: !diff.isPending && !diff.error,
+    scope,
+    branchScopeAvailable,
+    onScopeChange: (next) => selectScope(threadRef, next),
+  })
 
   // Refresh whenever the window regains focus: the diff is read live, so a
   // push or a review landing elsewhere should be visible on return.

@@ -7,12 +7,22 @@ import { useEffect, useRef } from "react"
 import { ToolMessage } from "@langchain/core/messages"
 import type { BaseMessage } from "@langchain/core/messages"
 
+import type { DiffScopeKind } from "@/features/agents/lib/diffPanelStore"
+
 export type DiffSide = "old" | "new"
 
 export interface ShowInDiffTarget {
   path: string
   line: number | null
   side: DiffSide
+}
+
+/** Transcript rows carry absolute paths; diff files are repo-relative. */
+export function matchesRevealPath(
+  filePath: string,
+  requested: string
+): boolean {
+  return filePath === requested || requested.endsWith(`/${filePath}`)
 }
 
 export function parseShowInDiffArtifact(
@@ -71,4 +81,43 @@ export function useShowInDiffRequests(
     const last = fresh.at(-1)
     if (last) onShowRef.current(last.value)
   }, [messages, ready])
+}
+
+/**
+ * The Changes panel shows one scope at a time — the working tree against HEAD,
+ * or the branch against its base — while the agent reads both at once. A reveal
+ * naming a file the loaded scope does not contain switches to the other scope,
+ * once per request, so a committed-only or uncommitted-only file still lands
+ * somewhere the user can see.
+ */
+export function useShowInDiffScopeFallback({
+  target,
+  files,
+  loaded,
+  scope,
+  branchScopeAvailable,
+  onScopeChange,
+}: {
+  target: ShowInDiffTarget | null | undefined
+  files: ReadonlyArray<{ filePath: string }>
+  loaded: boolean
+  scope: DiffScopeKind
+  branchScopeAvailable: boolean
+  onScopeChange: (scope: DiffScopeKind) => void
+}): void {
+  const triedRef = useRef<ShowInDiffTarget | null>(null)
+  const onScopeChangeRef = useRef(onScopeChange)
+  useEffect(() => {
+    onScopeChangeRef.current = onScopeChange
+  }, [onScopeChange])
+
+  useEffect(() => {
+    if (!target || !loaded || triedRef.current === target) return
+    triedRef.current = target
+    if (files.some((file) => matchesRevealPath(file.filePath, target.path)))
+      return
+    const next: DiffScopeKind = scope === "branch" ? "working-tree" : "branch"
+    if (next === "branch" && !branchScopeAvailable) return
+    onScopeChangeRef.current(next)
+  }, [target, files, loaded, scope, branchScopeAvailable])
 }

@@ -17,6 +17,7 @@ import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type { ShowInDiffTarget } from "@/features/agents/lib/showInDiff"
+import { matchesRevealPath } from "@/features/agents/lib/showInDiff"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import {
   DIFF_VIRTUALIZER_CONFIG,
@@ -311,10 +312,8 @@ export function DiffFilesView({
     // as the diff can place it.
     const step = () => {
       if (cancelled) return
-      // Transcript rows carry absolute paths; diff files are repo-relative.
-      const file = filesRef.current.find(
-        (candidate) =>
-          candidate.filePath === path || path.endsWith(`/${candidate.filePath}`)
+      const file = filesRef.current.find((candidate) =>
+        matchesRevealPath(candidate.filePath, path)
       )
       if (file) {
         if (!revealed) {
