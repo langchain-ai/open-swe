@@ -128,11 +128,14 @@ genuinely spent is the difference between what the agent read to *decide* and wh
 *finish* — reads that serve only the routing decision. On a well-scoped task that difference is
 near zero. On an open-ended one it is not, and nothing in this proposal bounds it.
 
-Two smaller regressions come with it. The decision is no longer guaranteed to happen: an agent
-that never calls the exit tool stays on `fast` with the restricted tool set, though any
-disallowed call returns an error naming the exit tool, so the failure is loud rather than
-silent. And routing quality now depends on the model backing the `fast` profile, which makes
-every routing decision for every thread.
+One smaller regression comes with it: the decision is no longer guaranteed to happen. An agent
+that never calls the exit tool stays on `fast` with the restricted tool set. Any disallowed call
+returns an error naming the exit tool, so the failure is loud rather than silent, but the
+classifier could not fail this way at all.
+
+Everything else is strictly better. The `fast` profile already made every routing decision under
+the classifier, so the dependency on that model is unchanged — it now makes the same decision
+with the repository in front of it instead of 8,000 characters of prose.
 
 ## Unresolved questions
 
