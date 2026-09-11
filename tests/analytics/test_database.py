@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from agent.analytics import database, emitter, ingestion, outbox, queries
-from agent.analytics.events import EventName, RunStartedPayload, make_event
+from agent.analytics.events import EventName, PROpenedPayload, RunStartedPayload, make_event
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ async def test_replicas_and_restarts_preserve_identity_without_starting_collecti
     assert status["collection_started_at"] is None
     report = await queries.usage_leaderboard(period="all", limit=10, current_login=None, admin=True)
     assert report["rows"] == []
-    assert report["analytics_epoch"] is None
+    assert report["collection_started_at"] is None
     assert report["completeness"] == "not_started"
 
 
@@ -110,7 +110,7 @@ async def test_capture_start_survives_delivery_retention_and_restart(deployment_
     assert not await ingestion.ingest(delayed)
     report = await queries.usage_leaderboard(period="all", limit=10, current_login=None, admin=True)
     assert report["rows"][0]["agent_runs"] == 3
-    assert report["analytics_epoch"] == started_at.isoformat()
+    assert report["collection_started_at"] == started_at.isoformat()
     assert report["completeness"] == "observed_events_only"
     async with database.transaction() as conn:
         await conn.execute(text("DELETE FROM events"))
@@ -183,3 +183,92 @@ async def test_migration_preserves_existing_workspace_and_history(deployment_db,
     await database.close()
     await database.migrate()
     assert database.workspace_id() == old_workspace
+
+
+async def test_report_distinguishes_capture_delivery_period_and_suppression(
+    deployment_db, monkeypatch
+):
+    monkeypatch.setenv("ANALYTICS_MIN_COHORT_SIZE", "2")
+    await database.migrate()
+    report = await queries.pr_merge_rate_by_model(period="all")
+    assert report["status"] == "not_started"
+    assert report["collection_started_at"] is None
+    assert report["last_processed_at"] is None
+    assert not report["has_pending_events"]
+
+    opened = make_event(
+        workspace_id=database.workspace_id(),
+        event_name=EventName.PR_OPENED,
+        producer="test",
+        producer_event_id=str(uuid4()),
+        occurred_at=datetime.now(UTC) - timedelta(days=60),
+        environment="test",
+        payload=PROpenedPayload(opening_run_id=uuid4(), model_attribution_quality="unavailable"),
+        pr_id=uuid4(),
+        repository_id=uuid4(),
+    )
+    assert await outbox.enqueue(opened)
+    report = await queries.pr_merge_rate_by_model(period="all")
+    assert report["status"] == "no_prs"
+    assert report["collection_started_at"] is not None
+    assert report["last_processed_at"] is None
+    assert report["has_pending_events"]
+
+    async with database.transaction() as conn:
+        await conn.execute(text("UPDATE outbox SET state = 'dead_letter'"))
+    report = await queries.pr_merge_rate_by_model(period="all")
+    assert report["has_failed_events"]
+    assert not report["has_pending_events"]
+    async with database.transaction() as conn:
+        await conn.execute(text("UPDATE outbox SET state = 'pending'"))
+    before_delivery = datetime.now(UTC)
+    assert await outbox.deliver_batch() == 1
+    report = await queries.pr_merge_rate_by_model(period="all")
+    assert report["status"] == "suppressed"
+    assert report["cohorts"] == []
+    assert report["data_source"] == "event_projections"
+    processed_at = datetime.fromisoformat(report["last_processed_at"])
+    assert before_delivery <= processed_at <= datetime.now(UTC)
+    assert not report["has_pending_events"]
+    assert not report["has_failed_events"]
+    assert report["completeness"] == "observed_events_only"
+
+    report = await queries.pr_merge_rate_by_model(period="7d")
+    assert report["status"] == "no_prs"
+    assert report["cohorts"] == []
+    report = await queries.pr_merge_rate_by_model(period="all", admin=True)
+    assert report["status"] == "ready"
+    assert report["cohorts"][0]["cohort_size"] == 1
+
+    async with database.transaction() as conn:
+        await conn.execute(text("DELETE FROM events"))
+        await conn.execute(text("DELETE FROM ingestion_receipts"))
+        await conn.execute(text("DELETE FROM outbox"))
+    await database.close()
+    await database.migrate()
+    report = await queries.pr_merge_rate_by_model(period="all", admin=True)
+    assert report["status"] == "ready"
+    assert datetime.fromisoformat(report["last_processed_at"]) == processed_at
+
+
+async def test_failed_projection_does_not_advance_processing_progress(deployment_db, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    await database.migrate()
+    assert await ingestion.ingest(run_event())
+    before = await queries.pr_merge_rate_by_model(period="all")
+    monkeypatch.setattr(ingestion, "_mark_dirty", AsyncMock(side_effect=RuntimeError("failed")))
+    with pytest.raises(RuntimeError, match="failed"):
+        await ingestion.ingest(run_event())
+    after = await queries.pr_merge_rate_by_model(period="all")
+    assert after["last_processed_at"] == before["last_processed_at"]
+    async with database.connection() as conn:
+        assert await conn.scalar(text("SELECT count(*) FROM run_projection")) == 1
+
+
+async def test_standalone_uri_with_sslmode_connects(deployment_db, monkeypatch):
+    uri = make_url(os.environ["POSTGRES_URI"]).set(drivername="postgresql")
+    uri = uri.update_query_dict({"sslmode": "disable"})
+    monkeypatch.setenv("POSTGRES_URI", uri.render_as_string(hide_password=False))
+    await database.migrate()
+    assert (await database.readiness())["ready"]

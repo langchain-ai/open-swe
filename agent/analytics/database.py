@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from agent.config import ENV
@@ -33,7 +33,14 @@ def analytics_uri() -> str | None:
         value = "postgresql+asyncpg://" + value.removeprefix("postgresql://")
     if not value.startswith("postgresql+asyncpg://"):
         raise ValueError("analytics PostgreSQL URI must use a PostgreSQL scheme")
-    return value
+    url = make_url(value)
+    if "sslmode" in url.query:
+        if "ssl" in url.query:
+            raise ValueError("analytics PostgreSQL URI must specify only one SSL mode")
+        url = url.update_query_dict({"ssl": url.query["sslmode"]}).difference_update_query(
+            ["sslmode"]
+        )
+    return url.render_as_string(hide_password=False)
 
 
 def configured() -> bool:
@@ -57,6 +64,32 @@ async def record_capture(conn: AsyncConnection) -> None:
             "WHERE collection_started_at IS NULL"
         )
     )
+
+
+async def reporting_metadata(conn: AsyncConnection) -> dict[str, Any]:
+    result = await conn.execute(
+        text(
+            "SELECT collection_started_at, last_processed_at, "
+            "EXISTS (SELECT 1 FROM outbox WHERE workspace_id = d.workspace_id "
+            "AND state IN ('pending', 'delivering')) AS has_pending_events, "
+            "EXISTS (SELECT 1 FROM outbox WHERE workspace_id = d.workspace_id "
+            "AND state = 'dead_letter') AS has_failed_events "
+            "FROM deployment_metadata d"
+        )
+    )
+    row = result.mappings().one()
+    return {
+        "collection_started_at": row["collection_started_at"].isoformat()
+        if row["collection_started_at"]
+        else None,
+        "last_processed_at": row["last_processed_at"].isoformat()
+        if row["last_processed_at"]
+        else None,
+        "data_source": "event_projections",
+        "completeness": "observed_events_only" if row["collection_started_at"] else "not_started",
+        "has_pending_events": row["has_pending_events"],
+        "has_failed_events": row["has_failed_events"],
+    }
 
 
 def engine() -> AsyncEngine:
@@ -161,9 +194,9 @@ async def _run_script(conn: AsyncConnection, script: str) -> None:
 
 
 async def readiness() -> dict[str, Any]:
-    if not configured():
-        return {"configured": False, "ready": False, "reason": "not configured"}
     try:
+        if not configured():
+            return {"configured": False, "ready": False, "reason": "not configured"}
         async with asyncio.timeout(ENV.ANALYTICS_HEALTH_TIMEOUT_SECONDS.get_int(3)):
             async with connection() as conn:
                 event_count = await conn.scalar(text("SELECT count(*) FROM events WHERE false"))
@@ -173,14 +206,14 @@ async def readiness() -> dict[str, Any]:
                 dead_letters = await conn.scalar(
                     text("SELECT count(*) FROM outbox WHERE state = 'dead_letter'")
                 )
-                started_at = await collection_started_at(conn)
+                metadata = await reporting_metadata(conn)
         return {
             "configured": True,
             "ready": event_count == 0,
             "pending_outbox": int(pending or 0),
             "dead_letters": int(dead_letters or 0),
             "workspace_id": str(workspace_id()),
-            "collection_started_at": started_at.isoformat() if started_at else None,
+            **metadata,
         }
     except Exception as exc:  # noqa: BLE001
         logger.warning("Analytics readiness check failed", exc_info=True)
