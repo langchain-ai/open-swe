@@ -54,7 +54,7 @@ const scopes: Record<MCPScope, MCPScopeConfig> = {
   local: {
     title: "Local MCPs",
     description:
-      "Connect MCP servers for local desktop runs. Credentials stay on this computer. Local connections replace personal or workspace connections with the same name.",
+      "Connect MCP servers for local desktop runs. Credentials stay on this computer. New connections enable all tools; edit tool restrictions in mcp.json. Local connections replace personal or workspace connections with the same name.",
     queryKey: ["localMCPs"],
     list: () => window.openSweDesktop!.listMcpConnections(),
     save: (body) => window.openSweDesktop!.saveMcpConnection(body),
@@ -371,9 +371,11 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
             {draft.oauth ? "Additional headers" : "Authentication headers"}
           </p>
           <p className="text-xs text-muted-foreground">
-            {draft.oauth
-              ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
-              : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
+            {local
+              ? "Values are stored unencrypted in mcp.json and hidden by default. Use a header such as Authorization or X-API-Key."
+              : draft.oauth
+                ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
+                : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
           </p>
           {!replaceHeaders ? (
             <>
@@ -661,8 +663,8 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
                   <p className="text-sm font-medium">
                     {connection.name}{" "}
                     <span className="text-muted-foreground">
-                      · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
-                      {connection.allowed_tools.length} tools
+                      · {connection.enabled ? "Enabled" : "Disabled"}
+                      {!local && ` · ${connection.allowed_tools.length} tools`}
                     </span>
                   </p>
                   <p className="text-xs break-all text-muted-foreground">

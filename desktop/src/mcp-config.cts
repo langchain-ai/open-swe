@@ -74,17 +74,13 @@ function saveMcpConnection(configPath, name, update) {
     url: update.url,
     transport: update.transport,
     enabled: update.enabled !== false,
-    allowed_tools: update.allowed_tools || previous.allowed_tools || [],
-    ...(update.headers === null
-      ? {}
-      : { headers: update.headers || previous.headers }),
+    ...(update.headers == null ? {} : { headers: update.headers }),
   };
   delete settings.type;
   delete settings.command;
   delete settings.args;
   delete settings.env;
   delete settings.oauth;
-  if (update.headers === null) delete settings.headers;
   document.mcpServers[name] = settings;
   writeDocument(configPath, document);
   return publicConnection(name, settings);

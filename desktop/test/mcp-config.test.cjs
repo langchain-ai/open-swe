@@ -29,6 +29,13 @@ test("local MCP connections are managed through structured config", (t) => {
     allowed_tools: [],
     headers: { Authorization: "Bearer secret" },
   });
+  assert.equal(
+    Object.hasOwn(
+      JSON.parse(fs.readFileSync(configPath, "utf8")).mcpServers.local,
+      "allowed_tools",
+    ),
+    false,
+  );
   assert.deepEqual(revealMcpHeaders(configPath, "local"), {
     Authorization: "Bearer secret",
   });
@@ -51,6 +58,54 @@ test("local MCP connections are managed through structured config", (t) => {
   deleteMcpConnection(configPath, "local");
   assert.deepEqual(listMcpConnections(configPath), []);
 });
+
+for (const allowedTools of [undefined, [], ["search"]]) {
+  test(`edits and toggles preserve local tool policy ${JSON.stringify(allowedTools)} and headers`, (t) => {
+    const configPath = temporaryConfig(t);
+    const headers = { Authorization: "Bearer secret" };
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        mcpServers: {
+          local: {
+            url: "http://localhost:8080/mcp",
+            transport: "streamable_http",
+            allowed_tools: allowedTools,
+            headers,
+          },
+        },
+      }),
+    );
+
+    for (const update of [
+      { headers: null, enabled: true },
+      { enabled: false },
+      { enabled: true },
+    ]) {
+      saveMcpConnection(configPath, "local", {
+        ...listMcpConnections(configPath)[0],
+        url: "http://localhost:9090/mcp",
+        ...update,
+      });
+      const saved = JSON.parse(fs.readFileSync(configPath, "utf8")).mcpServers
+        .local;
+      assert.deepEqual(saved.allowed_tools, allowedTools);
+      assert.equal(
+        Object.hasOwn(saved, "allowed_tools"),
+        allowedTools !== undefined,
+      );
+      assert.deepEqual(saved.headers, headers);
+      assert.equal(saved.url, "http://localhost:9090/mcp");
+      assert.equal(saved.enabled, update.enabled);
+    }
+
+    saveMcpConnection(configPath, "local", {
+      ...listMcpConnections(configPath)[0],
+      headers: {},
+    });
+    assert.deepEqual(revealMcpHeaders(configPath, "local"), {});
+  });
+}
 
 test("command MCPs remain visible but cannot be overwritten as URLs", (t) => {
   const configPath = temporaryConfig(t);
