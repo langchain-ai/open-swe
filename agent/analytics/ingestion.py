@@ -93,6 +93,9 @@ async def ingest(event: EventEnvelope) -> bool:
         )
         await _project(conn, event)
         await _mark_dirty(conn, event)
+        await conn.execute(
+            text("UPDATE deployment_metadata SET last_processed_at = clock_timestamp()")
+        )
     return True
 
 

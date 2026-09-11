@@ -5,9 +5,8 @@ from typing import Any
 
 from sqlalchemy import text
 
-from agent.analytics.database import collection_started_at, connection
+from agent.analytics.database import connection, reporting_metadata
 from agent.analytics.emitter import workspace_id
-from agent.analytics.summaries import summary_metadata
 from agent.config import ENV
 
 
@@ -133,11 +132,7 @@ async def usage_leaderboard(
             ),
             {"workspace_id": workspace_id(), "start": start},
         )
-        watermark = await conn.scalar(
-            text("SELECT max(recorded_at) FROM events WHERE workspace_id = :workspace_id"),
-            {"workspace_id": workspace_id()},
-        )
-        started_at = await collection_started_at(conn)
+        metadata = await reporting_metadata(conn)
     current_user_rank = None
     for row in rows:
         if row.pop("is_current"):
@@ -149,7 +144,8 @@ async def usage_leaderboard(
         "current_user_rank": current_user_rank,
         "generated_at_ms": int(datetime.now(UTC).timestamp() * 1000),
         "reviewer_stats": await reviewer_stats(start),
-        **summary_metadata(watermark=watermark, collection_started_at=started_at),
+        **metadata,
+        "as_of": datetime.now(UTC).isoformat(),
     }
 
 
@@ -200,7 +196,9 @@ async def pr_merge_rate_by_model(
     days = maturity_days or ENV.ANALYTICS_PR_MATURITY_DAYS.get_int(14)
     days = min(max(days, 1), 365)
     minimum = 1 if admin else ENV.ANALYTICS_MIN_COHORT_SIZE.get_int(5)
+    as_of = datetime.now(UTC)
     async with connection() as conn:
+        await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
         result = await conn.execute(
             text(
                 """
@@ -222,8 +220,8 @@ async def pr_merge_rate_by_model(
             {
                 "workspace_id": workspace_id(),
                 "start": start,
-                "as_of": datetime.now(UTC),
-                "mature_before": datetime.now(UTC) - timedelta(days=days),
+                "as_of": as_of,
+                "mature_before": as_of - timedelta(days=days),
                 "minimum": minimum,
             },
         )
@@ -249,12 +247,22 @@ async def pr_merge_rate_by_model(
                     "mature_cohort_merge_share": merged / mature if mature else None,
                 }
             )
-        watermark = await conn.scalar(
-            text("SELECT max(recorded_at) FROM events WHERE workspace_id = :workspace_id"),
-            {"workspace_id": workspace_id()},
-        )
-        started_at = await collection_started_at(conn)
+        metadata = await reporting_metadata(conn)
+        if cohorts:
+            status = "ready"
+        elif metadata["collection_started_at"] is None:
+            status = "not_started"
+        else:
+            has_prs = await conn.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM pr_projection WHERE workspace_id = :workspace_id "
+                    "AND opened_at >= :start AND opened_at <= :as_of)"
+                ),
+                {"workspace_id": workspace_id(), "start": start, "as_of": as_of},
+            )
+            status = "suppressed" if has_prs else "no_prs"
     return {
+        "status": status,
         "metric": "pr_outcomes_by_opening_invocation_configured_model",
         "definition": (
             "PR-open-date cohorts grouped by the opening invocation's configured model. "
@@ -265,5 +273,6 @@ async def pr_merge_rate_by_model(
         "period": period if period in {"7d", "30d", "all"} else "30d",
         "suppression_threshold": minimum,
         "cohorts": cohorts,
-        **summary_metadata(watermark=watermark, collection_started_at=started_at),
+        **metadata,
+        "as_of": as_of.isoformat(),
     }

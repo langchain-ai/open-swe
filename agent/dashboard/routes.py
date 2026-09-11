@@ -1900,13 +1900,26 @@ async def api_pr_merge_rate_by_model(
     maturity_days: int | None = Query(default=None, ge=1, le=365),
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
+    from asyncpg import PostgresError
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from agent.analytics.database import configured
     from agent.analytics.queries import pr_merge_rate_by_model
 
-    return await pr_merge_rate_by_model(
-        period=period,
-        maturity_days=maturity_days,
-        admin=_session_is_admin(session),
-    )
+    try:
+        if not configured():
+            raise HTTPException(503, "PR analytics is unavailable on this deployment.")
+        return await pr_merge_rate_by_model(
+            period=period,
+            maturity_days=maturity_days,
+            admin=_session_is_admin(session),
+        )
+    except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "PR analytics report unavailable",
+            extra={"analytics_error_type": type(exc).__name__},
+        )
+        raise HTTPException(503, "PR analytics is unavailable on this deployment.") from exc
 
 
 @router.get("/analytics/readiness")
