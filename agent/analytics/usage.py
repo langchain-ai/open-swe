@@ -112,6 +112,7 @@ async def record_agent_invocation_completion(
     invocation_id: str,
     usage: RunUsageSummary | None,
     status: str = "success",
+    failure_code: str | None = None,
     thread_id: str = "",
 ) -> bool:
     if not invocation_id or not database.configured():
@@ -142,6 +143,7 @@ async def record_agent_invocation_completion(
         name = EventName.RUN_FAILED
         payload = RunFailedPayload(
             failure_class="timeout" if status == "timeout" else "error",
+            failure_code=failure_code,
             input_tokens=counts.input_tokens,
             output_tokens=counts.output_tokens,
             total_tokens=counts.total_tokens,

@@ -3,12 +3,19 @@
 import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain.agents.middleware import ModelRequest
+from langchain_core.exceptions import ModelAuthenticationError
+from langchain_core.messages import AIMessage, HumanMessage
 from sqlalchemy import text
 
+from agent import agent_cost
 from agent.analytics import directory, emitter, ingestion, outbox, queries, usage
 from agent.analytics.events import EventEnvelope
+from agent.middleware.record_run_usage import record_run_usage
+from agent.utils.langsmith import LangSmithThreadCost
 from agent.utils.run_usage import RunUsageSummary
 from tests.analytics.helpers import DAY
 
@@ -242,3 +249,66 @@ async def test_reviewer_records_unsurfaced_and_only_new_head_findings(analytics_
     assert stats["human_replies"] == 1
     async with transaction() as conn:
         assert await conn.scalar(text("SELECT finding_count FROM review_projection")) == 1
+
+
+@pytest.mark.parametrize(
+    ("prior_tokens", "trace_cost"), [(0, 0.0), (100, 0.4), (0, 0.6), (0, None), (100, None)]
+)
+async def test_auth_failure_is_terminal_and_cost_coverage_uses_trace_evidence(
+    analytics_db, usage_storage, monkeypatch, prior_tokens, trace_cost
+):
+    _, transaction = analytics_db
+    await _start()
+    usage_storage[0] = DAY + timedelta(seconds=12)
+    monkeypatch.setattr(
+        "agent.run_config.get_config",
+        lambda: {"configurable": {"thread_id": "thread", "invocation_id": "run"}},
+    )
+    scheduled = AsyncMock(return_value=True)
+    monkeypatch.setattr(agent_cost, "schedule_agent_cost_refresh", scheduled)
+    messages = [HumanMessage(content="Current task")]
+    if prior_tokens:
+        messages.append(
+            AIMessage(
+                content="Earlier work in this invocation",
+                response_metadata={"open_swe_invocation_id": "run"},
+                usage_metadata={
+                    "input_tokens": prior_tokens,
+                    "output_tokens": 0,
+                    "total_tokens": prior_tokens,
+                },
+            )
+        )
+    request = ModelRequest(model=MagicMock(), messages=messages, state={"messages": messages})
+    error = ModelAuthenticationError("Authentication rejected")
+    with pytest.raises(ModelAuthenticationError) as raised:
+        await record_run_usage.awrap_model_call(request, AsyncMock(side_effect=error))
+    assert raised.value is error
+    assert scheduled.await_count == 1
+    await _deliver(transaction)
+    async with transaction() as conn:
+        run = (await conn.execute(text("SELECT * FROM run_projection"))).mappings().one()
+        assert run["technical_status"] == "failed"
+        assert run["total_tokens"] == (prior_tokens or None)
+        payload = await conn.scalar(
+            text(
+                "SELECT event_body -> 'payload' FROM outbox WHERE event_body ->> 'event_name' = 'run.failed'"
+            )
+        )
+        assert payload["failure_code"] == "authentication_rejected"
+    row = (await _report())["rows"][0]
+    assert row["invocations"] == 1
+    assert row["invocations_without_cost"] == 1
+
+    snapshot = None if trace_cost is None else LangSmithThreadCost(trace_cost, DAY, DAY)
+    monkeypatch.setattr(agent_cost, "get_langsmith_thread_cost", AsyncMock(return_value=snapshot))
+    result = await agent_cost.run_agent_cost_refresh(
+        {"thread_id": "thread", "invocation_id": "run", "attempt": 4}, client=MagicMock()
+    )
+    assert result["status"] == ("exhausted" if trace_cost is None else "updated")
+    await _deliver(transaction)
+    row = (await _report())["rows"][0]
+    assert row["invocations"] == 1
+    assert row["invocations_without_cost"] == int(trace_cost is None)
+    assert row["total_cost_usd"] == (trace_cost or 0.0)
+    assert row["total_tokens"] == prior_tokens

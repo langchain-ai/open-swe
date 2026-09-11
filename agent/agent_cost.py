@@ -161,6 +161,7 @@ async def finalize_agent_invocation_usage(
     thread_id: str,
     state: dict[str, Any] | None,
     status: str = "success",
+    failure_code: str | None = None,
 ) -> None:
     """Persist terminal invocation usage and schedule deferred cost enrichment."""
     try:
@@ -168,6 +169,7 @@ async def finalize_agent_invocation_usage(
             invocation_id=invocation_id,
             thread_id=thread_id,
             status=status,
+            failure_code=failure_code,
             usage=summarize_run_usage(state, invocation_id=invocation_id),
         )
         if not recorded and not await agent_invocation_needs_cost_refresh(
