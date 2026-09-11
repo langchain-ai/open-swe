@@ -179,6 +179,7 @@ from agent.dashboard.threads.api import (
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_state,
     rename_dashboard_thread,
+    resolve_all_dashboard_threads,
     resolve_dashboard_thread,
     send_dashboard_message,
 )
@@ -2029,6 +2030,15 @@ async def api_list_threads(
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
+
+
+@router.post("/threads/resolve-all")
+async def api_resolve_all_threads(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, int]:
+    return {
+        "resolved": await resolve_all_dashboard_threads(session["sub"], email=session.get("email"))
+    }
 
 
 @router.get("/threads/projects")
