@@ -6,6 +6,7 @@ const { pathToFileURL } = require("node:url");
 const {
   app,
   BrowserWindow,
+  clipboard,
   ipcMain,
   Menu,
   dialog,
@@ -434,6 +435,12 @@ async function discardThreadWorktree(thread) {
 }
 
 function configureDesktopIpc() {
+  ipcMain.handle("desktop:write-clipboard", (event, value) => {
+    requireTrustedDesktopIpc(event);
+    if (typeof value !== "string") return false;
+    clipboard.writeText(value);
+    return true;
+  });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
     return app.getVersion();
