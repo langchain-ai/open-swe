@@ -11,7 +11,7 @@ enforced by rejecting disallowed tool calls, not by hiding the tools.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, NotRequired
+from typing import Any, NotRequired, cast
 
 from langchain.agents.middleware.types import (
     AgentState,
@@ -60,24 +60,26 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         # thread's stored settings via ``initial_route``.
         del runtime
         route = state.get("model_route") or self._initial_route
-        if route is None:
-            return {"pre_routed": True}
-        return {"model_route": route, "pre_routed": False}
+        # Checked against the state schema, then widened: the base class declares
+        # this override as returning a plain dict.
+        update: ModelSelectionState = (
+            {"pre_routed": True} if route is None else {"model_route": route, "pre_routed": False}
+        )
+        return dict(update)
 
-    def _model_for(self, state: Mapping[str, Any]) -> BaseChatModel:
+    def _model_for(self, state: ModelSelectionState) -> BaseChatModel:
         if state.get("plan_mode"):
             return self._models["performance"]
         if state.get("pre_routed"):
             return self._models["fast"]
-        route = state.get("model_route", "balanced")
-        return self._models.get(route, self._models["balanced"])
+        return self._models.get(state.get("model_route", "balanced"), self._models["balanced"])
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        return await handler(request.override(model=self._model_for(request.state)))
+        return await handler(request.override(model=self._model_for(_state(request))))
 
     async def awrap_tool_call(
         self,
@@ -92,9 +94,14 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         return await handler(request)
 
 
+def _state(request: ModelRequest | ToolCallRequest) -> ModelSelectionState:
+    """The run state as this middleware's schema; the SDK types it only as ``AgentState``."""
+    return cast(ModelSelectionState, request.state)
+
+
 def _rejection(request: ToolCallRequest) -> str | None:
     name = request.tool_call["name"]
-    state = request.state
+    state = _state(request)
     if state.get("plan_mode"):
         if name == EXIT_PRE_ROUTED_MODE_TOOL:
             return "Plan mode is active; exit_plan_mode carries the routing decision."
