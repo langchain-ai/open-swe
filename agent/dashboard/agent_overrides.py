@@ -92,10 +92,10 @@ def profile_draft_prs(profile: dict[str, Any] | None) -> bool:
     return value if isinstance(value, bool) else True
 
 
-def profile_model_routing_enabled(profile: dict[str, Any] | None) -> bool:
-    """Return whether adaptive model routing is enabled. Defaults to False."""
+def profile_model_routing_enabled(profile: dict[str, Any] | None) -> bool | None:
+    """The user's adaptive model routing preference, or ``None`` to inherit the org default."""
     value = profile.get("model_routing_enabled") if isinstance(profile, dict) else None
-    return value if isinstance(value, bool) else False
+    return value if isinstance(value, bool) else None
 
 
 def _normalize_profile_model_pair(

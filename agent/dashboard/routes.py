@@ -596,6 +596,7 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "avatar_url": session.get("avatar_url"),
         "is_admin": _session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
+        "api_base_url": _api_base_url(),
     }
 
 
