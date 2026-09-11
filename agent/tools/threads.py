@@ -19,6 +19,7 @@ from agent.dashboard.agent_overrides import resolve_login_from_email_async
 from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.plan_store import get_plan_content, list_plan_comments
+from agent.dashboard.schedules import authorized_system_schedule
 from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -38,6 +39,7 @@ from agent.dashboard.workflow_approval import (
 )
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
+from agent.run_config import RunConfig
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.utils.dashboard_links import (
@@ -118,7 +120,23 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     if not login:
         login = await resolve_login_from_email_async(email)
     if not login:
-        return None
+        try:
+            record = await authorized_system_schedule(RunConfig.from_config(config))
+        except Exception:
+            return None
+        if record is None:
+            return None
+        schedule_id = record.get("id")
+        if not isinstance(schedule_id, str) or not schedule_id:
+            return None
+        login = record.get("created_by")
+        if not isinstance(login, str) or not login.strip():
+            return None
+        login = login.strip()
+        email_value = record.get("user_email")
+        email = (
+            email_value.strip() if isinstance(email_value, str) and email_value.strip() else None
+        )
     current_login = _latest_state_github_login(state)
     if current_login and current_login.lower() != login.lower():
         login = current_login

@@ -41,6 +41,62 @@ async def test_actor_uses_only_trusted_run_configuration(monkeypatch: pytest.Mon
     )
 
 
+async def test_actor_authorizes_the_current_system_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = {
+        "configurable": {
+            "thread_id": "thread-1",
+            "source": "schedule",
+            "schedule_id": "schedule-1",
+            "invocation_id": "invocation-1",
+        }
+    }
+    monkeypatch.setattr(threads_tool, "get_config", lambda: config)
+    authorize = AsyncMock(
+        return_value={
+            "id": "schedule-1",
+            "name": "CI fixer",
+            "created_by": "trusted-user",
+            "user_email": "trusted@example.com",
+        }
+    )
+    monkeypatch.setattr(threads_tool, "authorized_system_schedule", authorize)
+
+    actor = await threads_tool._actor()
+
+    assert actor == threads_tool._Actor(
+        login="trusted-user",
+        email="trusted@example.com",
+        name="trusted-user",
+    )
+    authorize.assert_awaited_once()
+
+
+async def test_actor_rejects_a_system_schedule_without_a_creator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "thread-1",
+                "source": "schedule",
+                "schedule_id": "schedule-1",
+                "invocation_id": "invocation-1",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "authorized_system_schedule",
+        AsyncMock(return_value={"id": "schedule-1"}),
+    )
+
+    assert await threads_tool._actor() is None
+
+
 async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         threads_tool,
