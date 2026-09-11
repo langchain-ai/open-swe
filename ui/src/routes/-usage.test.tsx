@@ -1,7 +1,14 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 import {
@@ -9,7 +16,9 @@ import {
   ApiError,
   type PRMergeRatePayload,
   type UsageLeaderboardPayload,
+  type UsageLeaderboardRow,
 } from "@/lib/api"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 import { UsageAnalytics } from "./usage"
 
@@ -66,12 +75,14 @@ function mountReport() {
   })
   render(
     <QueryClientProvider client={client}>
-      <UsageAnalytics
-        period="30d"
-        login="reader"
-        isAdmin={false}
-        onPeriodChange={() => {}}
-      />
+      <TooltipProvider>
+        <UsageAnalytics
+          period="30d"
+          login="reader"
+          isAdmin={false}
+          onPeriodChange={() => {}}
+        />
+      </TooltipProvider>
     </QueryClientProvider>
   )
   return client
@@ -218,6 +229,8 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
         deletions: 15,
         total_tokens: 1234,
         total_cost_usd: 2.5,
+        invocations_without_cost: 0,
+        invocations_with_partial_cost: 0,
         avg_invocation_seconds: 90,
       },
     ],
@@ -244,5 +257,142 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
   expect(screen.queryByText("Example Reader")).toBeNull()
   expect(screen.queryByText(/Updated /)).toBeNull()
   expect(screen.queryByText("7 human replies tracked")).toBeNull()
+  client.clear()
+})
+
+const costRow: UsageLeaderboardRow = {
+  rank: 1,
+  user: { name: "Cost Reader", github_login: "reader", email: null },
+  favorite_model: "example-model",
+  invocations: 2,
+  prs_opened: 0,
+  merged_prs: 0,
+  agent_loc: 0,
+  additions: 0,
+  deletions: 0,
+  total_tokens: 100,
+  total_cost_usd: 0,
+  invocations_without_cost: 0,
+  invocations_with_partial_cost: 0,
+  avg_invocation_seconds: 90,
+}
+
+it.each([
+  {
+    name: "confirmed zero",
+    cost: 0,
+    missing: 0,
+    partial: 0,
+    amount: "$0.00",
+    label: null,
+  },
+  {
+    name: "complete cost",
+    cost: 2.5,
+    missing: 0,
+    partial: 0,
+    amount: "$2.50",
+    label: null,
+  },
+  {
+    name: "all missing",
+    cost: 0,
+    missing: 2,
+    partial: 0,
+    amount: "—",
+    label: "Unavailable",
+  },
+  {
+    name: "mixed zero and missing",
+    cost: 0,
+    missing: 1,
+    partial: 0,
+    amount: "$0.00",
+    label: "Incomplete",
+  },
+  {
+    name: "partial cost",
+    cost: 2.5,
+    missing: 0,
+    partial: 1,
+    amount: "$2.50",
+    label: "Incomplete",
+  },
+  {
+    name: "unknown zero coverage",
+    cost: 0,
+    missing: undefined,
+    partial: undefined,
+    amount: "—",
+    label: "Unavailable",
+  },
+  {
+    name: "unknown positive coverage",
+    cost: 2.5,
+    missing: undefined,
+    partial: undefined,
+    amount: "$2.50",
+    label: "Incomplete",
+  },
+])(
+  "distinguishes $name in the cost column",
+  async ({ cost, missing, partial, amount, label }) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      total_members: 1,
+      rows: [
+        {
+          ...costRow,
+          total_cost_usd: cost,
+          invocations_without_cost: missing,
+          invocations_with_partial_cost: partial,
+        },
+      ],
+    })
+    const client = mountReport()
+    const row = (await screen.findByText("Cost Reader")).closest("tr")!
+    expect(within(row).getByText(amount)).toBeTruthy()
+    const indicator = within(row).queryByRole("button", {
+      name: /Cost (unavailable|incomplete)/,
+    })
+    expect(indicator?.textContent ?? null).toBe(label)
+    client.clear()
+  }
+)
+
+it("explains incomplete coverage on focus and removes the indicator when costs recover", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      {
+        ...costRow,
+        total_cost_usd: 2.5,
+        invocations_without_cost: 1,
+        invocations_with_partial_cost: 1,
+      },
+    ],
+  })
+  const client = mountReport()
+  const trigger = await screen.findByRole("button", { name: "Cost incomplete" })
+  act(() => trigger.focus())
+  const tooltip = await screen.findByText(/Recorded cost so far/)
+  expect(tooltip.textContent).toContain(
+    "Costs are missing for 1 of 2 invocations."
+  )
+  expect(tooltip.textContent).toContain(
+    "Costs are partial for 1 of 2 invocations."
+  )
+
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [{ ...costRow, total_cost_usd: 3.75 }],
+  })
+  await act(() => client.invalidateQueries({ queryKey: ["usageLeaderboard"] }))
+  expect(await screen.findByText("$3.75")).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Cost incomplete" })).toBeNull()
   client.clear()
 })

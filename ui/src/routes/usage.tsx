@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -441,7 +442,7 @@ function UsageTable({
                 {formatNumber(row.total_tokens)}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
-                {formatCurrency(row.total_cost_usd)}
+                <UsageCost row={row} />
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatDuration(row.avg_invocation_seconds)}
@@ -606,6 +607,50 @@ function formatTime(value: number): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value)
+}
+
+function UsageCost({ row }: { row: UsageLeaderboardRow }) {
+  if (row.invocations === 0) return <span>—</span>
+
+  const missing = row.invocations_without_cost
+  const partial = row.invocations_with_partial_cost
+  const coverageKnown = missing != null && partial != null
+  if (coverageKnown && missing === 0 && partial === 0) {
+    return <span>{formatCurrency(row.total_cost_usd)}</span>
+  }
+
+  const unavailable = coverageKnown
+    ? missing >= row.invocations
+    : row.total_cost_usd === 0
+  const label = unavailable ? "Unavailable" : "Incomplete"
+  const explanation = coverageKnown
+    ? [
+        unavailable ? "No costs have been recorded." : "Recorded cost so far.",
+        missing > 0
+          ? `Costs are missing for ${missing} of ${row.invocations} invocations.`
+          : "",
+        partial > 0
+          ? `Costs are partial for ${partial} of ${row.invocations} invocations.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : "Cost coverage is unavailable for these invocations."
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <span>{unavailable ? "—" : formatCurrency(row.total_cost_usd)}</span>
+      <Tooltip>
+        <TooltipTrigger
+          aria-label={`Cost ${label.toLowerCase()}`}
+          className="cursor-help rounded-sm text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          {label}
+        </TooltipTrigger>
+        <TooltipPopup className="max-w-xs">{explanation}</TooltipPopup>
+      </Tooltip>
+    </div>
+  )
 }
 
 function formatCurrency(value: number): string {

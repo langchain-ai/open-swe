@@ -281,6 +281,8 @@ export interface UsageLeaderboardRow {
   deletions: number
   total_tokens: number
   total_cost_usd: number
+  invocations_without_cost?: number
+  invocations_with_partial_cost?: number
   avg_invocation_seconds: number
   /** @deprecated Rolling compatibility with older clients. */
   avg_run_seconds?: number
