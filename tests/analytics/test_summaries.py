@@ -284,3 +284,71 @@ async def test_resolution_latency_survives_reopening_and_raw_expiry(analytics_db
             assert row["histogram_bounds"][bucket - 1] < latency_ms
         if bucket < len(row["histogram_bounds"]):
             assert latency_ms <= row["histogram_bounds"][bucket]
+
+
+@pytest.mark.parametrize("expire_raw_events", [False, True])
+async def test_earlier_run_start_moves_cost_and_membership_out_of_previous_day(
+    analytics_db, expire_raw_events
+):
+    workspace, transaction = analytics_db
+    moved_run, other_run, moved_person, other_person = (uuid4() for _ in range(4))
+    for run_id, user_id, cost in [(moved_run, moved_person, 5), (other_run, other_person, 2)]:
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_STARTED,
+                RunStartedPayload(model_attribution_quality="unavailable"),
+                day=1,
+                run_id=run_id,
+                user_id=user_id,
+            )
+        )
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_COST_RECORDED,
+                RunCostRecordedPayload(
+                    cost_usd=cost,
+                    status="complete",
+                    source="provider",
+                    observation_revision=1,
+                    observed_at=DAY + timedelta(days=2),
+                ),
+                day=2,
+                run_id=run_id,
+            )
+        )
+    await flush_summaries()
+    if expire_raw_events:
+        async with transaction() as conn:
+            await conn.execute(text("DELETE FROM events"))
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.RUN_STARTED,
+            RunStartedPayload(model_attribution_quality="unavailable"),
+            run_id=moved_run,
+            user_id=moved_person,
+        )
+    )
+    await flush_summaries()
+    async with transaction() as conn:
+        rows = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT family, partition_date, counters, sums, exact_members FROM daily_summaries "
+                        "WHERE family IN ('cost_completeness', 'distinct_membership')"
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        by_day = {(row["family"], row["partition_date"]): row for row in rows}
+        for day, person, cost in [(0, moved_person, 5), (1, other_person, 2)]:
+            date = (DAY + timedelta(days=day)).date()
+            cost_row = by_day["cost_completeness", date]
+            assert cost_row["counters"] == {"runs": 1, "known_cost_runs": 1}
+            assert cost_row["sums"] == {"cost_usd": cost}
+            assert by_day["distinct_membership", date]["exact_members"] == [person]

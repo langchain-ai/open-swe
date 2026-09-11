@@ -45,7 +45,7 @@ def _params(event: EventEnvelope) -> dict[str, object]:
 
 async def ingest(event: EventEnvelope) -> bool:
     async with transaction() as conn:
-        subject_id = event.finding_id or event.pr_id
+        subject_id = event.finding_id or event.pr_id or event.run_id
         if event.event_name == EventName.FEEDBACK_SUBMITTED:
             subject_id = event.event_id
         elif event.event_name == EventName.FEEDBACK_WITHDRAWN:
@@ -92,6 +92,9 @@ async def ingest(event: EventEnvelope) -> bool:
                 "receipt_days": ENV.ANALYTICS_RECEIPT_DAYS.get_int(90),
             },
         )
+        if event.event_name == EventName.RUN_STARTED:
+            # A corrected start can move a run out of an already summarized UTC day.
+            await mark_dirty(conn, event)
         await _project(conn, event)
         await mark_dirty(conn, event)
         await conn.execute(
