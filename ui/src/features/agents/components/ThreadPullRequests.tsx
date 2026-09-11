@@ -231,7 +231,7 @@ function HealthDetails({
   )
 }
 
-function PullRequestHoverCard({
+export function PullRequestHoverCard({
   pullRequest,
   health,
   healthUnavailable,

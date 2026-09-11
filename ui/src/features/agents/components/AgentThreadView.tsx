@@ -19,6 +19,7 @@ import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeade
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
+import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import {
@@ -314,54 +315,61 @@ export function AgentThreadView({
               />
             </div>
           ) : (
-            <Messages
-              messages={visibleMessages}
-              threadId={thread.id}
-              scrollKey={thread.id}
-              showPlanArtifact={
-                thread.planStatus === "ready" || thread.planStatus === "shared"
-              }
-              emptyState={
-                <div className="flex min-h-60 items-center justify-center">
-                  {hydrationFailed ? (
-                    <Alert variant="error" className="max-w-3xl">
-                      <CircleAlertIcon />
-                      <AlertDescription>
-                        <span>
-                          This thread&apos;s messages could not be loaded.
-                          Reload to try again.
-                        </span>
-                      </AlertDescription>
-                    </Alert>
-                  ) : (
-                    <p className="text-xs text-muted-foreground/70">
-                      This thread has no messages yet.
-                    </p>
-                  )}
-                </div>
-              }
-              onOpenFile={handleOpenFile}
-              queuedMessages={queuedMessages}
-              isStreaming={isStreaming}
-              streamIsLoading={stream.isLoading}
-              scrollControlRef={scrollControlRef}
-              isThinking={isThinking}
-              isOffloading={stream.isOffloading}
-              settingUpSandbox={settingUpSandbox}
-              pollWorkflowApprovalsWhileActive={isStreaming}
-              contentWidthClass="max-w-3xl"
-              footer={
-                !isStreaming &&
-                !sendMessage.isPending &&
-                queuedMessages.length === 0 && (
-                  <ThreadFeedbackCard
-                    key={`${thread.id}:${session.data?.login ?? ""}`}
-                    threadId={thread.id}
-                    login={session.data?.login ?? null}
-                  />
-                )
-              }
-            />
+            <PullRequestPreviewProvider
+              pullRequests={thread.pullRequests ?? []}
+              health={pullRequestHealth}
+              healthUnavailable={pullRequestStatus.isError}
+            >
+              <Messages
+                messages={visibleMessages}
+                threadId={thread.id}
+                scrollKey={thread.id}
+                showPlanArtifact={
+                  thread.planStatus === "ready" ||
+                  thread.planStatus === "shared"
+                }
+                emptyState={
+                  <div className="flex min-h-60 items-center justify-center">
+                    {hydrationFailed ? (
+                      <Alert variant="error" className="max-w-3xl">
+                        <CircleAlertIcon />
+                        <AlertDescription>
+                          <span>
+                            This thread&apos;s messages could not be loaded.
+                            Reload to try again.
+                          </span>
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <p className="text-xs text-muted-foreground/70">
+                        This thread has no messages yet.
+                      </p>
+                    )}
+                  </div>
+                }
+                onOpenFile={handleOpenFile}
+                queuedMessages={queuedMessages}
+                isStreaming={isStreaming}
+                streamIsLoading={stream.isLoading}
+                scrollControlRef={scrollControlRef}
+                isThinking={isThinking}
+                isOffloading={stream.isOffloading}
+                settingUpSandbox={settingUpSandbox}
+                pollWorkflowApprovalsWhileActive={isStreaming}
+                contentWidthClass="max-w-3xl"
+                footer={
+                  !isStreaming &&
+                  !sendMessage.isPending &&
+                  queuedMessages.length === 0 && (
+                    <ThreadFeedbackCard
+                      key={`${thread.id}:${session.data?.login ?? ""}`}
+                      threadId={thread.id}
+                      login={session.data?.login ?? null}
+                    />
+                  )
+                }
+              />
+            </PullRequestPreviewProvider>
           )}
           {!isHydrating && (
             <AgentComposerDock>
