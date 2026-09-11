@@ -85,7 +85,7 @@ async def _cleanup(thread_ids: set[str]) -> None:
             logger.warning("Could not delete eval thread", extra={"thread": thread_id})
 
 
-_COLUMNS = ("task", "expected", "actual", "calls", "tools", "ktok", "secs", "title")
+_COLUMNS = ("task", "accepted", "actual", "calls", "tools", "ktok", "secs", "title")
 
 
 async def _print_table(results: Any) -> None:
@@ -100,10 +100,11 @@ async def _print_table(results: Any) -> None:
             if outcome
             else "error"
         )
+        accepted = reference.get("accepted")
         rows.append(
             (
                 str((row["example"].inputs or {}).get("task_id", "?")),
-                str(reference.get("expected_route", "?")),
+                "|".join(accepted) if isinstance(accepted, list) else "?",
                 actual,
                 str(outcome.model_calls_before_exit) if outcome else "-",
                 str(outcome.tool_calls_before_exit) if outcome else "-",
@@ -122,7 +123,7 @@ async def _print_table(results: Any) -> None:
     print("  ".join("-" * width for width in widths))
     for row_cells in rows:
         print("  ".join(cell.ljust(width) for cell, width in zip(row_cells, widths, strict=True)))
-    matched = sum(1 for row_cells in rows if row_cells[1] == row_cells[2])
+    matched = sum(1 for row_cells in rows if row_cells[2] in row_cells[1].split("|"))
     print(f"\nroute accuracy {matched}/{len(rows)}")
 
 

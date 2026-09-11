@@ -12,7 +12,7 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from langsmith import Client
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter
 
 TASKS_PATH = Path(__file__).with_name("tasks.json")
 DEFAULT_DATASET_NAME = "openswe-routing-v1"
@@ -24,7 +24,9 @@ ExpectedRoute = Literal["fast", "balanced", "performance", "none"]
 class RoutingTask(BaseModel):
     id: str
     prompt: str
-    expected_route: ExpectedRoute
+    # Every route a competent agent could defensibly pick. Scored as a set, so a
+    # task that is genuinely on a boundary does not punish either side.
+    accepted: list[ExpectedRoute] = Field(min_length=1)
     rationale: str = ""
 
 
@@ -50,9 +52,7 @@ def main() -> None:
 
     tasks = load_tasks()
     inputs = [{"task_id": task.id, "prompt": task.prompt, "repo": args.repo} for task in tasks]
-    outputs = [
-        {"expected_route": task.expected_route, "rationale": task.rationale} for task in tasks
-    ]
+    outputs = [{"accepted": task.accepted, "rationale": task.rationale} for task in tasks]
     if args.dry_run:
         print(
             json.dumps(

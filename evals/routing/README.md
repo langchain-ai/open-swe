@@ -9,7 +9,7 @@ then cancelled and the decision is scored.
 
 ```
 evals/routing/
-├── tasks.json          # 40 tasks with an expected route: fast, balanced, performance, none
+├── tasks.json          # 40 tasks, each with the set of routes its label accepts
 ├── build_dataset.py    # tasks.json → LangSmith dataset
 ├── config.toml         # defaults for run_eval
 ├── target.py           # starts one run, stops at the routing decision, returns the outcome
@@ -21,9 +21,9 @@ evals/routing/
 
 | Feedback | Meaning |
 |---|---|
-| `route_match` | agent's route equals the label (`none` means answered without routing) |
-| `route_distance` | tiers between agent and label; missing or timed out counts as 3 |
-| `over_routed`, `under_routed` | direction of the miss |
+| `route_match` | the agent's route is one the label accepts (`none` means answered without routing) |
+| `route_distance` | tiers outside the accepted band; 0 inside it; a timeout counts as 3 |
+| `over_routed`, `under_routed` | which side of the band the miss fell on |
 | `title_format` | 3 to 8 words, under 80 chars, no trailing punctuation or markup |
 | `title_quality` | LLM judge against the title rules the agent is given |
 | `model_calls_before_exit`, `tool_calls_before_exit`, `pre_exit_*_tokens`, `seconds_to_decision` | what sizing the task cost |

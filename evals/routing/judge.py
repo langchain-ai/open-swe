@@ -64,10 +64,20 @@ def _outcome(run: Run) -> RoutingOutcome | None:
     return RoutingOutcome.model_validate(run.outputs)
 
 
-def _expected(example: Example) -> str:
-    outputs = example.outputs or {}
-    expected = outputs.get("expected_route")
-    return expected if isinstance(expected, str) else "balanced"
+def _accepted(example: Example) -> list[str]:
+    """Every route the label allows. A boundary task accepts both sides."""
+    accepted = (example.outputs or {}).get("accepted")
+    if isinstance(accepted, list):
+        routes = [route for route in accepted if isinstance(route, str)]
+        if routes:
+            return routes
+    return ["balanced"]
+
+
+def _tier_bounds(accepted: list[str]) -> tuple[int, int] | None:
+    """Cheapest and most expensive accepted tier, ignoring the non-tier ``none``."""
+    indexes = [_TIERS.index(route) for route in accepted if route in _TIERS]
+    return (min(indexes), max(indexes)) if indexes else None
 
 
 def _actual(outcome: RoutingOutcome) -> str:
@@ -82,50 +92,59 @@ def route_match(run: Run, example: Example) -> dict[str, Any]:
     outcome = _outcome(run)
     if outcome is None:
         return {"key": "route_match", "score": 0, "comment": "no outputs"}
-    expected, actual = _expected(example), _actual(outcome)
+    accepted, actual = _accepted(example), _actual(outcome)
     return {
         "key": "route_match",
-        "score": int(actual == expected),
-        "comment": f"expected={expected} actual={actual}",
+        "score": int(actual in accepted),
+        "comment": f"accepted={'|'.join(accepted)} actual={actual}",
     }
 
 
 def route_distance(run: Run, example: Example) -> dict[str, Any]:
-    """Tiers away from the label; 0 is exact. Missing or timed-out decisions count as 3."""
+    """Tiers outside the accepted band; 0 when inside it. A timeout counts as 3."""
     outcome = _outcome(run)
-    expected = _expected(example)
+    accepted = _accepted(example)
     actual = _actual(outcome) if outcome else "timeout"
-    if expected in _TIERS and actual in _TIERS:
-        distance = abs(_TIERS.index(actual) - _TIERS.index(expected))
-    elif expected == actual:
+    if actual in accepted:
         distance = 0
+    elif actual in _TIERS and (bounds := _tier_bounds(accepted)) is not None:
+        low, high = bounds
+        index = _TIERS.index(actual)
+        distance = low - index if index < low else index - high
     else:
         distance = 3
-    return {"key": "route_distance", "score": distance, "comment": f"{actual} vs {expected}"}
+    return {
+        "key": "route_distance",
+        "score": distance,
+        "comment": f"{actual} vs {'|'.join(accepted)}",
+    }
 
 
 def over_routed(run: Run, example: Example) -> dict[str, Any]:
-    """1 when the agent chose a more expensive tier than needed."""
+    """1 when the agent chose a tier above everything the label accepts."""
     outcome = _outcome(run)
-    expected = _expected(example)
+    accepted = _accepted(example)
     actual = _actual(outcome) if outcome else "timeout"
-    if expected in _TIERS and actual in _TIERS:
-        score = int(_TIERS.index(actual) > _TIERS.index(expected))
-    else:
-        score = int(expected == "none" and actual in _TIERS)
-    return {"key": "over_routed", "score": score}
+    if actual in accepted:
+        return {"key": "over_routed", "score": 0}
+    bounds = _tier_bounds(accepted)
+    if actual in _TIERS and bounds is not None:
+        return {"key": "over_routed", "score": int(_TIERS.index(actual) > bounds[1])}
+    # A routed tier where only "none" is accepted is spending money on nothing.
+    return {"key": "over_routed", "score": int(actual in _TIERS and bounds is None)}
 
 
 def under_routed(run: Run, example: Example) -> dict[str, Any]:
-    """1 when the agent chose a cheaper tier than needed, or never routed a real task."""
+    """1 when the agent chose below the accepted band, or never routed real work."""
     outcome = _outcome(run)
-    expected = _expected(example)
+    accepted = _accepted(example)
     actual = _actual(outcome) if outcome else "timeout"
-    if expected in _TIERS and actual in _TIERS:
-        score = int(_TIERS.index(actual) < _TIERS.index(expected))
-    else:
-        score = int(expected in _TIERS and actual != "timeout")
-    return {"key": "under_routed", "score": score}
+    if actual in accepted:
+        return {"key": "under_routed", "score": 0}
+    bounds = _tier_bounds(accepted)
+    if actual in _TIERS and bounds is not None:
+        return {"key": "under_routed", "score": int(_TIERS.index(actual) < bounds[0])}
+    return {"key": "under_routed", "score": int(actual == "none" and bounds is not None)}
 
 
 def exploration_cost(run: Run, example: Example) -> dict[str, Any]:
@@ -188,10 +207,10 @@ def aggregate(runs: list[Run], examples: list[Example]) -> dict[str, Any]:
     scored = [(o, e) for o, e in outcomes if o is not None]
     if not scored:
         return {"results": []}
-    matches = sum(_actual(o) == _expected(e) for o, e in scored)
+    matches = sum(_actual(o) in _accepted(e) for o, e in scored)
     confusion: dict[str, int] = {}
     for o, e in scored:
-        key = f"{_expected(e)}->{_actual(o)}"
+        key = f"{'|'.join(_accepted(e))}->{_actual(o)}"
         confusion[key] = confusion.get(key, 0) + 1
     routed = [o for o, _ in scored if o.exited]
     mean = lambda values: round(sum(values) / len(values), 2) if values else 0.0  # noqa: E731
