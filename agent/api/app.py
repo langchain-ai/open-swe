@@ -27,6 +27,7 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from agent.analytics.database import activate_reporting
     from agent.analytics.database import close as close_analytics
     from agent.analytics.database import migrate as migrate_analytics
     from agent.analytics.worker import start_worker, stop_worker
@@ -40,6 +41,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_local_dev_llm_config()
     try:
         await migrate_analytics()
+        await activate_reporting()
         await start_worker()
     except Exception:  # noqa: BLE001
         logger.warning("Analytics startup failed", exc_info=True)
