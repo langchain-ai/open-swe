@@ -40,7 +40,7 @@ def _request(event: dict[str, Any]) -> Request:
 def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     calls: dict[str, Any] = {
         "verify_slack_signature": lambda **_: True,
-        "_get_slack_channel_context": AsyncMock(
+        "resolve_slack_channel_context": AsyncMock(
             return_value={"id": "C-code", "is_ext_shared": False, "is_pending_ext_shared": False}
         ),
         "slack_channel_allows_operations": lambda _context: True,
@@ -121,7 +121,8 @@ async def test_a_join_in_an_unbound_channel_queues_nothing(webhook: dict[str, An
 
 
 async def test_an_ordinary_message_still_reaches_the_session(webhook: dict[str, Any]) -> None:
-    await _post({**JOIN, "subtype": None, "text": "what is the status?"})
+    ordinary = {key: value for key, value in JOIN.items() if key != "subtype"}
+    await _post({**ordinary, "text": "what is the status?"})
 
     webhook["process_slack_mention"].assert_awaited_once()
     webhook["queue_message_for_thread"].assert_not_awaited()
