@@ -902,14 +902,15 @@ export function AgentsSidebar({
         {(updateState.status === "ready" || updateInstalling) && (
           <button
             type="button"
-            title={updateInstalling ? "Installing update…" : "Update"}
-            aria-label={updateInstalling ? "Installing update" : "Update"}
+            title={
+              updateInstalling ? "Installing update…" : "Restart to update"
+            }
+            aria-label={
+              updateInstalling ? "Installing update" : "Restart to update"
+            }
             disabled={updateInstalling}
             onClick={() => void installUpdate()}
-            className={cn(
-              "group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60",
-              updateInstalling && "w-auto gap-2 px-3"
-            )}
+            className="flex h-8 shrink-0 items-center justify-center gap-2 rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
           >
             {updateInstalling ? (
               <>
@@ -918,8 +919,8 @@ export function AgentsSidebar({
               </>
             ) : (
               <>
-                <DownloadSimpleIcon className="size-4 group-hover:hidden" />
-                <span className="hidden group-hover:inline">Update</span>
+                <DownloadSimpleIcon className="size-4" />
+                <span>Restart to update</span>
               </>
             )}
           </button>
