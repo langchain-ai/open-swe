@@ -746,30 +746,49 @@ async def test_reopenings_accumulate_across_repeated_raw_expiry(analytics_db):
                 await conn.execute(text("DELETE FROM events"))
 
 
-async def test_additive_migration_preserves_expired_and_unsummarized_totals(analytics_db):
+@pytest.mark.parametrize("expired_count", [0, 1, 2])
+async def test_additive_migration_preserves_expired_and_unsummarized_totals(
+    analytics_db, expired_count
+):
     workspace, transaction = analytics_db
+    initial = []
     for day in (0, 0, 1):
-        await ingestion.ingest(
-            event(
-                workspace,
-                EventName.RUN_STARTED,
-                RunStartedPayload(model_attribution_quality="unavailable"),
-                run_id=uuid4(),
-                day=day,
-            )
-        )
-    await flush_summaries()
-    async with transaction() as conn:
-        await conn.execute(text("DELETE FROM events WHERE occurred_at = :day"), {"day": DAY})
-    await ingestion.ingest(
-        event(
+        item = event(
             workspace,
             EventName.RUN_STARTED,
             RunStartedPayload(model_attribution_quality="unavailable"),
             run_id=uuid4(),
-            day=1,
+            day=day,
         )
-    )
+        initial.append(item)
+        await ingestion.ingest(item)
+    await flush_summaries()
+    async with transaction() as conn:
+        for item in initial[:expired_count]:
+            await conn.execute(
+                text("DELETE FROM events WHERE event_id = :event_id"),
+                {"event_id": item.event_id},
+            )
+        await conn.execute(
+            text(
+                "INSERT INTO daily_summaries (workspace_id, summary_version, family, "
+                "partition_date, counters, data_watermark, recomputed_at) SELECT workspace_id, "
+                "2, family, partition_date, counters, data_watermark, recomputed_at "
+                "FROM daily_summaries WHERE family = 'additive'"
+            )
+        )
+    for day in (0, 1, 2):
+        # Queue creation can predate the summary even though ingestion happens afterward.
+        late = event(
+            workspace,
+            EventName.RUN_STARTED,
+            RunStartedPayload(model_attribution_quality="unavailable"),
+            run_id=uuid4(),
+            day=day,
+            recorded_at=DAY,
+        )
+        assert await ingestion.ingest(late)
+        assert not await ingestion.ingest(late)
     async with transaction() as conn:
         await conn.execute(text("DROP TABLE additive_event_projection"))
         schema = await conn.scalar(text("SELECT current_schema()"))
@@ -787,7 +806,23 @@ async def test_additive_migration_preserves_expired_and_unsummarized_totals(anal
                 )
             )
         ).all()
-        assert rows == [(DAY.date(), 2), ((DAY + timedelta(days=1)).date(), 2)]
+        assert rows == [
+            ((DAY + timedelta(days=day)).date(), count) for day, count in enumerate((3, 2, 1))
+        ]
+    await flush_summaries()
+    async with transaction() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT partition_date, (counters->>'run.started')::bigint "
+                    "FROM daily_summaries WHERE family = 'additive' AND summary_version = 1 "
+                    "ORDER BY partition_date"
+                )
+            )
+        ).all()
+        assert rows == [
+            ((DAY + timedelta(days=day)).date(), count) for day, count in enumerate((3, 2, 1))
+        ]
 
 
 @pytest.mark.parametrize(
