@@ -13,6 +13,7 @@ from agent.dashboard.agent_usage import record_agent_pr_usage
 from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
+from agent.github.http import github_request, is_github_rate_limit
 from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -36,6 +37,7 @@ _REFERENCES_HEADING = "## References"
 _ACCESS_FAILURE_CODE = "github_app_access_missing_or_repo_not_found"
 _BRANCH_FAILURE_CODE = "github_pr_branch_not_visible"
 _PREFLIGHT_FAILURE_CODE = "github_pr_preflight_failed"
+_RATE_LIMIT_FAILURE_CODE = "github_api_rate_limit_exhausted"
 _RESPONSE_BODY_LIMIT = 800
 _REPORTED_RESPONSE_HEADERS = (
     "location",
@@ -63,26 +65,30 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     return token, "user"
 
 
-async def _workspace_has_repository(client: httpx2.AsyncClient, owner: str, repo: str) -> bool:
+async def _workspace_has_repository(
+    client: httpx2.AsyncClient, owner: str, repo: str
+) -> tuple[bool, httpx2.Response | None]:
     token = await get_github_app_installation_token()
     if not token:
-        return False
+        return False, None
     page = 1
     while True:
-        response = await client.get(
+        response = await github_request(
+            client,
+            "GET",
             f"{GITHUB_API}/installation/repositories",
             headers=_auth_headers(token),
             params={"per_page": "100", "page": str(page)},
         )
         if response.status_code != 200:
-            return False
+            return False, response
         repositories = response.json().get("repositories", [])
         if any(
             item.get("full_name", "").lower() == f"{owner}/{repo}".lower() for item in repositories
         ):
-            return True
+            return True, None
         if len(repositories) < 100:
-            return False
+            return False, None
         page += 1
 
 
@@ -297,7 +303,34 @@ def _branch_failure_payload(
 
 
 async def _github_get(client: httpx2.AsyncClient, token: str, path: str) -> httpx2.Response:
-    return await client.get(f"{GITHUB_API}{path}", headers=_auth_headers(token))
+    return await github_request(client, "GET", f"{GITHUB_API}{path}", headers=_auth_headers(token))
+
+
+def _rate_limit_failure_payload(
+    *,
+    response: httpx2.Response,
+    owner: str,
+    repo: str,
+    head: str,
+    base: str,
+    token_kind: str,
+    branch_pushed: bool | None,
+    failed_step: str,
+) -> dict[str, Any]:
+    return _failure_payload(
+        code=_RATE_LIMIT_FAILURE_CODE,
+        owner=owner,
+        repo=repo,
+        head=head,
+        base=base,
+        token_kind=token_kind,
+        http_status=response.status_code,
+        reason="GitHub's API rate limit remained exhausted after retries",
+        likely_cause="a temporary GitHub API rate-limit window",
+        branch_pushed=branch_pushed,
+        failed_step=failed_step,
+        response=response,
+    )
 
 
 async def _preflight_pr_access(
@@ -311,6 +344,17 @@ async def _preflight_pr_access(
     base: str,
 ) -> dict[str, Any] | None:
     repo_resp = await _github_get(client, token, f"/repos/{owner}/{repo}")
+    if is_github_rate_limit(repo_resp):
+        return _rate_limit_failure_payload(
+            response=repo_resp,
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind=token_kind,
+            branch_pushed=None,
+            failed_step="preflight_repo",
+        )
     if repo_resp.status_code in {403, 404}:
         return _access_failure_payload(
             owner=owner,
@@ -346,6 +390,17 @@ async def _preflight_pr_access(
     base_resp = await _github_get(
         client, token, f"/repos/{owner}/{repo}/branches/{quote(base, safe='')}"
     )
+    if is_github_rate_limit(base_resp):
+        return _rate_limit_failure_payload(
+            response=base_resp,
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind=token_kind,
+            branch_pushed=None,
+            failed_step="preflight_base_branch",
+        )
     if base_resp.status_code == 404:
         return _branch_failure_payload(
             owner=owner,
@@ -396,6 +451,17 @@ async def _preflight_pr_access(
     head_resp = await _github_get(
         client, token, f"/repos/{owner}/{repo}/branches/{quote(head_branch, safe='')}"
     )
+    if is_github_rate_limit(head_resp):
+        return _rate_limit_failure_payload(
+            response=head_resp,
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind=token_kind,
+            branch_pushed=False,
+            failed_step="preflight_head_branch",
+        )
     if head_resp.status_code == 404:
         return _branch_failure_payload(
             owner=owner,
@@ -829,22 +895,36 @@ async def _open_pull_request(
         )
 
     async with httpx2.AsyncClient(timeout=30.0) as client:
-        if (
-            kind == "user"
-            and await private_credential_login() is None
-            and not await _workspace_has_repository(client, owner, repo)
-        ):
-            return _access_failure_payload(
-                owner=owner,
-                repo=repo,
-                head=head,
-                base=base,
-                token_kind=kind,
-                http_status=None,
-                reason="Could not verify the target repository belongs to the workspace GitHub App installation",
-                branch_pushed=None,
-                failed_step="workspace_repo",
+        if kind == "user" and await private_credential_login() is None:
+            workspace_has_repo, workspace_response = await _workspace_has_repository(
+                client, owner, repo
             )
+            if not workspace_has_repo:
+                if workspace_response is not None and is_github_rate_limit(workspace_response):
+                    return _rate_limit_failure_payload(
+                        response=workspace_response,
+                        owner=owner,
+                        repo=repo,
+                        head=head,
+                        base=base,
+                        token_kind=kind,
+                        branch_pushed=None,
+                        failed_step="workspace_repo",
+                    )
+                return _access_failure_payload(
+                    owner=owner,
+                    repo=repo,
+                    head=head,
+                    base=base,
+                    token_kind=kind,
+                    http_status=(
+                        workspace_response.status_code if workspace_response is not None else None
+                    ),
+                    reason="Could not verify the target repository belongs to the workspace GitHub App installation",
+                    branch_pushed=None,
+                    failed_step="workspace_repo",
+                    response=workspace_response,
+                )
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,

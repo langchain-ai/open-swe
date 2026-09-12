@@ -52,7 +52,10 @@ def github_headers(token: str) -> dict[str, str]:
     }
 
 
-def _is_secondary_rate_limit(response: httpx2.Response) -> bool:
+def is_github_rate_limit(response: httpx2.Response) -> bool:
+    """Return whether GitHub's response indicates an exhausted rate limit."""
+    if response.status_code == 429:
+        return True
     if response.status_code != 403:
         return False
     if response.headers.get("X-RateLimit-Remaining") == "0":
@@ -66,7 +69,7 @@ def _is_retryable_response(response: httpx2.Response, method: str) -> bool:
         return True
     if response.status_code in _IDEMPOTENT_RETRYABLE_STATUS:
         return method.upper() in _RETRYABLE_TRANSPORT_METHODS
-    return _is_secondary_rate_limit(response)
+    return is_github_rate_limit(response)
 
 
 def _retry_after_seconds(response: httpx2.Response) -> float | None:

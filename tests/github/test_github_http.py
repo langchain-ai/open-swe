@@ -10,11 +10,11 @@ from agent.github.http import (
     GITHUB_GRAPHQL,
     _compute_backoff,
     _is_retryable_response,
-    _is_secondary_rate_limit,
     _retry_after_seconds,
     github_client,
     github_headers,
     github_request,
+    is_github_rate_limit,
 )
 
 
@@ -37,23 +37,26 @@ def _make_response(status_code: int, headers: dict[str, str] | None = None) -> h
 class TestIsSecondaryRateLimit:
     def test_403_with_rate_limit_remaining_zero(self) -> None:
         resp = _make_response(403, {"X-RateLimit-Remaining": "0"})
-        assert _is_secondary_rate_limit(resp)
+        assert is_github_rate_limit(resp)
 
     def test_403_with_secondary_rate_limit_body(self) -> None:
         resp = httpx2.Response(403, text="You have exceeded a secondary rate limit")
-        assert _is_secondary_rate_limit(resp)
+        assert is_github_rate_limit(resp)
 
     def test_403_with_rate_limit_body(self) -> None:
         resp = httpx2.Response(403, text="API rate limit exceeded")
-        assert _is_secondary_rate_limit(resp)
+        assert is_github_rate_limit(resp)
 
     def test_403_without_rate_limit_indicators(self) -> None:
         resp = httpx2.Response(403, text="Forbidden")
-        assert not _is_secondary_rate_limit(resp)
+        assert not is_github_rate_limit(resp)
 
-    def test_non_403_not_secondary_rate_limit(self) -> None:
-        resp = _make_response(429, {"X-RateLimit-Remaining": "0"})
-        assert not _is_secondary_rate_limit(resp)
+    def test_429_is_rate_limit(self) -> None:
+        assert is_github_rate_limit(_make_response(429))
+
+    def test_non_rate_limit_status(self) -> None:
+        resp = _make_response(503, {"X-RateLimit-Remaining": "0"})
+        assert not is_github_rate_limit(resp)
 
 
 class TestIsRetryableResponse:
