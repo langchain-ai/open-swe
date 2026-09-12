@@ -23,6 +23,7 @@ import { agentsApi } from "@/features/agents/lib/api"
 import { api } from "@/lib/api"
 import type { ThreadVisibility } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
+import { AssistantUiPreference } from "./AssistantUiPreference"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },
@@ -73,6 +74,7 @@ export function PreferencesSection() {
 
   return (
     <SettingsSection title="Preferences">
+      <AssistantUiPreference />
       <SettingsRow
         label="Appearance"
         description="Theme used across the dashboard."
