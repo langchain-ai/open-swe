@@ -159,11 +159,11 @@ async def migrate() -> None:
         "Initializing analytics database",
         extra={"analytics_database_setting": "POSTGRES_URI", "analytics_schema": _SCHEMA},
     )
-    migrations, scripts = await asyncio.to_thread(_load_migrations)
+    migrations = await asyncio.to_thread(_load_migrations)
     async with engine().begin() as conn:
         await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _MIGRATION_LOCK})
         await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {_SCHEMA}"))
-        await conn.run_sync(_upgrade, migrations, scripts)
+        await conn.run_sync(_upgrade, migrations)
         persisted_workspace = await conn.scalar(
             text(f"SELECT workspace_id FROM {_SCHEMA}.deployment_metadata")
         )
@@ -180,22 +180,17 @@ async def migrate() -> None:
     )
 
 
-def _load_migrations() -> tuple[ScriptDirectory, dict[str, str]]:
+def _load_migrations() -> ScriptDirectory:
     global _MIGRATIONS
     if _MIGRATIONS is None:
         _MIGRATIONS = ScriptDirectory(str(_MIGRATION_DIR))
         list(_MIGRATIONS.walk_revisions())
-    scripts = {
-        path.name.split("_", 1)[0]: path.read_text()
-        for path in sorted(_MIGRATION_DIR.glob("*.sql"))
-    }
-    return _MIGRATIONS, scripts
+    return _MIGRATIONS
 
 
 def _upgrade(
     conn: Connection,
     migrations: ScriptDirectory,
-    scripts: dict[str, str],
     schema: str = _SCHEMA,
     revision: str = "head",
 ) -> None:
@@ -207,10 +202,11 @@ def _upgrade(
             "fn": lambda current, _: upgrade_revisions(revision, current),
             "version_table_schema": schema,
             "transaction_per_migration": True,
+            "analytics_schema": schema,
         },
     )
     with Operations.context(context):
-        context.run_migrations(migration_scripts=scripts)
+        context.run_migrations()
 
 
 async def readiness() -> dict[str, Any]:
