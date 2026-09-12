@@ -358,7 +358,7 @@ async def test_prompt_cleanup_failure_preserves_saved_feedback_and_confirmation(
         feedback.post_slack_ephemeral_message.assert_not_awaited()
     else:
         feedback.post_slack_ephemeral_message.assert_awaited_once_with(
-            "C1", "U1", "✅ Feedback completed. Thanks!", thread_ts="1.0"
+            "C1", "U1", "✅ Feedback submitted. Thanks!", thread_ts="1.0"
         )
 
 
