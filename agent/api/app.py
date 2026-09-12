@@ -27,9 +27,9 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    from agent.analytics.database import activate_reporting
-    from agent.analytics.database import close as close_analytics
-    from agent.analytics.database import migrate as migrate_analytics
+    from agent.database.analytics import activate_reporting
+    from agent.database.analytics import close as close_analytics
+    from agent.database.analytics import migrate as migrate_analytics
     from agent.analytics.worker import start_worker, stop_worker
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config

@@ -5,7 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from agent.analytics import database, directory, emitter
+from agent.analytics import directory, emitter
+from agent.database import analytics as database
 
 
 @pytest.fixture
