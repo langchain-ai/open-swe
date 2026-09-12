@@ -2,10 +2,12 @@ export function ThinkingSpinner({
   isActive,
   settingUpSandbox = false,
   label,
+  onRetry,
 }: {
   isActive: boolean
   settingUpSandbox?: boolean
   label?: string
+  onRetry?: () => void
 }) {
   if (!isActive) return null
 
@@ -21,6 +23,15 @@ export function ThinkingSpinner({
           ? "Agent is setting up the environment…"
           : (label ?? "Working…")}
       </span>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          Retry now
+        </button>
+      )}
     </div>
   )
 }

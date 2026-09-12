@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest"
 import {
   IDLE_STREAM_TTL_MS,
   MAX_IDLE_STREAMS,
+  MAX_RECONNECT_ATTEMPTS,
+  reconnectDelayMs,
   useStreamPool,
 } from "./streamPool"
 import type { AgentStream } from "./streamPool"
@@ -134,5 +136,51 @@ describe("streamPool", () => {
     expect(retained).toContain(`thread-${MAX_IDLE_STREAMS}`)
     expect(retained).toContain("current")
     expect(retained).toHaveLength(MAX_IDLE_STREAMS + 1)
+  })
+
+  describe("connection", () => {
+    it("reports each retry with the deadline its delay implies", () => {
+      pool().activate("cloud", "one")
+      const id = activeEntry()!.id
+
+      pool().streamReconnecting(id, 3, NOW)
+
+      expect(activeEntry()!.connection).toEqual({
+        status: "reconnecting",
+        attempt: 3,
+        retryAt: NOW + reconnectDelayMs(3),
+      })
+    })
+
+    it("returns to live once a stream opens again", () => {
+      pool().activate("cloud", "one")
+      const id = activeEntry()!.id
+      pool().streamReconnecting(id, 1, NOW)
+
+      pool().streamLive(id)
+
+      expect(activeEntry()!.connection).toEqual({ status: "live" })
+    })
+
+    it("only gives up on a stream that was already reconnecting", () => {
+      pool().activate("cloud", "one")
+      const id = activeEntry()!.id
+
+      pool().streamLost(id)
+
+      expect(activeEntry()!.connection).toEqual({ status: "live" })
+    })
+
+    it("bumps the epoch on retry so the instance is rebuilt", () => {
+      pool().activate("cloud", "one")
+      pool().streamReconnecting(activeEntry()!.id, MAX_RECONNECT_ATTEMPTS, NOW)
+      pool().streamLost(activeEntry()!.id)
+
+      pool().retryStream("cloud", "one")
+
+      const entry = activeEntry()!
+      expect(entry.epoch).toBe(1)
+      expect(entry.connection.status).toBe("reconnecting")
+    })
   })
 })
