@@ -152,6 +152,15 @@ export function isHotkeySuppressed(target: EventTarget | null): boolean {
   return Boolean(closestElement(target)?.closest('[data-hotkeys="ignore"]'))
 }
 
+/**
+ * Whether a shortcut should stay active while the user is typing. Modifier
+ * combos (e.g. Cmd/Ctrl+N) qualify; bare keys like `c` do not.
+ */
+export function isTypingSafeShortcut(shortcut: string): boolean {
+  const combo = parseCombo(shortcut)
+  return combo.mod || combo.meta || combo.ctrl || combo.alt
+}
+
 export function shouldIgnoreHotkey(
   event: KeyboardEvent,
   enableInFormFields = false,
@@ -169,6 +178,7 @@ export function shouldIgnoreHotkey(
 /**
  * Register a global keyboard shortcut. Use "mod" for the platform meta key
  * (Cmd on macOS, Ctrl elsewhere). Accepts one combo or several aliases.
+ * Modifier combos also fire while typing in form fields; bare keys do not.
  */
 export function useHotkey(
   combo: string | Array<string>,
@@ -191,8 +201,16 @@ export function useHotkey(
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return
     const combos = comboKey.split("\u0000")
+    const typingSafe = combos.some(isTypingSafeShortcut)
     const onKeyDown = (event: KeyboardEvent) => {
-      if (shouldIgnoreHotkey(event, enableInFormFields, ignoreRepeat)) return
+      if (
+        shouldIgnoreHotkey(
+          event,
+          enableInFormFields || typingSafe,
+          ignoreRepeat
+        )
+      )
+        return
       if (!combos.some((value) => eventMatchesShortcut(event, value))) return
       if (preventDefault) event.preventDefault()
       handlerRef.current(event)

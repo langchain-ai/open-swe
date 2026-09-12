@@ -13,6 +13,7 @@ What a deployment needs:
 | `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_INSTALLATION_ID` | The GitHub App you create in step 3 |
 | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME` | The Slack app you create in step 5 |
 | `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 6) |
+| `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` | The GitHub organizations or users allowed to log in (step 6) |
 | `CONFIGURED_ADMINS` | The GitHub logins or emails of your admins (step 6) |
 | `LANGGRAPH_URL` | The deployment's own public URL |
 
@@ -20,7 +21,7 @@ GitHub and Slack are the two surfaces every deployment has; Linear is an optiona
 
 ## 1. Create the deployment
 
-You need the deployment's public URL before the GitHub App can be created, so create the deployment first; it starts without the GitHub and Slack variables and picks them up in step 6.
+You need the deployment's public URL before the GitHub App can be created, so create the deployment first. Its initial revision may remain stopped until step 6, when you configure the GitHub and Slack variables plus a required login allowlist.
 
 **LangGraph Platform.** Connect the repository to a new deployment in LangSmith → Deployments. The image build bundles the dashboard (the `dockerfile_lines` in `langgraph.json`), so the deployment URL serves the UI at `/` and the API beneath it; a failed UI build is logged and the backend still deploys. The platform injects `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, and `LANGSMITH_PROJECT`. You will set the environment variables in step 6.
 
@@ -101,7 +102,7 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 
 **LangSmith LLM Gateway.** Instead of per-provider keys, route every model call through the gateway with one LangSmith key that has the `gateway:invoke` permission, set as `LANGSMITH_GATEWAY_API_KEY`. Setting that key turns the gateway on; `LANGSMITH_GATEWAY_ENABLED=true|false` forces it either way (with `true` and no gateway key, `LANGSMITH_API_KEY` is used, which on LangGraph Platform may lack the permission). `LANGSMITH_GATEWAY_BASE_URL` points at a regional or self-hosted gateway. Admins can also toggle the gateway per team in the dashboard.
 
-**Which model runs.** The deployment default is `anthropic:claude-opus-5` when only an Anthropic key is configured and `openai:gpt-5.6-sol` otherwise, at `medium` reasoning effort; override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set a team default under **Admin → Team settings**, and each user can pick their own model and effort under **My settings**; the supported list lives in `agent/dashboard/options.py`. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
+**Which model runs.** The deployment default is `anthropic:claude-opus-5` when only an Anthropic key is configured and `openai:gpt-5.6-sol` otherwise, at `medium` reasoning effort; override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set a team default under **Admin → Global defaults**, and each user can pick their own model and effort under **My settings**; the supported list lives in `agent/dashboard/options.py`. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 **Other API keys.** `EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool. `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
 
@@ -207,6 +208,8 @@ GITHUB_APP_CLIENT_SECRET=""
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"   # one line with \n between the PEM lines, or the multi-line value your platform accepts
 GITHUB_WEBHOOK_SECRET=""
 GITHUB_APP_INSTALLATION_ID=""
+ALLOWED_GITHUB_ORGS=""               # required unless ALLOWED_GITHUB_USERS is set
+ALLOWED_GITHUB_USERS=""              # required unless ALLOWED_GITHUB_ORGS is set
 
 SLACK_BOT_TOKEN=""                    # step 5
 SLACK_SIGNING_SECRET=""
@@ -222,11 +225,11 @@ On LangGraph Platform, set them under the deployment's environment variables; sa
 
 ## 7. Verify it works
 
-**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Team settings, User mappings, Sandbox, Environments, …) appear. Set **Admin → Team settings → Default repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
+**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Global defaults, User mappings, Sandbox, Environments, …) appear. Set **Admin → Global defaults → Default Repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
 
-**Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Runs it starts act as the GitHub App until the Slack user is linked to a GitHub login, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
+**Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Public runs use the workspace GitHub App for agent operations, and user-owned PRs are opened as the thread's initiating GitHub user. Link the Slack user to a GitHub login before starting the thread, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
 
-**GitHub.** Signing in once is also what lets GitHub-triggered runs act as you: they run as the commenting user and need the token the sign-in stored; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
+**GitHub.** GitHub-triggered conversations are public. Agent GitHub operations use the App installation identity, while PRs use the initiating commenter's OAuth. The commenter must have a linked account; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
 
 ---
 
@@ -249,23 +252,10 @@ Open a section when you want that feature; everything above keeps working withou
 Open SWE listens for Linear comments that mention `@openswe`.
 
 1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** only **Comments → Create**.
-2. **Settings → API → Personal API keys → New API key** with **All access**, saved as `LINEAR_API_KEY`.
-3. Map Linear teams and projects to repositories in `agent/linear/team_repo_map.py`:
+2. Add a Linear MCP server named `linear` under **Admin → Workspace MCPs** and select the tools Open SWE may use. Include `save_comment` (or `create_comment` if offered) so the backend can post run, authentication, and sandbox failure notices even after the agent stops.
+3. Set a workspace default repository under **Open SWE Agent**. Add a `repo:owner/name` token or GitHub URL to a Linear comment when the issue belongs to another repository.
 
-```python
-LINEAR_TEAM_TO_REPO = {
-    "My Team": {"owner": "my-org", "name": "my-repo"},
-    "Engineering": {
-        "projects": {
-            "backend": {"owner": "my-org", "name": "backend"},
-            "frontend": {"owner": "my-org", "name": "frontend"},
-        },
-        "default": {"owner": "my-org", "name": "monorepo"},
-    },
-}
-```
-
-A `repo:owner/name` token or GitHub URL in the comment overrides the mapping. **Verify:** comment `@openswe what files are in this repo?` on an issue in a mapped team.
+**Verify:** comment `@openswe what files are in this repo?` on an issue, adding `repo:owner/name` when needed.
 
 </details>
 
@@ -278,7 +268,7 @@ The bundled dashboard needs none of this. Read on only if the dashboard is deplo
 
 **Mount prefix.** If the server runs under a LangGraph `http.mount_prefix`, the Platform image builds the UI for that prefix automatically; locally pass it to the build (`DASHBOARD_BASE_PATH=/<prefix>/ make build-dashboard`) and keep `LANGGRAPH_URL` on the mounted URL.
 
-**Datadog RUM.** Set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building. Optional: `VITE_DATADOG_SITE` (default `datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay masks all content and telemetry strips query strings and fragments. `VITE_` values are public in the bundle; use a client token, never an API or application key.
+**Datadog RUM.** Set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building. Optional: `VITE_DATADOG_SITE` (default `us5.datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay masks all content and telemetry strips query strings and fragments. `VITE_` values are public in the bundle; use a client token, never an API or application key.
 
 </details>
 
@@ -312,16 +302,17 @@ ADMIN_OIDC_AUDIENCE="open-swe"                                  # optional; this
 **Allowlists.**
 
 ```bash
-ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"                        # all repos in these orgs
+ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"                        # org members allowed to log in; all repos in these orgs
+ALLOWED_GITHUB_USERS="octocat,hubot"                                 # individual users allowed to log in
 ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"  # specific owner/repo pairs
 PUBLIC_REPO_ORG_GATE=""   # single org whose members may trigger runs on *public* repos; empty = no gate
 ```
 
-A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`; both empty allows everything. For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level guard: editing a repository outside those orgs requires the user to name it with its full `https://github.com/<owner>/<repo>` URL. It also gates **dashboard login** to active members of the listed organizations, verified server-side with the installation token and failing closed on any API error; install the App in every listed organization and grant **Organization → Members: Read-only**. When team LangSmith credentials are connected, every active member of a listed organization can use the read-only LangSmith trace tools, so only list organizations whose full membership may see team-level trace data.
+Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS`; an empty value in both stops the server. The desktop app's authenticated private local backend is exempt because it supports local mode without GitHub. When both are configured, they form a union: dashboard login accepts an explicitly listed user **or** an active member of a listed organization. Organization membership is verified server-side with the installation token and fails closed on any API error; install the App in every listed organization and grant **Organization → Members: Read-only**. A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`; both repository allowlists empty allows every installed repository. For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level guard: editing a repository outside those orgs requires the user to name it with its full `https://github.com/<owner>/<repo>` URL. When team LangSmith credentials are connected, every active member of a listed organization can use the read-only LangSmith trace tools, so only list organizations whose full membership may see team-level trace data.
 
-**User mapping.** Which GitHub users can trigger the agent is controlled by the user mapping (GitHub login ⇄ work email ⇄ optional Slack ID) in the LangGraph Store, managed under **Admin → User mappings**. Signing in to the dashboard records a mapping for that user. An unmapped person who tags Open SWE in Slack gets a run with the GitHub App's installation permissions and a "link your GitHub account" prompt; completing the org-gated login records a `self` mapping.
+**User mapping.** Which GitHub users can trigger the agent is controlled by the user mapping (GitHub login ⇄ work email ⇄ optional Slack ID) in the LangGraph Store, managed under **Admin → User mappings**. Signing in to the dashboard records a mapping for that user. An unmapped person who tags Open SWE in Slack gets a run with the GitHub App's installation permissions and a "link your GitHub account" prompt; completing the allowlisted login records a `self` mapping.
 
-**Default repository.** Runs that name no repository use **Admin → Team settings → Default repository**, seeded from `DEFAULT_REPO_OWNER` / `DEFAULT_REPO_NAME` when set; `SLACK_REPO_OWNER` / `SLACK_REPO_NAME` are a Slack-only fallback.
+**Default repository.** Runs that name no repository use **Admin → Global defaults → Default Repository**, seeded from `DEFAULT_REPO_OWNER` / `DEFAULT_REPO_NAME` when set; `SLACK_REPO_OWNER` / `SLACK_REPO_NAME` are a Slack-only fallback.
 
 </details>
 
@@ -344,6 +335,34 @@ A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_O
 - Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create for Linear.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
 
+### Thread credential scope
+
+Public threads use the GitHub App installation identity for agent GitHub
+operations. PRs from user-owned threads are opened with the original initiator's
+stored GitHub OAuth token, even when another participant starts the run. If that
+token is unavailable, the initiator must sign in again; PR creation does not fall
+back to the bot. Public PR creation first verifies that the target repository is
+accessible through the configured workspace installation. System-owned threads, including scheduled automations, open PRs
+as the GitHub App. Existing threads without recorded ownership retain bot PR
+authorship. Scheduled runs check repository access with the workspace GitHub App.
+They record the automation creator for auditing but do not require that person's
+OAuth token or inject their GitHub login or email as the agent's execution identity.
+Admin schedules retain their management tools through authorization tied to the
+scheduled invocation. The graph and tools recheck the creator's current admin
+status; later participants do not inherit that authorization. Automation management
+from these system runs also uses workspace credentials.
+
+Public threads load workspace MCP connections and organization skills. Personal
+Notion connections, user skills, and user custom instructions are available only in a private thread
+started by its immutable owner. The same ownership check applies when a personal
+MCP tool refreshes its credentials at execution time.
+
+Private threads use their owner's stored GitHub OAuth token for server-side
+GitHub operations and PR creation. If that token is unavailable, the owner must
+sign in again; the run does not fall back to the bot. Sandbox GitHub proxy access
+continues to use the GitHub App installation token in both kinds of thread.
+User identity and membership checks still apply to public runs.
+
 ### GitHub authentication errors
 
 - Check `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APP_INSTALLATION_ID`. The private key must include the full `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines; in a `.env` file write it as one double-quoted line with `\n` between the PEM lines.
@@ -355,7 +374,8 @@ A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_O
 - `redirect_uri is not associated with this application`: the App must list `<URL you opened the dashboard on>/dashboard/api/auth/callback`. Add it in the App's settings.
 - Login redirects but the session does not stick: use `https://` and open the dashboard on `LANGGRAPH_URL` itself.
 - `403 CSRF check failed` on saves: the request's `Origin` is neither `DASHBOARD_BASE_URL` (defaults to `LANGGRAPH_URL`) nor in `DASHBOARD_ALLOWED_ORIGINS`.
-- Login rejected with an org error: `ALLOWED_GITHUB_ORGS` gates login and needs the App's Organization → Members permission.
+- Startup fails with `ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured`: set at least one nonempty login allowlist.
+- Login rejected with an authorization error: add the login to `ALLOWED_GITHUB_USERS`, or configure `ALLOWED_GITHUB_ORGS` and grant the App Organization → Members permission.
 - Admin pages 403: add your GitHub login or email to `CONFIGURED_ADMINS`.
 
 ### Dashboard shows the LangGraph JSON instead of the UI, or 404s at `/`

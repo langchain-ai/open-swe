@@ -251,6 +251,7 @@ ENV.var("EXTRA_INTERNAL_BOT_LOGINS", "Comma-separated bot logins treated as inte
 ENV.var(
     "ALLOWED_GITHUB_ORGS", "Comma-separated GitHub orgs allowed for webhooks and dashboard login."
 )
+ENV.var("ALLOWED_GITHUB_USERS", "Comma-separated GitHub users allowed to log in to the dashboard.")
 ENV.var("ALLOWED_GITHUB_REPOS", "Comma-separated owner/repo pairs allowed for webhooks.")
 ENV.var("PUBLIC_REPO_ORG_GATE", "Single org whose members may trigger runs on public repos.")
 ENV.var(
@@ -270,7 +271,6 @@ ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention d
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
-ENV.var("LINEAR_API_KEY", "Linear API key.", secret=True)
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
