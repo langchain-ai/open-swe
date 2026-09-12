@@ -107,6 +107,7 @@ export interface SessionUser {
   is_admin: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
+  slack_base_url?: string
 }
 
 export interface ModelOption {

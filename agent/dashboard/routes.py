@@ -406,6 +406,10 @@ def _api_base_url() -> str:
     return dashboard_api_base_url()
 
 
+def _slack_base_url() -> str:
+    return (ENV.SLACK_PUBLIC_BASE_URL.get() or _api_base_url()).rstrip("/")
+
+
 def _frontend_base_url() -> str:
     v = dashboard_base_url()
     if not v:
@@ -625,6 +629,7 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "is_admin": _session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
         "api_base_url": _api_base_url(),
+        "slack_base_url": _slack_base_url(),
     }
 
 
@@ -861,7 +866,7 @@ async def slack_login(
     """Start the Sign in with Slack flow to link the current GitHub account."""
     if not slack_oauth_configured():
         raise HTTPException(500, "Slack OAuth is not configured")
-    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
     nonce = new_state_nonce()
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
@@ -931,7 +936,7 @@ async def slack_callback(
 
 async def _verified_slack_identity(code: str) -> tuple[str, str]:
     """Resolve an authorization code to a Slack member id and verified email."""
-    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
     identity = await fetch_slack_identity(await exchange_slack_code(code, redirect_uri))
     verify_team(identity)
     if not identity.email or not identity.email_verified:

@@ -240,6 +240,8 @@ Open a section when you want that feature; everything above keeps working withou
 <details id="slack-sign-in-and-code-channels">
 <summary><strong>Slack: "Sign in with Slack" linking and code channels</strong></summary>
 
+For local development through ngrok, set `SLACK_PUBLIC_BASE_URL` to the tunnel’s HTTPS URL while keeping `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` on localhost. The generated Slack manifest and both OAuth steps use this public URL. Register that callback in Slack. If the dashboard session lives on localhost, the tunnel must redirect the browser from `/dashboard/api/slack/callback` to the same localhost path, preserving the query string so the local session and OAuth state cookies are available.
+
 **Allow other Slack bots.** In **Admin → Slack integration → Allowed bots**, click **Add bot** to browse active bots in the connected workspace. Search by name and select **Allow**, or use **Enter bot ID manually** with a bot ID (`B…`) or bot member ID (`U…`). Every addition is verified with Slack. Browsing needs the `users:read` bot scope and caches the directory for five minutes; reinstall the Slack app after adding that scope.
 
 Allowed bots start public, system-owned threads by explicitly mentioning Open SWE in a channel. Runs and pull requests use the Open SWE GitHub App and its installation's repository access. The admin who added the bot is recorded for audit and supplies no execution credentials or elevated permissions. No environment assignment is required. Bots cannot use personal integrations, admin tools, cross-thread browsing, breakout threads, or delegated PR review.
