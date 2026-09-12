@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,9 +10,8 @@ import {
 } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AppendMessage } from "@assistant-ui/react"
-import AssistantConversation, {
-  appendMessageInput,
-} from "./AssistantConversation"
+import { ConversationTestHarness as AssistantConversation } from "./ConversationTestHarness"
+import { appendMessageInput } from "@/features/agents/lib/assistant-ui/conversationRuntime"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 
 vi.mock("@/features/agents/components/chat/Markdown", () => ({
@@ -131,12 +131,23 @@ describe("assistant-ui conversation", () => {
     }
     const pending = { ...tool, status: "in_progress" as const }
     const second = { ...tool, toolCallId: "read", title: "Read file" }
-    const messages = (first: ToolExecutionChunk) => [{
-      ...agent,
-      chunks: [first, { kind: "text" as const, text: "Checking files." }, second, approval],
-    }]
+    const messages = (first: ToolExecutionChunk) => [
+      {
+        ...agent,
+        chunks: [
+          first,
+          { kind: "text" as const, text: "Checking files." },
+          second,
+          approval,
+        ],
+      },
+    ]
     const view = render(
-      <AssistantConversation composer={{}} messages={messages(pending)} isStreaming />
+      <AssistantConversation
+        composer={{}}
+        messages={messages(pending)}
+        isStreaming
+      />
     )
     const activity = screen.getByText("Show activity").closest("details")!
     expect(screen.getAllByText("Show activity")).toHaveLength(1)
@@ -145,15 +156,23 @@ describe("assistant-ui conversation", () => {
     expect(activity.contains(screen.getByText("Read file"))).toBe(true)
     expect(activity.contains(screen.getByText("Checking files."))).toBe(false)
     expect(activity.contains(screen.getByText("Approve changes"))).toBe(false)
-    expect(screen.getByText("Approve changes").closest("details")!.open).toBe(true)
-    expect(activity.querySelector("summary")!.textContent).toContain("2 calls · Running")
+    expect(screen.getByText("Approve changes").closest("details")!.open).toBe(
+      true
+    )
+    expect(activity.querySelector("summary")!.textContent).toContain(
+      "2 calls · Running"
+    )
 
     fireEvent.click(screen.getByText("Show activity"))
     expect(activity.open).toBe(true)
     view.rerender(
       <AssistantConversation
         composer={{}}
-        messages={messages({ ...pending, status: "error", output: "Build failed" })}
+        messages={messages({
+          ...pending,
+          status: "error",
+          output: "Build failed",
+        })}
         isStreaming={false}
       />
     )
@@ -240,6 +259,50 @@ describe("assistant-ui conversation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }))
     expect(send).toHaveBeenCalledTimes(1)
   })
+  it("keeps a failed message while sending another draft and clears it after retry", async () => {
+    let fail = (_error: Error) => {}
+    const send = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            fail = reject
+          })
+      )
+      .mockResolvedValue(undefined)
+    render(
+      <AssistantConversation
+        composer={{ onSubmit: send }}
+        messages={[]}
+        isStreaming={false}
+      />
+    )
+    fill("First message")
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith("First message", []))
+    fill("Second message")
+    await act(async () => fail(new Error("Connection lost")))
+    expect(
+      await screen.findByRole("button", { name: "Retry failed message" })
+    ).toBeTruthy()
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+      "Second message"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith("Second message", []))
+    expect(screen.getByText("First message", { exact: true })).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry failed message" })
+    )
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(3))
+    expect(send).toHaveBeenLastCalledWith("First message", [])
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Retry failed message" })
+      ).toBeNull()
+    )
+  })
+
   it("updates a streaming message without duplicating its text", async () => {
     const view = render(
       <AssistantConversation

@@ -9,6 +9,8 @@ import {
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentStreamProvider } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { ExperimentalRuntimeProvider } from "@/features/agents/lib/assistant-ui/ExperimentalRuntimeProvider"
+import { useExperimentalAssistantUi } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
@@ -35,6 +37,7 @@ function useAgentsTheme() {
 function AgentsLayout() {
   useAgentsTheme()
   const session = useSession()
+  const experimentalAssistantUi = useExperimentalAssistantUi()
   const navigate = Route.useNavigate()
   const threadMatch = useMatch({
     from: "/agents/$threadId",
@@ -77,17 +80,36 @@ function AgentsLayout() {
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
-      <AgentStreamProvider
-        threadId={activeLocalSessionId ?? activeThreadId ?? null}
-        transport={activeLocalSessionId ? "local" : "cloud"}
-        onThreadCreated={(id) => {
-          if (!activeThreadId) {
-            void navigate({ to: "/agents/$threadId", params: { threadId: id } })
-          }
-        }}
-      >
-        <Outlet />
-      </AgentStreamProvider>
+      {experimentalAssistantUi ? (
+        <ExperimentalRuntimeProvider
+          threadId={activeLocalSessionId ?? activeThreadId ?? null}
+          transport={activeLocalSessionId ? "local" : "cloud"}
+          cloudEnabled={Boolean(session.data)}
+          onThreadCreated={(id) => {
+            void navigate({
+              to: "/agents/$threadId",
+              params: { threadId: id },
+            })
+          }}
+        >
+          <Outlet />
+        </ExperimentalRuntimeProvider>
+      ) : (
+        <AgentStreamProvider
+          threadId={activeLocalSessionId ?? activeThreadId ?? null}
+          transport={activeLocalSessionId ? "local" : "cloud"}
+          onThreadCreated={(id) => {
+            if (!activeThreadId) {
+              void navigate({
+                to: "/agents/$threadId",
+                params: { threadId: id },
+              })
+            }
+          }}
+        >
+          <Outlet />
+        </AgentStreamProvider>
+      )}
     </AgentsShell>
   )
 }

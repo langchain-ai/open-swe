@@ -5,7 +5,7 @@ import type { BaseMessage } from "@langchain/core/messages"
 import { AIMessage, HumanMessage } from "@langchain/core/messages"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
-import AssistantConversation from "./AssistantConversation"
+import { ConversationTestHarness as AssistantConversation } from "./ConversationTestHarness"
 import { useMessages, useToolCalls } from "@langchain/react"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"

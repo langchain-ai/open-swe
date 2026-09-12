@@ -1,25 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useState } from "react"
 import {
-  AssistantRuntimeProvider,
   AttachmentPrimitive,
   ComposerPrimitive,
-  MessageNotSentError,
-  SimpleImageAttachmentAdapter,
   ThreadPrimitive,
+  useAui,
   useAuiState,
-  useExternalStoreRuntime,
 } from "@assistant-ui/react"
 import { ArrowDown, ArrowUp, Map, Plus, Square, X } from "lucide-react"
-import type {
-  AppendMessage,
-  AssistantRuntime,
-  ExternalThreadQueueAdapter,
-} from "@assistant-ui/react"
 import type { ReactNode } from "react"
 import type { ChatComposerProps } from "../composer/ChatComposer"
 import type { MessagesProps } from "../messages/types"
-import type { ImageChunk } from "@/features/agents/lib/types"
-import { convertMessage } from "./convertMessage"
+import type { ConversationRuntimeExtras } from "@/features/agents/lib/assistant-ui/conversationRuntime"
 import { AssistantMessage } from "./AssistantMessage"
 import { ModelPicker } from "../ModelPicker"
 import { ContextWindowMeter } from "../composer/ContextWindowMeter"
@@ -31,41 +22,6 @@ export interface AssistantConversationProps extends MessagesProps {
   footer?: ReactNode
   isLoading?: boolean
   hydrationFailed?: boolean
-}
-
-export function appendMessageInput(message: AppendMessage) {
-  const content = message.content
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
-  const imageParts = [
-    ...message.content
-      .filter((part) => part.type === "image")
-      .map((part) => ({ part, name: undefined as string | undefined })),
-    ...(message.attachments ?? []).flatMap((attachment) =>
-      attachment.content
-        .filter((part) => part.type === "image")
-        .map((part) => ({ part, name: attachment.name }))
-    ),
-  ]
-  if (imageParts.length > 5)
-    throw new Error("Attach up to 5 images per message.")
-  const images: ImageChunk[] = imageParts.map(({ part, name }) => {
-    const match = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.*)$/s.exec(
-      part.image
-    )
-    if (!match?.[1] || !match[2])
-      throw new Error("Use PNG, JPEG, GIF, or WebP images.")
-    if ((match[2].length * 3) / 4 > 10 * 1024 * 1024)
-      throw new Error("Each image must be smaller than 10 MB.")
-    return {
-      kind: "image",
-      mimeType: match[1],
-      base64: match[2],
-      fileName: name,
-    }
-  })
-  return { content, images }
 }
 
 function ComposerAttachment() {
@@ -105,14 +61,14 @@ function Composer({
   runtime,
 }: {
   options: ChatComposerProps
-  runtime: AssistantRuntime
+  runtime: ReturnType<typeof useAui>
 }) {
   const running = useAuiState((s) => s.thread.isRunning)
   const empty = useAuiState((s) => s.composer.isEmpty)
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0)
   const disabled = useAuiState((s) => s.thread.isDisabled)
   const insert = (value: string) => {
-    const composer = runtime.thread.composer
+    const composer = runtime.composer()
     const text = composer.getState().text
     composer.setText(
       `${text}${text && !text.endsWith(" ") ? " " : ""}${value} `
@@ -139,7 +95,7 @@ function Composer({
           onKeyDown={(event) => {
             if (event.key === "Escape" && running) {
               event.preventDefault()
-              runtime.thread.composer.cancel()
+              runtime.composer().cancel()
             }
           }}
         />
@@ -254,128 +210,26 @@ export default function AssistantConversation({
   onAutoApprove,
   onOpenFile,
 }: AssistantConversationProps) {
+  const runtime = useAui()
+  const { error, sending, failedMessages, dispatch, configureComposer } =
+    useAuiState((s) => s.thread.extras) as ConversationRuntimeExtras
+  useLayoutEffect(
+    () => configureComposer(composer),
+    [configureComposer, composer]
+  )
+  useLayoutEffect(() => () => configureComposer(undefined), [configureComposer])
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
     [messages]
   )
-  const [error, setError] = useState<string | null>(null)
-  const [sending, setSending] = useState(false)
-  const [failedMessage, setFailedMessage] = useState<AppendMessage | null>(null)
-  const inFlight = useRef(false)
-  const mounted = useRef(true)
-  const runtimeRef = useRef<AssistantRuntime | null>(null)
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
-  const send = async (message: AppendMessage) => {
-    inFlight.current = true
-    setSending(true)
-    setError(null)
-    setFailedMessage(null)
-    try {
-      const input = appendMessageInput(message)
-      const model = composer.models?.find(
-        (option) => option.id === composer.selection?.modelId
-      )
-      if (input.images.length && model?.supports_images === false)
-        throw new Error("Choose a model that supports images.")
-      if (!composer.onSubmit) throw new Error("Sending is unavailable.")
-      await composer.onSubmit(input.content, input.images)
-    } catch (cause) {
-      if (!mounted.current) return
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "The message could not be sent."
-      )
-      const draft = runtimeRef.current?.thread.composer
-      if (draft && !draft.getState().isEmpty) {
-        setFailedMessage(message)
-        return
-      }
-      draft?.setText(
-        message.content
-          .filter((part) => part.type === "text")
-          .map((part) => part.text)
-          .join("\n")
-      )
-      for (const attachment of message.attachments ?? []) {
-        await draft?.addAttachment({
-          type: attachment.type,
-          name: attachment.name,
-          contentType: attachment.contentType,
-          content: attachment.content,
-        })
-      }
-    } finally {
-      inFlight.current = false
-      if (mounted.current) setSending(false)
-    }
-  }
-  const dispatch = (message: AppendMessage) => {
-    if (composer.disabled || inFlight.current)
-      throw new MessageNotSentError("Sending is unavailable.")
-    void send(message)
-  }
-  // Queue ownership stays with the backend, which can inject follow-ups into the active run.
-  const queue: ExternalThreadQueueAdapter = {
-    items: [],
-    steerItems: [],
-    enqueue: dispatch,
-    steer: dispatch,
-    move: () => {
-      throw new Error("Queued messages are managed by the server.")
-    },
-    edit: () => {
-      throw new Error("Queued messages are managed by the server.")
-    },
-    remove: () => {
-      throw new Error("Queued messages are managed by the server.")
-    },
-  }
-  const attachments = useMemo(() => {
-    const adapter = new SimpleImageAttachmentAdapter()
-    adapter.accept = "image/png,image/jpeg,image/gif,image/webp"
-    return adapter
-  }, [])
-  const runtime = useExternalStoreRuntime({
-    messages: visibleMessages,
-    convertMessage,
-    isRunning: isStreaming,
-    isLoading,
-    isDisabled: !!composer.disabled,
-    isSendDisabled: sending,
-    onNew: send,
-    queue,
-    adapters: { attachments },
-    onCancel: composer.onStop
-      ? async () => {
-          try {
-            await composer.onStop?.()
-          } catch (cause) {
-            if (mounted.current)
-              setError(
-                cause instanceof Error
-                  ? cause.message
-                  : "The run could not be stopped."
-              )
-          }
-        }
-      : undefined,
-  })
-  useEffect(() => {
-    runtimeRef.current = runtime
-  }, [runtime])
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
+    <>
       <ThreadPrimitive.Root
         className="relative flex min-h-0 min-w-0 flex-1 flex-col"
         data-testid="assistant-ui-conversation"
       >
         <ThreadPrimitive.Viewport
+          turnAnchor="top"
           className="min-h-0 flex-1 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto"
           aria-label="Conversation messages"
         >
@@ -457,10 +311,13 @@ export default function AssistantConversation({
               {error}
             </p>
           )}
-          {failedMessage && (
-            <div className="mb-3 rounded-xl border border-destructive/30 p-3 text-sm">
+          {failedMessages.map(({ id, message }) => (
+            <div
+              key={id}
+              className="mb-3 rounded-xl border border-destructive/30 p-3 text-sm"
+            >
               <p className="whitespace-pre-wrap">
-                {failedMessage.content
+                {message.content
                   .filter((part) => part.type === "text")
                   .map((part) => part.text)
                   .join("\n")}
@@ -469,15 +326,15 @@ export default function AssistantConversation({
                 type="button"
                 disabled={sending || composer.disabled}
                 className="mt-2 underline"
-                onClick={() => dispatch(failedMessage)}
+                onClick={() => dispatch(message)}
               >
                 Retry failed message
               </button>
             </div>
-          )}
+          ))}
           <Composer options={composer} runtime={runtime} />
         </div>
       </ThreadPrimitive.Root>
-    </AssistantRuntimeProvider>
+    </>
   )
 }
