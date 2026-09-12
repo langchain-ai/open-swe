@@ -8,6 +8,22 @@ Each thread uses an isolated sandbox. A separate read-only reviewer graph review
 
 `ui`, `desktop`, and `tests/e2e` form a pnpm/turbo workspace (`pnpm-workspace.yaml`). Use pnpm for them.
 
+## Local Development
+
+- Use `make dev-ui` for the backend plus Vite, and open the dashboard at `http://localhost:2024`. `make dev` starts only the backend; without a dashboard build or Vite, a healthy `/ok` does not mean the UI is ready.
+- Check existing processes and ports before starting. When switching worktrees, stop the previous backend gracefully and wait for it to release port 2024 before starting the replacement.
+- Always run an ngrok tunnel when starting Open SWE locally. Reuse the existing tunnel and its exact configured domain, forwarding to the active backend (normally localhost:2024). If no tunnel is running, recover the domain from configuration or prior local runtime notes before starting one; an automatically assigned hostname will not match existing webhook settings.
+- Set `SLACK_PUBLIC_BASE_URL` to the active ngrok HTTPS URL. Keep dashboard/API URLs on localhost. Preserve the webhook traffic policy and the Slack OAuth callback redirect from `/dashboard/api/slack/callback` to localhost, including the complete query string.
+- Before reporting readiness, verify backend health, the dashboard in a browser, ngrok forwarding, and the OAuth callback redirect. Record the worktree, process IDs, fixed tunnel domain, and state location in ignored `logs/local-dev/` notes in the primary checkout so the next session can reuse them.
+
+### LangGraph State Across Worktrees
+
+`langgraph dev` persists local threads, checkpoints, and Store data under `.langgraph_api` in its working directory. A fresh worktree otherwise starts with separate, empty state.
+
+- Preserve existing local data when moving development to a new worktree unless the user requests a clean start. Stop the source backend gracefully so it flushes persistence, back up its state, and copy the entire `.langgraph_api` directory, including hidden files, into the new worktree before startup. Preserve any existing destination state rather than overwriting it automatically.
+- A copy is a snapshot: subsequent changes in the two worktrees diverge. For one continuous local instance across worktrees, link `.langgraph_api` to the primary checkout's state directory instead. Only one backend may use that shared directory at a time; restart from the desired worktree to switch code.
+- Copied state also retains schedules and integration settings. Avoid running multiple copies against the same live integrations, which can duplicate background work. Keep state, backups, and environment files ignored by Git; reference the existing local environment without printing credentials.
+
 ## Architecture
 
 `langgraph.json`:
