@@ -506,10 +506,24 @@ async def _replace_findings_unlocked(thread_id: str, findings: list[Finding]) ->
         await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
     except LangGraphSDKNotFoundError as exc:
         raise ReviewerThreadMissingError(thread_id, exc) from exc
-    from agent.dashboard.agent_usage import record_reviewer_finding_state
+    from agent.analytics.usage import record_reviewer_finding_state
 
+    metadata = await get_thread_metadata(thread_id)
+    pr: dict[str, Any] = metadata["pr"] if isinstance(metadata.get("pr"), dict) else {}
     results = await asyncio.gather(
-        *(record_reviewer_finding_state(thread_id, finding) for finding in findings),
+        *(
+            record_reviewer_finding_state(
+                thread_id,
+                {
+                    **finding,
+                    "pr": pr,
+                    "owner": pr.get("owner"),
+                    "repo": pr.get("name"),
+                    "pr_number": pr.get("number"),
+                },
+            )
+            for finding in findings
+        ),
         return_exceptions=True,
     )
     failures = [result for result in results if isinstance(result, Exception)]

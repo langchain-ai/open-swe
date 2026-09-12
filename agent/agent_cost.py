@@ -6,7 +6,7 @@ from typing import Any, Literal, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.dashboard.agent_usage import (
+from agent.analytics.usage import (
     agent_invocation_needs_cost_refresh,
     mark_agent_invocation_cost_refresh_scheduled,
     record_agent_invocation_completion,
@@ -156,12 +156,20 @@ async def run_agent_cost_refresh(
 
 
 async def finalize_agent_invocation_usage(
-    *, invocation_id: str, thread_id: str, state: dict[str, Any] | None
+    *,
+    invocation_id: str,
+    thread_id: str,
+    state: dict[str, Any] | None,
+    status: str = "success",
+    failure_code: str | None = None,
 ) -> None:
     """Persist terminal invocation usage and schedule deferred cost enrichment."""
     try:
         recorded = await record_agent_invocation_completion(
             invocation_id=invocation_id,
+            thread_id=thread_id,
+            status=status,
+            failure_code=failure_code,
             usage=summarize_run_usage(state, invocation_id=invocation_id),
         )
         if not recorded and not await agent_invocation_needs_cost_refresh(

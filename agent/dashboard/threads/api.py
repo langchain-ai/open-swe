@@ -568,6 +568,11 @@ async def resolve_dashboard_thread(
                 "attention_reason": None,
             }
             await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            if resolved:
+                from agent.analytics.emitter import task_accepted, task_marked_complete
+
+                await task_marked_complete(thread_id, source="dashboard")
+                await task_accepted(thread_id, source="dashboard", actor_key=login)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001

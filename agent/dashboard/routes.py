@@ -26,6 +26,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, ValidationError
 
+from agent.analytics.queries import usage_leaderboard
 from agent.config import ENV
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_instructions import (
@@ -34,7 +35,6 @@ from agent.dashboard.agent_instructions import (
     AgentInstructionsCreate,
     AgentInstructionsUpdate,
 )
-from agent.dashboard.agent_usage import list_agent_usage_leaderboard
 from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
@@ -1965,12 +1965,73 @@ async def api_agent_usage_leaderboard(
     limit: int = 10,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await list_agent_usage_leaderboard(
-        period=period,
-        limit=limit,
-        current_login=session["sub"],
-        current_email=session.get("email"),
-    )
+    from asyncpg import PostgresError
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from agent.database.analytics import configured
+
+    try:
+        if not configured():
+            raise HTTPException(503, "Usage analytics is unavailable on this deployment.")
+        return await usage_leaderboard(
+            period=period,
+            limit=limit,
+            current_login=session["sub"],
+            current_email=session.get("email"),
+            admin=_session_is_admin(session),
+        )
+    except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Usage analytics report unavailable",
+            extra={"analytics_error_type": type(exc).__name__},
+        )
+        raise HTTPException(503, "Usage analytics is unavailable on this deployment.") from exc
+
+
+@router.get("/analytics/pr-merge-rate-by-model")
+async def api_pr_merge_rate_by_model(
+    period: str | None = "30d",
+    maturity_days: int | None = Query(default=None, ge=1, le=365),
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    from asyncpg import PostgresError
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from agent.analytics.queries import pr_merge_rate_by_model
+    from agent.database.analytics import configured
+
+    try:
+        if not configured():
+            raise HTTPException(503, "PR analytics is unavailable on this deployment.")
+        return await pr_merge_rate_by_model(
+            period=period,
+            maturity_days=maturity_days,
+            admin=_session_is_admin(session),
+        )
+    except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "PR analytics report unavailable",
+            extra={"analytics_error_type": type(exc).__name__},
+        )
+        raise HTTPException(503, "PR analytics is unavailable on this deployment.") from exc
+
+
+@router.get("/analytics/readiness")
+async def api_analytics_readiness(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    from agent.database.analytics import readiness
+
+    return await readiness()
+
+
+@router.get("/analytics/outbox-status")
+async def api_analytics_outbox_status(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    from agent.analytics.outbox import outbox_status
+
+    return await outbox_status()
 
 
 @router.get("/schedules")

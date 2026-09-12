@@ -45,6 +45,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from agent.analytics.usage import record_agent_invocation_usage
 from agent.credential_scope import private_credential_login
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
@@ -55,7 +56,6 @@ from agent.dashboard.agent_overrides import (
     profile_model_routing_enabled,
     resolve_github_login,
 )
-from agent.dashboard.agent_usage import record_agent_invocation_usage
 from agent.dashboard.environments import (
     resolve_environment,
 )
@@ -804,10 +804,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         invocation_id=cfg.invocation_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
+                        github_user_id=cfg.github_user_id,
                         user_email=self._user_email,
                         model_id=self._model_id,
                         effort=self._effort,
                         source=self._source,
+                        repository=cfg.repo_full_name or None,
                     )
         except Exception:
             logger.debug(
