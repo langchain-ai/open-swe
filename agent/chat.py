@@ -68,6 +68,7 @@ from agent.tools import (
     list_review_findings,
     read_repo_file,
     search_repo_code,
+    show_in_diff,
     web_search,
 )
 from agent.utils import ttl_cache
@@ -211,6 +212,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 read_repo_file,
                 search_repo_code,
                 list_review_findings,
+                show_in_diff,
                 web_search,
                 fetch_url,
             ]

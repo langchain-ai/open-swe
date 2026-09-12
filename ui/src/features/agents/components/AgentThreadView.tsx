@@ -13,6 +13,7 @@ import type {
   Message,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import type { ShowInDiffTarget } from "@/features/agents/lib/showInDiff"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
@@ -29,6 +30,7 @@ import { Messages } from "@/features/agents/components/messages"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { useShowInDiffRequests } from "@/features/agents/lib/showInDiff"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
@@ -181,16 +183,23 @@ export function AgentThreadView({
     },
     [thread.id]
   )
-  const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
-  const [revealChangesKey, setRevealChangesKey] = useState(0)
-  const handleOpenFile = useCallback(
-    (filePath: string) => {
-      setRevealFilePath(filePath)
-      setRevealChangesKey((key) => key + 1)
+  const [revealTarget, setRevealTarget] = useState<ShowInDiffTarget | null>(
+    null
+  )
+  const revealInDiff = useCallback(
+    (target: ShowInDiffTarget) => {
+      setRevealTarget({ ...target })
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange]
   )
+  const handleOpenFile = useCallback(
+    (filePath: string) =>
+      revealInDiff({ path: filePath, line: null, side: "new" }),
+    [revealInDiff]
+  )
+  // The agent's own `show_in_diff` calls, driving the same reveal.
+  useShowInDiffRequests(stream.messages, !stream.isThreadLoading, revealInDiff)
 
   const baseMessages = useMemo<Array<Message>>(
     () =>
@@ -406,8 +415,7 @@ export function AgentThreadView({
       </div>
       <AgentGitPanel
         thread={thread}
-        revealFilePath={revealFilePath}
-        revealChangesKey={revealChangesKey}
+        revealTarget={revealTarget}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
       />
