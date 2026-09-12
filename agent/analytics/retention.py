@@ -2,8 +2,8 @@
 
 from sqlalchemy import text
 
-from agent.analytics.database import transaction
 from agent.config import ENV
+from agent.database.analytics import transaction
 
 
 async def enforce_retention() -> None:

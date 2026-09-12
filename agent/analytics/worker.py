@@ -3,9 +3,9 @@
 import asyncio
 import logging
 
-from agent.analytics.database import configured
 from agent.analytics.outbox import deliver_batch
 from agent.analytics.retention import enforce_retention
+from agent.database.analytics import configured
 
 logger = logging.getLogger(__name__)
 
