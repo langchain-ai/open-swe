@@ -1228,6 +1228,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ModelSelectionMiddleware(
                 routing_models,
                 routing_models["fast"],
+                route_model_ids={
+                    route: routed_model_id
+                    for route, (routed_model_id, _) in routing_defaults.items()
+                },
             )
         )
     subagent_model = _make_model_or_defer(

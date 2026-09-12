@@ -5,6 +5,7 @@ from typing import Any, Literal, NotRequired
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
+from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
@@ -53,6 +54,25 @@ class ModelSelectionState(AgentState):
     plan_mode: NotRequired[bool]
 
 
+async def _emit_routed_model(
+    models: Mapping[str, BaseChatModel],
+    route_model_ids: Mapping[str, str],
+    route: Route,
+) -> None:
+    """Stream the routed model's id so the UI can show it next to `Auto`."""
+    model_id = route_model_ids.get(route)
+    if model_id is None:
+        model = models.get(route)
+        model_id = getattr(model, "model_id", None)
+    if not isinstance(model_id, str) or not model_id:
+        return
+    try:
+        get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
+    except Exception:
+        # Routing display is cosmetic; never fail a run over it.
+        logger.debug("Failed to emit model_routed event", exc_info=True)
+
+
 class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     state_schema = ModelSelectionState
 
@@ -60,8 +80,11 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         self,
         models: Mapping[str, BaseChatModel],
         classifier: BaseChatModel,
+        *,
+        route_model_ids: Mapping[str, str] | None = None,
     ) -> None:
         self._models = dict(models)
+        self._route_model_ids = dict(route_model_ids or {})
         # `nostream` keeps the routing decision out of the user-facing message
         # stream; it stays visible in traces, unlike the offloading summarizer.
         hidden_classifier = classifier.model_copy(
@@ -78,6 +101,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     ) -> dict[str, Route]:
         del runtime
         if model_route := state.get("model_route"):
+            await _emit_routed_model(self._models, self._route_model_ids, model_route)
             return {"model_route": model_route}
         if state.get("plan_mode"):
             return {}
@@ -101,6 +125,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
                 route = decision.model_route
         except Exception:  # noqa: BLE001
             logger.exception("Model routing classifier failed")
+        await _emit_routed_model(self._models, self._route_model_ids, route)
         return {"model_route": route}
 
     async def awrap_model_call(
