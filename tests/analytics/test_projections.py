@@ -20,7 +20,7 @@ from agent.analytics.events import (
     RunCostRecordedPayload,
     RunStartedPayload,
 )
-from agent.database import analytics as database
+from agent.database import postgres
 from tests.analytics.helpers import DAY, event
 
 
@@ -263,7 +263,7 @@ async def test_pr_timestamp_migration_preserves_existing_reopen(analytics_db):
     async with transaction() as conn:
         schema = await conn.scalar(text("SELECT current_schema()"))
         await conn.execute(text("ALTER TABLE pr_projection DROP COLUMN latest_transition_at"))
-        revision = database._load_migrations().get_revision("0002")
+        revision = postgres.load_migrations().get_revision("0002")
         raw = await conn.get_raw_connection()
         await raw.driver_connection.execute(revision.module.SQL.replace("open_swe", schema))
     await ingestion.ingest(
@@ -608,7 +608,7 @@ async def test_feedback_migration_recovers_acknowledged_withdrawals(analytics_db
         await conn.execute(text("UPDATE feedback_projection SET withdrawn_at = NULL"))
         await conn.execute(text("DROP TABLE feedback_withdrawal_projection"))
         schema = await conn.scalar(text("SELECT current_schema()"))
-        revision = database._load_migrations().get_revision("0003")
+        revision = postgres.load_migrations().get_revision("0003")
         raw = await conn.get_raw_connection()
         await raw.driver_connection.execute(revision.module.SQL.replace("open_swe", schema))
     await ingestion.ingest(submissions[1])
