@@ -2,7 +2,6 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -263,11 +262,9 @@ async def test_pr_timestamp_migration_preserves_existing_reopen(analytics_db):
     async with transaction() as conn:
         schema = await conn.scalar(text("SELECT current_schema()"))
         await conn.execute(text("ALTER TABLE pr_projection DROP COLUMN latest_transition_at"))
-        migration = (
-            Path(database.__file__).with_name("migrations") / "0002_pr_transition_timestamp.sql"
-        )
+        revision = database._load_migrations().get_revision("0002")
         raw = await conn.get_raw_connection()
-        await raw.driver_connection.execute(migration.read_text().replace("open_swe", schema))
+        await raw.driver_connection.execute(revision.module.SQL.replace("open_swe", schema))
     await ingestion.ingest(
         event(
             workspace,
@@ -610,11 +607,9 @@ async def test_feedback_migration_recovers_acknowledged_withdrawals(analytics_db
         await conn.execute(text("UPDATE feedback_projection SET withdrawn_at = NULL"))
         await conn.execute(text("DROP TABLE feedback_withdrawal_projection"))
         schema = await conn.scalar(text("SELECT current_schema()"))
-        migration = (
-            Path(database.__file__).with_name("migrations") / "0003_feedback_withdrawals.sql"
-        )
+        revision = database._load_migrations().get_revision("0003")
         raw = await conn.get_raw_connection()
-        await raw.driver_connection.execute(migration.read_text().replace("open_swe", schema))
+        await raw.driver_connection.execute(revision.module.SQL.replace("open_swe", schema))
     await ingestion.ingest(submissions[1])
     for item in withdrawals:
         assert not await ingestion.ingest(item)
