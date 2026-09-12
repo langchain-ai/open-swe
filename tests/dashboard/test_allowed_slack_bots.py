@@ -16,7 +16,7 @@ def directory() -> dict[str, Any]:
 
 @pytest.fixture
 def client(
-    monkeypatch: pytest.MonkeyPatch, fake_store: Any, directory: dict[str, Any]
+    monkeypatch: pytest.MonkeyPatch, fake_store: Any, directory: dict[str, Any], slack_api
 ) -> TestClient:
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
@@ -28,26 +28,27 @@ def client(
         "email": "alice@example.com",
     }
 
-    def slack(request: httpx2.Request) -> httpx2.Response:
-        assert request.method == ("POST" if request.url.path == "/api/auth.test" else "GET")
-        assert request.headers["authorization"] in {
+    def slack(method, params, headers):
+        assert headers["authorization"] in {
             "Bearer test-slack-token",
             "Bearer another-test-token",
         }
-        if request.url.path == "/api/auth.test":
+        if method == "auth.test":
             directory["auth_calls"] += 1
             data = {"ok": True, "team_id": "T123", "user_id": "UOWN", "bot_id": "BOWN"}
-        elif request.url.path == "/api/users.list":
-            directory["calls"].append(str(request.url.params.get("cursor", "")))
+        elif method == "users.list":
+            directory["calls"].append(str(params.get("cursor", "")))
             if directory["error"]:
-                return directory["error"]
-            data = directory["pages"].get(
-                request.url.params.get("cursor", ""), {"ok": True, "members": []}
-            )
-        elif request.url.path == "/api/users.info":
-            user_id = request.url.params["user"]
+                return (
+                    directory["error"].status_code,
+                    directory["error"].json(),
+                    dict(directory["error"].headers),
+                )
+            data = directory["pages"].get(params.get("cursor", ""), {"ok": True, "members": []})
+        elif method == "users.info":
+            user_id = params["user"]
             if user_id == "UMISSING":
-                return httpx2.Response(200, json={"ok": True, "user": None})
+                return 200, {"ok": True, "user": None}, {}
             data = {
                 "ok": True,
                 "user": {
@@ -58,8 +59,8 @@ def client(
                 },
             }
         else:
-            assert request.url.path == "/api/bots.info"
-            bot_id = request.url.params["bot"]
+            assert method == "bots.info"
+            bot_id = params["bot"]
             data = {
                 "ok": True,
                 "bot": {
@@ -70,14 +71,9 @@ def client(
                     "deleted": False,
                 },
             }
-        return httpx2.Response(200, json=data)
+        return 200, data, {}
 
-    async_client = httpx2.AsyncClient
-    monkeypatch.setattr(
-        httpx2,
-        "AsyncClient",
-        lambda **kwargs: async_client(**kwargs, transport=httpx2.MockTransport(slack)),
-    )
+    slack_api.handler = slack
     return TestClient(app)
 
 

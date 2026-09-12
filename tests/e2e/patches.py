@@ -29,8 +29,7 @@ def apply() -> None:
 
     from agent import server
     from agent.github import token as auth
-    from agent.slack import client as slack_utils
-    from agent.slack import code_channels as slack_code_channels
+    from agent.slack import http as slack_http
     from agent.utils import authorship
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
@@ -65,8 +64,7 @@ def apply() -> None:
 
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
-    slack_utils.SLACK_API_BASE_URL = FAKE_SLACK_API
-    slack_code_channels.SLACK_API_BASE_URL = FAKE_SLACK_API
+    slack_http.SLACK_API_BASE_URL = FAKE_SLACK_API
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.
