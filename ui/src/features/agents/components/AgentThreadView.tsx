@@ -56,6 +56,7 @@ import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useReconnectStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import {
   runTranscriptBuilt,
   runTranscriptCommitted,
@@ -250,6 +251,7 @@ export function AgentThreadView({
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
   const isThinking = stream.isLoading
   const settingUpSandbox = isThinking && baseMessages.length === 0
+  const reconnect = useReconnectStatus("cloud", thread.id)
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
   // Show a loading state during that one-time fetch instead of the empty state.
   const isHydrating = stream.isThreadLoading && !hasMessages
@@ -309,7 +311,7 @@ export function AgentThreadView({
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
-        {thread.status === "error" && (
+        {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
               <CircleAlertIcon />
@@ -389,9 +391,21 @@ export function AgentThreadView({
                   }
                   emptyState={
                     <div className="flex min-h-60 items-center justify-center">
-                      <p className="text-xs text-muted-foreground/70">
-                        This thread has no messages yet.
-                      </p>
+                      {hydrationFailed ? (
+                        <Alert variant="error" className="max-w-3xl">
+                          <CircleAlertIcon />
+                          <AlertDescription>
+                            <span>
+                              This thread&apos;s messages could not be loaded.
+                              Reload to try again.
+                            </span>
+                          </AlertDescription>
+                        </Alert>
+                      ) : (
+                        <p className="text-xs text-muted-foreground/70">
+                          This thread has no messages yet.
+                        </p>
+                      )}
                     </div>
                   }
                   onOpenFile={handleOpenFile}
@@ -401,6 +415,7 @@ export function AgentThreadView({
                   scrollControlRef={scrollControlRef}
                   isThinking={isThinking}
                   isOffloading={stream.isOffloading}
+                  reconnectLabel={reconnect.label}
                   settingUpSandbox={settingUpSandbox}
                   pollWorkflowApprovalsWhileActive={isStreaming}
                   contentWidthClass="max-w-3xl"
