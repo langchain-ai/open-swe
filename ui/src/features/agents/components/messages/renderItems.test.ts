@@ -6,7 +6,27 @@ import {
   selectCollapsedTurnItems,
   splitWorkAndReply,
 } from "./renderItems"
-import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
+import type {
+  Chunk,
+  DiffData,
+  ToolExecutionChunk,
+} from "@/features/agents/lib/types"
+
+function diff(
+  filePath: string,
+  originalContent: string,
+  newContent: string
+): DiffData {
+  return {
+    filePath,
+    originalContent,
+    newContent,
+    isNewFile: false,
+    isBinary: false,
+    isTruncated: false,
+    totalLines: 1,
+  }
+}
 
 function iframeChunk(): ToolExecutionChunk {
   return {
@@ -34,6 +54,79 @@ describe("buildRenderItems", () => {
         type: "iframe-item",
         key: "tool-call-1",
         chunk: iframeChunk(),
+      },
+    ])
+  })
+
+  it("groups repeated edits to the same file without expanding individual calls", () => {
+    const first: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "edit-1",
+      title: "edit_file /workspace/app.ts",
+      toolKind: "edit",
+      status: "completed",
+      diffData: diff("/workspace/app.ts", "a\n", "b\n"),
+    }
+    const other: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "edit-2",
+      title: "edit_file /workspace/other.ts",
+      toolKind: "edit",
+      status: "completed",
+      diffData: diff("/workspace/other.ts", "x\n", "y\n"),
+    }
+    const second: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "edit-3",
+      title: "edit_file /workspace/app.ts",
+      toolKind: "edit",
+      status: "completed",
+      diffData: diff("/workspace/app.ts", "b\n", "c\n"),
+    }
+
+    expect(buildRenderItems([first, other, second])).toEqual([
+      {
+        type: "edit-group",
+        key: "edit-group-edit-1",
+        chunks: [first, second],
+      },
+      { type: "edit-item", key: "tool-edit-2", chunk: other },
+    ])
+  })
+
+  it("groups repeated reads to the same file while preserving other exploration", () => {
+    const first: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "read-1",
+      title: "read_file",
+      toolKind: "read",
+      input: { file_path: "/workspace/app.ts" },
+      status: "completed",
+    }
+    const search: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "search-1",
+      title: "search",
+      toolKind: "search",
+      input: { pattern: "render" },
+      status: "completed",
+    }
+    const second: ToolExecutionChunk = {
+      ...first,
+      toolCallId: "read-2",
+    }
+
+    expect(buildRenderItems([first, search, second])).toEqual([
+      {
+        type: "read-group",
+        key: "read-group-read-1",
+        chunks: [first, second],
+      },
+      {
+        type: "explored-group",
+        key: "explored-read-1-search-1",
+        id: "explored-read-1-search-1",
+        chunks: [search],
       },
     ])
   })

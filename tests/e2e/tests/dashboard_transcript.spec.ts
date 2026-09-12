@@ -50,7 +50,7 @@ test.describe("finished transcript (shared fixture thread)", () => {
     await page.unroute("**/stream/events");
   });
 
-  test("folds the agent's work and expands an Edit into an inline diff", async () => {
+  test("folds repeated edits into one expandable combined diff", async () => {
     await page.goto(`/agents/${threadId}`);
     await expectTranscriptVisible(page);
 
@@ -58,7 +58,10 @@ test.describe("finished transcript (shared fixture thread)", () => {
       name: /^Worked(?: for .+)? · \d+ actions?$/,
     });
     const acknowledgement = page.getByText("On it!", { exact: true });
-    const edit = page.getByRole("button", { name: "Edited greet.py" });
+    const helperEdit = page.getByRole("button", { name: "Edited helpers.py" });
+    const read = page.getByText("Read (x3)", { exact: true });
+    const edit = page.getByRole("button", { name: "Edited (x7) greet.py" });
+    const notesEdit = page.getByRole("button", { name: "Edited notes.md" });
 
     // Folded: the acknowledgement shows, the individual tool calls do not.
     await expect(worked).toBeVisible();
@@ -66,7 +69,10 @@ test.describe("finished transcript (shared fixture thread)", () => {
     await expect(edit).toHaveCount(0);
 
     await worked.click();
-    await expect(edit).toBeVisible();
+    await expect(helperEdit).toHaveCount(1);
+    await expect(read).toHaveCount(1);
+    await expect(edit).toHaveCount(1);
+    await expect(notesEdit).toHaveCount(1);
     await expect(acknowledgement).toBeVisible();
     expect(
       await acknowledgement.evaluate(
@@ -79,18 +85,53 @@ test.describe("finished transcript (shared fixture thread)", () => {
       ),
     ).toBe(true);
 
+    expect(
+      await helperEdit.evaluate(
+        (helper, entries) => {
+          const [greeting, notes] = entries;
+          return Boolean(
+            greeting &&
+            notes &&
+            helper.compareDocumentPosition(greeting) &
+              Node.DOCUMENT_POSITION_FOLLOWING &&
+            greeting.compareDocumentPosition(notes) &
+              Node.DOCUMENT_POSITION_FOLLOWING,
+          );
+        },
+        await Promise.all([edit.elementHandle(), notesEdit.elementHandle()]),
+      ),
+    ).toBe(true);
+
     await expect(edit).toHaveAttribute("aria-expanded", "false");
     await edit.click();
     await expect(edit).toHaveAttribute("aria-expanded", "true");
 
     const inlineDiff = edit.locator("[data-diff]");
     await expect(inlineDiff).toBeVisible();
-    await expect(
-      inlineDiff.locator('[data-line][data-line-type="change-deletion"]'),
-    ).toContainText('return "Hello!"');
-    await expect(
-      inlineDiff.locator('[data-line][data-line-type="change-addition"]'),
-    ).toContainText('return f"Hello, {name}!"');
+    const deletions = inlineDiff.locator(
+      '[data-line][data-line-type="change-deletion"]',
+    );
+    await expect(deletions).toContainText([
+      'return "Hello!"',
+      'return f"Goodbye, {name}!"',
+      'return f"Welcome, {name}!"',
+      'return f"Thanks, {name}!"',
+      'return f"Come in, {name}!"',
+    ]);
+    const additions = inlineDiff.locator(
+      '[data-line][data-line-type="change-addition"]',
+    );
+    await expect(additions).toContainText([
+      'return f"Hello, {name.strip().title()}!"',
+      'return f"Goodbye, {name.strip().title()}!"',
+      'return f"Welcome, {name.strip().title()}!"',
+      'return f"Thanks, {name.strip().title()}!"',
+      'return f"Come in, {name.strip().title()}!"',
+    ]);
+    await expect(inlineDiff).not.toContainText('return f"Hello, {name}!"');
+    await expect(inlineDiff).not.toContainText(
+      'return f"Hello, {name.strip()}!"',
+    );
     await expect(inlineDiff).toHaveAttribute("data-disable-line-numbers");
     await expect(inlineDiff).not.toContainText("normalize");
   });
