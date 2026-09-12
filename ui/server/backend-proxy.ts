@@ -42,6 +42,21 @@ export function requestHeaders(incoming: Headers): Headers {
   return headers
 }
 
+function acceptsGzip(value: string | null): boolean {
+  const encodings = (value ?? "").split(",").map((part) => {
+    const [name, ...parameters] = part.toLowerCase().split(";")
+    const quality = parameters.find((param) => param.trim().startsWith("q="))
+    return {
+      name: name?.trim(),
+      quality: quality === undefined ? 1 : Number(quality.trim().slice(2)),
+    }
+  })
+  const accepted =
+    encodings.find(({ name }) => name === "gzip") ??
+    encodings.find(({ name }) => name === "*")
+  return !!accepted && accepted.quality > 0 && accepted.quality <= 1
+}
+
 export default async function backendProxy(event: { req: Request }) {
   const url = new URL(event.req.url)
   const method = event.req.method
@@ -71,11 +86,43 @@ export default async function backendProxy(event: { req: Request }) {
     headers.append("set-cookie", cookie)
   }
 
+  let body = upstream.body
+  if (
+    body &&
+    method !== "HEAD" &&
+    upstream.status === 200 &&
+    /^\/dashboard\/api\/threads\/[^/]+\/(state|history)\/?$/.test(
+      url.pathname
+    ) &&
+    headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ===
+      "application/json" &&
+    !/(?:^|,)\s*no-transform\s*(?:,|$)/i.test(
+      [
+        event.req.headers.get("cache-control"),
+        headers.get("cache-control"),
+      ].join(",")
+    )
+  ) {
+    const vary = (headers.get("vary") ?? "")
+      .toLowerCase()
+      .split(",")
+      .map((name) => name.trim())
+    if (!vary.includes("*") && !vary.includes("accept-encoding")) {
+      headers.append("vary", "Accept-Encoding")
+    }
+    if (acceptsGzip(event.req.headers.get("accept-encoding"))) {
+      body = body.pipeThrough(new CompressionStream("gzip"))
+      headers.set("content-encoding", "gzip")
+      const etag = headers.get("etag")
+      if (etag && !etag.startsWith("W/")) headers.set("etag", `W/${etag}`)
+    }
+  }
+
   // A plain web Response, built here rather than by a proxy helper: the server
   // runtime bundles its own copy of h3, and a proxy result from a different one
   // is not a shape it recognises — it stringified it to `[object Object]` under
   // `text/plain`, which every dashboard query then failed to parse.
-  return new Response(upstream.body, {
+  return new Response(body, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers,

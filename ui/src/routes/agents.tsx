@@ -10,7 +10,7 @@ import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentStreamProvider } from "@/features/agents/lib/stream/AgentStreamProvider"
 import { ExperimentalRuntimeProvider } from "@/features/agents/lib/assistant-ui/ExperimentalRuntimeProvider"
-import { useExperimentalAssistantUi } from "@/lib/profile"
+import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
@@ -37,6 +37,7 @@ function useAgentsTheme() {
 function AgentsLayout() {
   useAgentsTheme()
   const session = useSession()
+  const profile = useProfile()
   const experimentalAssistantUi = useExperimentalAssistantUi()
   const navigate = Route.useNavigate()
   const threadMatch = useMatch({
@@ -80,7 +81,11 @@ function AgentsLayout() {
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
-      {experimentalAssistantUi ? (
+      {session.data && profile.isPending ? (
+        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+          <Skeleton className="h-40 w-full max-w-md" />
+        </main>
+      ) : experimentalAssistantUi ? (
         <ExperimentalRuntimeProvider
           threadId={activeLocalSessionId ?? activeThreadId ?? null}
           transport={activeLocalSessionId ? "local" : "cloud"}

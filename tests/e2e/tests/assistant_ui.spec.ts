@@ -67,6 +67,51 @@ test.afterEach(async ({ page }) => {
   await setExperimentalMode(page, false);
 });
 
+test("waits for the profile and hydrates the transcript only once", async ({
+  page,
+}) => {
+  const id = await startSlackThread(page, "Add a greet() helper and open a PR");
+  await waitForThreadIdle(page, id);
+  await waitForThreadNotBusy(page, id);
+  const profileRequested = Promise.withResolvers<void>();
+  const releaseProfile = Promise.withResolvers<void>();
+  await page.route("**/dashboard/api/profile", async (route) => {
+    profileRequested.resolve();
+    await releaseProfile.promise;
+    await route.continue();
+  });
+  const statePath = `/dashboard/api/threads/${id}/state`;
+  const stateRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === statePath) {
+      stateRequests.push(request.url());
+    }
+  });
+  const warmedState = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === statePath,
+  );
+
+  try {
+    await page.goto(`/agents/${id}`, { waitUntil: "domcontentloaded" });
+    await profileRequested.promise;
+    const response = await warmedState;
+    await response.finished();
+    expect(response.ok()).toBeTruthy();
+    expect(await response.headerValue("content-encoding")).toBe("gzip");
+    await expect(page.getByTestId("composer-editor")).toHaveCount(0);
+    await expect(conversation(page)).toHaveCount(0);
+
+    releaseProfile.resolve();
+    await expect(conversation(page)).toBeVisible();
+    await expect(
+      conversation(page).getByText(/anything else you'd like changed/),
+    ).toBeVisible();
+    expect(stateRequests).toHaveLength(1);
+  } finally {
+    releaseProfile.resolve();
+  }
+});
+
 test("creates a thread, sends a follow-up, and hydrates the experimental transcript", async ({
   page,
 }) => {
