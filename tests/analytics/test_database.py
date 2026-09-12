@@ -10,7 +10,8 @@ import pytest
 from blockbuster import BlockBuster
 from sqlalchemy import make_url, text
 
-from agent.analytics import database
+from agent.database import analytics as database
+from agent.database import postgres
 
 
 async def test_migrations_allow_nonblocking_startup_and_restart(deployment_db):
@@ -34,7 +35,7 @@ async def test_migrations_allow_nonblocking_startup_and_restart(deployment_db):
 async def test_replicas_and_restarts_preserve_identity_without_starting_collection(deployment_db):
     script = (
         "import asyncio\n"
-        "from agent.analytics import database\n"
+        "from agent.database import analytics as database\n"
         "async def main():\n"
         "    await database.migrate()\n"
         "    print(database.workspace_id())\n"
@@ -72,10 +73,10 @@ async def test_migration_preserves_existing_workspace_and_history(deployment_db,
     old_workspace = uuid4()
     run_id = uuid4()
     captured_at = datetime(2026, 9, 1, tzinfo=UTC)
-    migrations = database._load_migrations()
+    migrations = postgres.load_migrations()
     async with database.engine().begin() as conn:
         await conn.execute(text("CREATE SCHEMA open_swe"))
-        await conn.run_sync(database._upgrade, migrations, "open_swe", "0006")
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "0006")
         await conn.execute(
             text("INSERT INTO run_projection (workspace_id, run_id) VALUES (:workspace, :run)"),
             {"workspace": old_workspace, "run": run_id},
