@@ -5,15 +5,54 @@ down_revision = "0006"
 branch_labels = None
 depends_on = None
 
-SQL = (
-    "CREATE TABLE deployment_metadata (\n    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),\n    workspace_id uuid NOT NULL UNIQUE,\n    collection_started_at timestamptz\n)",
-    "-- Preserve the namespace of any existing facts, including retained projections.\nWITH workspaces AS (\n    SELECT workspace_id FROM events\n    UNION SELECT workspace_id FROM outbox\n    UNION SELECT workspace_id FROM ingestion_receipts\n    UNION SELECT workspace_id FROM run_projection\n    UNION SELECT workspace_id FROM task_projection\n    UNION SELECT workspace_id FROM pr_projection\n    UNION SELECT workspace_id FROM pr_run_link_projection\n    UNION SELECT workspace_id FROM latest_cost_projection\n    UNION SELECT workspace_id FROM review_projection\n    UNION SELECT workspace_id FROM finding_projection\n    UNION SELECT workspace_id FROM feedback_projection\n    UNION SELECT workspace_id FROM feedback_withdrawal_projection\n    UNION SELECT workspace_id FROM projection_conflicts\n    UNION SELECT workspace_id FROM dirty_summary_partitions\n    UNION SELECT workspace_id FROM daily_summaries\n    UNION SELECT workspace_id FROM additive_event_projection\n    UNION SELECT workspace_id FROM identity_directory\n    UNION SELECT workspace_id FROM model_directory\n    UNION SELECT workspace_id FROM repository_directory\n    UNION SELECT workspace_id FROM named_export_audit\n), captures AS (\n    SELECT min(recorded_at) AS captured_at FROM events\n    UNION ALL SELECT min(created_at) FROM outbox\n    UNION ALL SELECT min(received_at) FROM ingestion_receipts\n)\nINSERT INTO deployment_metadata (workspace_id, collection_started_at)\nVALUES (\n    COALESCE((SELECT workspace_id FROM workspaces), gen_random_uuid()),\n    (SELECT min(captured_at) FROM captures)\n)",
-)
-
 
 def upgrade() -> None:
-    for statement in SQL:
-        op.execute(statement)
+    op.execute(
+        """
+        CREATE TABLE deployment_metadata (
+            singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+            workspace_id uuid NOT NULL UNIQUE,
+            collection_started_at timestamptz
+        )
+        """
+    )
+
+    op.execute(
+        """
+        -- Preserve the namespace of any existing facts, including retained projections.
+        WITH workspaces AS (
+            SELECT workspace_id FROM events
+            UNION SELECT workspace_id FROM outbox
+            UNION SELECT workspace_id FROM ingestion_receipts
+            UNION SELECT workspace_id FROM run_projection
+            UNION SELECT workspace_id FROM task_projection
+            UNION SELECT workspace_id FROM pr_projection
+            UNION SELECT workspace_id FROM pr_run_link_projection
+            UNION SELECT workspace_id FROM latest_cost_projection
+            UNION SELECT workspace_id FROM review_projection
+            UNION SELECT workspace_id FROM finding_projection
+            UNION SELECT workspace_id FROM feedback_projection
+            UNION SELECT workspace_id FROM feedback_withdrawal_projection
+            UNION SELECT workspace_id FROM projection_conflicts
+            UNION SELECT workspace_id FROM dirty_summary_partitions
+            UNION SELECT workspace_id FROM daily_summaries
+            UNION SELECT workspace_id FROM additive_event_projection
+            UNION SELECT workspace_id FROM identity_directory
+            UNION SELECT workspace_id FROM model_directory
+            UNION SELECT workspace_id FROM repository_directory
+            UNION SELECT workspace_id FROM named_export_audit
+        ), captures AS (
+            SELECT min(recorded_at) AS captured_at FROM events
+            UNION ALL SELECT min(created_at) FROM outbox
+            UNION ALL SELECT min(received_at) FROM ingestion_receipts
+        )
+        INSERT INTO deployment_metadata (workspace_id, collection_started_at)
+        VALUES (
+            COALESCE((SELECT workspace_id FROM workspaces), gen_random_uuid()),
+            (SELECT min(captured_at) FROM captures)
+        )
+        """
+    )
 
 
 def downgrade() -> None:
