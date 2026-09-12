@@ -1,7 +1,6 @@
 """Daily summaries reconcile late events and retained projection history."""
 
 from datetime import timedelta
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -196,11 +195,8 @@ async def test_additive_migration_preserves_expired_and_unsummarized_totals(
     async with transaction() as conn:
         await conn.execute(text("DROP TABLE additive_event_projection"))
         schema = await conn.scalar(text("SELECT current_schema()"))
-        script = (
-            (Path(database.__file__).with_name("migrations") / "0006_additive_event_projection.sql")
-            .read_text()
-            .replace("open_swe", schema)
-        )
+        revision = database._load_migrations().get_revision("0006")
+        script = revision.module.SQL.replace("open_swe", schema)
         raw = await conn.get_raw_connection()
         await raw.driver_connection.execute(script)
         await raw.driver_connection.execute(script)
