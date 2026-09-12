@@ -31,6 +31,7 @@ import type {
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import { VoicePanel } from "@/features/agents/components/VoicePanel"
 import {
   SidebarSectionAction,
   SidebarSectionHeader,
@@ -641,17 +642,20 @@ export function AgentsSidebar({
           isDesktop ? "pt-13" : "pt-5"
         )}
       >
-        <Link
-          to={localOnly ? "/agents" : "/my-settings"}
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
-        >
-          <img
-            src={`${import.meta.env.BASE_URL}logo-mark.png`}
-            alt=""
-            className="size-5"
-          />
-          Open SWE
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to={localOnly ? "/agents" : "/my-settings"}
+            className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
+          >
+            <img
+              src={`${import.meta.env.BASE_URL}logo-mark.png`}
+              alt=""
+              className="size-5"
+            />
+            Open SWE
+          </Link>
+          {!isDesktop && !localOnly && <VoicePanel navigate={openThread} />}
+        </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
