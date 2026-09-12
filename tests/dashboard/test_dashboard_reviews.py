@@ -56,6 +56,21 @@ async def test_list_reviews_no_author_filters_kind_only(monkeypatch) -> None:
     assert captured["calls"][0]["metadata"] == {"kind": REVIEWER_THREAD_KIND}
 
 
+async def test_review_summaries_preserve_counts_and_distinguish_missing(monkeypatch):
+    thread = _thread("acme", "app", 1, "octocat")
+    thread["metadata"]["findings"] = [
+        {"id": "bug", "status": "open", "severity": "high", "confidence": "high"},
+        {"id": "flag", "status": "open", "severity": "medium", "confidence": "medium"},
+    ]
+    client, captured = _fake_client([[thread], []])
+    monkeypatch.setattr(review_api, "langgraph_client", lambda: client)
+    result = await review_api.get_review_summaries([("acme", "app", 1), ("acme", "app", 2)])
+    assert result["acme/app#1"]["counts"]["bugs"] == 1
+    assert result["acme/app#1"]["counts"]["flags"] == 1
+    assert result["acme/app#2"] is None
+    assert captured["calls"][0]["metadata"]["pr"] == {"owner": "acme", "name": "app", "number": 1}
+
+
 @pytest.mark.asyncio
 async def test_list_reviews_applies_accessibility_and_has_more(monkeypatch) -> None:
     page = [

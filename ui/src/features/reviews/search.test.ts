@@ -1,0 +1,52 @@
+import { expect, it } from "vitest"
+import { validateReviewsSearch } from "./search"
+
+it("restores a shared view and bounds malformed URL state", () => {
+  expect(
+    validateReviewsSearch({
+      tab: "all",
+      repo: "acme/app",
+      q: "retry",
+      status: "Conflicted",
+      sort: "updatedAt",
+      direction: "desc",
+      page: "2",
+    })
+  ).toEqual({
+    tab: "all",
+    repo: ["acme/app"],
+    q: "retry",
+    status: ["Conflicted"],
+    sort: "updatedAt",
+    direction: "desc",
+    page: 2,
+  })
+  expect(
+    validateReviewsSearch({
+      tab: "bad",
+      repo: {},
+      q: [],
+      status: "bad",
+      sort: "bad",
+      direction: "bad",
+      page: -1,
+    })
+  ).toEqual({
+    tab: undefined,
+    repo: undefined,
+    q: undefined,
+    status: undefined,
+    sort: undefined,
+    direction: undefined,
+    page: undefined,
+  })
+})
+
+it("restores multiple repositories and statuses, dropping invalid and duplicate values", () => {
+  const result = validateReviewsSearch({
+    repo: ["acme/app", "acme/other", "acme/app", null],
+    status: ["Failing", "Conflicted", "Failing", "invalid"],
+  })
+  expect(result.repo).toEqual(["acme/app", "acme/other"])
+  expect(result.status).toEqual(["Conflicted", "Failing"])
+})

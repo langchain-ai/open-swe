@@ -114,6 +114,7 @@ from agent.dashboard.review_api import (
     create_review_comment,
     get_review,
     get_review_diff,
+    get_review_summaries,
     list_review_comments,
     list_reviews,
     proxy_pr_image,
@@ -245,6 +246,7 @@ from agent.dashboard.workspace_mcps import (
     save_workspace_mcp,
 )
 from agent.github.pull_request_checks import PullRequestState
+from agent.github.pull_request_status import list_open_pull_requests, pull_request_identity
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
 from agent.mcp import (
     MCPConnection,
@@ -1469,6 +1471,46 @@ async def api_list_review_styles(
 REVIEWS_PAGE_SIZE = 20
 
 
+class ReviewSummaryRef(BaseModel):
+    repo: str = Field(max_length=140)
+    number: int = Field(ge=1)
+
+
+class ReviewSummariesRequest(BaseModel):
+    pullRequests: list[ReviewSummaryRef] = Field(max_length=100)
+
+
+@router.post("/reviews/summaries")
+async def api_get_review_summaries(
+    payload: ReviewSummariesRequest,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    identities: list[tuple[str, str, int]] = []
+    for ref in payload.pullRequests:
+        identity = pull_request_identity({"repo_full_name": ref.repo, "number": ref.number})
+        if identity is None:
+            raise HTTPException(422, "invalid pull request reference")
+        identities.append(identity)
+    accessible = await accessible_repo_full_names(session["sub"])
+    authorized = [
+        (owner, repo, number)
+        for owner, repo, number in identities
+        if f"{owner}/{repo}".lower() in accessible
+    ]
+    return await get_review_summaries(authorized) if authorized else {}
+
+
+@router.get("/my-pull-requests")
+async def api_list_my_pull_requests(
+    repo: str = "",
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await list_open_pull_requests(session["sub"], token, repo)
+
+
 @router.get("/reviews")
 async def api_list_reviews(
     page: int = 0,
@@ -1489,6 +1531,18 @@ async def api_list_reviews(
         is_accessible=is_accessible,
     )
     return {"reviews": reviews, "page": page, "has_more": has_more}
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/fix")
+async def api_fix_pull_request(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, str]:
+    from agent.dashboard.threads.pr_fixes import fix_pull_request
+
+    return await fix_pull_request(owner, repo, pr_number, session["sub"], session.get("email"))
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}")

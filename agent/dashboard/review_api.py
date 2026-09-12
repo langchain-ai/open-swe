@@ -6,6 +6,7 @@ endpoints surface that state plus live PR details/diff fetched from GitHub
 with the App installation token.
 """
 
+import asyncio
 import ipaddress
 import logging
 import re
@@ -316,6 +317,28 @@ async def list_reviews(
         scan_offset += page_size
     page = summaries[offset : offset + limit]
     return page, len(summaries) > offset + limit
+
+
+async def get_review_summaries(identities: list[tuple[str, str, int]]) -> dict[str, Any]:
+    """Read review indicators for already-authorized pull requests."""
+    client = langgraph_client()
+    semaphore = asyncio.Semaphore(4)
+
+    async def read(owner: str, repo: str, number: int) -> tuple[str, Any]:
+        async with semaphore:
+            threads = await client.threads.search(
+                metadata={
+                    "kind": REVIEWER_THREAD_KIND,
+                    "pr": {"owner": owner, "name": repo, "number": number},
+                },
+                limit=1,
+                sort_by="updated_at",
+                sort_order="desc",
+            )
+            summary = _thread_review_summary(threads[0]) if threads else None
+            return f"{owner}/{repo}#{number}".lower(), summary
+
+    return dict(await asyncio.gather(*(read(*identity) for identity in identities)))
 
 
 def _user_ref(value: Any) -> dict[str, Any] | None:

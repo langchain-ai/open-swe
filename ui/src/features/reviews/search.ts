@@ -1,0 +1,64 @@
+export type ReviewSort =
+  | "number"
+  | "title"
+  | "additions"
+  | "diffstat"
+  | "updatedAt"
+  | "createdAt"
+export const reviewStatuses = [
+  "Draft",
+  "Conflicted",
+  "Failing",
+  "Reviewable",
+  "Approved",
+  "Changes Requested",
+] as const
+export type ReviewStatus = (typeof reviewStatuses)[number]
+export interface ReviewsSearch {
+  tab?: "mine" | "all"
+  repo?: string[]
+  q?: string
+  status?: ReviewStatus[]
+  sort?: ReviewSort
+  direction?: "asc" | "desc"
+  page?: number
+}
+
+export function validateReviewsSearch(
+  search: Record<string, unknown>
+): ReviewsSearch {
+  const page = Number(search.page)
+  const selectedStatuses = Array.isArray(search.status)
+    ? search.status
+    : [search.status]
+  const status = reviewStatuses.filter((value) =>
+    selectedStatuses.includes(value)
+  )
+  const selectedRepos = Array.isArray(search.repo) ? search.repo : [search.repo]
+  const repo = [
+    ...new Set(
+      selectedRepos.filter(
+        (value): value is string =>
+          typeof value === "string" && value.length > 0 && value.length <= 140
+      )
+    ),
+  ]
+  return {
+    tab: search.tab === "all" ? "all" : undefined,
+    repo: repo.length ? repo : undefined,
+    q: typeof search.q === "string" ? search.q.slice(0, 200) : undefined,
+    status: status.length ? status : undefined,
+    sort: (
+      [
+        "number",
+        "title",
+        "additions",
+        "diffstat",
+        "updatedAt",
+        "createdAt",
+      ] as const
+    ).find((sort) => sort === search.sort),
+    direction: search.direction === "desc" ? "desc" : undefined,
+    page: Number.isInteger(page) && page > 0 && page <= 50 ? page : undefined,
+  }
+}

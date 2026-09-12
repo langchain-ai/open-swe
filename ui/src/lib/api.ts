@@ -534,6 +534,33 @@ export interface ReviewListPayload {
   has_more: boolean
 }
 
+export interface OpenPullRequest {
+  repo: string
+  number: number
+  title: string
+  draft: boolean | null
+  additions: number | null
+  deletions: number | null
+  mergeable: boolean | null
+  mergeState: string
+  headSha: string | null
+  headRef: string | null
+  reviewDecision: "approved" | "changes_requested" | "none" | null
+  statusAvailable: boolean
+  createdAt: string | null
+  updatedAt: string | null
+  ci: "passing" | "failing" | "pending" | "unknown" | "none"
+  failingChecks: string[]
+  pendingChecks: string[]
+}
+
+export interface OpenPullRequestsPayload {
+  pullRequests: OpenPullRequest[]
+  truncated: boolean
+  incomplete: boolean
+  updatedAt: string
+}
+
 export interface ReviewUserRef {
   login: string
   avatar_url?: string | null
@@ -874,6 +901,20 @@ export const api = {
     ),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
+  myPullRequests: (repo: string) =>
+    request<OpenPullRequestsPayload>(
+      `/my-pull-requests?repo=${encodeURIComponent(repo)}`
+    ),
+  fixPullRequest: (repo: string, number: number) =>
+    request<{ thread_id: string }>(
+      `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/fix`,
+      { method: "POST" }
+    ),
+  reviewSummaries: (pullRequests: Array<{ repo: string; number: number }>) =>
+    request<Record<string, ReviewSummary | null>>("/reviews/summaries", {
+      method: "POST",
+      body: JSON.stringify({ pullRequests }),
+    }),
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
