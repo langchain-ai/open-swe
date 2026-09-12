@@ -13,7 +13,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from agent.config import ENV
-from agent.github import system_scope
 from agent.github.app import (
     PermissionKey,
     PermissionMap,
@@ -21,6 +20,7 @@ from agent.github.app import (
     normalize_permissions,
 )
 from agent.sandboxes.state import SANDBOX_BACKENDS, unwrap_sandbox_backend
+from agent.slack import bot_authorization
 
 logger = logging.getLogger(__name__)
 
@@ -148,10 +148,10 @@ async def refresh_proxy_token(
         token_kwargs["repositories"] = list(effective_repositories)
     if permission_key:
         token_kwargs["permissions"] = dict(permission_key)
-    scoped = await system_scope.system_installation_token(thread_id)
+    bot_credentials = await bot_authorization.bot_installation_token(thread_id)
     token, expires_at = (
-        scoped
-        if scoped is not None
+        bot_credentials
+        if bot_credentials is not None
         else await get_github_app_installation_token_with_expiry(**token_kwargs)
     )
     if not token:

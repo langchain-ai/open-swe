@@ -24,7 +24,6 @@ from agent.dashboard.environments import (
     script_command,
 )
 from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
-from agent.github import system_scope
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.sandboxes.providers.langsmith import (
@@ -43,6 +42,7 @@ from agent.sandboxes.state import (
     set_sandbox_backend,
     unwrap_sandbox_backend,
 )
+from agent.slack import bot_authorization
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
 
@@ -60,9 +60,9 @@ async def _resolve_proxy_token(
 ) -> tuple[str | None, str | None, None]:
     """Resolve the proxy token and its expiry."""
     if thread_id:
-        scoped = await system_scope.system_installation_token(thread_id)
-        if scoped is not None:
-            return scoped[0], scoped[1], None
+        bot_credentials = await bot_authorization.bot_installation_token(thread_id)
+        if bot_credentials is not None:
+            return bot_credentials[0], bot_credentials[1], None
     if github_proxy_token:
         return github_proxy_token, None, None
     token, expires_at = await get_github_app_installation_token_with_expiry()
@@ -79,11 +79,8 @@ class SandboxCreateConfig:
     environment: Environment | None = None
 
     @classmethod
-    async def resolve(
-        cls, environment_slug: str | None = None, *, environment: Environment | None = None
-    ) -> SandboxCreateConfig:
-        if environment is None:
-            environment = await resolve_environment(environment_slug)
+    async def resolve(cls, environment_slug: str | None = None) -> SandboxCreateConfig:
+        environment = await resolve_environment(environment_slug)
         if environment is None:
             return cls(snapshot_id=await get_admin_base_snapshot_id())
         return cls(
@@ -162,8 +159,7 @@ async def _create_sandbox_with_proxy(
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
-        environment = await system_scope.system_environment(thread_id) if thread_id else None
-        config = await SandboxCreateConfig.resolve(environment_slug, environment=environment)
+        config = await SandboxCreateConfig.resolve(environment_slug)
     async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
         sandbox_backend = await config.boot()
 

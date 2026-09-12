@@ -163,7 +163,6 @@ def allowed_bot(fake_store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
             "app_id": "A123",
             "name": "Release bot",
             "created_by": "alice",
-            "environment": "backend",
             "owner_email": "alice@example.com",
             "created_at": "2026-09-09T00:00:00Z",
         },

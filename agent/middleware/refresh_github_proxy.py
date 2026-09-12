@@ -15,8 +15,8 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from agent.github.proxy import maybe_refresh_proxy_token
-from agent.github.system_scope import SystemScopeError
 from agent.middleware.trace import scrub_middleware_inputs
+from agent.slack.bot_authorization import BotAuthorizationError
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ async def refresh_github_proxy_before_model(
 
     try:
         await maybe_refresh_proxy_token(thread_id)
-    except SystemScopeError:
+    except BotAuthorizationError:
         raise
     except Exception:  # noqa: BLE001
         logger.warning(

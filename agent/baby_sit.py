@@ -12,7 +12,6 @@ from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.dispatch import dispatch_agent_run
-from agent.github import system_scope
 from agent.github.app import get_github_app_installation_token
 from agent.github.ci import (
     FAILING_CONCLUSIONS,
@@ -25,6 +24,7 @@ from agent.github.ci import (
 )
 from agent.github.comments import post_github_comment
 from agent.prompts import render_prompt
+from agent.slack import bot_authorization
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
@@ -277,9 +277,9 @@ async def stop_watch(key: str) -> bool:
 
 
 async def _watch_token(watch: BabySitWatch) -> str | None:
-    scoped = await system_scope.system_installation_token(watch.thread_id)
-    if scoped is not None:
-        return scoped[0]
+    bot_credentials = await bot_authorization.bot_installation_token(watch.thread_id)
+    if bot_credentials is not None:
+        return bot_credentials[0]
     if watch.installation_id is None:
         return None
     return await get_github_app_installation_token(installation_id=watch.installation_id)

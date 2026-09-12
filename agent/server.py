@@ -81,7 +81,6 @@ from agent.dashboard.user_mcps import user_mcp_source
 from agent.dashboard.workspace_mcps import workspace_mcp_source
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
-from agent.github.system_scope import system_configurable
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
@@ -149,6 +148,7 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
+from agent.slack.bot_authorization import bot_thread_configurable
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
@@ -869,8 +869,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ).with_config(bindable_config(config))
 
     if not is_desktop_run(cfg):
-        system_config = await system_configurable(thread_id, configurable)
-        if system_config.get("system_environment_thread"):
+        system_config = await bot_thread_configurable(thread_id, configurable)
+        if system_config.get("slack_bot_thread"):
             configurable = system_config
             config = {**config, "configurable": configurable}
             cfg = RunConfig.parse(configurable)
@@ -1176,8 +1176,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             read_user_settings,
         )
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
-    if configurable.get("system_environment_thread"):
-        # These tools can delegate work or act on other threads outside the saved scope.
+    if configurable.get("slack_bot_thread"):
+        # Bots can continue only their own thread and have no human actor for delegation.
         unavailable = (
             list_threads,
             get_thread,

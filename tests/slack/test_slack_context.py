@@ -1595,7 +1595,7 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
 
 @pytest.mark.parametrize("user_id", ["U123", ""])
 @pytest.mark.parametrize("existing_human_thread", [False, True])
-async def test_allowed_bot_runs_as_system_with_environment(
+async def test_allowed_bot_runs_as_system_without_environment(
     monkeypatch: pytest.MonkeyPatch,
     fake_store: Any,
     user_id: str,
@@ -1604,9 +1604,6 @@ async def test_allowed_bot_runs_as_system_with_environment(
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
-    fake_store.seed(
-        ["environments"], "backend", {"slug": "backend", "repos": ["langchain-ai/open-swe"]}
-    )
     fake_store.seed(
         ["allowed_slack_bots"],
         "T123:B123",
@@ -1617,7 +1614,6 @@ async def test_allowed_bot_runs_as_system_with_environment(
             "app_id": "A123",
             "name": "Release bot",
             "created_by": "alice",
-            "environment": "backend",
             "owner_email": "alice@example.com",
             "created_at": "2026-09-09T00:00:00Z",
         },
@@ -1670,7 +1666,6 @@ async def test_allowed_bot_runs_as_system_with_environment(
     kwargs = captured["run_create"]["kwargs"]
     config = kwargs["config"]["configurable"]
     assert not config.get("github_login")
-    assert config["environment"] == "backend"
     assert not config.get("user_email")
     assert config["slack_thread"]["triggering_bot_id"] == "B123"
     assert config["slack_thread"]["triggering_user_id"] == user_id
@@ -1691,9 +1686,6 @@ async def test_allowed_bot_can_continue_its_persisted_thread(
     _setup_slack_mention_fakes(monkeypatch, captured)
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     fake_store.seed(
-        ["environments"], "backend", {"slug": "backend", "repos": ["langchain-ai/open-swe"]}
-    )
-    fake_store.seed(
         ["allowed_slack_bots"],
         "T123:B123",
         {
@@ -1703,7 +1695,6 @@ async def test_allowed_bot_can_continue_its_persisted_thread(
             "app_id": "A123",
             "name": "Release bot",
             "created_by": "alice",
-            "environment": "backend",
             "created_at": "2026-09-09",
         },
     )
@@ -1761,7 +1752,7 @@ async def test_allowed_bot_can_continue_its_persisted_thread(
     await slack_webhooks._process_slack_mention_impl(SlackRequest.model_validate(event), repo)
     assert "run_create" in captured
     assert client.threads.metadata["owner_type"] == "system"
-    assert client.threads.metadata["system_repositories"] == ["langchain-ai/open-swe"]
+    assert client.threads.metadata["visibility"] == "public"
     assert not client.threads.metadata.get("owner_login")
     captured.pop("run_create")
     await slack_webhooks._process_slack_mention_impl(
@@ -1771,7 +1762,7 @@ async def test_allowed_bot_can_continue_its_persisted_thread(
     assert not captured["run_create"]["kwargs"]["config"]["configurable"].get("github_login")
 
 
-@pytest.mark.parametrize("block", ["removed", "missing-environment", "other-owner", "store-error"])
+@pytest.mark.parametrize("block", ["removed", "other-owner", "store-error"])
 async def test_bot_authorization_is_checked_before_execution(
     monkeypatch: pytest.MonkeyPatch,
     fake_store: Any,
@@ -1780,9 +1771,6 @@ async def test_bot_authorization_is_checked_before_execution(
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
-    fake_store.seed(
-        ["environments"], "backend", {"slug": "backend", "repos": ["langchain-ai/open-swe"]}
-    )
     if block != "removed":
         fake_store.seed(
             ["allowed_slack_bots"],
@@ -1794,7 +1782,6 @@ async def test_bot_authorization_is_checked_before_execution(
                 "app_id": "A123",
                 "name": "Release bot",
                 "created_by": "alice",
-                "environment": "backend",
                 "owner_email": "alice@example.com",
                 "created_at": "2026-09-09T00:00:00Z",
             },
@@ -1812,10 +1799,7 @@ async def test_bot_authorization_is_checked_before_execution(
     monkeypatch.setattr(client.threads, "get", get_thread, raising=False)
     monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=False))
     monkeypatch.setattr(webhook_common, "post_slack_thread_reply", AsyncMock(return_value=True))
-    # An authorized bot must never silently fall back to installation-wide permissions.
     monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: True)
-    if block == "missing-environment":
-        await fake_store.delete_item(["environments"], "backend")
     if block == "store-error":
         monkeypatch.setattr(fake_store, "get_item", AsyncMock(side_effect=RuntimeError("offline")))
     await slack_webhooks.process_slack_mention(

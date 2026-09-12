@@ -2,7 +2,6 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -20,7 +19,6 @@ const BOT = {
   app_id: "A123",
   name: "Release bot",
   created_by: "alice",
-  environment: "backend",
   created_at: "2026-09-09",
 }
 const DIRECTORY = [
@@ -36,18 +34,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderSection(
-  isAdmin = true,
-  environments = [
-    { slug: "backend", name: "Backend", repos: ["langchain-ai/open-swe"] },
-  ]
-) {
-  const originalFetch = globalThis.fetch
-  vi.stubGlobal("fetch", (url: string, init: RequestInit) =>
-    url.endsWith("/environments/options")
-      ? Promise.resolve(new Response(JSON.stringify({ environments })))
-      : originalFetch(url, init)
-  )
+function renderSection(isAdmin = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -59,58 +46,8 @@ function renderSection(
   )
 }
 
-async function chooseEnvironment() {
-  fireEvent.click(await screen.findByLabelText("Environment"))
-  fireEvent.click(await screen.findByRole("option", { name: "Backend" }))
-}
-
 describe("Allowed Slack bots", () => {
-  it("requires an environment before allowing a manually entered bot", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("[]"))
-    )
-    renderSection()
-    await screen.findByText("No Slack bots are allowed.")
-    fireEvent.click(
-      screen.getByRole("button", { name: "Enter bot ID manually" })
-    )
-    fireEvent.change(screen.getByLabelText("Slack bot ID"), {
-      target: { value: "B123" },
-    })
-    expect(screen.getByRole("button", { name: "Allow bot" })).toHaveProperty(
-      "disabled",
-      true
-    )
-    await chooseEnvironment()
-    expect(screen.getByLabelText("Environment").textContent).toContain(
-      "Backend"
-    )
-    expect(screen.getByRole("button", { name: "Allow bot" })).toHaveProperty(
-      "disabled",
-      false
-    )
-    expect(
-      screen.getByText("GitHub access: langchain-ai/open-swe")
-    ).toBeTruthy()
-  })
-
-  it("disables environments without repositories", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("[]"))
-    )
-    renderSection(true, [{ slug: "empty", name: "Empty", repos: [] }])
-    await screen.findByText("No Slack bots are allowed.")
-    fireEvent.click(await screen.findByLabelText("Environment"))
-    expect(
-      (
-        await screen.findByRole("option", { name: "Empty (no repositories)" })
-      ).getAttribute("aria-disabled")
-    ).toBe("true")
-  })
-
-  it("lets an admin add a bot, choose its environment, and remove it", async () => {
+  it("lets an admin browse, allow, and remove a bot", async () => {
     let bots: Array<typeof BOT> = []
     const requests: Array<{ url: string; init: RequestInit }> = []
     vi.stubGlobal(
@@ -132,37 +69,24 @@ describe("Allowed Slack bots", () => {
     )
     renderSection()
     await screen.findByText("No Slack bots are allowed.")
-    const allowButton = screen.getByRole("button", { name: "Allow bot" })
-    const search = await screen.findByRole("combobox", {
+    expect(
+      screen.queryByRole("textbox", { name: "Search Slack bots" })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
+    const search = await screen.findByRole("textbox", {
       name: "Search Slack bots",
     })
-    await waitFor(() => expect(search).toHaveProperty("disabled", false))
-    act(() => search.focus())
-    fireEvent.click(search)
-    fireEvent.input(search, {
-      target: { value: "Release" },
-      inputType: "insertText",
-      data: "Release",
-    })
-    fireEvent.click(await screen.findByRole("option", { name: /Release bot/ }))
-    fireEvent.input(search, {
-      target: { value: "Build" },
-      inputType: "insertText",
-      data: "Build",
-    })
-    expect(allowButton).toHaveProperty("disabled", true)
-    fireEvent.input(search, {
-      target: { value: "Release" },
-      inputType: "insertText",
-      data: "Release",
-    })
-    fireEvent.click(await screen.findByRole("option", { name: /Release bot/ }))
-    await chooseEnvironment()
-    fireEvent.click(screen.getByRole("button", { name: "Allow bot" }))
+    fireEvent.change(search, { target: { value: "Release" } })
+    expect(screen.queryByRole("button", { name: "Allow Build bot" })).toBeNull()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Allow Release bot" })
+    )
     expect(await screen.findByText("Release bot")).toBeTruthy()
-    expect(screen.getByText(/Runs as Open SWE.*Backend/)).toBeTruthy()
+    expect(
+      screen.queryByRole("textbox", { name: "Search Slack bots" })
+    ).toBeNull()
     expect(requests.find(({ init }) => init.method === "POST")?.init.body).toBe(
-      JSON.stringify({ bot_id: "U123", environment: "backend" })
+      JSON.stringify({ bot_id: "U123" })
     )
     fireEvent.click(screen.getByRole("button", { name: "Remove Release bot" }))
     await screen.findByText("No Slack bots are allowed.")
@@ -185,13 +109,13 @@ describe("Allowed Slack bots", () => {
     )
     renderSection()
     await screen.findByText("No Slack bots are allowed.")
+    fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
     fireEvent.click(
       screen.getByRole("button", { name: "Enter bot ID manually" })
     )
     fireEvent.change(screen.getByLabelText("Slack bot ID"), {
       target: { value: "UHUMAN" },
     })
-    await chooseEnvironment()
     fireEvent.click(screen.getByRole("button", { name: "Allow bot" }))
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
@@ -211,33 +135,22 @@ describe("Allowed Slack bots", () => {
       )
     )
     renderSection()
-    const search = await screen.findByRole("combobox", {
+    await screen.findByText("Release bot")
+    fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
+    const search = await screen.findByRole("textbox", {
       name: "Search Slack bots",
     })
-    await waitFor(() => expect(search).toHaveProperty("disabled", false))
-    act(() => search.focus())
-    fireEvent.click(search)
-    fireEvent.input(search, {
-      target: { value: "Release" },
-      inputType: "insertText",
-      data: "Release",
-    })
-    const option = await screen.findByRole("option", {
-      name: /Release bot.*Already allowed/,
-    })
-    expect(option.getAttribute("aria-disabled")).toBe("true")
-    expect(screen.queryByRole("option", { name: /Build bot/ })).toBeNull()
-    fireEvent.input(search, {
-      target: { value: "Build" },
-      inputType: "insertText",
-      data: "Build",
-    })
-    fireEvent.click(await screen.findByRole("option", { name: /Build bot/ }))
-    await chooseEnvironment()
-    expect(screen.getByRole("button", { name: "Allow bot" })).toHaveProperty(
-      "disabled",
-      false
-    )
+    fireEvent.change(search, { target: { value: "Release" } })
+    expect(
+      await screen.findByRole("button", {
+        name: "Release bot is already allowed",
+      })
+    ).toHaveProperty("disabled", true)
+    expect(screen.queryByRole("button", { name: "Allow Build bot" })).toBeNull()
+    fireEvent.change(search, { target: { value: "Build" } })
+    expect(
+      await screen.findByRole("button", { name: "Allow Build bot" })
+    ).toHaveProperty("disabled", false)
   })
 
   it("keeps manual entry available when Slack browsing fails", async () => {
@@ -253,6 +166,8 @@ describe("Allowed Slack bots", () => {
       )
     )
     renderSection()
+    await screen.findByText("No Slack bots are allowed.")
+    fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
     expect(
       await screen.findByText("Slack is temporarily unavailable.")
     ).toBeTruthy()
@@ -262,7 +177,6 @@ describe("Allowed Slack bots", () => {
     fireEvent.change(screen.getByLabelText("Slack bot ID"), {
       target: { value: "B123" },
     })
-    await chooseEnvironment()
     expect(screen.getByRole("button", { name: "Allow bot" })).toHaveProperty(
       "disabled",
       false

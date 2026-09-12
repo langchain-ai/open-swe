@@ -13,7 +13,6 @@ from langgraph_sdk import get_client
 
 from agent.config import ENV
 from agent.credential_scope import private_credential_login
-from agent.github import system_scope
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import (
     cache_github_token_for_thread,
@@ -22,6 +21,7 @@ from agent.github.thread_token import (
 )
 from agent.linear.notifications import post_linear_notification
 from agent.run_config import RunConfig
+from agent.slack import bot_authorization
 from agent.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
@@ -456,9 +456,11 @@ async def _resolve_dashboard_user_token(
 
 async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | None]:
     """Get a GitHub App installation token and cache it for the thread."""
-    scoped = await system_scope.system_installation_token(thread_id)
+    bot_credentials = await bot_authorization.bot_installation_token(thread_id)
     bot_token, expires_at = (
-        scoped if scoped is not None else await get_github_app_installation_token_with_expiry()
+        bot_credentials
+        if bot_credentials is not None
+        else await get_github_app_installation_token_with_expiry()
     )
     if not bot_token:
         raise RuntimeError(
@@ -477,7 +479,7 @@ async def resolve_github_token(
     """Use workspace bot auth publicly and the verified owner's OAuth privately."""
     cfg = RunConfig.from_config(config)
     if cfg.slack_thread and cfg.slack_thread.triggering_bot_id:
-        await system_scope.system_configurable(thread_id, cfg.dump())
+        await bot_authorization.bot_thread_configurable(thread_id, cfg.dump())
     login = await private_credential_login(config, thread_id=thread_id)
     await invalidate_cached_github_token(thread_id)
     if login is None:

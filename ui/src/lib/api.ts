@@ -173,8 +173,8 @@ export interface AllowedSlackBot {
   app_id: string
   name: string
   created_by: string
-  environment: string
   created_at: string
+  image_url: string
 }
 
 export interface TeamSettings {
@@ -438,7 +438,6 @@ export interface EnvironmentOption {
   slug: string
   name: string
   has_snapshot: boolean
-  repos?: Array<string>
   refresh_status?: EnvironmentRefreshStatus
   refresh_kind?: "full" | "update" | null
   refresh_finished_at?: string | null
@@ -807,7 +806,7 @@ export const api = {
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
-  allowSlackBot: (body: { bot_id: string; environment: string }) =>
+  allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
       method: "POST",
       body: JSON.stringify(body),

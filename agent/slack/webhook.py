@@ -12,7 +12,6 @@ import httpx2
 from langchain_core.messages.content import create_text_block
 
 from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
-from agent.github.system_scope import validate_system_scope
 from agent.input_messages import (
     InputMessageContext,
     MessageKind,
@@ -29,6 +28,7 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
+from agent.slack.bot_authorization import validate_bot_thread
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
@@ -604,14 +604,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             return
         if _slack_thread_visibility(channel_context) == "private":
             return
-        environment = await ENVIRONMENTS.get(allowed_bot.environment)
-        if environment is None or not environment.repos:
-            raise RuntimeError(
-                "Configure an environment with repositories for this bot in Admin settings."
-            )
-        if repo and repo.full_name.lower() not in {name.lower() for name in environment.repos}:
-            repo = None
-            repo_dict = None
         try:
             existing_thread = await langgraph_client.threads.get(thread_id)
         except Exception as exc:
@@ -631,7 +623,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
                     extra={"agent_thread_id": thread_id, "slack_bot_id": allowed_bot.bot_id},
                 )
                 return
-            await validate_system_scope(existing_metadata)
+            await validate_bot_thread(existing_metadata)
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
         await common.refresh_user_mapping_cache()
@@ -736,14 +728,8 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     # once, so honoring a later tag would change the prompt but not the image. The
     # tag is stripped only when it resolves, so a typo stays visible in the
     # transcript instead of vanishing.
-    environment_slug: str | None = allowed_bot.environment if allowed_bot else None
-    if allowed_bot is not None:
-        tagged_slug, text_without_tag = parse_environment_tag(clean_text)
-        if tagged_slug and tagged_slug != environment_slug:
-            raise RuntimeError("This bot can only use its admin-configured environment.")
-        if tagged_slug:
-            clean_text = text_without_tag or "(no text in mention)"
-    elif is_first_mention:
+    environment_slug: str | None = None
+    if is_first_mention:
         tagged_slug, text_without_tag = parse_environment_tag(clean_text)
         if tagged_slug and await ENVIRONMENTS.get(tagged_slug) is not None:
             environment_slug = tagged_slug
@@ -940,7 +926,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         visibility=visibility,
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",
-        system_repositories=list(environment.repos) if allowed_bot else None,
     )
     if (visibility == "private" or allowed_bot is not None) and not persisted:
         # Dispatch would create the thread itself, with no metadata and so public.
@@ -953,7 +938,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             allowed_bot.bot_id,
         ):
             raise RuntimeError("Slack thread ownership changed before dispatch.")
-        await validate_system_scope(saved)
+        await validate_bot_thread(saved)
 
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that

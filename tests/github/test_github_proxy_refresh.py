@@ -215,8 +215,8 @@ class TestMaybeRefreshProxyToken:
 
 class TestRefreshGithubProxyMiddleware:
     async def test_scope_revocation_is_not_swallowed(self):
-        from agent.github.system_scope import SystemScopeError
         from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
+        from agent.slack.bot_authorization import BotAuthorizationError
 
         with (
             patch(
@@ -225,9 +225,9 @@ class TestRefreshGithubProxyMiddleware:
             ),
             patch(
                 "agent.middleware.refresh_github_proxy.maybe_refresh_proxy_token",
-                new=AsyncMock(side_effect=SystemScopeError("revoked")),
+                new=AsyncMock(side_effect=BotAuthorizationError("revoked")),
             ),
-            pytest.raises(SystemScopeError, match="revoked"),
+            pytest.raises(BotAuthorizationError, match="revoked"),
         ):
             await refresh_github_proxy_before_model.abefore_model(cast(AgentState, {}), MagicMock())
 

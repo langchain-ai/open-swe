@@ -547,7 +547,6 @@ async def test_environment_options_omit_admin_only_settings(fake_store: FakeStor
             "slug": "default",
             "name": "default",
             "has_snapshot": True,
-            "repos": [],
             "refresh_status": "success",
             "refresh_kind": None,
             "refresh_finished_at": options[0]["refresh_finished_at"],

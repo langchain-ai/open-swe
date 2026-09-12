@@ -48,7 +48,6 @@ from agent.dashboard.user_mappings import (
 )
 from agent.dashboard.workflow_approval import decide_workflow_push_approval
 from agent.dispatch import dispatch_agent_run
-from agent.github import system_scope
 from agent.github.app import (
     get_github_app_installation_token,  # noqa: F401
     get_github_app_installation_token_with_expiry,
@@ -94,6 +93,7 @@ from agent.review.findings import (
 from agent.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from agent.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
 from agent.run_config import Repo
+from agent.slack import bot_authorization
 from agent.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
@@ -534,7 +534,6 @@ async def upsert_agent_thread_metadata(
     visibility: str = "public",
     owner_login: str = "",
     owner_type: str = "user",
-    system_repositories: list[str] | None = None,
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -586,18 +585,13 @@ async def upsert_agent_thread_metadata(
         saved_bot = existing_context.slack_thread
         if (
             existing_meta.get("owner_type") != "system"
-            or existing_meta.get("environment") != environment
-            or not system_scope.repository_scopes_match(
-                existing_meta.get("system_repositories"), system_repositories
-            )
+            or existing_meta.get("visibility") != "public"
             or expected_bot is None
             or saved_bot is None
             or (saved_bot.team_id, saved_bot.triggering_bot_id)
             != (expected_bot.team_id, expected_bot.triggering_bot_id)
         ):
             return False
-    if "system_repositories" in existing_meta:
-        metadata.pop("environment", None)
     sender_login = github_login or await resolve_login_from_email_async(user_email) or ""
     if sender_login:
         metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
@@ -629,8 +623,6 @@ async def upsert_agent_thread_metadata(
     ):
         metadata["visibility"] = visibility
         metadata["owner_type"] = owner_type
-        if system_repositories is not None:
-            metadata["system_repositories"] = system_repositories
         initiating_login = owner_login.strip() or sender_login.strip()
         if initiating_login and owner_type == "user":
             metadata["owner_login"] = initiating_login
@@ -643,14 +635,11 @@ async def upsert_agent_thread_metadata(
             if owner_type == "system":
                 saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
                 saved_meta = saved.get("metadata") or {}
-                if not system_scope.repository_scopes_match(
-                    saved_meta.get("system_repositories"), metadata.get("system_repositories")
-                ) or any(
+                if any(
                     saved_meta.get(key) != metadata.get(key)
                     for key in (
                         "owner_type",
                         "visibility",
-                        "environment",
                         "source_context",
                     )
                 ):
@@ -1428,9 +1417,11 @@ async def get_or_resolve_thread_github_token(thread_id: str, email: str) -> str 
     """GitHub webhook conversations always use the workspace bot identity."""
     del email
     await invalidate_cached_github_token(thread_id)
-    scoped = await system_scope.system_installation_token(thread_id)
+    bot_credentials = await bot_authorization.bot_installation_token(thread_id)
     bot_token, expires_at = (
-        scoped if scoped is not None else await get_github_app_installation_token_with_expiry()
+        bot_credentials
+        if bot_credentials is not None
+        else await get_github_app_installation_token_with_expiry()
     )
     if bot_token:
         cache_github_token_for_thread(

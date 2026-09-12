@@ -11,11 +11,11 @@ from langgraph_sdk import get_client
 from agent.credential_scope import pr_author_login, private_credential_login
 from agent.dashboard.agent_usage import record_agent_pr_usage
 from agent.dashboard.plan_store import get_plan_content
-from agent.github import system_scope
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
 from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
+from agent.slack import bot_authorization
 from agent.slack.client import (
     get_active_slack_thread,
     get_slack_permalink,
@@ -55,11 +55,13 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     """Use the initiator's OAuth for user-owned threads and the bot for system threads."""
     login = await pr_author_login()
     if login is None:
-        scoped = await system_scope.system_installation_token(
+        bot_credentials = await bot_authorization.bot_installation_token(
             RunConfig.from_runtime().thread_id or ""
         )
         return (
-            scoped[0] if scoped is not None else await get_github_app_installation_token()
+            bot_credentials[0]
+            if bot_credentials is not None
+            else await get_github_app_installation_token()
         ), "bot"
     from agent.dashboard.profiles import get_valid_access_token
 

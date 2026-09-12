@@ -1,4 +1,4 @@
-"""Admin-authorized Slack bots and the environments their system threads use."""
+"""Admin-authorized Slack bots that can start Open SWE system threads."""
 
 import hashlib
 import re
@@ -9,7 +9,6 @@ from fastapi import HTTPException
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from agent.config import ENV
-from agent.dashboard.environments import ENVIRONMENTS
 from agent.store import TypedStore, now_iso
 from agent.utils import ttl_cache
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -19,7 +18,6 @@ class AllowSlackBot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     bot_id: str
-    environment: str = Field(min_length=1)
 
     @field_validator("bot_id")
     @classmethod
@@ -36,8 +34,8 @@ class AllowedSlackBot(BaseModel):
     user_id: str = ""
     app_id: str = ""
     name: str
+    image_url: str = ""
     created_by: str = Field(default="", validation_alias=AliasChoices("created_by", "github_login"))
-    environment: str = ""
     created_at: str
 
 
@@ -61,8 +59,6 @@ async def resolve_allowed_slack_bot(
     if bot is None or bot.team_id != team_id or bot.bot_id != bot_id:
         return None
     if (user_id and user_id != bot.user_id) or (app_id and app_id != bot.app_id):
-        return None
-    if not bot.environment:
         return None
     return bot
 
@@ -93,9 +89,6 @@ async def _slack_info(client: httpx2.AsyncClient, method: str, **params: str) ->
 
 async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> AllowedSlackBot:
     login = admin["sub"]
-    environment = await ENVIRONMENTS.get(body.environment)
-    if environment is None or not environment.repos:
-        raise HTTPException(400, "Choose an environment with an explicit repository list.")
     token = ENV.SLACK_BOT_TOKEN.get()
     if not token:
         raise HTTPException(400, "Slack is not configured.")
@@ -132,17 +125,19 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
             raise HTTPException(400, "Choose an active bot in this Slack workspace.")
     key = f"{team_id}:{bot_id}"
     if await ALLOWED_SLACK_BOTS.get(key) is not None:
-        raise HTTPException(
-            409, "This bot is already allowed. Remove it first to change its environment."
-        )
+        raise HTTPException(409, "This bot is already allowed.")
+    profile = user.get("profile") if isinstance(user, dict) else None
+    image_url = profile.get("image_48", "") if isinstance(profile, dict) else ""
     record = AllowedSlackBot(
         team_id=team_id,
         bot_id=bot_id,
         user_id=user_id,
         app_id=bot.get("app_id") or "",
         name=bot.get("name") or bot_id,
+        image_url=image_url
+        if isinstance(image_url, str) and image_url.startswith("https://")
+        else "",
         created_by=login,
-        environment=environment.slug,
         created_at=now_iso(),
     )
     return await ALLOWED_SLACK_BOTS.put(key, record)

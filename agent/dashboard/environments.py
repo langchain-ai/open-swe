@@ -572,7 +572,6 @@ class Environment(BaseModel):
             "slug": self.slug,
             "name": self.name,
             "has_snapshot": self.snapshot_status == "ready",
-            "repos": self.repos,
             "refresh_status": self.refresh_status,
             "refresh_kind": self.refresh_kind,
             "refresh_finished_at": self.refresh_finished_at,

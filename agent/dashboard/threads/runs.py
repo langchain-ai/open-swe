@@ -326,13 +326,6 @@ async def _build_dashboard_configurable(
         for key, value in overrides.items():
             if value is not None:
                 configurable[key] = value
-    if "system_repositories" in metadata:
-        from agent.github.system_scope import validate_system_scope
-
-        await validate_system_scope(dict(metadata))
-        configurable["environment"] = metadata["environment"]
-        for key in ("github_login", "github_user_id", "user_email", "admin_thread"):
-            configurable.pop(key, None)
     return configurable
 
 
