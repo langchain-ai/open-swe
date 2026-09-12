@@ -68,6 +68,25 @@ function renderComposer(
   )
 }
 
+describe("ChatComposer submit", () => {
+  it("returns focus to the editor after submitting", async () => {
+    const onSubmit = vi.fn()
+    renderComposer(false, { onSubmit })
+    const editor = screen.getByTestId("composer-editor")
+    const fileInput =
+      document.querySelector<HTMLInputElement>('input[type="file"]')!
+    const image = new File(["image"], "image.png", { type: "image/png" })
+
+    fireEvent.change(fileInput, { target: { files: [image] } })
+    const sendButton = screen.getByRole("button", { name: "Send message" })
+    await waitFor(() => expect(sendButton.hasAttribute("disabled")).toBe(false))
+    fireEvent.click(sendButton)
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce())
+    expect(document.activeElement).toBe(editor)
+  })
+})
+
 describe("ChatComposer stop button", () => {
   it("offers to stop a run this client never joined", async () => {
     renderComposer(true)
