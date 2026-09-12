@@ -6,7 +6,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import database, directory, queries
+from agent.analytics import directory, queries
+from agent.database import analytics as database
 
 NOW = datetime(2026, 9, 11, tzinfo=UTC)
 

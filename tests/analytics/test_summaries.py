@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import database, ingestion, summaries
+from agent.analytics import ingestion, summaries
 from agent.analytics.events import (
     EventName,
     FindingStatePayload,
@@ -16,6 +16,7 @@ from agent.analytics.events import (
     RunCostRecordedPayload,
     RunStartedPayload,
 )
+from agent.database import analytics as database
 from tests.analytics.helpers import DAY, event
 
 
