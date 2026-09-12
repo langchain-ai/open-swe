@@ -5,7 +5,7 @@ import binascii
 import logging
 import uuid
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
@@ -37,12 +37,14 @@ from agent.dashboard.threads.summary import (
     repo_config_from_metadata,
     thread_source,
 )
+from agent.dashboard.user_preferences import get_user_preferences
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
 )
+from agent.invocation import new_invocation_id, with_invocation_id
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -214,10 +216,12 @@ async def _create_dashboard_thread_record(
     model_id: str | None = None,
     effort: str | None = None,
     plan_mode: bool = False,
+    model_selection: str = "auto",
     admin_thread: bool = False,
+    visibility: Literal["public", "private"] = "public",
     environment: str | None = None,
 ) -> dict[str, Any]:
-    """Create or update dashboard thread metadata without starting a run."""
+    """Create a dashboard thread with immutable ownership and visibility."""
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
@@ -239,6 +243,9 @@ async def _create_dashboard_thread_record(
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "origin": _DASHBOARD_SOURCE,
+        "owner_type": "user",
+        "owner_login": login.strip(),
+        "visibility": visibility,
         "thread_category": "interactive",
         "trigger_kind": "user",
         PARTICIPANT_LOGINS_KEY: merge_participants(None, login),
@@ -251,6 +258,7 @@ async def _create_dashboard_thread_record(
         "resolved_model": resolved_model,
         "resolved_effort": resolved_effort,
         "plan_mode": plan_mode,
+        "model_selection": model_selection,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
@@ -270,9 +278,8 @@ async def _create_dashboard_thread_record(
     await client.threads.create(
         thread_id=thread_id,
         metadata={**metadata, "feedback_initiator_login": login},
-        if_exists="do_nothing",
+        if_exists="raise",
     )
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
     thread = await client.threads.get(thread_id)
     return as_thread_dict(thread)
 
@@ -302,10 +309,16 @@ async def _build_dashboard_configurable(
         configurable.setdefault(key, value)
     if metadata.get("plan_mode") is True:
         configurable["plan_mode"] = True
+    model_selection = metadata.get("model_selection")
+    if model_selection in {"auto", "explicit"}:
+        configurable["model_selection"] = model_selection
     # The agent re-checks the requesting user against CONFIGURED_ADMINS before it
     # hands out the environment tools, so this only marks intent.
     if metadata.get("admin_thread") is True:
         configurable["admin_thread"] = True
+    continued_from = metadata.get("continued_from_thread_id")
+    if isinstance(continued_from, str) and continued_from:
+        configurable["continued_from_thread_id"] = continued_from
     environment = metadata.get("environment")
     if isinstance(environment, str) and environment:
         configurable["environment"] = environment
@@ -441,10 +454,21 @@ async def _enrich_run_start_command(
         client_configurable.get("agent_effort"),
     )
     plan_mode_requested = client_configurable.get("plan_mode") is True
+    model_selection = client_configurable.get("model_selection")
+    if model_selection not in {"auto", "explicit"}:
+        if client_configurable.get("agent_model_id"):
+            model_selection = "explicit"
+        else:
+            model_selection = "auto" if creating else metadata.get("model_selection")
+    offload_requested = client_configurable.get("offload_conversation") is True
     content = _command_message_content(params)
+    if isinstance(content, str) and content.strip() == "/offload":
+        offload_requested = True
+    if offload_requested and creating:
+        raise HTTPException(400, "offloading requires an existing conversation")
     command_images = _dashboard_images_from_content(content)
-    prepare_run_id = str(uuid.uuid4())
-    overrides: dict[str, Any] = {"prepare_run_id": prepare_run_id}
+    invocation_id = new_invocation_id()
+    overrides = with_invocation_id(None, invocation_id)
     run_model: str | None = None
     run_effort: str | None = None
 
@@ -455,17 +479,25 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
+        visibility = (
+            client_configurable.get("visibility")
+            or (await get_user_preferences(login))["default_visibility"]
+        )
+        if visibility not in ("public", "private"):
+            raise HTTPException(422, "visibility must be public or private")
         thread = await _create_dashboard_thread_record(
             thread_id,
             login=login,
             email=email,
             repo_config=_parse_repo(client_configurable.get("repo")) or {},
             repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
+            visibility=visibility,
             prompt=_command_prompt_text(content),
             images=command_images,
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
+            model_selection=model_selection or "auto",
             admin_thread=(
                 client_configurable.get("admin_thread") is True and is_admin(email, login=login)
             ),
@@ -564,6 +596,7 @@ async def _enrich_run_start_command(
     metadata_update: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "plan_mode": plan_mode_requested,
+        "model_selection": model_selection,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
         PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
         "injected_dynamic_context_hashes": sorted(injected),
@@ -595,7 +628,7 @@ async def _enrich_run_start_command(
             if metadata.get("attention_reason"):
                 metadata_update["attention_reason"] = None
             metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata)
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     else:
         if _is_thread_resolved(metadata):
             metadata_update["resolved"] = False
@@ -603,8 +636,9 @@ async def _enrich_run_start_command(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         metadata = {**metadata, **metadata_update}
-        await client.threads.update(thread_id=thread_id, metadata=metadata)
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
 
+    overrides["model_selection"] = model_selection
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
         login,
@@ -615,11 +649,21 @@ async def _enrich_run_start_command(
     run_metadata = params.get("metadata")
     if not isinstance(run_metadata, dict):
         run_metadata = {}
-    run_metadata = {
-        **run_metadata,
-        **agent_version_metadata(),
-        "prepare_run_id": prepare_run_id,
-    }
+    run_metadata = with_invocation_id(
+        {
+            **{
+                key: value
+                for key, value in run_metadata.items()
+                if key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
+            },
+            **agent_version_metadata(),
+        },
+        invocation_id,
+    )
+
+    if offload_requested:
+        merged_configurable["offload_conversation"] = True
+        params["input"] = {}
 
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))

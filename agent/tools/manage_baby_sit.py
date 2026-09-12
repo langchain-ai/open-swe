@@ -19,15 +19,9 @@ def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
     return RunConfig.from_config(config), config if isinstance(config, Mapping) else {}
 
 
-def _matches_configured_repo(cfg: RunConfig, owner: str, repo: str) -> bool:
-    if cfg.repo is None:
-        return True
-    if not cfg.repo.owner or not cfg.repo.name:
-        return False
-    return cfg.repo.owner.lower() == owner.lower() and cfg.repo.name.lower() == repo.lower()
-
-
-def _run_config(cfg: RunConfig, thread_id: str) -> dict[str, Any]:
+def _run_config(
+    cfg: RunConfig, thread_id: str, source_installation_id: int | None
+) -> dict[str, Any]:
     allowed = (
         "source",
         "slack_thread",
@@ -42,6 +36,10 @@ def _run_config(cfg: RunConfig, thread_id: str) -> dict[str, Any]:
     )
     dumped = cfg.dump()
     result = {key: dumped[key] for key in allowed if dumped.get(key) is not None}
+    if cfg.github_issue and isinstance(dumped.get("repo"), Mapping):
+        result["source_repo"] = dumped["repo"]
+        if source_installation_id is not None:
+            result["source_installation_id"] = source_installation_id
     result["thread_id"] = thread_id
     return result
 
@@ -74,9 +72,6 @@ async def manage_baby_sit(
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "No executable agent thread is available"}
-    if not _matches_configured_repo(cfg, pr_ref.owner, pr_ref.repo):
-        return {"success": False, "error": "Pull request does not match this thread's repository"}
-
     key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if action == "stop":
         from agent.baby_sit import WATCHES
@@ -130,6 +125,11 @@ async def manage_baby_sit(
             "success": False,
             "error": "GitHub App installation is unavailable for this repository",
         }
+    source_installation_id = installation_id
+    if cfg.github_issue and cfg.repo:
+        source_installation_id = await get_github_app_installation_id_for_repo(
+            cfg.repo.owner, cfg.repo.name
+        )
     try:
         watch = await start_watch(
             pr_ref=pr_ref,
@@ -137,7 +137,7 @@ async def manage_baby_sit(
             head_ref=pr_head_ref,
             installation_id=installation_id,
             thread_id=thread_id,
-            run_config=_run_config(cfg, thread_id),
+            run_config=_run_config(cfg, thread_id, source_installation_id),
             source_context=_source_context(cfg),
         )
     except Exception as exc:

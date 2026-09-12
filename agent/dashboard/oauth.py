@@ -8,7 +8,6 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
-from functools import cache
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -158,56 +157,34 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     return fallback
 
 
-def _allowed_login_orgs() -> frozenset[str]:
-    """Orgs whose members may log in to the dashboard.
-
-    Reuses the webhook-side ``ALLOWED_GITHUB_ORGS`` allowlist so deployments
-    configure a single org gate. When empty the dashboard login gate is
-    disabled (fail-open) to preserve existing deployments.
-    """
-    return frozenset(
-        org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get().split(",") if org.strip()
-    )
+def _allowed_login_orgs() -> tuple[str, ...]:
+    return tuple(dict.fromkeys(org.lower() for org in ENV.ALLOWED_GITHUB_ORGS.get_list()))
 
 
-@cache
-def _warn_login_gate_disabled() -> None:
-    """Announce the fail-open login gate once per process.
-
-    Every other unset secret here says so in the log — see the
-    ``GITHUB_WEBHOOK_SECRET``/``SLACK_SIGNING_SECRET`` warnings and the one in
-    ``agent.completion``. Those all fail closed, so a missed warning costs a
-    rejected request. This gate fails open, so a missed warning costs an
-    unrestricted dashboard, which is the case that most needs saying out loud.
-
-    Cached rather than logged per call because ``enforce_org_login_gate`` also
-    runs from the thread tools, not only from the OAuth callback.
-    """
-    logger.warning(
-        "ALLOWED_GITHUB_ORGS is not configured — dashboard login is open to any GitHub "
-        "account, and every logged-in user can read all surfaced threads. Set it to "
-        "restrict logins to members of your organization(s)."
-    )
+def _allowed_login_users() -> tuple[str, ...]:
+    return tuple(dict.fromkeys(user.lower() for user in ENV.ALLOWED_GITHUB_USERS.get_list()))
 
 
-async def enforce_org_login_gate(login: str) -> None:
-    """Reject dashboard login for users outside the allowed GitHub org(s).
-
-    No-op when ``ALLOWED_GITHUB_ORGS`` is unset, which leaves login open to any
-    GitHub account; that case warns once per process rather than passing
-    silently. Otherwise the user must be an active member of at least one
-    configured org; membership is checked with the GitHub App installation
-    token (fail-closed on any API error).
-    """
-    orgs = _allowed_login_orgs()
-    if not orgs:
-        _warn_login_gate_disabled()
+def validate_github_login_allowlist() -> None:
+    if ENV.OPEN_SWE_LOCAL_AUTH_TOKEN.is_set() or _allowed_login_orgs() or _allowed_login_users():
         return
-    for org in orgs:
-        if await is_user_active_org_member(login, org):
+    message = "ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured"
+    logger.error(message)
+    raise RuntimeError(message)
+
+
+async def enforce_github_login_gate(login: str) -> None:
+    normalized_login = login.strip().lower()
+    if any(hmac.compare_digest(normalized_login, user) for user in _allowed_login_users()):
+        return
+    for org in _allowed_login_orgs():
+        if await is_user_active_org_member(normalized_login, org):
             return
-    logger.warning("Rejected dashboard login for %r — not in allowed org(s)", login)
-    raise HTTPException(403, "your GitHub account is not a member of an authorized organization")
+    logger.warning(
+        "Rejected dashboard login",
+        extra={"github_login": login, "reason": "not in allowed users or orgs"},
+    )
+    raise HTTPException(403, "your GitHub account is not authorized")
 
 
 def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:

@@ -43,9 +43,9 @@ class FeedbackSubmission(BaseModel):
         return self
 
 
-async def _is_initiator(thread_id: str, login: str) -> bool:
+async def _is_initiator(thread_id: str, login: str, email: str | None) -> bool:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata):
+    if not thread_is_readable(metadata, login, email):
         raise HTTPException(404, "thread not found")
     initiator = metadata.get("feedback_initiator_login")
     if isinstance(initiator, str) and initiator.strip():
@@ -62,7 +62,7 @@ async def get_thread_feedback(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> ThreadFeedbackResponse:
     login = str(session["sub"]).strip().lower()
-    if not await _is_initiator(thread_id, login):
+    if not await _is_initiator(thread_id, login, session.get("email")):
         return ThreadFeedbackResponse(status="unavailable")
     record = await feedback_store().get(thread_id)
     return ThreadFeedbackResponse(
@@ -77,7 +77,7 @@ async def submit_thread_feedback(
     thread_id: str, submission: FeedbackSubmission, session: dict[str, Any] = _SESSION_DEP
 ) -> ThreadFeedbackResponse:
     login = str(session["sub"]).strip().lower()
-    if not await _is_initiator(thread_id, login):
+    if not await _is_initiator(thread_id, login, session.get("email")):
         raise HTTPException(403, "Only the thread initiator can give feedback.")
     async with agent_thread_pr_state_lock(langgraph_client(), thread_id):
         record = await feedback_store().get(thread_id)

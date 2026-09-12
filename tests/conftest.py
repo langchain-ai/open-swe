@@ -89,6 +89,26 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     return client.store
 
 
+@pytest.fixture
+def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
+    bot = {
+        "team_id": "T123",
+        "bot_id": "B123",
+        "user_id": "U123",
+        "app_id": "A123",
+        "name": "Release bot",
+        "created_by": "alice",
+        "created_at": "2026-09-09",
+    }
+    fake_store.seed(["allowed_slack_bots"], "T123:B123", bot)
+    return bot
+
+
+@pytest.fixture(autouse=True)
+def _default_github_login_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "test-user,trusted-user,reviewer")
+
+
 @pytest.fixture(autouse=True)
 def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Serve no dashboard build by default, whatever ``ui/.output`` holds locally."""

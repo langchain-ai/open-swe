@@ -65,15 +65,7 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
     provider = _image_provider(original_url)
     if provider is None or _image_provider(current_url) != provider:
         return None
-    if provider == "linear":
-        linear_api_key = ENV.LINEAR_API_KEY.get()
-        if linear_api_key:
-            return {"Authorization": linear_api_key}
-        logger.warning(
-            "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
-            current_url,
-        )
-    else:
+    if provider == "slack":
         slack_bot_token = ENV.SLACK_BOT_TOKEN.get()
         if slack_bot_token:
             return {"Authorization": f"Bearer {slack_bot_token}"}

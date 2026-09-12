@@ -9,7 +9,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -460,7 +460,8 @@ def _format_token_count(count: int) -> str:
 
 
 def _safe_model_label(model: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)[:48].strip("-")
+    sanitized = re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)
+    return sanitized.rsplit("/", 1)[-1][:48].strip("-")
 
 
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
@@ -547,17 +548,11 @@ def with_slack_session_cost(
 def format_slack_web_link_footer(
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
-    *,
-    trace_url: str | None = None,
 ) -> str:
     """Format the compact Slack footer links."""
-    if not dashboard_url and not trace_url:
+    if not dashboard_url:
         return ""
-    links = []
-    if dashboard_url:
-        links.append(f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>")
-    if trace_url:
-        links.append(f"<{trace_url}|View trace>")
+    links = [f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"]
     usage_text = format_slack_run_usage(usage)
     if usage_text:
         links.append(usage_text)
@@ -568,11 +563,9 @@ def append_slack_web_link_footer(
     text: str,
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
-    *,
-    trace_url: str | None = None,
 ) -> str:
     """Append the compact Slack footer links to fallback text."""
-    footer = format_slack_web_link_footer(dashboard_url, usage, trace_url=trace_url)
+    footer = format_slack_web_link_footer(dashboard_url, usage)
     if not footer or footer in text:
         return text
     stripped = text.rstrip()
@@ -584,10 +577,8 @@ def append_slack_web_link_footer(
 def _slack_web_link_context_block(
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
-    *,
-    trace_url: str | None = None,
 ) -> dict[str, Any] | None:
-    footer = format_slack_web_link_footer(dashboard_url, usage, trace_url=trace_url)
+    footer = format_slack_web_link_footer(dashboard_url, usage)
     if not footer:
         return None
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
@@ -610,10 +601,8 @@ def _with_slack_web_link_context_block(
     blocks: list[dict[str, Any]] | None,
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
-    *,
-    trace_url: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    context_block = _slack_web_link_context_block(dashboard_url, usage, trace_url=trace_url)
+    context_block = _slack_web_link_context_block(dashboard_url, usage)
     if context_block is None:
         return blocks
     if not blocks:
@@ -647,7 +636,6 @@ async def post_slack_thread_reply_with_ts(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
-    include_trace_link: bool = False,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     from agent.slack.code_channels import is_code_channel_session
@@ -655,15 +643,8 @@ async def post_slack_thread_reply_with_ts(
     if is_code_channel_session(thread_ts):
         agent_thread_id = None
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
-    trace_url = (
-        await get_langsmith_trace_url(agent_thread_id)
-        if include_trace_link and agent_thread_id
-        else None
-    )
-    blocks = _with_slack_web_link_context_block(
-        text, blocks, dashboard_url, usage, trace_url=trace_url
-    )
-    text = append_slack_web_link_footer(text, dashboard_url, usage, trace_url=trace_url)
+    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    text = append_slack_web_link_footer(text, dashboard_url, usage)
     return await _post_slack_message_with_ts(
         channel_id,
         text,
@@ -808,6 +789,19 @@ async def delete_slack_message(channel_id: str, message_ts: str) -> bool:
         except httpx2.HTTPError, ValueError:
             logger.exception("Slack chat.delete request failed")
         return False
+
+
+async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) -> bool:
+    """Set (or clear, with "") the animated assistant status shown under a thread."""
+    try:
+        await _slack_stream_call(
+            "assistant.threads.setStatus",
+            {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
+        )
+    except SlackStreamError as exc:
+        logger.info("Slack thread status unavailable: %s", exc.code)
+        return False
+    return True
 
 
 async def update_slack_message(
@@ -965,12 +959,9 @@ async def post_slack_thread_reply(
     *,
     blocks: list[dict[str, Any]] | None = None,
     agent_thread_id: str | None = None,
-    include_trace_link: bool = False,
 ) -> bool:
     """Post a reply in a Slack thread."""
     kwargs: dict[str, Any] = {"blocks": blocks}
-    if include_trace_link:
-        kwargs["include_trace_link"] = True
     if agent_thread_id is not None:
         kwargs["agent_thread_id"] = agent_thread_id
     message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text, **kwargs)
@@ -1015,6 +1006,71 @@ async def post_slack_ephemeral_message(
         except httpx2.HTTPError:
             logger.exception("Slack chat.postEphemeral request failed")
             return False
+
+
+SLACK_USER_ID_RE = re.compile(r"^[UW][A-Z0-9_]+$")
+
+
+def slack_user_ids(values: Iterable[str]) -> list[str]:
+    """The Slack user ids in `values`, de-duplicated, mentions unwrapped."""
+    ids: list[str] = []
+    for value in values:
+        candidate = value.strip().removeprefix("<@").removesuffix(">").split("|")[0].strip()
+        candidate = candidate.upper()
+        if SLACK_USER_ID_RE.fullmatch(candidate) and candidate not in ids:
+            ids.append(candidate)
+    return ids
+
+
+async def invite_to_slack_channel(
+    channel_id: str, user_ids: Iterable[str]
+) -> tuple[list[str], str]:
+    """Invite people to a channel, returning who is in and why anyone is not.
+
+    `force` matters: without it Slack refuses the whole batch when any single
+    user fails, so one stale id would cost everyone else their invitation. With
+    it, failures come back per user in `errors`.
+
+    A refusal is not fatal — a public channel is still reachable by its link —
+    so the caller decides what to do with the error.
+    """
+    users = slack_user_ids(user_ids)
+    if not SLACK_BOT_TOKEN or not channel_id or not users:
+        return [], "" if users else "no_users"
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/conversations.invite",
+                headers=slack_headers(),
+                json={"channel": channel_id, "users": ",".join(users), "force": True},
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (httpx2.HTTPError, ValueError) as exc:
+            logger.warning("Slack conversations.invite request failed", exc_info=True)
+            return [], f"{', '.join(users)}: http_error: {type(exc).__name__}"
+    if not isinstance(data, dict):
+        return [], f"{', '.join(users)}: invalid_response"
+
+    # Someone already in the channel is in the channel, which is what was asked.
+    failures = {
+        str(entry.get("user") or ""): str(entry.get("error") or "failed")
+        for entry in data.get("errors") or []
+        if isinstance(entry, dict)
+        and not entry.get("ok")
+        and entry.get("user")
+        and entry.get("error") != "already_in_channel"
+    }
+    top_error = str(data.get("error") or "")
+    if not data.get("ok") and top_error and top_error != "already_in_channel":
+        logger.info("Could not invite %s to %s: %s", users, channel_id, top_error)
+        return [], f"{', '.join(users)}: {top_error}"
+    if failures:
+        logger.info("Could not invite %s to %s", failures, channel_id)
+    return (
+        [user for user in users if user not in failures],
+        ", ".join(f"{user} ({reason})" for user, reason in failures.items()),
+    )
 
 
 async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any]) -> bool:

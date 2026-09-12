@@ -110,6 +110,30 @@ beforeEach(() => {
 })
 
 describe("useSubmitAgentMessage", () => {
+  it("offloads without adding a user message or queuing a prompt", async () => {
+    const { client, result } = setup()
+    await result.current.mutateAsync({ content: "/offload", images: [] })
+    expect(stream.submit).toHaveBeenCalledWith(
+      {},
+      {
+        config: { configurable: { offload_conversation: true } },
+      }
+    )
+    expect(queueMessage).not.toHaveBeenCalled()
+    expect(pendingMessages(client)).toBeUndefined()
+    expect(queuedMessages(client)).toBeUndefined()
+  })
+
+  it("rejects offloading during a live run instead of queuing it", async () => {
+    stream.isLoading = true
+    const { result } = setup()
+    await expect(
+      result.current.mutateAsync({ content: "/offload" })
+    ).rejects.toThrow("Wait for the current run")
+    expect(stream.submit).not.toHaveBeenCalled()
+    expect(queueMessage).not.toHaveBeenCalled()
+  })
+
   it("shows an optimistic user message before the idle probe resolves", async () => {
     let rejectProbe: (error: Error) => void = () => {}
     queueMessage.mockImplementationOnce(
