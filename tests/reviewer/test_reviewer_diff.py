@@ -36,6 +36,48 @@ index 3333333..4444444 100644
 """
 
 
+# A deletion large enough to shift the following hunk's new-side numbering below
+# its own old-side numbering. That overlap is what makes a side mix-up visible:
+# old line 15 belongs to the first hunk, but 15 also falls inside the second
+# hunk's new-side range (15..18).
+_SHRINKING_DIFF = """diff --git a/shrink.py b/shrink.py
+index 1111111..2222222 100644
+--- a/shrink.py
++++ b/shrink.py
+@@ -10,6 +10,1 @@ def first():
+-    removed_a()
+-    removed_b()
+-    removed_c()
+-    removed_d()
+-    removed_e()
+-    removed_f()
++    kept()
+@@ -20,3 +15,4 @@ def second():
+     ctx_a
+     ctx_b
++    inserted()
+     ctx_c
+"""
+
+# git emits one entry per path, but concatenated diffs (and re-review deltas)
+# can repeat one. compute_diff_line_set already merges them.
+_REPEATED_PATH_DIFF = """diff --git a/dup.py b/dup.py
+--- a/dup.py
++++ b/dup.py
+@@ -1,2 +1,3 @@
+ import os
++import sys
+ print(os.getcwd())
+diff --git a/dup.py b/dup.py
+--- a/dup.py
++++ b/dup.py
+@@ -80,3 +81,4 @@ def later():
+     tail_a
++    tail_b
+     tail_c
+"""
+
+
 def test_parse_unified_diff_extracts_hunks_per_file() -> None:
     files = parse_unified_diff(_TWO_FILE_DIFF)
     assert [fd.file for fd in files] == ["foo.py", "bar.py"]
@@ -208,3 +250,43 @@ async def test_compute_diff_in_sandbox_uses_two_dot_by_default() -> None:
     cmd = backend.aexecute.call_args.args[0]
     assert "oldsha..newsha" in cmd
     assert "oldsha...newsha" not in cmd
+
+
+def test_extract_diff_hunk_left_side_uses_old_line_numbers() -> None:
+    """A deleted line is numbered on the old side. Matching it against the
+    new-side hunk range finds nothing, so the finding loses its context."""
+    hunk = extract_diff_hunk(_SHRINKING_DIFF, "shrink.py", 12, 12, side="LEFT")
+    assert hunk is not None
+    assert "@@ -10,6 +10,1 @@" in hunk
+    assert "removed_c" in hunk
+
+
+def test_extract_diff_hunk_left_side_does_not_return_a_later_hunk() -> None:
+    """Old line 15 is in the first hunk, but also inside the second hunk's
+    new-side range. Comparing against the wrong side attaches the wrong code
+    to the finding, which is worse than returning nothing."""
+    hunk = extract_diff_hunk(_SHRINKING_DIFF, "shrink.py", 15, 15, side="LEFT")
+    assert hunk is not None
+    assert "@@ -10,6 +10,1 @@" in hunk
+    assert "inserted()" not in hunk
+
+
+def test_extract_diff_hunk_right_side_is_unchanged_by_the_side_argument() -> None:
+    """RIGHT is the default and keeps matching on new-side numbering."""
+    assert extract_diff_hunk(_SHRINKING_DIFF, "shrink.py", 15, 15) == extract_diff_hunk(
+        _SHRINKING_DIFF, "shrink.py", 15, 15, side="RIGHT"
+    )
+    hunk = extract_diff_hunk(_SHRINKING_DIFF, "shrink.py", 15, 15, side="RIGHT")
+    assert hunk is not None
+    assert "inserted()" in hunk
+
+
+def test_extract_diff_hunk_searches_every_entry_for_a_repeated_path() -> None:
+    """Only inspecting the first entry drops hunks that compute_diff_line_set
+    accepts, so a finding validated as in-diff would come back contextless."""
+    line_set = compute_diff_line_set(_REPEATED_PATH_DIFF)
+    assert is_range_in_diff(line_set, "dup.py", 82, 82) is True
+
+    hunk = extract_diff_hunk(_REPEATED_PATH_DIFF, "dup.py", 82, 82)
+    assert hunk is not None
+    assert "tail_b" in hunk
