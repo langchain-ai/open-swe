@@ -225,3 +225,29 @@ async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
 
     assert not middleware.has_groups
     assert "- Corridor" not in cast(StructuredTool, middleware.tools[0]).description
+
+
+async def test_unavailable_group_is_cataloged_and_reports_reason() -> None:
+    builds = 0
+
+    async def load() -> list[BaseTool]:
+        nonlocal builds
+        builds += 1
+        return [_tool("notion-search")]
+
+    reason = "Personal Notion connections require a private thread started by their owner"
+    middleware = DynamicToolMiddleware(
+        {"Notion": IntegrationGroup(tool_names=(), load=load, unavailable_reason=reason)}
+    )
+    loader = cast(StructuredTool, middleware.tools[0])
+    assert "- Notion (integration: Notion) - unavailable: " + reason in loader.description
+
+    command = await cast(Any, loader.coroutine)(
+        tool_names=["Notion"], state={}, tool_call_id="load-1"
+    )
+
+    message = cast(dict[str, Any], command.update)["messages"][0]
+    assert message.status == "error"
+    assert reason in message.content
+    assert builds == 0
+    assert "loaded_integration_tools" not in cast(dict[str, Any], command.update)

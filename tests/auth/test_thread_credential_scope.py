@@ -180,8 +180,37 @@ async def test_public_notion_tools_do_not_load_personal_credentials(monkeypatch,
     get_token = AsyncMock(return_value="notion-token")
     monkeypatch.setattr(notion_mcp, "get_notion_access_token", get_token)
     monkeypatch.setattr(notion_mcp, "_build_mcp_tools", AsyncMock(return_value=[]))
-    assert await notion_mcp.load_notion_tools("alice") == []
+    with pytest.raises(
+        notion_mcp.NotionCredentialScopeError,
+        match="Personal Notion connections require a private thread started by their owner",
+    ):
+        await notion_mcp.load_notion_tools("alice")
     get_token.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_private_owner_loads_notion_tools(monkeypatch, thread_metadata):
+    from langchain_core.tools import StructuredTool
+
+    thread_metadata["visibility"] = "private"
+    monkeypatch.setattr("agent.run_config.get_config", config)
+    get_token = AsyncMock(return_value="notion-token")
+    monkeypatch.setattr(notion_mcp, "get_notion_access_token", get_token)
+
+    async def search(query: str) -> str:
+        return query
+
+    source_tool = StructuredTool.from_function(
+        coroutine=search,
+        name="notion_search",
+        description="Search Notion",
+    )
+    monkeypatch.setattr(notion_mcp, "_build_mcp_tools", AsyncMock(return_value=[source_tool]))
+
+    tools = await notion_mcp.load_notion_tools("alice")
+
+    assert [tool.name for tool in tools] == ["notion_search"]
+    get_token.assert_awaited_once_with("alice")
 
 
 @pytest.mark.asyncio

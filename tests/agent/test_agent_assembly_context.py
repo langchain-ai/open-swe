@@ -49,7 +49,19 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert not tool_names.intersection(
         {"save_user_instructions", "save_user_skill", "delete_user_skill", "read_user_settings"}
     )
-    notion.assert_awaited_once_with(None)
+    notion.assert_not_awaited()
+    from agent.middleware import DynamicToolMiddleware
+
+    dynamic_tools = next(
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, DynamicToolMiddleware)
+    )
+    assert (
+        "- Notion (integration: Notion) - unavailable: "
+        "Personal Notion connections require a private thread started by their owner"
+        in dynamic_tools.tools[0].description
+    )
     from agent.middleware import WorkspaceSkillsMiddleware
 
     middleware = cast(list[object], captured["middleware"])

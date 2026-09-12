@@ -149,7 +149,11 @@ from agent.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from agent.tool_loaders.notion_mcp import load_notion_tools
+from agent.tool_loaders.notion_mcp import (
+    PERSONAL_NOTION_THREAD_REASON,
+    NotionCredentialScopeError,
+    load_notion_tools,
+)
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
     approve_plan,
@@ -504,19 +508,28 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
     except TimeoutError:
         logger.warning("Timed out loading cached tools for %s", key, exc_info=True)
         return []
+    except NotionCredentialScopeError:
+        raise
     except Exception:
         logger.warning("Failed to load cached tools for %s", key, exc_info=True)
         return []
 
 
-async def _notion_tools_for(profile_login: str | None) -> list[Any]:
+async def _empty_tool_loader() -> list[Any]:
+    return []
+
+
+async def _notion_tools_for(profile_login: str | None) -> list[Any] | IntegrationGroup:
     if not profile_login:
-        return []
-    return await _cached_tool_loader(
-        f"tools:notion:{profile_login}",
-        300,
-        lambda: load_notion_tools(profile_login),
-    )
+        return IntegrationGroup((), _empty_tool_loader, PERSONAL_NOTION_THREAD_REASON)
+    try:
+        return await _cached_tool_loader(
+            f"tools:notion:{profile_login}",
+            300,
+            lambda: load_notion_tools(profile_login),
+        )
+    except NotionCredentialScopeError as exc:
+        return IntegrationGroup((), _empty_tool_loader, str(exc))
 
 
 async def _mcp_tools_for(credential_login: str | None) -> list[Any]:
@@ -859,12 +872,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     profile_login = resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
+    credential_scope_reason: str | None = None
     if not is_desktop_run(cfg):
         try:
             credential_login = await private_credential_login(config)
             credential_scope_known = True
         except Exception:
-            logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
+            credential_scope_reason = (
+                "Personal integration connections are unavailable because the thread "
+                "credential scope could not be resolved"
+            )
+            logger.exception("Cannot resolve thread credential scope")
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
@@ -1087,21 +1105,28 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
-    mcp_tools: list[Any] = []
-    notion_tools: list[Any] = []
+    mcp_tools: list[Any] | IntegrationGroup = []
+    notion_tools: list[Any] | IntegrationGroup = []
     if not stop_summary_mode and not local_run and credential_scope_known:
-        mcp_tools, notion_tools = await asyncio.gather(
-            _phase_result(
-                thread_id,
-                "factory.mcp_tools",
-                lambda: _mcp_tools_for(credential_login),
-            ),
-            _phase_result(
-                thread_id,
-                "factory.notion_tools",
-                lambda: _notion_tools_for(credential_login),
-            ),
+        mcp_result = _phase_result(
+            thread_id,
+            "factory.mcp_tools",
+            lambda: _mcp_tools_for(credential_login),
         )
+        if credential_login:
+            mcp_tools, notion_tools = await asyncio.gather(
+                mcp_result,
+                _phase_result(
+                    thread_id,
+                    "factory.notion_tools",
+                    lambda: _notion_tools_for(credential_login),
+                ),
+            )
+        else:
+            mcp_tools = await mcp_result
+            notion_tools = IntegrationGroup((), _empty_tool_loader, PERSONAL_NOTION_THREAD_REASON)
+    elif not stop_summary_mode and not local_run and credential_scope_reason:
+        notion_tools = IntegrationGroup((), _empty_tool_loader, credential_scope_reason)
 
     slack_tools = [
         manage_code_channel,

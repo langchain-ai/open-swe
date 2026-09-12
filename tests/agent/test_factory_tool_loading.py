@@ -55,7 +55,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
             )
         ),
     )
-    barrier = asyncio.Barrier(2)
+    barrier = asyncio.Barrier(1)
 
     async def delete_incident() -> str:
         return "deleted"
@@ -107,7 +107,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
         patch("agent.server.email_for_login", new_callable=AsyncMock, return_value=None),
         patch("agent.server._mcp_tools_for", side_effect=rendezvous([mcp_tool])),
-        patch("agent.server._notion_tools_for", side_effect=rendezvous([])),
+        patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
     ):
         config = _config()
         config["configurable"]["github_login"] = github_login

@@ -14,6 +14,13 @@ from agent.utils.thread_participants import resolve_participant
 logger = logging.getLogger(__name__)
 
 _MCP_TIMEOUT_SECONDS = 30.0
+PERSONAL_NOTION_THREAD_REASON = (
+    "Personal Notion connections require a private thread started by their owner"
+)
+
+
+class NotionCredentialScopeError(RuntimeError):
+    """Raised when the current thread cannot use personal Notion credentials."""
 
 
 async def _build_mcp_tools(access_token: str) -> list[BaseTool]:
@@ -113,8 +120,12 @@ def _refreshing_tool(tool: BaseTool) -> BaseTool:
 async def load_notion_tools(login: str) -> list[BaseTool]:
     """Load the private owner's personal Notion tools."""
     owner = await private_credential_login()
-    if owner is None or owner.lower() != login.strip().lower():
-        return []
+    if owner is None:
+        raise NotionCredentialScopeError(PERSONAL_NOTION_THREAD_REASON)
+    if owner.lower() != login.strip().lower():
+        raise NotionCredentialScopeError(
+            "Personal Notion connections require the private thread owner to start the run"
+        )
     access_token = await get_notion_access_token(owner)
     if not access_token:
         return []

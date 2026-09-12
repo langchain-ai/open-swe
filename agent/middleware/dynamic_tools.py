@@ -40,6 +40,7 @@ class IntegrationGroup:
 
     tool_names: Sequence[str]
     load: Callable[[], Awaitable[Sequence[BaseTool]]]
+    unavailable_reason: str | None = None
 
 
 class DynamicToolState(AgentState):
@@ -65,6 +66,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         reserved = {"load_integration_tools", *reserved_names}
         self._groups: dict[str, IntegrationGroup] = {}
         self._group_of: dict[str, str] = {}
+        self._unavailable: dict[str, str] = {}
         self._resolved: dict[str, _Resolved] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         catalog: list[str] = []
@@ -77,10 +79,16 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                     raise ValueError(f"Duplicate integration tool name: {name}")
                 self._group_of[name] = group
                 names.append(name)
-            if not names:
+            if not names and entry.unavailable_reason is None:
                 continue
             self._groups[group] = entry
-            catalog.extend(f"- {name} (integration: {group})" for name in sorted(names))
+            if entry.unavailable_reason is not None:
+                self._unavailable[group] = entry.unavailable_reason
+                catalog.append(
+                    f"- {group} (integration: {group}) - unavailable: {entry.unavailable_reason}"
+                )
+            else:
+                catalog.extend(f"- {name} (integration: {group})" for name in sorted(names))
 
         aliases = {
             alias: name
@@ -95,13 +103,34 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             tool_call_id: Annotated[str, InjectedToolCallId] = "",
         ) -> Command:
             normalized_names = [aliases.get(name, name) for name in tool_names]
-            unknown = sorted(set(normalized_names) - self._group_of.keys())
+            known = self._group_of.keys() | self._unavailable.keys()
+            unknown = sorted(set(normalized_names) - known)
             if unknown:
                 return Command(
                     update={
                         "messages": [
                             ToolMessage(
                                 content=f"Unknown integration tools: {', '.join(unknown)}",
+                                tool_call_id=tool_call_id,
+                                status="error",
+                            )
+                        ]
+                    }
+                )
+            unavailable = {
+                name: self._unavailable[name]
+                for name in normalized_names
+                if name in self._unavailable
+            }
+            if unavailable:
+                details = "; ".join(
+                    f"{name}: {reason}" for name, reason in sorted(unavailable.items())
+                )
+                return Command(
+                    update={
+                        "messages": [
+                            ToolMessage(
+                                content=f"Integration unavailable: {details}",
                                 tool_call_id=tool_call_id,
                                 status="error",
                             )
@@ -143,9 +172,11 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             )
 
         description = load_prompt("tools/load_integration_tools.md")
-        if self._group_of:
+        if self._groups:
             example_name = (
-                "analyzePlan" if "analyzePlan" in self._group_of else next(iter(self._group_of))
+                "analyzePlan"
+                if "analyzePlan" in self._group_of
+                else next(iter(self._group_of), next(iter(self._groups)))
             )
             example = json.dumps({"tool_names": [example_name]}, separators=(",", ":"))
             description += f"\nExample: {example}\nAvailable tools:\n" + "\n".join(catalog)
