@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
-    "approve_plan": ".approve_plan",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "create_automation": ".automations",
@@ -13,6 +12,8 @@ _TOOL_MODULES = {
     "delete_automation": ".automations",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
+    "exit_plan_mode": ".exit_plan_mode",
+    "exit_pre_routed_mode": ".exit_pre_routed_mode",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
@@ -62,7 +63,6 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
-    "approve_plan",
     "background_execute",
     "background_task",
     "create_automation",
@@ -71,6 +71,8 @@ __all__ = [
     "delete_automation",
     "delete_environment",
     "enter_plan_mode",
+    "exit_plan_mode",
+    "exit_pre_routed_mode",
     "fetch_review_diff",
     "fetch_url",
     "get_thread",
@@ -130,7 +132,6 @@ if TYPE_CHECKING:
     from agent.slack.tools.start_new_thread import slack_start_new_thread
     from agent.slack.tools.thread_reply import slack_thread_reply
     from agent.tools.add_finding import add_finding
-    from agent.tools.approve_plan import approve_plan
     from agent.tools.automations import (
         create_automation,
         delete_automation,
@@ -149,6 +150,8 @@ if TYPE_CHECKING:
         publish_environment,
         refresh_environment_start,
     )
+    from agent.tools.exit_plan_mode import exit_plan_mode
+    from agent.tools.exit_pre_routed_mode import exit_pre_routed_mode
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url
     from agent.tools.http_request import http_request

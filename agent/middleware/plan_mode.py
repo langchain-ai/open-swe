@@ -28,7 +28,7 @@ class PlanModeState(AgentState):
     plan_mode: NotRequired[bool]
 
 
-def _tool_name(tool: BaseTool | dict[str, Any] | Any) -> str | None:
+def _tool_name(tool: BaseTool | dict[str, Any]) -> str | None:
     if isinstance(tool, dict):
         name = tool.get("name")
         return name if isinstance(name, str) else None

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from langchain_core.tools import StructuredTool
 
+from agent.prompt import construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
 
 
@@ -13,7 +14,14 @@ def sample_tool(value: str) -> str:
 
 def test_render_prompt_requires_all_placeholders() -> None:
     with pytest.raises(KeyError):
-        render_prompt("model-selection.md")
+        render_prompt("system/plan-mode-active.md")
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_construct_system_prompt_gates_pre_routed_mode(enabled: bool) -> None:
+    prompt = construct_system_prompt(working_dir="/work", pre_routed_mode=enabled)
+
+    assert ("### Pre-routed Mode" in prompt) is enabled
 
 
 def test_load_prompt_rejects_paths_outside_resources() -> None:

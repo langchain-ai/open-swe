@@ -152,7 +152,6 @@ from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_titl
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
-    approve_plan,
     background_execute,
     background_task,
     create_automation,
@@ -163,6 +162,8 @@ from agent.tools import (
     delete_organization_skill,
     delete_user_skill,
     enter_plan_mode,
+    exit_plan_mode,
+    exit_pre_routed_mode,
     fetch_url,
     get_thread,
     http_request,
@@ -627,13 +628,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         repo_instructions: str | None,
         model_id: str,
         effort: str | None,
-        title_model: BaseChatModel,
+        title_model: BaseChatModel | None,
         source: str,
         user_email: str,
         linear_project_id: str,
         linear_issue_number: str,
         draft_prs: bool,
         plan_mode: bool,
+        model_routing: bool,
         admin_environments: bool,
         credential_login: str | None = None,
     ) -> None:
@@ -651,6 +653,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
+        self._model_routing = model_routing
         self._admin_environments = admin_environments
 
     def _prepare_config_fingerprint(self) -> Any:
@@ -662,6 +665,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "plan_mode": self._plan_mode,
+            "model_routing": self._model_routing,
             "draft_prs": self._draft_prs,
             "model": self._model_id,
             "effort": self._effort,
@@ -718,17 +722,20 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        schedule_thread_title_generation(
-            thread_id=self._thread_id,
-            messages=state.get("messages") or [],
-            model=self._title_model,
-            client=client,
-        )
+        # With model routing on, the agent titles the thread itself on exiting
+        # pre-routed or plan mode; the background titler is the routing-off path.
+        if self._title_model is not None:
+            schedule_thread_title_generation(
+                thread_id=self._thread_id,
+                messages=state.get("messages") or [],
+                model=self._title_model,
+                client=client,
+            )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
         if is_desktop_run(cfg):
-            if cfg.local_project_path:
+            if cfg.local_project_path and self._title_model is not None:
                 schedule_worktree_branch_rename(
                     worktree_path=cfg.local_project_path,
                     messages=state.get("messages") or [],
@@ -743,6 +750,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "rendered_system_prompt": construct_system_prompt(
                     working_dir=work_dir,
                     source="desktop",
+                    pre_routed_mode=self._model_routing,
                 ),
             }
         async with aphase(self._thread_id, "prepare.github_token"):
@@ -836,6 +844,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 default_repo=prompt_default_repo,
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
+                pre_routed_mode=self._model_routing,
                 repo_custom_instructions=self._repo_instructions,
                 environment_name=environment.name if environment else None,
                 environment_instructions=environment.instructions if environment else None,
@@ -980,8 +989,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
-    if cfg.source == "dashboard" and cfg.model_selection in {"auto", "explicit"}:
-        adaptive_model_routing = cfg.model_selection == "auto"
+    # A picked model always wins; "auto" defers to the user and org toggles above.
+    if cfg.source == "dashboard" and cfg.model_selection == "explicit":
+        adaptive_model_routing = False
 
     # An explicit per-run model choice is the one thing allowed to move a thread
     # off its stored settings; the new choice is then stored in turn.
@@ -1097,6 +1107,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
+    # A stop summary is one wrap-up turn; sizing it first would spend the whole turn.
+    adaptive_model_routing = adaptive_model_routing and not stop_summary_mode
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
@@ -1127,7 +1139,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         http_request,
         fetch_url,
         web_search,
-        approve_plan,
+        exit_plan_mode,
+        *([exit_pre_routed_mode] if adaptive_model_routing else []),
         background_execute,
         background_task,
         enter_plan_mode,
@@ -1237,8 +1250,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         }
         model_selection_middleware.append(
             ModelSelectionMiddleware(
-                routing_models,
-                routing_models["fast"],
+                routing_models, initial_route=thread_settings.get("model_route")
             )
         )
     subagent_model = _make_model_or_defer(
@@ -1249,7 +1261,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     subagent_tools = [
         tool
         for tool in static_tools
-        if tool is not background_execute and tool is not background_task
+        if tool is not background_execute
+        and tool is not background_task
+        and tool is not exit_pre_routed_mode
     ]
     title_model = _make_model_or_defer(
         title_model_id,
@@ -1293,13 +1307,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     repo_instructions=repo_instructions,
                     model_id=model_id,
                     effort=profile_effort,
-                    title_model=title_model,
+                    title_model=None if adaptive_model_routing else title_model,
                     source=source,
                     user_email=user_email,
                     linear_project_id=linear_project_id,
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
+                    model_routing=adaptive_model_routing,
                     admin_environments=admin_thread,
                 ),
                 *([workspace_skills] if workspace_skills else []),

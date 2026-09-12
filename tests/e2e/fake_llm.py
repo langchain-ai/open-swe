@@ -1096,6 +1096,39 @@ def _script_for(context: ScriptContext) -> tuple[StepSpec, ...]:
     return SCRIPT_LIBRARY["followup"]
 
 
+EXIT_PRE_ROUTED_MODE_TOOL = "exit_pre_routed_mode"
+
+
+def _is_exit_pre_routed_call(message: BaseMessage) -> bool:
+    return isinstance(message, AIMessage) and any(
+        call["name"] == EXIT_PRE_ROUTED_MODE_TOOL for call in message.tool_calls
+    )
+
+
+def _pre_routed(messages: list[BaseMessage]) -> bool:
+    """A routed thread starts pre-routed; the real model exits before doing the task."""
+    system = next((m for m in messages if isinstance(m, SystemMessage)), None)
+    if system is None or "### Pre-routed Mode" not in _text(system.content):
+        return False
+    return not any(_is_exit_pre_routed_call(m) for m in messages)
+
+
+def _exit_pre_routed_step(first_text: str) -> AIMessage:
+    enveloped = re.search(r"<content>(.*?)</content>", first_text, re.S)
+    request = (enveloped.group(1) if enveloped else first_text).strip()
+    title = " ".join(request.split()[:8]) or "Scripted E2E task"
+    return AIMessage(
+        content="Sized the task; leaving pre-routed mode.",
+        tool_calls=[
+            {
+                "name": EXIT_PRE_ROUTED_MODE_TOOL,
+                "args": {"model_route": "fast", "title": title},
+                "id": "call-exit-pre-routed",
+            }
+        ],
+    )
+
+
 def build_script() -> list[StepSpec]:
     return list(SCRIPT_LIBRARY["implement"])
 
@@ -1134,12 +1167,20 @@ class FakeScriptedChatModel(BaseChatModel):
             last_text=_text(humans[-1].content) if humans else "",
             human_count=len(humans),
         )
+        if _pre_routed(messages):
+            return ChatResult(
+                generations=[ChatGeneration(message=_exit_pre_routed_step(context.first_text))]
+            )
         script = _script_for(context)
 
         last_human = max(
             (i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1
         )
-        step_index = sum(1 for m in messages[last_human + 1 :] if isinstance(m, AIMessage))
+        step_index = sum(
+            1
+            for m in messages[last_human + 1 :]
+            if isinstance(m, AIMessage) and not _is_exit_pre_routed_call(m)
+        )
 
         # Keep a run busy on demand so E2E can land follow-ups mid-run (exercising
         # the interrupt-debounce path). Only the triggering message carries the

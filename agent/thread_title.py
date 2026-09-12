@@ -6,10 +6,14 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langgraph_sdk import get_client
 from pydantic import BaseModel, Field
 
+from agent.desktop import is_desktop_run
+from agent.desktop_branch import rename_temporary_branch_to
 from agent.input_messages import dynamic_context_hash, human_input, input_message_text
 from agent.prompts import load_prompt
+from agent.run_config import RunConfig
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, rename_session
 from agent.source_context import SourceContext
 
@@ -58,6 +62,51 @@ def _normalize_title(title: str) -> str:
     return normalized[:MAX_THREAD_TITLE_CHARS].rsplit(" ", 1)[0].rstrip()
 
 
+def _awaiting_generated_title(metadata: Mapping[str, Any]) -> bool:
+    """A seeded title is the placeholder the UI shows until a real one lands."""
+    title_seed = metadata.get("title_seed")
+    return (
+        metadata.get("source") in {"dashboard", "slack"}
+        and isinstance(title_seed, str)
+        and metadata.get("title") == title_seed
+    )
+
+
+async def store_thread_title(*, thread_id: str, title: str, client: Any) -> str | None:
+    """Replace the seeded placeholder title, leaving user-chosen titles alone."""
+    thread = await client.threads.get(thread_id=thread_id)
+    metadata = _thread_metadata(thread)
+    if not _awaiting_generated_title(metadata):
+        return None
+    normalized = _normalize_title(title)
+    if not normalized:
+        return None
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"title": normalized, "title_seed": None},
+    )
+    # Re-read after the update: the pre-update snapshot can be stale if the
+    # thread was promoted to a code channel between the check and the update.
+    latest = await client.threads.get(thread_id=thread_id)
+    context = SourceContext.from_metadata(_thread_metadata(latest))
+    if context.slack_location and context.slack_location[1] == CODE_CHANNEL_SESSION_TS:
+        await rename_session(context.slack_location[0], normalized)
+    return normalized
+
+
+async def name_thread(*, thread_id: str, title: str, cfg: RunConfig) -> None:
+    """Apply an agent-chosen title to the thread and, on desktop, its worktree branch."""
+    try:
+        await store_thread_title(thread_id=thread_id, title=title, client=get_client())
+    except Exception:  # noqa: BLE001
+        logger.warning("Storing agent-chosen thread title failed", extra={"thread": thread_id})
+    if is_desktop_run(cfg) and cfg.local_project_path:
+        try:
+            await rename_temporary_branch_to(worktree_path=cfg.local_project_path, name=title)
+        except Exception:  # noqa: BLE001
+            logger.warning("Renaming worktree branch failed", extra={"thread": thread_id})
+
+
 async def generate_and_store_thread_title(
     *,
     thread_id: str,
@@ -67,13 +116,7 @@ async def generate_and_store_thread_title(
 ) -> None:
     thread = await client.threads.get(thread_id=thread_id)
     metadata = _thread_metadata(thread)
-    expected_title = metadata.get("title")
-    title_seed = metadata.get("title_seed")
-    if (
-        metadata.get("source") not in {"dashboard", "slack"}
-        or not isinstance(title_seed, str)
-        or expected_title != title_seed
-    ):
+    if not _awaiting_generated_title(metadata):
         return
 
     structured = model.with_structured_output(_ThreadTitle)
@@ -99,27 +142,7 @@ async def generate_and_store_thread_title(
         )
     if not isinstance(result, _ThreadTitle):
         return
-    title = _normalize_title(result.title)
-    if not title:
-        return
-
-    latest = await client.threads.get(thread_id=thread_id)
-    latest_metadata = _thread_metadata(latest)
-    if (
-        latest_metadata.get("title") != expected_title
-        or latest_metadata.get("title_seed") != title_seed
-    ):
-        return
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"title": title, "title_seed": None},
-    )
-    # Re-read after the update: the pre-update snapshot can be stale if the
-    # thread was promoted to a code channel between the check and the update.
-    latest = await client.threads.get(thread_id=thread_id)
-    context = SourceContext.from_metadata(_thread_metadata(latest))
-    if context.slack_location and context.slack_location[1] == CODE_CHANNEL_SESSION_TS:
-        await rename_session(context.slack_location[0], title)
+    await store_thread_title(thread_id=thread_id, title=result.title, client=client)
 
 
 def schedule_thread_title_generation(

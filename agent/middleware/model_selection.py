@@ -1,56 +1,49 @@
-import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any, Literal, NotRequired
+"""Pre-routed mode: the agent sizes the task on the cheap model, then picks its route.
 
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+Every thread starts pre-routed on the ``fast`` profile. ``exit_pre_routed_mode``
+writes ``model_route`` into state and the thread's stored settings; the decision
+is final for the thread. Plan mode takes precedence: it runs on ``performance``
+and ``exit_plan_mode`` carries the routing decision instead.
+
+The tool list and system prompt are identical before and after the exit so a
+fast→fast exit keeps the provider's prompt cache warm. Read-only discipline is
+enforced by rejecting disallowed tool calls, not by hiding the tools.
+"""
+
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, NotRequired, TypedDict, cast
+
+from langchain.agents.middleware.types import (
+    AgentState,
+    ModelRequest,
+    ModelResponse,
+    ToolCallRequest,
+)
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langgraph.runtime import Runtime
-from pydantic import BaseModel
+from langgraph.types import Command
 
-from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import load_prompt, render_prompt
+from agent.utils.thread_settings import ModelRoute
 
-logger = logging.getLogger(__name__)
-
-Route = Literal["fast", "balanced", "performance"]
-
-_CLASSIFIER_PROMPT = load_prompt("model-selection.md")
-_PLAN_APPROVED_PREFIX = "Plan mode is now inactive because the plan was approved."
-
-
-def _latest_human_task(messages: Sequence[Any]) -> str:
-    """The user's own request, skipping injected context envelopes.
-
-    Context blocks (sender metadata, dynamic context) are appended as
-    ``HumanMessage``s after the real input, so the newest ``HumanMessage`` is
-    usually machine-authored. Only ``kind="human"`` envelopes carry a request.
-    """
-    plain = ""
-    for message in reversed(messages):
-        if not isinstance(message, HumanMessage):
-            continue
-        content = message.content
-        if message_sender_id(content, kind="human") is not None:
-            if authored := input_message_text(content):
-                return authored
-            continue
-        text = message.text
-        if plain or not isinstance(text, str) or "<dynamic-context" in text:
-            continue
-        if "<input-message" not in text:
-            plain = text
-    return plain
-
-
-class RouteDecision(BaseModel):
-    model_route: Route
+EXIT_PRE_ROUTED_MODE_TOOL = "exit_pre_routed_mode"
+PRE_ROUTED_MODE_TOOLS: frozenset[str] = frozenset(
+    {EXIT_PRE_ROUTED_MODE_TOOL, "execute", "read_file", "ls", "glob"}
+)
 
 
 class ModelSelectionState(AgentState):
-    model_route: NotRequired[Route]
+    model_route: NotRequired[ModelRoute]
+    pre_routed: NotRequired[bool]
     plan_mode: NotRequired[bool]
+
+
+class ModelSelectionUpdate(TypedDict, total=False):
+    """The channels this middleware writes, as a partial of ``ModelSelectionState``."""
+
+    model_route: ModelRoute
+    pre_routed: bool
 
 
 class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
@@ -59,59 +52,74 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     def __init__(
         self,
         models: Mapping[str, BaseChatModel],
-        classifier: BaseChatModel,
+        *,
+        initial_route: ModelRoute | None = None,
     ) -> None:
         self._models = dict(models)
-        # `nostream` keeps the routing decision out of the user-facing message
-        # stream; it stays visible in traces, unlike the offloading summarizer.
-        hidden_classifier = classifier.model_copy(
-            update={"tags": [*(classifier.tags or []), "nostream"]}
-        )
-        self._classifier = hidden_classifier.with_structured_output(
-            RouteDecision, method="json_schema"
-        )
+        self._initial_route = initial_route
 
-    async def abefore_model(
+    async def abefore_agent(
         self,
         state: ModelSelectionState,
         runtime: Runtime,
-    ) -> dict[str, Route]:
+    ) -> dict[str, Any]:
+        # Run state does not outlive the run; the committed route arrives from the
+        # thread's stored settings via ``initial_route``.
         del runtime
-        if model_route := state.get("model_route"):
-            return {"model_route": model_route}
-        if state.get("plan_mode"):
-            return {}
-        messages = state.get("messages", [])
-        approved_plan = next(
-            (
-                message.text
-                for message in reversed(messages)
-                if isinstance(message, ToolMessage)
-                and message.text.startswith(_PLAN_APPROVED_PREFIX)
-            ),
-            "",
+        route = state.get("model_route") or self._initial_route
+        # Checked against the state schema, then widened: the base class declares
+        # this override as returning a plain dict.
+        update: ModelSelectionUpdate = (
+            {"pre_routed": True} if route is None else {"model_route": route, "pre_routed": False}
         )
-        task = approved_plan or _latest_human_task(messages)
-        route: Route = "balanced"
-        try:
-            decision = await self._classifier.ainvoke(
-                render_prompt("model-selection.md", task=task[-8_000:])
-            )
-            if isinstance(decision, RouteDecision):
-                route = decision.model_route
-        except Exception:  # noqa: BLE001
-            logger.exception("Model routing classifier failed")
-        return {"model_route": route}
+        return dict(update)
+
+    def _model_for(self, state: ModelSelectionState) -> BaseChatModel:
+        if state.get("plan_mode"):
+            return self._models["performance"]
+        if state.get("pre_routed"):
+            return self._models["fast"]
+        return self._models.get(state.get("model_route", "balanced"), self._models["balanced"])
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        route = (
-            "performance"
-            if request.state.get("plan_mode")
-            else request.state.get("model_route", "balanced")
+        return await handler(request.override(model=self._model_for(_state(request))))
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        rejection = _rejection(request)
+        if rejection is not None:
+            return ToolMessage(
+                content=rejection, tool_call_id=request.tool_call["id"] or "", status="error"
+            )
+        return await handler(request)
+
+
+def _state(request: ModelRequest | ToolCallRequest) -> ModelSelectionState:
+    """The run state as this middleware's schema; the SDK types it only as ``AgentState``."""
+    return cast(ModelSelectionState, request.state)
+
+
+def _rejection(request: ToolCallRequest) -> str | None:
+    name = request.tool_call["name"]
+    state = _state(request)
+    if state.get("plan_mode"):
+        if name == EXIT_PRE_ROUTED_MODE_TOOL:
+            return "Plan mode is active; exit_plan_mode carries the routing decision."
+        return None
+    if state.get("pre_routed"):
+        if name in PRE_ROUTED_MODE_TOOLS:
+            return None
+        return (
+            f"`{name}` is unavailable in pre-routed mode. Size the task with `execute`, "
+            "`read_file`, `ls`, and `glob`, then call `exit_pre_routed_mode` first."
         )
-        model = self._models.get(route, self._models["balanced"])
-        return await handler(request.override(model=model))
+    if name == EXIT_PRE_ROUTED_MODE_TOOL:
+        return "This thread is already routed; the decision is final."
+    return None

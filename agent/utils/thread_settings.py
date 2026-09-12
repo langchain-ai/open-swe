@@ -12,7 +12,7 @@ snapshot, which today means a per-run model override.
 
 import logging
 from collections.abc import Mapping
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 THREAD_SETTINGS_KEY = "agent_settings"
 _CACHE_TTL_SECONDS = 300
 
+ModelRoute = Literal["fast", "balanced", "performance"]
+
 
 class ThreadSettings(TypedDict, total=False):
     model_id: str
@@ -30,6 +32,7 @@ class ThreadSettings(TypedDict, total=False):
     subagent_model_id: str
     subagent_effort: str | None
     model_routing_enabled: bool
+    model_route: ModelRoute
     repo_instructions: str | None
 
 
@@ -75,3 +78,9 @@ async def store_thread_settings(client: Any, thread_id: str, settings: ThreadSet
         logger.debug("Could not store settings for thread %s", thread_id, exc_info=True)
         return
     ttl_cache.set_cached(_cache_key(thread_id), settings, _CACHE_TTL_SECONDS)
+
+
+async def store_thread_model_route(client: Any, thread_id: str, model_route: ModelRoute) -> None:
+    """Freeze the thread's routing decision into its stored settings."""
+    settings = await load_thread_settings(client, thread_id)
+    await store_thread_settings(client, thread_id, {**settings, "model_route": model_route})

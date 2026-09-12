@@ -8,6 +8,8 @@ $plan_mode_guidance_section
 
 $plan_mode_section
 
+$pre_routed_mode_section
+
 $self_awareness_section
 
 $default_prompt_section
