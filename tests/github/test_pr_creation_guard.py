@@ -1,6 +1,7 @@
 import json
 from typing import Any, cast
 
+import pytest
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
@@ -92,9 +93,17 @@ async def test_middleware_blocks_background_pr_creation_fallback() -> None:
     assert result.status == "error"
 
 
-async def test_middleware_allows_safe_pr_view() -> None:
+@pytest.mark.parametrize(
+    "command",
+    [
+        "GH_TOKEN=dummy gh pr view 1 --json url",
+        "gh api --method PATCH repos/langchain-ai/open-swe/pulls/1 "
+        "-F body=@/tmp/pr-body.md --jq .html_url",
+    ],
+)
+async def test_middleware_allows_safe_pr_commands(command: str) -> None:
     result = await PullRequestCreationGuardMiddleware().awrap_tool_call(
-        cast(ToolCallRequest, _Request("GH_TOKEN=dummy gh pr view 1 --json url")), _handler
+        cast(ToolCallRequest, _Request(command)), _handler
     )
 
     assert isinstance(result, ToolMessage)
