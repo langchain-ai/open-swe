@@ -1,10 +1,11 @@
 """Shared webhook dispatch and thread helpers."""
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -530,6 +531,7 @@ async def upsert_agent_thread_metadata(
     title: str = "",
     source_context: SourceContext | None = None,
     environment: str | None = None,
+    slack_participant_user_ids: Collection[str] = (),
     visibility: str = "public",
     owner_login: str = "",
     owner_type: str = "user",
@@ -542,6 +544,9 @@ async def upsert_agent_thread_metadata(
     config; the Agents UI lists threads by thread *metadata*, so we mirror the
     sender onto the thread's participants here. ``visibility`` and ``owner_login``
     are stamped once, when the thread is created, and never changed afterwards.
+    Slack events on an existing thread also pass ``slack_participant_user_ids`` so
+    every linked human in the Slack thread becomes an Open SWE participant of the
+    agent thread.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
     category = "interactive"
@@ -595,6 +600,17 @@ async def upsert_agent_thread_metadata(
     if sender_login:
         metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
             existing_meta.get(PARTICIPANT_LOGINS_KEY), sender_login
+        )
+    # Slack human senders with linked Open SWE accounts join the thread as
+    # participants on every event, so later conversations credit everyone.
+    slack_logins = await asyncio.gather(
+        *(login_for_slack_id(user_id) for user_id in slack_participant_user_ids)
+    )
+    resolved_slack_logins = [login for login in slack_logins if isinstance(login, str) and login]
+    if resolved_slack_logins:
+        metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
+            metadata.get(PARTICIPANT_LOGINS_KEY, existing_meta.get(PARTICIPANT_LOGINS_KEY)),
+            *resolved_slack_logins,
         )
     if user_email:
         metadata[PARTICIPANT_EMAILS_KEY] = merge_participants(

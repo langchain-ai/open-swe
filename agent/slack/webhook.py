@@ -921,6 +921,10 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         title=clean_text if is_first_mention else "",
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         environment=environment_slug,
+        # Everyone who has spoken in the Slack thread keeps their Open SWE
+        # participant credit, so a later message from any one of them refreshes
+        # the whole set rather than only the latest sender.
+        slack_participant_user_ids=[*logins_by_user_id] if not is_first_mention else [],
         visibility=visibility,
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",

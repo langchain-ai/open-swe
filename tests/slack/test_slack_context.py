@@ -1593,6 +1593,49 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     assert "prompt" not in captured
 
 
+def test_process_slack_mention_existing_thread_adds_everyone_as_participants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A follow-up in an existing thread credits every linked Slack participant."""
+    from agent.dashboard import user_mappings
+
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    user_mappings.clear_cache()
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    async def fake_login_for_slack_id(slack_user_id):
+        return "mason-gh" if slack_user_id == "U123" else "teammate-gh"
+
+    threads = _FakeThreadsClient({"metadata": {}})
+    client = _FakeClient(threads)
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_webhooks, "get_langgraph_client", lambda: client)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000200",
+                    "user_id": "U123",
+                    "text": "<@UBOT> continue on the branch",
+                    "bot_user_id": "UBOT",
+                }
+            ),
+            Repo(owner="langchain-ai", name="open-swe"),
+        )
+    )
+
+    participant_logins = cast(dict, threads.thread)["metadata"]["participant_logins"]
+    assert participant_logins == {"mason-gh": True, "teammate-gh": True}
+
+
 @pytest.fixture
 def bot_run(monkeypatch, allowed_bot, fake_store):
     captured: dict[str, Any] = {}
