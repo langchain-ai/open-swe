@@ -12,8 +12,6 @@ from agent import store as agent_store
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
 
-pytestmark = pytest.mark.usefixtures("public_thread_metadata")
-
 
 class _Store:
     def __init__(self, values: dict[str, dict[str, Any]] | None = None) -> None:

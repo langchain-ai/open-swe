@@ -1685,7 +1685,7 @@ async def test_failed_bot_request_can_retry(monkeypatch, bot_run):
     assert threads.metadata["owner_type"] == "system"
 
 
-@pytest.mark.parametrize("block", ["removed", "other-owner", "store-error"])
+@pytest.mark.parametrize("block", ["removed", "other-owner", "private", "other-bot", "store-error"])
 async def test_bot_authorization_is_checked_before_execution(
     monkeypatch, bot_run, fake_store, block
 ):
@@ -1694,10 +1694,41 @@ async def test_bot_authorization_is_checked_before_execution(
         await fake_store.delete_item(["allowed_slack_bots"], "T123:B123")
     elif block == "other-owner":
         threads.metadata = {"owner_type": "user", "owner_login": "alice", "visibility": "public"}
+    elif block in {"private", "other-bot"}:
+        await slack_webhooks._process_slack_mention_impl(request, None)
+        captured.pop("run_create")
+        if block == "private":
+            threads.metadata["visibility"] = "private"
+        else:
+            threads.metadata["source_context"]["slack_thread"]["triggering_bot_id"] = "BOTHER"
     else:
         monkeypatch.setattr(fake_store, "get_item", AsyncMock(side_effect=RuntimeError("offline")))
     await slack_webhooks.process_slack_mention(request, None)
     assert "run_create" not in captured
+
+
+@pytest.mark.parametrize("race", ["before-upsert", "during-create"])
+async def test_bot_cannot_take_over_a_concurrently_created_thread(monkeypatch, bot_run, race):
+    request, threads, captured = bot_run
+    human = {"owner_type": "user", "owner_login": "alice", "visibility": "public"}
+    if race == "before-upsert":
+        upsert = webhook_common.upsert_agent_thread_metadata
+
+        async def competing_upsert(*args, **kwargs):
+            threads.metadata = dict(human)
+            return await upsert(*args, **kwargs)
+
+        monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", competing_upsert)
+    else:
+
+        async def competing_create(**kwargs):
+            threads.metadata = dict(human)
+
+        monkeypatch.setattr(threads, "create", competing_create)
+    with pytest.raises(RuntimeError, match="authorization metadata"):
+        await slack_webhooks._process_slack_mention_impl(request, None)
+    assert "run_create" not in captured
+    assert threads.metadata == human
 
 
 class _FakeResponse:

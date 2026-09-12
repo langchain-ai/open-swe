@@ -4,8 +4,6 @@ import pytest
 
 from agent.tools.sandbox_reset import SandboxResetParams, sandbox_reset
 
-pytestmark = pytest.mark.usefixtures("public_thread_metadata")
-
 
 @pytest.mark.asyncio
 async def test_sandbox_reset_forwards_public_and_hidden_create_options(

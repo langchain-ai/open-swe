@@ -15,7 +15,6 @@ from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
 from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
-from agent.slack import bot_authorization
 from agent.slack.client import (
     get_active_slack_thread,
     get_slack_permalink,
@@ -55,14 +54,7 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     """Use the initiator's OAuth for user-owned threads and the bot for system threads."""
     login = await pr_author_login()
     if login is None:
-        bot_credentials = await bot_authorization.bot_installation_token(
-            RunConfig.from_runtime().thread_id or ""
-        )
-        return (
-            bot_credentials[0]
-            if bot_credentials is not None
-            else await get_github_app_installation_token()
-        ), "bot"
+        return await get_github_app_installation_token(), "bot"
     from agent.dashboard.profiles import get_valid_access_token
 
     token = await get_valid_access_token(login)

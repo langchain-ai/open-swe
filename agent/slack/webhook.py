@@ -28,7 +28,6 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
-from agent.slack.bot_authorization import validate_bot_thread
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
@@ -614,6 +613,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             opening_slack = SourceContext.from_metadata(existing_metadata).slack_thread
             if (
                 existing_metadata.get("owner_type") != "system"
+                or existing_metadata.get("visibility") != "public"
                 or opening_slack is None
                 or opening_slack.triggering_bot_id != allowed_bot.bot_id
                 or opening_slack.team_id != allowed_bot.team_id
@@ -623,7 +623,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
                     extra={"agent_thread_id": thread_id, "slack_bot_id": allowed_bot.bot_id},
                 )
                 return
-            await validate_bot_thread(existing_metadata)
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
         await common.refresh_user_mapping_cache()
@@ -888,8 +887,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
-        if allowed_bot is None:
-            logins_by_user_id[user_id] = mapped_login
+        logins_by_user_id[user_id] = mapped_login
     # Later mentions carry no tag, so the thread's environment comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
     # was built from the environment the opening message picked.
@@ -930,15 +928,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if (visibility == "private" or allowed_bot is not None) and not persisted:
         # Dispatch would create the thread itself, with no metadata and so public.
         raise RuntimeError("could not persist thread authorization metadata")
-    if allowed_bot is not None:
-        saved = (await langgraph_client.threads.get(thread_id)).get("metadata") or {}
-        opening = SourceContext.from_metadata(saved).slack_thread
-        if opening is None or (opening.team_id, opening.triggering_bot_id) != (
-            allowed_bot.team_id,
-            allowed_bot.bot_id,
-        ):
-            raise RuntimeError("Slack thread ownership changed before dispatch.")
-        await validate_bot_thread(saved)
 
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that

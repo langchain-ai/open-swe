@@ -21,8 +21,6 @@ from agent.sandboxes.providers.langsmith import (
 )
 from agent.sandboxes.state import SandboxBackendProxy
 
-pytestmark = pytest.mark.usefixtures("public_thread_metadata")
-
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
     """Wire an ``httpx2.AsyncClient`` mock class to yield ``inner`` from its

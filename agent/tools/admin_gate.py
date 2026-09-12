@@ -6,7 +6,6 @@ Tools recheck user admin membership or a system invocation's saved authorization
 from agent.dashboard.admin import is_admin
 from agent.dashboard.schedules import authorized_admin_schedule
 from agent.run_config import RunConfig
-from agent.slack.bot_authorization import authorize_bot_thread
 
 
 def configurable() -> RunConfig:
@@ -19,8 +18,6 @@ def configurable() -> RunConfig:
 async def require_admin(action: str) -> str | None:
     """Recheck either the triggering admin or the saved system authorization."""
     cfg = configurable()
-    if cfg.thread_id and await authorize_bot_thread(cfg.thread_id):
-        return f"System threads cannot {action}."
     allowed = (
         await authorized_admin_schedule(cfg) is not None
         if cfg.source == "schedule"

@@ -42,7 +42,6 @@ from agent.sandboxes.state import (
     set_sandbox_backend,
     unwrap_sandbox_backend,
 )
-from agent.slack import bot_authorization
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
 
@@ -55,14 +54,8 @@ _SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 
 async def _resolve_proxy_token(
     github_proxy_token: str | None,
-    *,
-    thread_id: str | None = None,
 ) -> tuple[str | None, str | None, None]:
     """Resolve the proxy token and its expiry."""
-    if thread_id:
-        bot_credentials = await bot_authorization.bot_installation_token(thread_id)
-        if bot_credentials is not None:
-            return bot_credentials[0], bot_credentials[1], None
     if github_proxy_token:
         return github_proxy_token, None, None
     token, expires_at = await get_github_app_installation_token_with_expiry()
@@ -166,9 +159,7 @@ async def _create_sandbox_with_proxy(
     async with git_identity(thread_id, sandbox_backend):
         if ENV.SANDBOX_TYPE.get() == "langsmith":
             async with aphase(thread_id, "sandbox.proxy_token"):
-                token, expires_at, permissions = await _resolve_proxy_token(
-                    github_proxy_token, thread_id=thread_id
-                )
+                token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
             if not token:
                 msg = "Cannot configure proxy: GitHub App installation token is unavailable"
                 logger.error(msg)
@@ -234,9 +225,7 @@ async def _refresh_github_proxy(
         return
 
     async with aphase(thread_id, "sandbox.proxy_token"):
-        token, expires_at, permissions = await _resolve_proxy_token(
-            github_proxy_token, thread_id=thread_id
-        )
+        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
     if not token:
         raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
 
@@ -498,7 +487,7 @@ async def reset_sandbox_for_thread(
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")
 
     proxy_config = get_sandbox_proxy_config(create_params)
-    token, expires_at, permissions = await _resolve_proxy_token(None, thread_id=thread_id)
+    token, expires_at, permissions = await _resolve_proxy_token(None)
     if not token:
         raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
     await _configure_proxy(

@@ -2,11 +2,9 @@
 
 from collections.abc import Iterator, Sequence
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any
-from unittest.mock import AsyncMock
 
-import langgraph_sdk
 import pytest
 
 from agent import store as agent_store
@@ -104,16 +102,6 @@ def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
     }
     fake_store.seed(["allowed_slack_bots"], "T123:B123", bot)
     return bot
-
-
-@pytest.fixture
-def public_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = SimpleNamespace(
-        threads=SimpleNamespace(
-            get=AsyncMock(return_value={"metadata": {"owner_type": "user", "visibility": "public"}})
-        )
-    )
-    monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
 
 
 @pytest.fixture(autouse=True)

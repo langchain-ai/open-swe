@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import httpx2
-import langgraph_sdk
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -100,7 +99,6 @@ class _FakeClient:
 @pytest.fixture
 def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
     client = _FakeClient()
-    monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
     monkeypatch.setattr(schedules, "langgraph_client", lambda: client)
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client

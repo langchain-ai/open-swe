@@ -93,7 +93,6 @@ from agent.review.findings import (
 from agent.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from agent.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
 from agent.run_config import Repo
-from agent.slack import bot_authorization
 from agent.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
@@ -1417,12 +1416,7 @@ async def get_or_resolve_thread_github_token(thread_id: str, email: str) -> str 
     """GitHub webhook conversations always use the workspace bot identity."""
     del email
     await invalidate_cached_github_token(thread_id)
-    bot_credentials = await bot_authorization.bot_installation_token(thread_id)
-    bot_token, expires_at = (
-        bot_credentials
-        if bot_credentials is not None
-        else await get_github_app_installation_token_with_expiry()
-    )
+    bot_token, expires_at = await get_github_app_installation_token_with_expiry()
     if bot_token:
         cache_github_token_for_thread(
             thread_id, bot_token, expires_at=expires_at, is_bot_token=True

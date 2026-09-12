@@ -58,31 +58,6 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in subagents[0]["middleware"])
 
 
-async def test_slack_bot_threads_cannot_act_as_admin_or_enter_other_threads(
-    saved_thread_scope, allowed_bot
-):
-    saved_thread_scope.update(
-        owner_type="system",
-        visibility="public",
-        source_context={"slack_thread": {"triggering_bot_id": "B123", "team_id": "T123"}},
-    )
-    captured = await _capture_create_deep_agent_kwargs()
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    tool_names = {_registered_tool_name(tool) for tool in tools}
-    assert not tool_names.intersection(
-        {
-            "slack_start_new_thread",
-            "request_pr_review",
-            "manage_thread",
-            "list_threads",
-            "get_thread",
-            "publish_environment",
-        }
-    )
-    assert "open_pull_request" in tool_names
-
-
 @pytest.mark.asyncio
 async def test_unknown_scope_omits_workspace_and_personal_mcps():
     with (

@@ -111,11 +111,6 @@ def _config() -> dict[str, Any]:
 async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     config = _config()
     configurable = as_json_object(config.get("configurable"))
-    from agent.slack.bot_authorization import authorize_bot_thread
-
-    thread_id = configurable.get("thread_id")
-    if isinstance(thread_id, str) and await authorize_bot_thread(thread_id):
-        return None
     email_value = configurable.get("user_email")
     email = email_value.strip() if isinstance(email_value, str) and email_value.strip() else None
     login_value = configurable.get("github_login")

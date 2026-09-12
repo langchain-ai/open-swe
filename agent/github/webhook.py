@@ -1133,25 +1133,6 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     thread_id = github_issue_thread_id(issue_id)
     existing_thread = await common.thread_exists(thread_id)
-    persisted = await common.upsert_agent_thread_metadata(
-        thread_id,
-        source="github",
-        repo_config=repo_config,
-        github_login=github_login,
-        title=title or (f"Issue #{issue_number}" if issue_number else ""),
-        source_context=SourceContext.parse(
-            {
-                "github_issue": {
-                    "id": issue_id,
-                    "number": issue_number,
-                    "title": title,
-                    "url": issue_url,
-                }
-            }
-        ),
-    )
-    if not persisted:
-        raise RuntimeError("Could not persist GitHub issue ownership metadata")
     github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()
     reaction_token = github_token or app_token
@@ -1244,6 +1225,15 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             "url": issue_url,
         },
     }
+
+    await common.upsert_agent_thread_metadata(
+        thread_id,
+        source="github",
+        repo_config=repo_config,
+        github_login=github_login,
+        title=title or (f"Issue #{issue_number}" if issue_number else ""),
+        source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
+    )
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)

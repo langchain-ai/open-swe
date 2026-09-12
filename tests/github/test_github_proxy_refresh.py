@@ -17,8 +17,6 @@ from agent.github.proxy import (
     record_proxy_token_expiry,
 )
 
-pytestmark = pytest.mark.usefixtures("public_thread_metadata")
-
 
 @pytest.fixture(autouse=True)
 def _clear_state() -> Generator[None]:
@@ -199,23 +197,6 @@ class TestMaybeRefreshProxyToken:
 
 
 class TestRefreshGithubProxyMiddleware:
-    async def test_scope_revocation_is_not_swallowed(self):
-        from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
-        from agent.slack.bot_authorization import BotAuthorizationError
-
-        with (
-            patch(
-                "agent.middleware.refresh_github_proxy.get_config",
-                return_value={"configurable": {"thread_id": "thread-9"}},
-            ),
-            patch(
-                "agent.middleware.refresh_github_proxy.maybe_refresh_proxy_token",
-                new=AsyncMock(side_effect=BotAuthorizationError("revoked")),
-            ),
-            pytest.raises(BotAuthorizationError, match="revoked"),
-        ):
-            await refresh_github_proxy_before_model.abefore_model(cast(AgentState, {}), MagicMock())
-
     @pytest.mark.asyncio
     async def test_calls_refresh_with_thread_id(self) -> None:
         from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
