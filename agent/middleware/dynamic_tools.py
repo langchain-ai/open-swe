@@ -173,8 +173,12 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
             try:
                 tools = await self._groups[group].load()
             except Exception:
-                logger.warning("Failed to load %s integration tools", group, exc_info=True)
-                return resolved.tools
+                logger.warning(
+                    "Failed to load integration tools",
+                    extra={"integration_group": group},
+                    exc_info=True,
+                )
+                return {}
             resolved.tools = {tool.name: tool for tool in tools}
             resolved.done = True
         return resolved.tools
