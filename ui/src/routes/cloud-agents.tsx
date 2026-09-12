@@ -151,13 +151,33 @@ function CloudAgentsPage() {
         <div className="divide-y divide-border">
           <SettingsRow
             label="Adaptive model routing"
-            description="Automatically choose a model for each turn; turn this off to always use your default model"
+            description="Automatically choose a model for each turn. Inherit uses the org-wide default; Enabled or Disabled overrides it."
             control={
-              <Switch
-                checked={profile.data?.model_routing_enabled ?? false}
-                onCheckedChange={(v) => persist({ model_routing_enabled: v })}
+              <Select
+                value={
+                  profile.data?.model_routing_enabled === true
+                    ? "enabled"
+                    : profile.data?.model_routing_enabled === false
+                      ? "disabled"
+                      : "inherit"
+                }
+                onValueChange={(v) =>
+                  persist({
+                    model_routing_enabled:
+                      v === "enabled" ? true : v === "disabled" ? false : null,
+                  })
+                }
                 disabled={profile.isLoading || save.isPending}
-              />
+              >
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inherit">Inherit org default</SelectItem>
+                  <SelectItem value="enabled">Enabled</SelectItem>
+                  <SelectItem value="disabled">Disabled</SelectItem>
+                </SelectContent>
+              </Select>
             }
           />
           <SettingsRow

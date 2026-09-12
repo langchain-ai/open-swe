@@ -23,7 +23,11 @@ from agent.dashboard.agent_overrides import (
 from agent.dashboard.agent_usage import update_agent_pr_usage_from_webhook
 from agent.dashboard.enabled_repos import is_review_repo_enabled
 from agent.dashboard.oauth import build_settings_url
-from agent.dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
+from agent.dashboard.options import (
+    default_vision_model_pair,
+    model_supports_images,  # noqa: F401
+    normalize_model_choice,
+)
 from agent.dashboard.profiles import (  # noqa: F401
     get_profile,
     get_valid_access_token,
@@ -33,6 +37,7 @@ from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_settings,
 )
+from agent.dashboard.threads.summary import thread_is_private, thread_is_promptable
 from agent.dashboard.user_mappings import (
     email_for_login,  # noqa: F401
     login_for_email,  # noqa: F401
@@ -194,6 +199,7 @@ __all__ = [
     "resolve_slack_channel_context",
     "get_thread_metadata_safe",
     "get_thread_environment",
+    "get_thread_model_choice",
     "get_thread_plan_mode",
     "is_not_found_error",
     "is_pr_diff_unchanged_since_last_review",
@@ -766,6 +772,22 @@ async def get_thread_plan_mode(thread_id: str) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
+async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
+    """Return the explicit model choice persisted for a thread, if any."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if not is_not_found_error(exc):
+            logger.warning("Failed to fetch model metadata for thread %s", thread_id)
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict) or metadata.get("model_selection") != "explicit":
+        return None
+    model_id, effort = normalize_model_choice(metadata.get("model"), metadata.get("effort"))
+    return (model_id, effort) if model_id and effort else None
+
+
 async def get_thread_environment(thread_id: str) -> str | None:
     """Return the environment slug persisted for a thread, or ``None`` if unset."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -940,6 +962,20 @@ def build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
     return "\n\n## Comments:\n" + "".join(lines)
 
 
+async def authorize_github_thread(thread_id: str, github_login: str) -> dict[str, Any]:
+    """Reject private-thread follow-ups before reading credentials or dispatching."""
+    try:
+        thread = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
+    except Exception as exc:
+        if is_not_found_error(exc):
+            return {}
+        raise
+    metadata = as_thread_dict(thread).get("metadata") or {}
+    if thread_is_private(metadata) and not thread_is_promptable(metadata, github_login):
+        raise HTTPException(404, "thread not found")
+    return metadata
+
+
 async def trigger_or_queue_run(
     thread_id: str,
     prompt: str,
@@ -951,6 +987,7 @@ async def trigger_or_queue_run(
     pr_number: int,
 ) -> None:
     """Create a new agent run or queue the message if the thread is busy."""
+    await authorize_github_thread(thread_id, github_login)
     await upsert_agent_thread_metadata(
         thread_id,
         source="github",
