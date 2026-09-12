@@ -1,6 +1,9 @@
 from typing import Any
 from unittest.mock import patch
 
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
+
 from agent.utils import model
 
 
@@ -21,6 +24,24 @@ def _make_model(model_id: str, **kwargs: Any) -> dict[str, Any]:
     with patch.object(model, "init_chat_model", fake):
         model.make_model(model_id, use_gateway=False, **kwargs)
     return captured
+
+
+def test_direct_openai_model_supports_additional_tools(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    model._MODEL_CACHE.clear()
+    chat_model = ChatOpenAI(model="gpt-5.6-sol", api_key=SecretStr("test"), use_responses_api=True)
+    with patch.object(model, "init_chat_model", return_value=chat_model):
+        result = model.make_model("openai:gpt-5.6-sol", use_gateway=False)
+    assert isinstance(result, model.OpenAIAdditionalToolsChatModel)
+
+
+def test_gateway_openai_model_keeps_standard_adapter(monkeypatch) -> None:
+    monkeypatch.setenv("LANGSMITH_API_KEY", "test")
+    model._MODEL_CACHE.clear()
+    chat_model = ChatOpenAI(model="gpt-5.6-sol", api_key=SecretStr("test"), use_responses_api=True)
+    with patch.object(model, "init_chat_model", return_value=chat_model):
+        result = model.make_model("openai:gpt-5.6-sol", use_gateway=True)
+    assert type(result) is ChatOpenAI
 
 
 def test_openai_gets_a_default_request_timeout() -> None:

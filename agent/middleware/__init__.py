@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
+    "DynamicToolDeclarationMiddleware": ".dynamic_tools",
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
@@ -35,6 +36,7 @@ _MIDDLEWARE_MODULES = {
 }
 
 __all__ = [
+    "DynamicToolDeclarationMiddleware",
     "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
@@ -68,7 +70,11 @@ __all__ = [
 
 if TYPE_CHECKING:
     from agent.middleware.check_message_queue import check_message_queue_before_model
-    from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
+    from agent.middleware.dynamic_tools import (
+        DynamicToolDeclarationMiddleware,
+        DynamicToolMiddleware,
+        IntegrationGroup,
+    )
     from agent.middleware.exclude_tools import ExcludeToolsMiddleware
     from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
     from agent.middleware.model_errors import ModelErrorMiddleware

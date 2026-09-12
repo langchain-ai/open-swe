@@ -2,6 +2,9 @@ import asyncio
 from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
+from langchain_core.tools import BaseTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from langchain_openai import ChatOpenAI
 
 from agent.config import ENV
 from agent.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
@@ -10,6 +13,75 @@ from agent.utils.openai_oauth import (
     build_desktop_openai_oauth_model,
     desktop_openai_oauth_available,
 )
+
+OPENAI_ADDITIONAL_TOOLS_SETTING = "open_swe_additional_tools"
+
+
+class OpenAIAdditionalToolsChatModel(ChatOpenAI):
+    """Serialize dynamically loaded tools as Responses input items."""
+
+    def _get_request_payload(
+        self,
+        input_: Any,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        declarations = kwargs.pop(OPENAI_ADDITIONAL_TOOLS_SETTING, [])
+        if not self.use_responses_api:
+            return super()._get_request_payload(input_, stop=stop, **kwargs)
+        advertised_names = {
+            tool.get("function", tool).get("name") for tool in kwargs.get("tools", [])
+        }
+        declarations = [
+            {
+                **declaration,
+                "tools": [
+                    formatted
+                    for tool in declaration["tools"]
+                    if isinstance(tool, BaseTool) and tool.name in advertised_names
+                    for formatted in [convert_to_openai_tool(tool)]
+                ],
+            }
+            for declaration in declarations
+        ]
+        declarations = [declaration for declaration in declarations if declaration["tools"]]
+        deferred_names = {
+            tool.get("function", tool).get("name")
+            for declaration in declarations
+            for tool in declaration["tools"]
+        }
+        if tools := kwargs.get("tools"):
+            kwargs["tools"] = [
+                tool
+                for tool in tools
+                if tool.get("function", tool).get("name") not in deferred_names
+            ]
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        input_items = payload.get("input")
+        if not isinstance(input_items, list):
+            return payload
+        for declaration in declarations:
+            tools = [
+                {"type": "function", **tool["function"]}
+                if tool.get("type") == "function" and "function" in tool
+                else tool
+                for tool in declaration["tools"]
+            ]
+            item = {"type": "additional_tools", "role": "developer", "tools": tools}
+            call_id = declaration.get("after_call_id")
+            index = next(
+                (
+                    i + 1
+                    for i, candidate in enumerate(input_items)
+                    if candidate.get("type") == "function_call_output"
+                    and candidate.get("call_id") == call_id
+                ),
+                len(input_items),
+            )
+            input_items.insert(index, item)
+        return payload
+
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
@@ -209,6 +281,16 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         )
     else:
         model = init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
+    if (
+        model_id.startswith("openai:")
+        and not gateway_applied
+        and not oauth_applied
+        and isinstance(model, ChatOpenAI)
+        and not isinstance(model, OpenAIAdditionalToolsChatModel)
+    ):
+        model = OpenAIAdditionalToolsChatModel(
+            **{name: getattr(model, name) for name in ChatOpenAI.model_fields}
+        )
     _MODEL_CACHE[key] = model
     return model
 

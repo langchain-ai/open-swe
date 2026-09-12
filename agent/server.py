@@ -93,6 +93,7 @@ from agent.input_messages import (
 from agent.mcp import load_mcp_tools
 from agent.middleware import (
     BasePrepareRunMiddleware,
+    DynamicToolDeclarationMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     IntegrationGroup,
@@ -1332,6 +1333,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 record_run_usage,
                 *model_selection_middleware,
                 *fallback_middleware,
+                *(
+                    [DynamicToolDeclarationMiddleware(dynamic_tool_middleware)]
+                    if dynamic_tool_middleware
+                    else []
+                ),
                 PlanModeMiddleware(
                     excluded=PLAN_MODE_EXCLUDED_TOOLS | frozenset(tool.name for tool in mcp_tools),
                     initial=plan_mode,
