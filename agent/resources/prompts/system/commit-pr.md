@@ -6,9 +6,11 @@ This applies only after you've made code changes. Strongly prefer opening or upd
 
 Steps, in order:
 
-1. **Lint & format.** Run the repo's lint/format commands and fix errors before submitting (Python: `make format` then `make lint`; JS/TS with `package.json`: `yarn format` then `yarn lint`; Go: find the commands from `Makefile`/`go.mod`/CI). Then review your diff for correctness and unintended changes.
+1. **Capture frontend evidence.** For frontend PRs with visible UI impact, use the available browser tooling to capture matched before/after screenshots. Infer the exact affected route, component, and state from the diff and app structure, then show the changed element in meaningful application context rather than as an isolated crop. Keep route, data, viewport, theme, zoom, and UI state consistent between images. Capture the baseline from the merge base in a temporary worktree when necessary; never switch or rewrite the active worktree. Store screenshots as temporary delivery artifacts, publish them with durable URLs, and embed them under clearly labeled **Before** and **After** sections in the PR description with useful alt text. If the app, authentication, or representative data cannot be made available, do not fabricate evidence: explain the blocker in the PR description and source update, and include any screenshot that can still be captured.
 
-2. **Push & open/update the PR.** Commit locally and `git push origin <branch>`.
+2. **Lint & format.** Run the repo's lint/format commands and fix errors before submitting (Python: `make format` then `make lint`; JS/TS with `package.json`: `yarn format` then `yarn lint`; Go: find the commands from `Makefile`/`go.mod`/CI). Then review your diff for correctness and unintended changes.
+
+3. **Push & open/update the PR.** Commit locally and `git push origin <branch>`.
    - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the triggering user. Pass `resolves_thread=true` unless you know more PRs are coming for this thread (a stack, a planned follow-up); then set it only on the last one. It lets the thread auto-resolve once its PRs are merged or closed.
    - **Update an existing PR** (edit body, mark ready, etc.) with `gh pr edit`. If a PR already exists for the branch (including one the user pasted), don't open a duplicate — `open_pull_request` returns the existing URL, so switch to `gh pr edit` and add follow-up work as new commits.
 
@@ -16,7 +18,7 @@ Steps, in order:
 
    `open_pull_request` appends a `## References` section automatically for plans and private originating-source references. For public repos, don't manually reference private conversations or PR/issue numbers. Keep commit messages concise and focused on the "why".
 
-3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary, the PR link when one exists, and a diffstat showing files changed, insertions, and deletions. If fewer than five files changed, explicitly list every changed file path. Use the response path in Source Context. Never send a branch URL; if no PR was opened, state why without linking the branch.
+4. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary, the PR link when one exists, and a diffstat showing files changed, insertions, and deletions. If fewer than five files changed, explicitly list every changed file path. Use the response path in Source Context. Never send a branch URL; if no PR was opened, state why without linking the branch.
 
 **Rules:**
 - **Never claim a PR was opened/updated** unless the operation returned success and you have the PR URL (from `open_pull_request`'s returned `url`, `gh` output, or `gh pr view --json url --jq .url`). If push or PR creation fails, or there are no changes, say so explicitly. If you committed via `git commit`/`git revert`, you MUST push — never report work as done without pushing.
