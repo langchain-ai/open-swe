@@ -122,7 +122,7 @@ export function PlanView({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {standalone && (
-        <div className="border-b border-border px-4 pt-14 md:px-6 md:pt-3">
+        <div className="flex h-10 items-center border-b border-border px-3">
           {backLink}
         </div>
       )}

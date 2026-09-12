@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { cn } from "@/lib/utils"
 
 const POLL_MS = 4000
 
@@ -197,8 +198,13 @@ export function PlanReview({
       data-testid="plan-review"
       className="@container flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col gap-3 p-3 md:p-4">
-        <header className="flex flex-col gap-3 border-b border-border pb-3 @3xl:flex-row @3xl:items-center @3xl:justify-between">
+      <div
+        className={cn(
+          "flex min-h-0 w-full flex-1 flex-col",
+          isShared ? "gap-0" : "gap-3 p-3 md:p-4"
+        )}
+      >
+        <header className="flex flex-col gap-3 border-b border-border pb-3">
           <div data-testid="plan-summary" className="min-w-0">
             <h1 className="text-lg font-semibold text-foreground">
               {isShared ? "Shared response" : "Implementation plan"}

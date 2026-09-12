@@ -44,6 +44,10 @@ function AgentsLayout() {
     from: "/agents/local/$sessionId",
     shouldThrow: false,
   })
+  const planMatch = useMatch({
+    from: "/agents/$threadId_/plan",
+    shouldThrow: false,
+  })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
   const location = useRouterState({
@@ -76,6 +80,7 @@ function AgentsLayout() {
       localOnly={localOnly}
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
+      hideSidebar={Boolean(planMatch)}
     >
       <AgentStreamProvider
         threadId={activeLocalSessionId ?? activeThreadId ?? null}
