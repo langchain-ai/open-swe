@@ -16,7 +16,9 @@ def test_prompt_composes_artifact_delivery_guidance_with_available_tools() -> No
     assert "Prefer `output_iframe` for HTML previews" not in base_prompt
     assert "presentation artifacts are temporary delivery output" in download_prompt
     assert "`artifacts/` or another path in" in download_prompt
-    assert "`.open-swe/artifacts/`" in download_prompt
+    assert "Keep them under `/artifacts/`, outside the sandbox work directory" in download_prompt
+    assert "file must live under `/artifacts/`; the tool rejects" in download_prompt
+    assert "keep their inputs under `.open-swe/artifacts/`" in download_prompt
     assert "`.git/info/exclude`" in download_prompt
     assert "Prefer `output_iframe` for HTML previews" in download_prompt
     assert "`create_sandbox_file_download_url` for images, videos" in download_prompt

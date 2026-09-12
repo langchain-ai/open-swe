@@ -105,6 +105,7 @@ interface AgentsSidebarProps {
   activeThreadId?: string
   activeLocalSessionId?: string
   layout: SidebarLayout
+  inert?: boolean
 }
 
 interface HydratedProjectGroup extends SidebarProjectGroup {
@@ -186,6 +187,7 @@ export function AgentsSidebar({
   activeThreadId,
   activeLocalSessionId,
   layout,
+  inert = false,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const {
@@ -634,7 +636,11 @@ export function AgentsSidebar({
     recents.length === 0
 
   return (
-    <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
+    <SidebarFrame
+      {...layout}
+      inert={inert}
+      className="border-r border-border bg-sidebar"
+    >
       <div
         className={cn(
           "flex items-center justify-between px-4 pb-4",
@@ -1204,12 +1210,14 @@ export function AgentsShell({
   localOnly = false,
   activeThreadId,
   activeLocalSessionId,
+  sidebarInert = false,
   children,
 }: {
   user: SessionUser | null
   localOnly?: boolean
   activeThreadId?: string
   activeLocalSessionId?: string
+  sidebarInert?: boolean
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
@@ -1304,6 +1312,7 @@ export function AgentsShell({
           activeThreadId={activeThreadId}
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}
+          inert={sidebarInert}
         />
         <main className="relative flex min-w-0 flex-1 overflow-hidden bg-background">
           {children}

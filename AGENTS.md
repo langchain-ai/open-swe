@@ -30,6 +30,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - Keep comments minimal and only explain non-obvious reasons.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
+- For frontend changes, log in as Alice or Bob and take a screenshot. Put screenshots and other generated review artifacts under `/artifacts/`, outside the sandbox work directory, share them through a sandbox download URL, and link that URL in the PR description; never commit them.
 
 ## Testing
 

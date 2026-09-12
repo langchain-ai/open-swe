@@ -34,6 +34,31 @@ async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
     return backend_proxy, path, work_dir
 
 
+async def _resolve_download_artifact(file_path: str) -> tuple[Any, str]:
+    if not isinstance(file_path, str) or not file_path.strip() or "\x00" in file_path:
+        raise ValueError("file_path must be a non-empty absolute path under /artifacts")
+
+    path = posixpath.normpath(file_path.strip())
+    artifacts_dir = "/artifacts"
+    if (
+        not file_path.strip().startswith("/")
+        or posixpath.commonpath((artifacts_dir, path)) != artifacts_dir
+    ):
+        raise ValueError("file_path must resolve within /artifacts")
+
+    thread_id = RunConfig.from_runtime().thread_id
+    if not isinstance(thread_id, str) or not thread_id:
+        raise ValueError("no thread_id in run config")
+    backend_proxy = await get_sandbox_backend(thread_id)
+    resolved = await backend_proxy.aexecute(f"realpath -- {shlex.quote(path)}")
+    if resolved.exit_code != 0:
+        raise ValueError("file_path must identify an existing sandbox file")
+    path = posixpath.normpath(resolved.output.strip())
+    if posixpath.commonpath((artifacts_dir, path)) != artifacts_dir:
+        raise ValueError("file_path must resolve within /artifacts")
+    return backend_proxy, path
+
+
 async def create_sandbox_file_download_url(
     file_path: str,
     expires_in_seconds: int | None = None,
@@ -48,7 +73,7 @@ async def create_sandbox_file_download_url(
         if not content_type or "\r" in content_type or "\n" in content_type:
             raise ValueError("content_type must be a valid non-empty media type")
 
-    backend_proxy, path, _ = await resolve_sandbox_file(file_path)
+    backend_proxy, path = await _resolve_download_artifact(file_path)
     backend = unwrap_sandbox_backend(backend_proxy)
     async with get_async_sandbox_client() as client:
         download = await client.generate_download_url(
