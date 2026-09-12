@@ -6,9 +6,9 @@ from datetime import UTC, date, datetime, time
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.analytics.database import transaction
 from agent.analytics.events import EventEnvelope, EventName
 from agent.config import ENV
+from agent.database.analytics import transaction
 
 _LATENCY_BOUNDS_MS = [60_000, 300_000, 900_000, 3_600_000, 14_400_000, 86_400_000, 604_800_000]
 
