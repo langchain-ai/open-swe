@@ -195,12 +195,9 @@ async def test_additive_migration_preserves_expired_and_unsummarized_totals(
         assert not await ingestion.ingest(late)
     async with transaction() as conn:
         await conn.execute(text("DROP TABLE additive_event_projection"))
-        schema = await conn.scalar(text("SELECT current_schema()"))
-        revision = postgres.load_migrations().get_revision("0006")
-        script = revision.module.SQL.replace("open_swe", schema)
-        raw = await conn.get_raw_connection()
-        await raw.driver_connection.execute(script)
-        await raw.driver_connection.execute(script)
+        migrations = postgres.load_migrations()
+        await conn.run_sync(postgres.execute_revision, migrations, "0006")
+        await conn.run_sync(postgres.execute_revision, migrations, "0006")
         rows = (
             await conn.execute(
                 text(
