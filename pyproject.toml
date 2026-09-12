@@ -32,6 +32,8 @@ dependencies = [
     "langchain-google-genai>=4.3.5",
     "langchain-mcp-adapters>=0.3.2",
     "websockets>=16.1.1",
+    "slack-sdk>=3.44.1,<4.0.0",
+    "aiohttp>=3.14.3,<4.0.0",
 ]
 
 [project.optional-dependencies]

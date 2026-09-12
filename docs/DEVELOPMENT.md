@@ -31,7 +31,9 @@ Use a name of your own (GitHub App names are unique), and give it a distinct men
 
 ## 3. Tunnel for webhooks
 
-GitHub and Slack need a public HTTPS hostname that stays the same across restarts (skip this only if you will start runs from the dashboard alone). The free ngrok plan gives you one:
+Always run an ngrok tunnel when starting Open SWE locally. GitHub and Slack need a public HTTPS hostname that stays the same across restarts. Reuse an existing tunnel and its exact configured domain, forwarding to the active backend (normally localhost:2024). If no tunnel is running, recover the domain from configuration or prior local runtime notes in the primary checkout before starting one; an automatically assigned hostname will not match existing webhook settings.
+
+For a first-time setup, the free ngrok plan gives you a static domain:
 
 1. Sign up at [dashboard.ngrok.com](https://dashboard.ngrok.com/signup) and install the agent (`brew install ngrok`, or the download the dashboard offers).
 2. Connect the agent to your account with the `ngrok config add-authtoken …` command shown under **Getting Started → Your Authtoken**.
@@ -44,7 +46,7 @@ GitHub and Slack need a public HTTPS hostname that stays the same across restart
 
 `make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only `/webhooks/*` is reachable from the internet. That restriction is not optional. Under `langgraph dev` the LangGraph API itself (`/threads`, `/runs`, `/assistants`, `/store`, …) has no authentication at all: the dashboard API checks its session cookie and the webhook endpoints check their signatures, but anyone who can reach port 2024 can read and create threads and runs. A tunnel that forwards the whole port publishes exactly that. Everything except the webhooks stays on `http://localhost:2024`, where you keep opening the dashboard. Check the policy once the backend is up (step 6): `curl https://<name>.ngrok-free.dev/webhooks/slack` answers `{"status":"ok", …}` from the backend, while `/ok` gets ngrok's own 404.
 
-Use ngrok with this policy. A different tunnel is only an option if it can restrict the public paths to `/webhooks/*` the same way; one that forwards the whole port is not.
+Preserve the existing webhook traffic policy. For local Slack OAuth, also preserve the callback relay: requests to `/dashboard/api/slack/callback` on the ngrok domain must redirect to `http://localhost:2024/dashboard/api/slack/callback` with the complete query string intact. The stock webhooks-only policy blocks this path, so reuse the local policy containing that redirect when Slack OAuth is configured. The callback is a redirect to localhost; dashboard pages and API routes must remain inaccessible through the tunnel.
 
 ## 4. Create a Slack app for your machine
 
@@ -75,15 +77,18 @@ SLACK_BOT_TOKEN=""              # step 4: OAuth & Permissions → Bot User OAuth
 SLACK_SIGNING_SECRET=""         # Basic Information → App Credentials
 SLACK_BOT_USER_ID=""            # the bot's member id (bot profile → ⋮ → Copy member ID)
 SLACK_BOT_USERNAME=""           # the bot's handle, e.g. open_swe_you
+SLACK_PUBLIC_BASE_URL="https://<name>.ngrok-free.dev"  # your existing domain from step 3; used by Slack OAuth and the admin manifest
 
 TOKEN_ENCRYPTION_KEY=""         # openssl rand -base64 32  (encrypts stored GitHub and Slack tokens)
 DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session cookie and OAuth state)
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
 ```
 
-`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Provider keys, the LLM Gateway, and how the running model is chosen are in [Model providers and API keys](INSTALLATION.md#4-model-providers-and-api-keys). Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
+`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. Provider keys, the LLM Gateway, and how the running model is chosen are in [Model providers and API keys](INSTALLATION.md#4-model-providers-and-api-keys). Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
 ## 6. Run
+
+Check existing processes and ports before starting. When switching worktrees, stop the previous backend gracefully and wait for it to release port 2024 before starting the replacement. Prepare the [worktree state](#langgraph-state-across-worktrees) before startup.
 
 ```bash
 make build-dashboard   # pnpm install + Vite build into ui/.output/public
@@ -114,11 +119,27 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 
 ## 7. Verify it works
 
+Before reporting readiness, verify `/ok` on localhost, open the dashboard in a browser, and check tunnel forwarding and the OAuth callback redirect. A healthy `/ok` does not mean the UI is ready: `make dev` needs a dashboard build or a running Vite server to serve it.
+
 **Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages appear. Set **Admin → Global defaults → Default Repository**, then start a task from the composer.
 
 **Slack.** With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@open_swe_you what's in the repo?`. It replies in a thread; ngrok's inspector at `http://localhost:4040` shows the event arriving.
 
 **GitHub.** With the tunnel running and the App's webhook pointed at it, comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub-triggered runs act as the commenting user, so that account has to have signed in to your local dashboard once. The App's **Advanced** tab lists every delivery and its response, and ngrok's inspector at `http://localhost:4040` shows what arrived.
+
+Record the worktree, process IDs, fixed tunnel domain, and state location in ignored `logs/local-dev/` notes in the primary checkout so the next session can reuse them.
+
+## LangGraph state across worktrees
+
+`langgraph dev` persists local threads, checkpoints, and Store data under `.langgraph_api` in its working directory. Preserve existing local data when moving development to a new worktree unless you want a clean start.
+
+The repository's [`.worktreeinclude`](../.worktreeinclude) includes the root `.langgraph_api` directory. [Local Codex-managed worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees#copy-ignored-local-files-into-managed-worktrees) copy matching ignored files when they are created. Stop the source backend gracefully so it flushes persistence, and back up its state before creating the worktree. This is a snapshot, not ongoing synchronization.
+
+Codex skips source symlinks and preserves files already present in the destination. Create the worktree from the primary checkout containing the actual state directory. For worktrees created with `git worktree add`, or when the source is a symlink, copy the stopped primary checkout's entire `.langgraph_api` directory manually, including hidden files. Preserve any existing destination state rather than overwriting it automatically.
+
+For one continuous local instance across worktrees, link `.langgraph_api` to the primary checkout's state directory instead of copying it. Only one backend may use that shared directory at a time; restart from the desired worktree to switch code. Independently copied state diverges after creation and also retains schedules and integration settings, so avoid running multiple copies against the same live integrations, which can duplicate background work.
+
+Keep state, backups, and environment files ignored by Git. Reuse the existing local environment, including its token-encryption settings, without printing credentials. `.worktreeinclude` copies local state into worktrees; it does not add that state to version control.
 
 ## Dashboard on the Vite dev server directly
 

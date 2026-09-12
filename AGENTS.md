@@ -8,6 +8,10 @@ Each thread uses an isolated sandbox. A separate read-only reviewer graph review
 
 `ui`, `desktop`, and `tests/e2e` form a pnpm/turbo workspace (`pnpm-workspace.yaml`). Use pnpm for them.
 
+## Local Development
+
+Follow [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local startup, tunnel configuration, and preserving LangGraph state across worktrees.
+
 ## Architecture
 
 `langgraph.json`:

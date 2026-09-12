@@ -1731,56 +1731,15 @@ async def test_bot_cannot_take_over_a_concurrently_created_thread(monkeypatch, b
     assert threads.metadata == human
 
 
-class _FakeResponse:
-    def __init__(self, payload: dict) -> None:
-        self._payload = payload
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self) -> dict:
-        return self._payload
-
-
-class _FakeAsyncClient:
-    def __init__(self, payload: dict) -> None:
-        self._payload = payload
-
-    async def __aenter__(self) -> _FakeAsyncClient:
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        return None
-
-    async def get(self, url: str, **kwargs: object) -> _FakeResponse:
-        return _FakeResponse(self._payload)
-
-
-def test_get_slack_permalink_returns_link(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+async def test_get_slack_permalink_returns_link(slack_api):
     link = "https://workspace.slack.com/archives/C123/p1700000000000100"
-    monkeypatch.setattr(
-        slack_utils.httpx2,
-        "AsyncClient",
-        lambda *a, **k: _FakeAsyncClient({"ok": True, "permalink": link}),
-    )
-
-    result = asyncio.run(get_slack_permalink("C123", "1700000000.000100"))
-
-    assert result == link
+    slack_api.respond({"ok": True, "permalink": link})
+    assert await get_slack_permalink("C123", "1700000000.000100") == link
 
 
-def test_get_slack_permalink_returns_none_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setattr(
-        slack_utils.httpx2,
-        "AsyncClient",
-        lambda *a, **k: _FakeAsyncClient({"ok": False, "error": "message_not_found"}),
-    )
-
-    result = asyncio.run(get_slack_permalink("C123", "1700000000.000100"))
-
-    assert result is None
+async def test_get_slack_permalink_returns_none_on_error(slack_api):
+    slack_api.respond({"ok": False, "error": "message_not_found"})
+    assert await get_slack_permalink("C123", "1700000000.000100") is None
 
 
 def test_get_slack_permalink_without_token_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
