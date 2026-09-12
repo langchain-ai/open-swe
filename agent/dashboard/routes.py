@@ -236,7 +236,7 @@ from agent.dashboard.user_preferences import (
     get_user_preferences,
     set_user_preferences,
 )
-from agent.dashboard.voice import transcribe_audio
+from agent.dashboard.voice import LiveSessionOffer, create_live_session, transcribe_audio
 from agent.dashboard.workspace_mcps import (
     MCPRoute,
     delete_workspace_mcp,
@@ -2490,6 +2490,13 @@ async def create_voice_transcription(
     request: Request, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, str]:
     return {"text": await transcribe_audio(request)}
+
+
+@router.post("/voice/session", status_code=201)
+async def create_voice_session(
+    offer: LiveSessionOffer, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any]:
+    return await create_live_session(offer)
 
 
 @router.post("/threads/{thread_id}/messages")
