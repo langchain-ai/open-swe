@@ -2,7 +2,9 @@ import { StartClient } from "@tanstack/react-start/client"
 import { createRoot, hydrateRoot } from "react-dom/client"
 
 import { initializeDatadogRum } from "./lib/datadog"
+import { installDebugRecorder } from "./lib/debugRecorder"
 
+installDebugRecorder()
 void initializeDatadogRum()
 
 const app = <StartClient />

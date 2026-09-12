@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  createRapidKeyRun,
   eventMatchesShortcut,
   formatShortcut,
   isHotkeySuppressed,
@@ -113,5 +114,31 @@ describe("keyboard shortcut utilities", () => {
     expect(isTypingSafeShortcut("ctrl+shift+p")).toBe(true)
     expect(isTypingSafeShortcut("c")).toBe(false)
     expect(isTypingSafeShortcut("?")).toBe(false)
+  })
+})
+
+describe("rapid key runs", () => {
+  it("fires on the third press inside the window", () => {
+    const completesRun = createRapidKeyRun({ count: 3, windowMs: 750 })
+    expect(completesRun(0)).toBe(false)
+    expect(completesRun(200)).toBe(false)
+    expect(completesRun(400)).toBe(true)
+  })
+
+  it("drops presses older than the window", () => {
+    const completesRun = createRapidKeyRun({ count: 3, windowMs: 750 })
+    expect(completesRun(0)).toBe(false)
+    expect(completesRun(100)).toBe(false)
+    expect(completesRun(900)).toBe(false)
+    expect(completesRun(1000)).toBe(false)
+    expect(completesRun(1100)).toBe(true)
+  })
+
+  it("starts a fresh run after firing", () => {
+    const completesRun = createRapidKeyRun({ count: 3, windowMs: 750 })
+    for (const at of [0, 100, 200]) completesRun(at)
+    expect(completesRun(300)).toBe(false)
+    expect(completesRun(400)).toBe(false)
+    expect(completesRun(500)).toBe(true)
   })
 })
