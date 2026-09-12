@@ -315,6 +315,16 @@ ENV.var(
 ENV.var("RUN_COMPLETE_WEBHOOK_SECRET", "Token authenticating /webhooks/run-complete.", secret=True)
 ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks.")
 
+# --- Analytics -------------------------------------------------------------------------------
+ENV.var(
+    "POSTGRES_URI", "LangGraph deployment PostgreSQL URI available to custom code.", secret=True
+)
+ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
+ENV.var("ANALYTICS_POOL_SIZE", "Analytics PostgreSQL connection pool size.", default="5")
+ENV.var("ANALYTICS_POOL_OVERFLOW", "Analytics PostgreSQL pool overflow.", default="5")
+ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "Analytics pool checkout timeout.", default="5")
+ENV.var("ANALYTICS_HEALTH_TIMEOUT_SECONDS", "Analytics readiness timeout.", default="3")
+
 # --- Models and tools ------------------------------------------------------------------------
 ENV.var("ANTHROPIC_API_KEY", "Anthropic API key.", secret=True)
 ENV.var("OPENAI_API_KEY", "OpenAI API key (models and voice dictation).", secret=True)
