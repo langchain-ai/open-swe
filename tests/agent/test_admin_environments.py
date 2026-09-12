@@ -214,6 +214,18 @@ class _Publish:
         backend.id = "sb-thread"
         for target in (
             patch(
+                "langgraph_sdk.get_client",
+                return_value=MagicMock(
+                    threads=MagicMock(
+                        get=AsyncMock(
+                            return_value={
+                                "metadata": {"owner_type": "user", "owner_login": "ramonn"}
+                            }
+                        )
+                    )
+                ),
+            ),
+            patch(
                 "agent.run_config.get_config",
                 return_value=_config(github_login="ramonn", thread_id="t-1"),
             ),

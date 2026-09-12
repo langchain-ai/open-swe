@@ -1,8 +1,18 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import langgraph_sdk
 import pytest
 
 from agent.tools.sandbox_reset import SandboxResetParams, sandbox_reset
+
+
+@pytest.fixture(autouse=True)
+def user_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = SimpleNamespace(
+        threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {"owner_type": "user"}}))
+    )
+    monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
 
 
 @pytest.mark.asyncio
