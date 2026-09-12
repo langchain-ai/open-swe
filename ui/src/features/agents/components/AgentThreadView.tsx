@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
@@ -11,6 +12,8 @@ import type {
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
+import { ExperimentalConversation } from "./ExperimentalConversation"
+import { useExperimentalAssistantUi } from "@/lib/profile"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -29,6 +32,9 @@ import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitA
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
   useAgentSkills,
+  useCancelAgentThread,
+  agentThreadKeys,
+  invalidateAgentThreadLists,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
@@ -62,8 +68,11 @@ export function AgentThreadView({
   thread,
   autoFocusComposer = false,
 }: AgentThreadViewProps) {
+  const experimentalAssistantUi = useExperimentalAssistantUi()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
+  const queryClient = useQueryClient()
+  const cancelThread = useCancelAgentThread(thread.id)
   const isMobile = useIsMobile()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
@@ -270,7 +279,63 @@ export function AgentThreadView({
           threadId={thread.id}
           pollWhileActive={isStreaming}
         />
-        {hasConversation ? (
+        {experimentalAssistantUi ? (
+          <ExperimentalConversation
+            threadId={thread.id}
+            messages={baseMessages}
+            queuedMessages={queuedMessages}
+            isStreaming={isStreaming}
+            isLoading={isHydrating}
+            hydrationFailed={hydrationFailed}
+            settingUpSandbox={settingUpSandbox}
+            showPlanArtifact={
+              thread.planStatus === "ready" || thread.planStatus === "shared"
+            }
+            onOpenFile={handleOpenFile}
+            footer={
+              <ThreadPullRequests
+                pullRequests={thread.pullRequests ?? []}
+                health={pullRequestHealth}
+                healthUnavailable={pullRequestStatus.isError}
+                onFix={fixPullRequest}
+                fixDisabled={!canPost || sendMessage.isPending}
+              />
+            }
+            composer={{
+              placeholder: canPost
+                ? "Send a message…"
+                : "Only workspace admins can send messages in this thread",
+              autoFocus: autoFocusComposer,
+              disabled: !canPost,
+              onSubmit: submitMessage,
+              onStop: async () => {
+                const cancelled = await cancelThread.mutateAsync()
+                await stream.disconnect()
+                if (cancelled.status !== "running") {
+                  queryClient.setQueryData(
+                    agentThreadKeys.detail(thread.id),
+                    (previous) =>
+                      previous
+                        ? { ...previous, status: "interrupted" as const }
+                        : previous
+                  )
+                  invalidateAgentThreadLists(queryClient)
+                }
+              },
+              models,
+              selection: activeSelection,
+              onSelectionChange: setSelection,
+              planMode: activePlanMode,
+              onPlanModeChange: setPlanMode,
+              mentionPaths,
+              skills: skills.data,
+              contextUsage: {
+                usedTokens,
+                contextWindow: activeModel?.context_window ?? null,
+              },
+            }}
+          />
+        ) : hasConversation ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Messages
               messages={baseMessages}

@@ -44,6 +44,7 @@ class ProfileUpdate(BaseModel):
     auto_fix_ci: bool = True
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
+    experimental_assistant_ui: bool | None = None
 
     @model_validator(mode="after")
     def _normalize_stale_model_pairs(self) -> "ProfileUpdate":
@@ -148,6 +149,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
+        "experimental_assistant_ui": (
+            update.experimental_assistant_ui
+            if update.experimental_assistant_ui is not None
+            else existing.get("experimental_assistant_ui")
+        ),
         "updated_at": now_iso(),
     }
     for stale_field in (
