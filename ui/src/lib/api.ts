@@ -74,7 +74,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
   })
   if (!res.ok) {
-    let message = res.statusText
+    // HTTP/2 has no reason phrase, so `statusText` is empty on every deployed
+    // response — without the status fallback a non-JSON error renders blank.
+    let message = res.statusText || `request failed (${res.status})`
     try {
       const body = await res.json()
       if (body?.detail)
@@ -554,6 +556,54 @@ export interface ReviewListPayload {
   has_more: boolean
 }
 
+export type ReviewQueueDecision =
+  | "APPROVED"
+  | "CHANGES_REQUESTED"
+  | "REVIEW_REQUIRED"
+
+export interface ReviewQueueAiReview {
+  status: "running" | "error" | "idle"
+  counts: { bugs: number; flags: number }
+}
+
+export interface ReviewQueueItem {
+  repo_full_name: string
+  owner: string
+  repo: string
+  number: number
+  title: string
+  url: string
+  author: string | null
+  additions: number
+  deletions: number
+  changed_files: number
+  review_decision: ReviewQueueDecision | null
+  updated_at: string
+  ai_review: ReviewQueueAiReview | null
+  matched_paths: Array<string>
+  optional_failures: number
+}
+
+export type ReviewQueueChecksMode = "required" | "all" | "ignore"
+
+export interface ReviewQueueRepo {
+  full_name: string
+  paths: Array<string>
+  checks: ReviewQueueChecksMode
+}
+
+export interface ReviewQueueReposPayload {
+  repos: Array<ReviewQueueRepo>
+  updated_at: string
+}
+
+export interface ReviewQueuePayload {
+  repos: Array<ReviewQueueRepo>
+  items: Array<ReviewQueueItem>
+  total_open: number
+  fetched_at: string
+}
+
 export interface ReviewUserRef {
   login: string
   avatar_url?: string | null
@@ -904,6 +954,14 @@ export const api = {
       `/admin/user-mappings/${encodeURIComponent(github_login)}`,
       { method: "DELETE" }
     ),
+  getReviewQueueRepos: () =>
+    request<ReviewQueueReposPayload>("/review-queue/repos"),
+  setReviewQueueRepos: (repos: Array<ReviewQueueRepo>) =>
+    request<ReviewQueueReposPayload>("/review-queue/repos", {
+      method: "PUT",
+      body: JSON.stringify({ repos }),
+    }),
+  getReviewQueue: () => request<ReviewQueuePayload>("/review-queue"),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   getReview: (owner: string, repo: string, number: number) =>

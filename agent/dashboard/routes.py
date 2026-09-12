@@ -129,6 +129,13 @@ from agent.dashboard.review_chat_api import (
     proxy_review_chat_state,
     proxy_review_chat_stream_events,
 )
+from agent.dashboard.review_queue import (
+    ReviewQueuePayload,
+    ReviewQueueReposBody,
+    get_review_queue,
+    get_review_queue_repos,
+    set_review_queue_repos,
+)
 from agent.dashboard.sandbox_settings import (
     SandboxSettingsUpdate,
     get_sandbox_settings,
@@ -212,6 +219,7 @@ from agent.dashboard.user_credentials import (
     disconnect_notion,
     get_notion_status,
 )
+from agent.dashboard.user_data import ReviewQueueRepos
 from agent.dashboard.user_instructions import (
     UserInstructionsUpdate,
     delete_user_instructions,
@@ -1509,6 +1517,28 @@ async def api_list_review_styles(
         else record
         for record in records
     ]
+
+
+@router.get("/review-queue/repos")
+async def api_get_review_queue_repos(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> ReviewQueueRepos:
+    return await get_review_queue_repos(session["sub"])
+
+
+@router.put("/review-queue/repos")
+async def api_set_review_queue_repos(
+    body: ReviewQueueReposBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> ReviewQueueRepos:
+    return await set_review_queue_repos(session["sub"], body.repos)
+
+
+@router.get("/review-queue")
+async def api_get_review_queue(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> ReviewQueuePayload:
+    return await get_review_queue(session["sub"])
 
 
 REVIEWS_PAGE_SIZE = 20

@@ -66,6 +66,13 @@ export async function setRepoPrivate(page: Page, value: boolean) {
   expect(res.ok()).toBeTruthy();
 }
 
+export async function setReviewQueueFailure(page: Page, enabled: boolean) {
+  const res = await page.request.post("/control/review-queue-failure", {
+    data: { enabled },
+  });
+  expect(res.ok()).toBeTruthy();
+}
+
 export async function setPullRequestHealth(
   page: Page,
   values: Record<string, unknown>,
@@ -74,6 +81,37 @@ export async function setPullRequestHealth(
     data: { number: 1, ...values },
   });
   expect(res.ok()).toBeTruthy();
+}
+
+export type SeedPullValues = {
+  owner: string;
+  repo: string;
+  title: string;
+  draft?: boolean;
+  mergeable?: boolean;
+  check_conclusion?: "success" | "failure" | null;
+  check_runs?: Array<{
+    name: string;
+    conclusion?: string | null;
+    required?: boolean;
+  }>;
+  required_contexts?: string[];
+  additions?: number;
+  deletions?: number;
+  files?: number;
+  file_paths?: string[];
+  author?: string;
+};
+
+// Puts a pull request straight into the fake GitHub and returns its number.
+export async function seedPull(
+  page: Page,
+  values: SeedPullValues,
+): Promise<number> {
+  const res = await page.request.post("/control/seed-pull", { data: values });
+  expect(res.ok()).toBeTruthy();
+  const { number } = (await res.json()) as { number: number };
+  return number;
 }
 
 // Hold the fake run open long enough to load its busy composer and queue a

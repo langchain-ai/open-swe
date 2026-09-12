@@ -21,6 +21,7 @@ from e2e_env import (
     SECOND_REPO,
     TMP,
 )
+from pydantic import BaseModel
 
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
@@ -132,7 +133,9 @@ def update_code_channel(channel_id: str, **values: Any) -> dict[str, Any] | None
 # --- GitHub ----------------------------------------------------------------
 PULLS: list[dict[str, Any]] = []
 REPO_PRIVATE = [False]
+REVIEW_QUEUE_FAILURE = [False]
 _pr_seq = [0]
+_seed_seq = [0]
 _REMOTES = {
     (OWNER, REPO): BARE_REMOTE,
     (SECOND_OWNER, SECOND_REPO): SECOND_BARE_REMOTE,
@@ -243,6 +246,7 @@ def create_pull(
         "mergeable_state": "clean",
         "check_runs": [],
         "statuses": [],
+        "required_contexts": [],
         "review_threads": [],
         "reviews": [],
         "review_decision": "REVIEW_REQUIRED",
@@ -256,6 +260,77 @@ def create_pull(
     }
     PULLS.append(pr)
     return pr
+
+
+class SeedCheckRun(BaseModel):
+    """One check run to hang off a seeded pull request's head commit."""
+
+    name: str = "ci"
+    conclusion: str | None = None
+    required: bool = False
+
+
+def seed_pull(
+    owner: str,
+    repo: str,
+    *,
+    title: str,
+    draft: bool = False,
+    mergeable: bool = True,
+    check_conclusion: str | None = None,
+    check_runs: list[SeedCheckRun] | None = None,
+    required_contexts: list[str] | None = None,
+    additions: int = 0,
+    deletions: int = 0,
+    files: int = 0,
+    file_paths: list[str] | None = None,
+    author: str = "octocat",
+) -> dict[str, Any]:
+    """Put a pull request in the store directly, with no agent run behind it."""
+    _seed_seq[0] += 1
+    pull = create_pull(
+        owner,
+        repo,
+        head=f"seed-{_seed_seq[0]}",
+        base=BASE_BRANCH,
+        title=title,
+        body="",
+        draft=draft,
+    )
+    if file_paths:
+        pull["files"] = [{"filename": path, "additions": 2, "deletions": 1} for path in file_paths]
+        additions = additions or 2 * len(file_paths)
+        deletions = deletions or len(file_paths)
+    else:
+        pull["files"] = [
+            {
+                "filename": f"file{index}.py",
+                "additions": additions if index == 0 else 0,
+                "deletions": deletions if index == 0 else 0,
+            }
+            for index in range(max(files, 0))
+        ]
+    pull["additions"] = additions
+    pull["deletions"] = deletions
+    pull["mergeable"] = mergeable
+    pull["mergeable_state"] = "clean" if mergeable else "dirty"
+    pull["author"] = author
+    pull["required_contexts"] = list(required_contexts or [])
+    seeded = check_runs
+    if seeded is None and check_conclusion is not None:
+        seeded = [SeedCheckRun(name="ci", conclusion=check_conclusion, required=True)]
+    if seeded:
+        pull["check_runs"] = [
+            {
+                "name": check.name,
+                "status": "completed" if check.conclusion else "in_progress",
+                "conclusion": check.conclusion,
+                "required": check.required,
+                "html_url": f"https://checks.example/{check.name}",
+            }
+            for check in seeded
+        ]
+    return pull
 
 
 def find_pull(
@@ -384,6 +459,14 @@ def repo_private() -> bool:
     return REPO_PRIVATE[0]
 
 
+def set_review_queue_failure(value: bool) -> None:
+    REVIEW_QUEUE_FAILURE[0] = value
+
+
+def review_queue_failure() -> bool:
+    return REVIEW_QUEUE_FAILURE[0]
+
+
 # --- LangSmith snapshots ---------------------------------------------------
 # Captures the environment tools asked for: {"snapshot_id", "name", "sandbox_id"}.
 # The E2E sandbox is the local provider, so there is no real snapshot service —
@@ -413,5 +496,7 @@ def reset() -> None:
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
     REPO_PRIVATE[0] = False
+    REVIEW_QUEUE_FAILURE[0] = False
     _pr_seq[0] = 0
+    _seed_seq[0] = 0
     seed_bare_remotes()

@@ -14,11 +14,23 @@ import {
 import type { ReviewSummary } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ReviewQueue } from "@/features/reviews/components/ReviewQueue"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
+type ReviewsTab = "mine" | "all" | "queue"
+
+const TAB_VALUES: ReadonlyArray<ReviewsTab> = ["queue", "mine", "all"]
+
 export const Route = createFileRoute("/agents/reviews/")({
+  validateSearch: (search: Record<string, unknown>): { tab?: ReviewsTab } => ({
+    tab:
+      typeof search.tab === "string" &&
+      TAB_VALUES.includes(search.tab as ReviewsTab)
+        ? (search.tab as ReviewsTab)
+        : undefined,
+  }),
   component: ReviewsPage,
 })
 
@@ -37,15 +49,24 @@ function statusBadge(review: ReviewSummary) {
   return null
 }
 
+const TABS: Array<{ value: ReviewsTab; label: string; testId?: string }> = [
+  { value: "queue", label: "Ready for Review", testId: "review-queue-tab" },
+  { value: "mine", label: "My PRs" },
+  { value: "all", label: "All" },
+]
+
 function ReviewsPage() {
   const session = useSession()
   const queryClient = useQueryClient()
-  const [mine, setMine] = useState(true)
+  const { tab: tabParam } = Route.useSearch()
+  const tab = tabParam ?? "queue"
+  const navigate = Route.useNavigate()
   const [page, setPage] = useState(0)
+  const mine = tab === "mine"
   const reviews = useQuery({
     queryKey: ["reviews", mine, page],
     queryFn: () => api.listReviews(page, mine),
-    enabled: !!session.data,
+    enabled: !!session.data && tab !== "queue",
     placeholderData: keepPreviousData,
     refetchInterval: (query) =>
       query.state.data?.reviews.some((r) => r.status === "running")
@@ -70,29 +91,30 @@ function ReviewsPage() {
           PR Reviews
         </h1>
         <p className="mt-1 text-xs text-muted-foreground">
-          Pull requests reviewed by Open SWE Review. Click into one for the full
-          analysis.
+          {tab === "queue"
+            ? "Pull requests in your repositories with green CI, no conflicts, and not in draft."
+            : "Pull requests reviewed by Open SWE Review. Click into one for the full analysis."}
         </p>
 
         <div className="mt-6 flex items-center gap-1">
-          {(
-            [
-              [true, "My PRs"],
-              [false, "All"],
-            ] as const
-          ).map(([value, label]) => (
+          {TABS.map(({ value, label, testId }) => (
             <button
-              key={label}
+              key={value}
               type="button"
+              data-testid={testId}
               onClick={() => {
-                setMine(value)
+                void navigate({ search: { tab: value } })
                 setPage(0)
               }}
-              onPointerEnter={() => prefetch(value, 0)}
-              onFocus={() => prefetch(value, 0)}
+              onPointerEnter={() => {
+                if (value !== "queue") prefetch(value === "mine", 0)
+              }}
+              onFocus={() => {
+                if (value !== "queue") prefetch(value === "mine", 0)
+              }}
               className={cn(
                 "rounded-md px-2.5 py-1 text-xs transition-colors",
-                mine === value
+                tab === value
                   ? "bg-sidebar-row-hover font-medium text-foreground"
                   : "text-muted-foreground hover:bg-sidebar-row-hover"
               )}
@@ -102,102 +124,106 @@ function ReviewsPage() {
           ))}
         </div>
 
-        <div className="mt-3 overflow-hidden rounded-lg border border-border bg-card">
-          {reviews.isLoading && (
-            <div className="p-4">
-              <Skeleton className="h-24 w-full" />
-            </div>
-          )}
-          {reviews.error && (
-            <p className="px-4 py-3 text-xs text-destructive">
-              {reviews.error.message}
-            </p>
-          )}
-          {reviews.data && items.length === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">
-              {mine
-                ? "No reviews on your PRs yet. Switch to All to see every review you have access to."
-                : "No reviews yet. Enable repositories under Open SWE Review settings and open a PR."}
-            </p>
-          )}
-          <div className="divide-y divide-border">
-            {items.map((review) => (
-              <Link
-                key={review.thread_id}
-                to="/agents/reviews/$owner/$repo/$number"
-                params={{
-                  owner: review.owner,
-                  repo: review.repo,
-                  number: String(review.number),
-                }}
-                className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-sidebar-row-hover"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <GitPullRequestIcon className="size-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <div className="truncate text-xs font-medium text-foreground">
-                      {review.title}
-                    </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {review.owner}/{review.repo}#{review.number}
-                      {review.author && !mine && (
-                        <span className="ml-2">by {review.author}</span>
-                      )}
-                      {review.head_ref && (
-                        <span className="ml-2 font-mono text-[11px]">
-                          {review.head_ref}
-                        </span>
-                      )}
+        {tab === "queue" ? (
+          <ReviewQueue />
+        ) : (
+          <div className="mt-3 overflow-hidden rounded-lg border border-border bg-card">
+            {reviews.isLoading && (
+              <div className="p-4">
+                <Skeleton className="h-24 w-full" />
+              </div>
+            )}
+            {reviews.error && (
+              <p className="px-4 py-3 text-xs text-destructive">
+                {reviews.error.message}
+              </p>
+            )}
+            {reviews.data && items.length === 0 && (
+              <p className="px-4 py-3 text-xs text-muted-foreground">
+                {mine
+                  ? "No reviews on your PRs yet. Switch to All to see every review you have access to."
+                  : "No reviews yet. Enable repositories under Open SWE Review settings and open a PR."}
+              </p>
+            )}
+            <div className="divide-y divide-border">
+              {items.map((review) => (
+                <Link
+                  key={review.thread_id}
+                  to="/agents/reviews/$owner/$repo/$number"
+                  params={{
+                    owner: review.owner,
+                    repo: review.repo,
+                    number: String(review.number),
+                  }}
+                  className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-sidebar-row-hover"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <GitPullRequestIcon className="size-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-medium text-foreground">
+                        {review.title}
+                      </div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        {review.owner}/{review.repo}#{review.number}
+                        {review.author && !mine && (
+                          <span className="ml-2">by {review.author}</span>
+                        )}
+                        {review.head_ref && (
+                          <span className="ml-2 font-mono text-[11px]">
+                            {review.head_ref}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-3 text-xs">
-                  {statusBadge(review)}
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1",
-                      review.counts.bugs > 0
-                        ? "text-destructive"
-                        : "text-muted-foreground"
-                    )}
-                  >
-                    <BugBeetleIcon className="size-3.5" />
-                    {review.counts.bugs}
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-muted-foreground">
-                    <FlagIcon className="size-3.5" />
-                    {review.counts.flags}
-                  </span>
-                </div>
-              </Link>
-            ))}
-          </div>
-          {(page > 0 || reviews.data?.has_more) && (
-            <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
-              <span className="text-muted-foreground">Page {page + 1}</span>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={page === 0}
-                  onPointerEnter={() => prefetch(mine, page - 1)}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                >
-                  Prev
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!reviews.data?.has_more}
-                  onPointerEnter={() => prefetch(mine, page + 1)}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
+                  <div className="flex shrink-0 items-center gap-3 text-xs">
+                    {statusBadge(review)}
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1",
+                        review.counts.bugs > 0
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                      )}
+                    >
+                      <BugBeetleIcon className="size-3.5" />
+                      {review.counts.bugs}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <FlagIcon className="size-3.5" />
+                      {review.counts.flags}
+                    </span>
+                  </div>
+                </Link>
+              ))}
             </div>
-          )}
-        </div>
+            {(page > 0 || reviews.data?.has_more) && (
+              <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
+                <span className="text-muted-foreground">Page {page + 1}</span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page === 0}
+                    onPointerEnter={() => prefetch(mine, page - 1)}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    Prev
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!reviews.data?.has_more}
+                    onPointerEnter={() => prefetch(mine, page + 1)}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </main>
   )
