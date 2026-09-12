@@ -1,15 +1,18 @@
-from agent.analytics.migrations.operations import execute_script
+from alembic import op
 
 revision = "0010"
 down_revision = "0009"
 branch_labels = None
 depends_on = None
 
-SQL = "SET search_path TO open_swe, public;\n\nALTER TABLE deployment_metadata\n    ADD COLUMN IF NOT EXISTS reporting_cutover_at timestamptz;\n"
+SQL = (
+    "ALTER TABLE deployment_metadata\n    ADD COLUMN IF NOT EXISTS reporting_cutover_at timestamptz",
+)
 
 
 def upgrade() -> None:
-    execute_script(SQL)
+    for statement in SQL:
+        op.execute(statement)
 
 
 def downgrade() -> None:
