@@ -118,9 +118,6 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   },
 });
 
-const DRAG_REGION_ID = "open-swe-desktop-drag-region";
-const DRAG_REGION_HEIGHT = 44;
-
 ipcRenderer.on("desktop:fullscreen-change", (_event, fullscreen) => {
   document.documentElement.classList.toggle("desktop-fullscreen", fullscreen);
 });
@@ -130,19 +127,18 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const style = document.createElement("style");
   style.textContent = `
-    #${DRAG_REGION_ID} {
+    [data-desktop-drag-strip] {
       -webkit-app-region: drag;
       pointer-events: none;
       position: fixed;
       top: 0;
       left: 118px;
       right: 0;
-      height: ${DRAG_REGION_HEIGHT}px;
-      z-index: 2147483647;
+      height: 44px;
       user-select: none;
     }
 
-    .desktop-fullscreen #${DRAG_REGION_ID} {
+    .desktop-fullscreen [data-desktop-drag-strip] {
       left: 0;
     }
 
@@ -168,9 +164,4 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   `;
   document.head.append(style);
-
-  const dragRegion = document.createElement("div");
-  dragRegion.id = DRAG_REGION_ID;
-  dragRegion.setAttribute("aria-hidden", "true");
-  document.body.prepend(dragRegion);
 });

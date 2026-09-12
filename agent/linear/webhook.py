@@ -40,15 +40,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         repo_config.get("name"),
     )
 
-    triggering_comment_id = issue_data.get("triggering_comment_id", "")
-    if triggering_comment_id:
-        await common.react_to_linear_comment(triggering_comment_id, "👀")
-
     thread_id = linear_issue_thread_id(issue_id)
 
-    full_issue = await common.fetch_linear_issue_details(issue_id)
-    if not full_issue:
-        full_issue = issue_data
+    full_issue = issue_data
 
     user_email = None
     user_name = None
@@ -165,11 +159,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     ticket_url_line = f"## Linear Ticket URL: {ticket_url}\n\n" if ticket_url else ""
 
     triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
-    tag_instruction = (
-        f"When calling linear_comment, tag @{user_name} if you are asking them a question, need their input, or are notifying them of something important (e.g. a completed PR). For simple answers, tagging is not required."
-        if user_name
-        else ""
-    )
     prompt = render_prompt(
         "runs/linear-issue.md",
         repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
@@ -179,7 +168,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         issue_id=issue_id,
         ticket_url_line=ticket_url_line,
         description=description,
-        tag_instruction=tag_instruction,
     )
     description_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
     image_blocks_by_url: dict[str, dict[str, Any]] = {}
@@ -330,4 +318,3 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         thread_id,
         run.get("run_id") if isinstance(run, dict) else None,
     )
-    await common.post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)

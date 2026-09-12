@@ -106,6 +106,8 @@ export interface SessionUser {
   avatar_url: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
+  api_base_url?: string
+  slack_base_url?: string
 }
 
 export interface ModelOption {
@@ -152,15 +154,36 @@ export interface ProfileUpdate {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean
+  model_routing_enabled?: boolean | null
   draft_prs?: boolean
   review_draft_prs?: boolean | null
+}
+
+export interface SlackBotOption {
+  team_id: string
+  bot_id: string
+  user_id: string
+  name: string
+  image_url: string
+}
+
+export interface AllowedSlackBot {
+  team_id: string
+  bot_id: string
+  user_id: string
+  app_id: string
+  name: string
+  created_by: string
+  created_at: string
+  image_url: string
 }
 
 export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  /** Tri-state adaptive model routing toggle; user preference overrides this org default. */
+  model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   transcription_model?: string
@@ -190,7 +213,7 @@ export interface TeamSettings {
   updated_at?: string | null
 }
 
-export interface WorkspaceMCPOAuth {
+export interface MCPOAuth {
   grant_type?: "client_credentials"
   token_url: string
   client_id: string
@@ -198,30 +221,30 @@ export interface WorkspaceMCPOAuth {
   token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic"
 }
 
-export type WorkspaceMCPOAuthUpdate = WorkspaceMCPOAuth & {
+export type MCPOAuthUpdate = MCPOAuth & {
   client_secret?: string | null
 }
 
-export interface WorkspaceMCP {
+export interface MCPConnection {
   name: string
   url: string
   transport: "streamable_http" | "sse"
   enabled: boolean
   allowed_tools: string[]
   header_names: string[]
-  oauth?: WorkspaceMCPOAuth | null
+  oauth?: MCPOAuth | null
   revision: string
   updated_at: string
 }
 
-export interface WorkspaceMCPUpdate {
+export interface MCPConnectionUpdate {
   name: string
   url: string
-  transport: WorkspaceMCP["transport"]
+  transport: MCPConnection["transport"]
   enabled: boolean
   allowed_tools: string[]
   headers?: Record<string, string> | null
-  oauth?: WorkspaceMCPOAuthUpdate | null
+  oauth?: MCPOAuthUpdate | null
 }
 
 export interface NotionCredentialStatus {
@@ -355,6 +378,14 @@ export interface UserInstructions {
   created_at?: string
   updated_at?: string
   updated_by?: string
+}
+
+export type ThreadVisibility = "public" | "private"
+
+export interface UserPreferences {
+  default_visibility: ThreadVisibility
+  local_tracing_project: string | null
+  default_local_tracing_project: string
 }
 
 export interface Skill {
@@ -704,6 +735,12 @@ export const api = {
     }),
   deleteMyInstructions: () =>
     request<void>("/me/instructions", { method: "DELETE" }),
+  getMyPreferences: () => request<UserPreferences>("/me/preferences"),
+  saveMyPreferences: (preferences: UserPreferences) =>
+    request<UserPreferences>("/me/preferences", {
+      method: "PUT",
+      body: JSON.stringify(preferences),
+    }),
   listSkills: (offset = 0) =>
     request<SkillsPage>(`/skills?limit=100&offset=${offset}`),
   createSkill: (name: string, body: SkillInput) =>
@@ -770,6 +807,18 @@ export const api = {
   listEnvironmentOptions: () =>
     request<EnvironmentOptionList>("/environments/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
+  listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
+  allowSlackBot: (body: { bot_id: string }) =>
+    request<AllowedSlackBot>("/slack/allowed-bots", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeAllowedSlackBot: (teamId: string, botId: string) =>
+    request<{ ok: boolean }>(
+      `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
+      { method: "DELETE" }
+    ),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {
       method: "PUT",
@@ -780,14 +829,14 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ transcription_model }),
     }),
-  getWorkspaceMCPs: () => request<WorkspaceMCP[]>("/workspace-mcps"),
+  getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
   revealWorkspaceMCPHeaders: (name: string) =>
     request<Record<string, string>>(
       `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
       { method: "POST", cache: "no-store" }
     ),
-  saveWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
-    request<WorkspaceMCP>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
+  saveWorkspaceMCP: (body: MCPConnectionUpdate) =>
+    request<MCPConnection>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -795,9 +844,29 @@ export const api = {
     request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
-  discoverWorkspaceMCP: (body: WorkspaceMCPUpdate) =>
+  discoverWorkspaceMCP: (body: MCPConnectionUpdate) =>
     request<{ name: string; description: string }[]>(
       `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),
+  revealMyMCPHeaders: (name: string) =>
+    request<Record<string, string>>(
+      `/my-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveMyMCP: (body: MCPConnectionUpdate) =>
+    request<MCPConnection>(`/my-mcps/${encodeURIComponent(body.name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteMyMCP: (name: string) =>
+    request<void>(`/my-mcps/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+  discoverMyMCP: (body: MCPConnectionUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
   getMyNotionStatus: () =>

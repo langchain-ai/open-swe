@@ -23,7 +23,11 @@ from agent.dashboard.agent_overrides import (
 from agent.dashboard.agent_usage import update_agent_pr_usage_from_webhook
 from agent.dashboard.enabled_repos import is_review_repo_enabled
 from agent.dashboard.oauth import build_settings_url
-from agent.dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
+from agent.dashboard.options import (
+    default_vision_model_pair,
+    model_supports_images,  # noqa: F401
+    normalize_model_choice,
+)
 from agent.dashboard.profiles import (  # noqa: F401
     get_profile,
     get_valid_access_token,
@@ -33,6 +37,7 @@ from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_settings,
 )
+from agent.dashboard.threads.summary import thread_is_private, thread_is_promptable
 from agent.dashboard.user_mappings import (
     email_for_login,  # noqa: F401
     login_for_email,  # noqa: F401
@@ -69,17 +74,12 @@ from agent.github.comments import (
 from agent.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from agent.github.thread_token import (
     cache_github_token_for_thread,
-    get_github_token_from_thread,
-    github_token_principal,
     invalidate_cached_github_token,
 )
 from agent.github.token import (
     is_bot_token_only_mode,
-    resolve_github_token_from_email,
 )
-from agent.linear.client import post_linear_trace_comment  # noqa: F401
 from agent.linear.comments import get_recent_comments  # noqa: F401
-from agent.linear.team_repo_map import LINEAR_TEAM_TO_REPO
 from agent.prompts import render_prompt
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
@@ -199,6 +199,7 @@ __all__ = [
     "resolve_slack_channel_context",
     "get_thread_metadata_safe",
     "get_thread_environment",
+    "get_thread_model_choice",
     "get_thread_plan_mode",
     "is_not_found_error",
     "is_pr_diff_unchanged_since_last_review",
@@ -217,7 +218,6 @@ __all__ = [
     "store_current_reviewer_run_id",
     "thread_exists",
     "trigger_or_queue_run",
-    "upsert_slack_thread_repo_metadata",
     "append_finding_interaction",
     "build_pr_prompt",
     "claim_slack_event",
@@ -235,7 +235,6 @@ __all__ = [
     "fetch_github_pr_metadata",
     "fetch_image_block",
     "fetch_issue_comments",
-    "fetch_linear_issue_details",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_review_threads",
     "fetch_slack_thread_messages",
@@ -246,7 +245,6 @@ __all__ = [
     "get_github_app_installation_token_with_expiry",
     "get_profile_default_repo",
     "get_recent_comments",
-    "get_repo_config_from_team_mapping",
     "get_slack_channel_context_description",
     "get_slack_repo_config",
     "get_slack_user_info",
@@ -265,7 +263,6 @@ __all__ = [
     "model_supports_images",
     "normalize_slack_channel_context",
     "parse_qs",
-    "post_linear_trace_comment",
     "post_review_started_comment",
     "post_slack_thread_reply",
     "post_slack_trace_reply",
@@ -275,7 +272,6 @@ __all__ = [
     "process_slack_stop_reaction",
     "queue_message_for_thread",
     "react_to_github_comment",
-    "react_to_linear_comment",
     "reconcile_findings_with_review_threads",
     "repo_context_bar_items",
     "refresh_user_mapping_cache",
@@ -353,8 +349,6 @@ ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
     repo.strip().lower() for repo in ENV.ALLOWED_GITHUB_REPOS.get().split(",") if repo.strip()
 )
 
-LINEAR_API_KEY = ENV.LINEAR_API_KEY.get()
-
 _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🔐 **GitHub Authentication Required**",
     "✅ **Pull Request Created**",
@@ -364,144 +358,6 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🤖 **Agent Response**",
     "❌ **Agent Error**",
 )
-
-
-def get_repo_config_from_team_mapping(
-    team_identifier: str, project_name: str = ""
-) -> dict[str, str]:
-    """Look up repository configuration from LINEAR_TEAM_TO_REPO mapping."""
-    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME} if DEFAULT_REPO_NAME else {}
-
-    if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
-        return fallback
-
-    config = LINEAR_TEAM_TO_REPO[team_identifier]
-
-    if "owner" in config and "name" in config:
-        return config
-
-    projects = config.get("projects")
-    if isinstance(projects, dict) and project_name:
-        project_config = projects.get(project_name)
-        if isinstance(project_config, dict):
-            return project_config
-
-    default = config.get("default")
-    if isinstance(default, dict):
-        return default
-
-    return fallback
-
-
-async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
-    """Add an emoji reaction to a Linear comment.
-
-    Args:
-        comment_id: The Linear comment ID
-        emoji: The emoji to react with (default: eyes 👀)
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if not LINEAR_API_KEY:
-        return False
-
-    url = "https://api.linear.app/graphql"
-
-    mutation = """
-    mutation ReactionCreate($commentId: String!, $emoji: String!) {
-        reactionCreate(input: { commentId: $commentId, emoji: $emoji }) {
-            success
-        }
-    }
-    """
-
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": mutation,
-                    "variables": {"commentId": comment_id, "emoji": emoji},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-            return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
-        except Exception:  # noqa: BLE001
-            return False
-
-
-async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
-    """Fetch full issue details from Linear API including description and comments.
-
-    Args:
-        issue_id: The Linear issue ID
-
-    Returns:
-        Full issue data dict, or None if fetch failed
-    """
-    if not LINEAR_API_KEY:
-        return None
-
-    url = "https://api.linear.app/graphql"
-
-    query = """
-    query GetIssue($issueId: String!) {
-        issue(id: $issueId) {
-            id
-            identifier
-            title
-            description
-            url
-            project {
-                id
-                name
-            }
-            team {
-                id
-                name
-                key
-            }
-            comments {
-                nodes {
-                    id
-                    body
-                    createdAt
-                    user {
-                        id
-                        name
-                        email
-                    }
-                }
-            }
-        }
-    }
-    """
-
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": query,
-                    "variables": {"issueId": issue_id},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-
-            return result.get("data", {}).get("issue")
-        except httpx2.HTTPError:
-            return None
 
 
 def _extract_repo_config_from_thread(thread: ThreadLike) -> dict[str, str] | None:
@@ -625,32 +481,6 @@ async def enforce_public_repo_org_gate(
     return _PUBLIC_REPO_GATE_REJECTION
 
 
-async def upsert_slack_thread_repo_metadata(
-    thread_id: str, repo_config: dict[str, str], langgraph_client: LangGraphClient
-) -> None:
-    """Persist the selected repo config on the thread metadata."""
-    try:
-        await langgraph_client.threads.update(thread_id=thread_id, metadata={"repo": repo_config})
-    except Exception as exc:  # noqa: BLE001
-        if is_not_found_error(exc):
-            try:
-                await langgraph_client.threads.create(
-                    thread_id=thread_id,
-                    if_exists="do_nothing",
-                    metadata={"repo": repo_config},
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Failed to create Slack thread %s while persisting repo metadata",
-                    thread_id,
-                )
-            return
-        logger.exception(
-            "Failed to persist Slack thread repo metadata for thread %s",
-            thread_id,
-        )
-
-
 def _existing_slack_permalink(
     existing_metadata: dict[str, Any], channel_id: str, thread_ts: str
 ) -> str | None:
@@ -700,12 +530,18 @@ async def upsert_agent_thread_metadata(
     title: str = "",
     source_context: SourceContext | None = None,
     environment: str | None = None,
-) -> None:
+    visibility: str = "public",
+    owner_login: str = "",
+    owner_type: str = "user",
+) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
+
+    Returns whether the write succeeded so private-thread callers can fail closed.
 
     Webhook-triggered runs only pass ``source``/``github_login`` through the run
     config; the Agents UI lists threads by thread *metadata*, so we mirror the
-    sender onto the thread's participants here.
+    sender onto the thread's participants here. ``visibility`` and ``owner_login``
+    are stamped once, when the thread is created, and never changed afterwards.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
     category = "interactive"
@@ -743,6 +579,18 @@ async def upsert_agent_thread_metadata(
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     existing_context = SourceContext.from_metadata(existing_meta)
+    if owner_type == "system" and existing_meta:
+        expected_bot = source_context.slack_thread if source_context else None
+        saved_bot = existing_context.slack_thread
+        if (
+            existing_meta.get("owner_type") != "system"
+            or existing_meta.get("visibility") != "public"
+            or expected_bot is None
+            or saved_bot is None
+            or (saved_bot.team_id, saved_bot.triggering_bot_id)
+            != (expected_bot.team_id, expected_bot.triggering_bot_id)
+        ):
+            return False
     sender_login = github_login or await resolve_login_from_email_async(user_email) or ""
     if sender_login:
         metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
@@ -767,11 +615,34 @@ async def upsert_agent_thread_metadata(
     elif source == "slack" and "title" in metadata:
         metadata["title_seed"] = metadata["title"]
 
+    # A helper may have pre-created a bare stub this request; it still needs the
+    # creation stamps. Legacy threads carry created_at_ms and are left alone.
+    if existing is None or (
+        "visibility" not in existing_meta and existing_meta.get("created_at_ms") is None
+    ):
+        metadata["visibility"] = visibility
+        metadata["owner_type"] = owner_type
+        initiating_login = owner_login.strip() or sender_login.strip()
+        if initiating_login and owner_type == "user":
+            metadata["owner_login"] = initiating_login
+
     try:
         if existing is None:
             await langgraph_client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )
+            if owner_type == "system":
+                saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
+                saved_meta = saved.get("metadata") or {}
+                if any(
+                    saved_meta.get(key) != metadata.get(key)
+                    for key in (
+                        "owner_type",
+                        "visibility",
+                        "source_context",
+                    )
+                ):
+                    return False
         elif _pr_linked(existing_meta) or _pr_state_reset_for_user_activity(existing_meta):
             # A person is continuing the thread, so PR-driven resolution or the
             # "PRs closed" mark no longer applies. Only the PR webhook sets those,
@@ -786,8 +657,10 @@ async def upsert_agent_thread_metadata(
                 await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
         else:
             await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+        return True
     except Exception:  # noqa: BLE001
         logger.exception("Failed to persist owner metadata for thread %s", thread_id)
+        return False
 
 
 async def get_slack_repo_config(
@@ -922,6 +795,22 @@ async def get_thread_plan_mode(thread_id: str) -> bool | None:
         return None
     value = metadata.get("plan_mode")
     return value if isinstance(value, bool) else None
+
+
+async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
+    """Return the explicit model choice persisted for a thread, if any."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if not is_not_found_error(exc):
+            logger.warning("Failed to fetch model metadata for thread %s", thread_id)
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict) or metadata.get("model_selection") != "explicit":
+        return None
+    model_id, effort = normalize_model_choice(metadata.get("model"), metadata.get("effort"))
+    return (model_id, effort) if model_id and effort else None
 
 
 async def get_thread_environment(thread_id: str) -> str | None:
@@ -1098,6 +987,20 @@ def build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
     return "\n\n## Comments:\n" + "".join(lines)
 
 
+async def authorize_github_thread(thread_id: str, github_login: str) -> dict[str, Any]:
+    """Reject private-thread follow-ups before reading credentials or dispatching."""
+    try:
+        thread = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
+    except Exception as exc:
+        if is_not_found_error(exc):
+            return {}
+        raise
+    metadata = as_thread_dict(thread).get("metadata") or {}
+    if thread_is_private(metadata) and not thread_is_promptable(metadata, github_login):
+        raise HTTPException(404, "thread not found")
+    return metadata
+
+
 async def trigger_or_queue_run(
     thread_id: str,
     prompt: str,
@@ -1109,6 +1012,7 @@ async def trigger_or_queue_run(
     pr_number: int,
 ) -> None:
     """Create a new agent run or queue the message if the thread is busy."""
+    await authorize_github_thread(thread_id, github_login)
     await upsert_agent_thread_metadata(
         thread_id,
         source="github",
@@ -1509,39 +1413,17 @@ async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> s
 
 
 async def get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
-    """Resolve and cache a GitHub token for a thread when available.
-
-    In bot-token-only mode, returns a fresh GitHub App installation token
-    instead of resolving per-user OAuth tokens.
-    """
-    if is_bot_token_only_mode():
-        bot_token, expires_at = await get_github_app_installation_token_with_expiry()
-        if bot_token:
-            cache_github_token_for_thread(
-                thread_id, bot_token, expires_at=expires_at, is_bot_token=True
-            )
-            return bot_token
-        logger.warning("Bot-token-only mode but GitHub App token unavailable")
-        return None
-
-    principal = github_token_principal(email=email)
-    github_token, _expires_at = await get_github_token_from_thread(thread_id, principal=principal)
-    if github_token:
-        return github_token
-
-    auth_result = await resolve_github_token_from_email(email)
-    github_token = auth_result.get("token")
-    if not github_token:
-        return None
-
-    expires_at = auth_result.get("expires_at")
-    cache_github_token_for_thread(
-        thread_id,
-        github_token,
-        expires_at=expires_at if isinstance(expires_at, str) else None,
-        principal=principal,
-    )
-    return github_token
+    """GitHub webhook conversations always use the workspace bot identity."""
+    del email
+    await invalidate_cached_github_token(thread_id)
+    bot_token, expires_at = await get_github_app_installation_token_with_expiry()
+    if bot_token:
+        cache_github_token_for_thread(
+            thread_id, bot_token, expires_at=expires_at, is_bot_token=True
+        )
+        return bot_token
+    logger.warning("Workspace GitHub App token unavailable", extra={"thread_id": thread_id})
+    return None
 
 
 def finding_comment_ids(finding: Finding) -> set[int]:

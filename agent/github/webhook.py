@@ -847,6 +847,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     email = await common.email_for_login(github_login) or ""
     if email:
+        thread_metadata = await common.authorize_github_thread(thread_id, github_login)
         github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     else:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
@@ -884,9 +885,35 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         common.logger.warning("No PR number found in payload, skipping")
         return
 
+    event = payload.get("review" if event_type == "pull_request_review" else "comment", {})
+    event_comment = {
+        "body": event.get("body", ""),
+        "author": event.get("user", {}).get("login", ""),
+        "created_at": event.get("submitted_at") or event.get("created_at", ""),
+        "event_at": event.get("updated_at") if payload.get("action") == "edited" else None,
+        "type": {
+            "issue_comment": "pr_comment",
+            "pull_request_review_comment": "review_comment",
+            "pull_request_review": "review",
+        }[event_type],
+        "comment_id": comment_id,
+        "path": event.get("path", ""),
+        "line": event.get("line") or event.get("original_line"),
+    }
+    if not event_comment["created_at"] or not comment_id:
+        return
+    if common.thread_is_private(thread_metadata) and not common.thread_is_promptable(
+        thread_metadata, event_comment["author"]
+    ):
+        return
+
     try:
         comments = await common.fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token
+            repo_config,
+            pr_number,
+            token=github_token,
+            event_comment=event_comment,
+            authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
         )
     except GitHubAuthError:
         github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
@@ -894,7 +921,11 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
             return
         comments = await common.fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token
+            repo_config,
+            pr_number,
+            token=github_token,
+            event_comment=event_comment,
+            authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
         )
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)

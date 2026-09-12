@@ -208,6 +208,7 @@ class BackendSupervisor {
         ...process.env,
         ...this.options.env,
         ...this.gatewayEnvironment(),
+        ...(await this.options.tracingEnv?.()),
         ...this.options.providerEnv?.(),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,

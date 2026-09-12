@@ -271,7 +271,11 @@ ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention d
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
-ENV.var("LINEAR_API_KEY", "Linear API key.", secret=True)
+ENV.var(
+    "SLACK_PUBLIC_BASE_URL",
+    "Public URL for Slack webhooks and the Sign in with Slack callback; defaults to "
+    "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
+)
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------

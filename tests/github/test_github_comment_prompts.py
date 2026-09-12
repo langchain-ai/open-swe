@@ -96,7 +96,7 @@ def test_background_task_prompt_continues_without_acknowledging() -> None:
 
 def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
     expected = {
-        "linear": "Use `linear_comment`",
+        "linear": "Use the configured Linear MCP tools",
         "github": "Use `gh issue comment` or `gh pr comment`",
         "schedule": "call `notify_automation_channel` once",
     }
