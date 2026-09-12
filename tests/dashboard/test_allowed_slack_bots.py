@@ -162,25 +162,6 @@ def _member(user_id: str, name: str, **overrides: Any) -> dict[str, Any]:
     }
 
 
-async def test_legacy_bot_remains_authorized_without_environment(fake_store):
-    from agent.slack.allowed_bots import resolve_allowed_slack_bot
-
-    fake_store.seed(
-        ["allowed_slack_bots"],
-        "T123:B123",
-        {
-            "team_id": "T123",
-            "bot_id": "B123",
-            "name": "Legacy bot",
-            "github_login": "alice",
-            "created_at": "2026-09-09",
-        },
-    )
-    bot = await resolve_allowed_slack_bot("T123", "B123")
-    assert bot is not None
-    assert bot.created_by == "alice"
-
-
 def test_bot_directory_paginates_filters_and_caches(
     client: TestClient, directory: dict[str, Any]
 ) -> None:

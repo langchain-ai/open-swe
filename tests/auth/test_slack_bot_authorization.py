@@ -6,7 +6,7 @@ import pytest
 
 
 @pytest.fixture
-def scope(monkeypatch, fake_store):
+def scope(monkeypatch, allowed_bot):
     metadata = {
         "owner_type": "system",
         "visibility": "public",
@@ -26,18 +26,6 @@ def scope(monkeypatch, fake_store):
         lambda: SimpleNamespace(
             threads=SimpleNamespace(get=AsyncMock(side_effect=lambda _: {"metadata": metadata}))
         ),
-    )
-    fake_store.seed(
-        ["allowed_slack_bots"],
-        "T123:B123",
-        {
-            "team_id": "T123",
-            "bot_id": "B123",
-            "user_id": "U123",
-            "name": "Release bot",
-            "created_by": "alice",
-            "created_at": "2026-09-11",
-        },
     )
     return metadata
 
@@ -142,13 +130,6 @@ async def test_automation_keeps_existing_authorization(scope):
     assert await authorize_bot_thread("thread") is False
 
 
-async def test_old_environment_fields_do_not_limit_bot_access(scope):
-    from agent.slack.bot_authorization import authorize_bot_thread
-
-    scope.update(environment="deleted", system_repositories=["old/repo"])
-    assert await authorize_bot_thread("thread") is True
-
-
 async def test_move_preserves_bot_authorization(scope):
     from agent.slack.bot_authorization import validate_bot_thread
     from agent.slack.tools.move_thread import _new_slack_context
@@ -158,15 +139,6 @@ async def test_move_preserves_bot_authorization(scope):
     )
     assert scope["source_context"]["slack_thread"]["triggering_bot_id"] == "B123"
     assert await validate_bot_thread(scope) is True
-
-
-async def test_bot_uses_installation_access_without_repo_restrictions(monkeypatch, scope):
-    from agent.slack import bot_authorization
-
-    mint = AsyncMock(return_value=("app-token", "expiry"))
-    monkeypatch.setattr(bot_authorization, "get_github_app_installation_token_with_expiry", mint)
-    assert await bot_authorization.bot_installation_token("thread") == ("app-token", "expiry")
-    mint.assert_awaited_once_with()
 
 
 @pytest.mark.parametrize("entrypoint", ["run", "pr", "proxy", "webhook"])

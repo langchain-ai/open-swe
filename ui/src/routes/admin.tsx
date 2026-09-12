@@ -68,7 +68,7 @@ function AdminPage() {
       <SlackIntegrationSection
         backendUrl={session.data.slack_base_url ?? session.data.api_base_url}
       >
-        <AllowedSlackBotsSection isAdmin={session.data.is_admin} />
+        <AllowedSlackBotsSection />
       </SlackIntegrationSection>
       <MCPConnectionsSection scope="workspace" />
 

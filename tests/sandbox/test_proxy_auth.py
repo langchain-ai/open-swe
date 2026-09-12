@@ -21,18 +21,7 @@ from agent.sandboxes.providers.langsmith import (
 )
 from agent.sandboxes.state import SandboxBackendProxy
 
-
-@pytest.fixture(autouse=True)
-def unscoped_thread_metadata(monkeypatch):
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(
-                get=AsyncMock(return_value={"metadata": {"visibility": "public"}})
-            )
-        ),
-    )
+pytestmark = pytest.mark.usefixtures("public_thread_metadata")
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:

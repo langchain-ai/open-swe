@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from agent.config import ENV
 from agent.store import TypedStore, now_iso
@@ -35,7 +35,7 @@ class AllowedSlackBot(BaseModel):
     app_id: str = ""
     name: str
     image_url: str = ""
-    created_by: str = Field(default="", validation_alias=AliasChoices("created_by", "github_login"))
+    created_by: str = ""
     created_at: str
 
 

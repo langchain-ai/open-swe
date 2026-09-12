@@ -59,22 +59,12 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
 
 
 async def test_slack_bot_threads_cannot_act_as_admin_or_enter_other_threads(
-    saved_thread_scope, fake_store
+    saved_thread_scope, allowed_bot
 ):
     saved_thread_scope.update(
         owner_type="system",
         visibility="public",
         source_context={"slack_thread": {"triggering_bot_id": "B123", "team_id": "T123"}},
-    )
-    fake_store.seed(
-        ["allowed_slack_bots"],
-        "T123:B123",
-        {
-            "team_id": "T123",
-            "bot_id": "B123",
-            "name": "Release bot",
-            "created_at": "2026-09-11",
-        },
     )
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]

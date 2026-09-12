@@ -17,22 +17,7 @@ from agent.github.proxy import (
     record_proxy_token_expiry,
 )
 
-
-@pytest.fixture(autouse=True)
-def unscoped_thread_metadata(monkeypatch):
-    from types import SimpleNamespace
-
-    import langgraph_sdk
-
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(
-                get=AsyncMock(return_value={"metadata": {"visibility": "public"}})
-            )
-        ),
-    )
+pytestmark = pytest.mark.usefixtures("public_thread_metadata")
 
 
 @pytest.fixture(autouse=True)

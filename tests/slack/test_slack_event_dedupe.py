@@ -150,25 +150,6 @@ async def test_mention_and_message_deliveries_start_one_run(
     }
 
 
-@pytest.fixture
-def allowed_bot(fake_store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
-    fake_store.seed(
-        ["allowed_slack_bots"],
-        "T123:B123",
-        {
-            "team_id": "T123",
-            "bot_id": "B123",
-            "user_id": "U123",
-            "app_id": "A123",
-            "name": "Release bot",
-            "created_by": "alice",
-            "owner_email": "alice@example.com",
-            "created_at": "2026-09-09T00:00:00Z",
-        },
-    )
-
-
 def _bot_payload(*, event_type: str = "message", with_user: bool = True) -> dict[str, Any]:
     payload = _mention_payload()
     payload.update({"team_id": "T123", "api_app_id": "AOWN"})

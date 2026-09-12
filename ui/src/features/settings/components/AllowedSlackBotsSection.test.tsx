@@ -1,13 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AllowedSlackBotsSection } from "./AllowedSlackBotsSection"
@@ -34,14 +28,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderSection(isAdmin = true) {
+function renderSection() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <AllowedSlackBotsSection isAdmin={isAdmin} />
+      <AllowedSlackBotsSection />
     </QueryClientProvider>
   )
 }
@@ -87,6 +81,16 @@ describe("Allowed Slack bots", () => {
     expect(requests.find(({ init }) => init.method === "POST")?.init.body).toBe(
       JSON.stringify({ bot_id: "U123" })
     )
+    fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
+    expect(
+      await screen.findByRole("button", {
+        name: "Release bot is already allowed",
+      })
+    ).toHaveProperty("disabled", true)
+    expect(
+      screen.getByRole("button", { name: "Allow Build bot" })
+    ).toHaveProperty("disabled", false)
+    fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
     fireEvent.click(screen.getByRole("button", { name: "Remove Release bot" }))
     await screen.findByText("No Slack bots are allowed.")
     expect(
@@ -94,21 +98,27 @@ describe("Allowed Slack bots", () => {
     ).toContain("/slack/allowed-bots/T123/B123")
   })
 
-  it("shows a failed add without claiming the bot is allowed", async () => {
+  it("supports manual entry when browsing fails and reports rejected additions", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_url: string, init: RequestInit) =>
-        init.method === "POST"
+      vi.fn(async (url: string, init: RequestInit) =>
+        url.endsWith("/slack/bots")
           ? new Response(
-              JSON.stringify({ detail: "That Slack member is not a bot." }),
-              { status: 400 }
+              JSON.stringify({ detail: "Slack is temporarily unavailable." }),
+              { status: 502 }
             )
-          : new Response("[]")
+          : init.method === "POST"
+            ? new Response(
+                JSON.stringify({ detail: "That Slack member is not a bot." }),
+                { status: 400 }
+              )
+            : new Response("[]")
       )
     )
     renderSection()
     await screen.findByText("No Slack bots are allowed.")
     fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
+    await screen.findByText("Slack is temporarily unavailable.")
     fireEvent.click(
       screen.getByRole("button", { name: "Enter bot ID manually" })
     )
@@ -121,72 +131,5 @@ describe("Allowed Slack bots", () => {
       "That Slack member is not a bot."
     )
     expect(screen.getByText("No Slack bots are allowed.")).toBeTruthy()
-  })
-
-  it("searches names and disables bots that are already allowed", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async (url: string) =>
-          new Response(
-            JSON.stringify(url.endsWith("/slack/bots") ? DIRECTORY : [BOT])
-          )
-      )
-    )
-    renderSection()
-    await screen.findByText("Release bot")
-    fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
-    const search = await screen.findByRole("textbox", {
-      name: "Search Slack bots",
-    })
-    fireEvent.change(search, { target: { value: "Release" } })
-    expect(
-      await screen.findByRole("button", {
-        name: "Release bot is already allowed",
-      })
-    ).toHaveProperty("disabled", true)
-    expect(screen.queryByRole("button", { name: "Allow Build bot" })).toBeNull()
-    fireEvent.change(search, { target: { value: "Build" } })
-    expect(
-      await screen.findByRole("button", { name: "Allow Build bot" })
-    ).toHaveProperty("disabled", false)
-  })
-
-  it("keeps manual entry available when Slack browsing fails", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) =>
-        url.endsWith("/slack/bots")
-          ? new Response(
-              JSON.stringify({ detail: "Slack is temporarily unavailable." }),
-              { status: 502 }
-            )
-          : new Response("[]")
-      )
-    )
-    renderSection()
-    await screen.findByText("No Slack bots are allowed.")
-    fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
-    expect(
-      await screen.findByText("Slack is temporarily unavailable.")
-    ).toBeTruthy()
-    fireEvent.click(
-      screen.getByRole("button", { name: "Enter bot ID manually" })
-    )
-    fireEvent.change(screen.getByLabelText("Slack bot ID"), {
-      target: { value: "B123" },
-    })
-    expect(screen.getByRole("button", { name: "Allow bot" })).toHaveProperty(
-      "disabled",
-      false
-    )
-  })
-
-  it("does not show controls or load the allowlist for non-admins", async () => {
-    const fetch = vi.fn()
-    vi.stubGlobal("fetch", fetch)
-    const view = renderSection(false)
-    await waitFor(() => expect(view.container.innerHTML).toBe(""))
-    expect(fetch).not.toHaveBeenCalled()
   })
 })

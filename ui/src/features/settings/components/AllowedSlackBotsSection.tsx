@@ -16,7 +16,7 @@ import type { AllowedSlackBot } from "@/lib/api"
 
 const QUERY_KEY = ["allowedSlackBots"]
 
-export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
+export function AllowedSlackBotsSection() {
   const [open, setOpen] = useState(false)
   const [manual, setManual] = useState(false)
   const [botId, setBotId] = useState("")
@@ -25,12 +25,11 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
   const bots = useQuery({
     queryKey: QUERY_KEY,
     queryFn: api.listAllowedSlackBots,
-    enabled: isAdmin,
   })
   const directory = useQuery({
     queryKey: ["slackBotDirectory"],
     queryFn: api.listSlackBots,
-    enabled: isAdmin && open && !manual,
+    enabled: open && !manual,
     staleTime: 5 * 60 * 1000,
     retry: false,
   })
@@ -48,8 +47,6 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
       api.removeAllowedSlackBot(bot.team_id, bot.bot_id),
     onSuccess: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
   })
-
-  if (!isAdmin) return null
 
   const pending = add.isPending || remove.isPending
   const unavailable = pending || bots.isPending || bots.isError

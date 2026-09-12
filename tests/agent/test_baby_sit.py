@@ -12,22 +12,7 @@ from agent import store as agent_store
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
 
-
-@pytest.fixture(autouse=True)
-def thread_metadata(monkeypatch):
-    from types import SimpleNamespace
-
-    import langgraph_sdk
-
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(
-                get=AsyncMock(return_value={"metadata": {"visibility": "public"}})
-            )
-        ),
-    )
+pytestmark = pytest.mark.usefixtures("public_thread_metadata")
 
 
 class _Store:
