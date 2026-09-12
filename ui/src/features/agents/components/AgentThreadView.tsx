@@ -267,7 +267,7 @@ export function AgentThreadView({
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
-        {thread.status === "error" && (
+        {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
               <CircleAlertIcon />
