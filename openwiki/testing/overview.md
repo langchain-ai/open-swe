@@ -1,11 +1,8 @@
 ---
 type: testing strategy
-title: Focused Validation Strategy
-description: Select the narrowest Python, frontend, or Playwright validation that owns an Open SWE change. This guide explains shared fakes, production-boundary coverage, and focused commands.
+title: Testing Strategy and Focused Validation
+description: Select the narrowest deterministic Python, pnpm workspace, or Playwright validation that owns an Open SWE behavior change. This guide explains shared fixtures and fakes, integration boundaries, end-to-end harnesses, and focused entrypoints.
 tags: [testing, pytest, vitest, playwright, sandbox, webhooks, reviewer]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
 sources:
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
     resource: repo://AGENTS.md
@@ -53,10 +50,13 @@ sources:
     resource: repo://turbo.json
   - id: openwiki-source-436f4179fe22abf615d2f7d0
     resource: repo://ui/package.json
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-09-12T08:12:50.175Z
+generated: { by: "openwiki/0.4.2", at: "2026-09-12T08:12:50.175Z" }
 ---
 
-# Focused Validation Strategy
+# Testing Strategy and Focused Validation
 
 Validate at the lowest layer that owns the changed observable contract. Use focused pytest tests for agent assembly, reviewer, sandbox, webhook, API, and tool behavior; use dashboard Vitest tests for React rendering and client state; use desktop Node tests for Electron main-process code. Escalate to Playwright only when the contract crosses the real webhook, authenticated dashboard, local git/sandbox, or Electron boundary. Never run the full local suite: target the owning file or one test first.
 
@@ -79,13 +79,14 @@ This routing keeps feedback narrow while still requiring an end-to-end proof whe
 
 Pytest collects `tests/` and uses asyncio auto mode, so asynchronous tests and fixtures need no per-test asyncio marker. Tests are grouped by system owner, including `tests/agent/`, `tests/reviewer/`, `tests/sandbox/`, `tests/webhooks/`, `tests/dashboard/`, `tests/github/`, `tests/slack/`, `tests/middleware/`, and `tests/tools/`.
 
-Do not add tests that merely restate static prompt text. For agent instructions, test rendered output, configuration precedence, tool composition, or a behavioral result instead. For example, the assembly tests capture the `create_deep_agent` arguments: they protect an initialized sandbox-backed composite backend required for deepagents context eviction and summarization, source-dependent skill routing, and the separation between parent and subagent tools. This is the appropriate focused location for server graph wiring, middleware, skill, backend, or authorization changes.
+Source and tests are authoritative for the contract, but a test should protect an observable behavior rather than become a change detector. Do not add assertions that merely restate prompt text, source structure, mappings, model identifiers, or incidental internal call order. Prefer rendered output, configuration precedence, tool composition, authorization, or a behavioral result; refactors that preserve those outcomes should not require mechanical test updates. For example, the assembly tests capture the `create_deep_agent` arguments to protect an initialized sandbox-backed composite backend required for deepagents context eviction and summarization, source-dependent skill routing, and parent-versus-subagent tool boundaries. This is the focused location for a server graph wiring, middleware, skill, backend, or authorization change.
 
 ### Shared isolation and fakes
 
 `tests/conftest.py` intentionally makes ordinary unit tests independent of a running LangGraph Store and of a locally built dashboard:
 
 - `fake_store` redirects `agent.store` to an in-memory store, while retaining the production serialization round trip. Seed it only when persisted state is part of the contract.
+- An autouse fixture sets `ALLOWED_GITHUB_USERS` to known test identities, so authentication tests start from an explicit allowlist rather than a developer's environment.
 - An autouse dashboard fixture points `DASHBOARD_STATIC_DIR` at a missing temporary directory, so a local `ui/.output` cannot change a Python test's behavior.
 - The autouse TTL-cache reset runs before and after every case, preventing cached team settings from leaking.
 - The autouse auto-review stub enables every repository because no live Store means the dashboard opt-in list is empty. A test of the opt-in gate must replace this stub with its intended policy.
@@ -113,7 +114,7 @@ make lint
 make typecheck
 ```
 
-`make test` and `make tests` execute `uv run pytest -vvv $(TEST_FILE)` when the target path exists, otherwise they print a skip message. Quality gates are separate: `make lint` runs Ruff checking and a format diff, `make format` applies Ruff formatting and fixes, and `make typecheck` runs `ty check agent tests`.
+`make test` and `make tests` execute `uv run pytest -vvv $(TEST_FILE)` when the target path exists, otherwise they print a skip message. Although `make integration_tests` is available for the dedicated `tests/integration_tests/` path, it has the same existence guard; that directory is absent in this checkout, so the target currently reports a skip rather than running coverage. Quality gates are separate: `make lint` runs Ruff checking and a format diff, `make format` applies Ruff formatting and fixes, and `make typecheck` runs `ty check agent tests`.
 
 For frontend changes, target the relevant workspace rather than root `pnpm test`, which delegates all workspace test tasks to Turbo:
 

@@ -1,8 +1,11 @@
 ---
 type: workflow
-title: Scheduling, Background Work, and CI Monitoring
-description: How the model-free scheduler routes cron and delayed work into recurring automations, reconciliation, cost refreshes, background-task monitoring, and opt-in pull-request CI recovery.
+title: Scheduled Work, Background Tasks, and CI Monitoring
+description: Model-free scheduler routing for recurring work, delayed maintenance jobs, thread wakeups, sandbox task monitoring, and durable pull-request CI watches.
 tags: [scheduler, cron, baby-sit, ci-monitoring, background-tasks, thread-wakeup, reconciliation, cost-refresh]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-09-12T08:12:50.175Z
 sources:
   - id: openwiki-source-d2bd9c9ce8ccfbe9c55e6d30
     resource: repo://agent/agent_cost.py
@@ -10,16 +13,10 @@ sources:
     resource: repo://agent/baby_sit.py
   - id: openwiki-source-26c2c4725a171eaf524f2ad7
     resource: repo://agent/background_tasks.py
-  - id: openwiki-source-838cdb388dc01d838e2807cc
-    resource: repo://agent/bundled_skills/baby-sit/SKILL.md
-  - id: openwiki-source-068d65a84c760eb8d555055e
-    resource: repo://agent/completion.py
   - id: openwiki-source-202e70aa1fb446ab05cc6d99
     resource: repo://agent/dashboard/schedules.py
   - id: openwiki-source-3d1c7beecd605173281a3bf6
     resource: repo://agent/github/routes.py
-  - id: openwiki-source-ba064e884edcde6097165df2
-    resource: repo://agent/github/webhook.py
   - id: openwiki-source-1116ea2d477f08cf0f5b2ef0
     resource: repo://agent/graphs/scheduler.py
   - id: openwiki-source-d2c2e4ba7449d086f84f8ccd
@@ -36,137 +33,124 @@ sources:
     resource: repo://langgraph.json
   - id: openwiki-source-8328043d526fe7293c1c1950
     resource: repo://scripts/purge_wakeup_crons.py
-  - id: openwiki-source-69340fb3707cf818280a8db0
-    resource: repo://tests/agent/test_agent_cost.py
   - id: openwiki-source-b11620c8b3f8d7354abe85a9
     resource: repo://tests/agent/test_baby_sit.py
-  - id: openwiki-source-0a761caaa3a3f58f61089ed8
-    resource: repo://tests/agent/test_session_cost.py
   - id: openwiki-source-a8868f4abfd7eb37a9a9680e
     resource: repo://tests/github/test_baby_sit_webhook.py
   - id: openwiki-source-a565a4a1fb4d3fc05d998ca3
     resource: repo://tests/reviewer/test_reconcile_sweep.py
   - id: openwiki-source-7416596e0d9fc9b802355ff6
     resource: repo://tests/tools/test_schedule_thread_wakeup.py
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-09-12T08:12:50.175Z" }
 ---
 
-# Scheduling, Background Work, and CI Monitoring
+# Scheduled Work, Background Tasks, and CI Monitoring
 
-This workflow is the system's model-free automation layer. The `scheduler` assistant receives cron ticks and delayed runs, then routes each tick to one bounded handler. It does not decide what work to perform with an LLM; handlers either maintain durable state, dispatch a deliberately new agent run, or finish their own lifecycle.
+The `scheduler` assistant is the model-free automation router. A cron or delayed run selects one bounded handler; handlers maintain durable state, start a deliberate agent run, or terminate their own work. The scheduler itself does not use an LLM. For thread and run ownership, see [Threads and state](../concepts/threads-and-state.md); for follow-up behavior, see [Follow-up messages](follow-up-messages.md).
 
-The principal consumers are dashboard schedules, stale-run reconciliation, deferred cost enrichment, sandbox background-task monitoring, and the opt-in `/baby-sit` pull-request watch. For run and thread ownership, see [Threads and state](../concepts/threads-and-state.md); for user-facing follow-ups, see [Follow-up messages](follow-up-messages.md); and for PR work itself, see [PR creation](pr-creation.md).
+## Scheduler dispatch and persisted schedules
 
-## Scheduler dispatch
-
-`agent/scheduler.py` compiles a one-node `StateGraph` (`START → launch → END`), exposed as `scheduler` through `langgraph.json`. `_launch` reads `task` from the state first and then `config.configurable`, invoking exactly one handler:
+`agent/scheduler.py` compiles a one-node `StateGraph` (`START → launch → END`) registered as `scheduler`. `_launch` takes `task` from state before `config.configurable`; recognized tasks route to a maintenance handler, while an absent or unrecognized task is a dashboard schedule tick.
 
 ```mermaid
 flowchart TD
   Tick["Cron or delayed run"] --> Launch["scheduler launch"]
-  Launch -->|reconcile| Reconcile["reconcile_stale_runs"]
-  Launch -->|baby_sit| Watch["evaluate_watch"]
-  Launch -->|background_tasks| Background["monitor_background_tasks"]
-  Launch -->|session_cost| SessionCost["run_session_cost_refresh"]
-  Launch -->|agent_cost| AgentCost["run_agent_cost_refresh"]
-  Launch -->|no task| Schedule["launch_scheduled_agent_run"]
+  Launch -->|reconcile| Reconcile["reconcile stale runs"]
+  Launch -->|baby sit| Watch["evaluate watch"]
+  Launch -->|background tasks| Background["monitor tasks"]
+  Launch -->|environment refresh| Environment["refresh environment"]
+  Launch -->|session cost| SessionCost["refresh Slack cost"]
+  Launch -->|thread feedback| Feedback["deliver feedback prompt"]
+  Launch -->|agent cost| AgentCost["refresh usage cost"]
+  Launch -->|other task| Schedule["launch scheduled agent run"]
 ```
 
-Diagram: one scheduler tick selects one deterministic maintenance or dispatch handler.
+Diagram: a scheduler tick has one deterministic route; only selected handlers can dispatch agent work.
 
-The recognized task values are `reconcile`, `baby_sit`, `background_tasks`, `session_cost`, and `agent_cost`. An unrecognized or absent task is the dashboard-schedule path. The keyed branches return `missing_watch_key`, `missing_thread_id`, or `missing_schedule_id` rather than raising if their required routing key is absent. This makes malformed ticks observable no-ops instead of cron-wide failures.
-
-A producer owns creation, tagging, and removal of its cron or delayed run. In particular, watches use `kind=baby_sit_watch`, background monitors use `kind=background_tasks`, and cost refreshes are one-shot delayed scheduler runs with `on_completion="delete"`. This ownership is important: the scheduler is a router, not a generic cron garbage collector.
+`baby_sit`, `background_tasks`, and schedule dispatch validate their `watch_key`, `thread_id`, and `schedule_id` respectively, returning a `missing_*` status rather than crashing a cron. Producers own their cron/delayed-run creation and cleanup; the router is not a general cron garbage collector.
 
 ### Dashboard recurring runs
 
-`agent/dashboard/schedules.py` owns user-defined recurring agent automations. It normalizes and validates a five-field cron expression before storage, accepting numeric values, `*`, ranges, steps, and lists within field-specific bounds. A dashboard tick has no recognized task, so it falls through to `launch_scheduled_agent_run(schedule_id)`.
+Dashboard schedules are persisted in `agent_schedules`, while operational results live independently in `agent_schedule_run_state`. Creation validates a normalized five-field cron expression with numeric values, `*`, ranges, steps, and lists within field bounds, then creates a `kind=agent_schedule` cron targeting `scheduler`. A tick loads the record and starts a fresh `agent` thread and durable run; successful dispatch records `last_thread_id`, `last_run_id`, and `last_triggered_at`, while authorization or setup failures record error state. Disabled schedules do not launch.
 
-The launch path loads the schedule record, creates a fresh `agent` thread/run with system/automation input context, and stores scheduling results separately from the definition. Its run-state namespace retains `last_thread_id`, `last_run_id`, and `last_triggered_at`, or error information. Keeping run state separate allows schedule configuration and operational status to evolve independently.
+### Recovery, environment refresh, and delayed feedback
 
-### Stale-run reconciliation
+`reconcile_stale_runs()` is the durable-dispatch safety net when a completion webhook is lost: it paginates busy threads, lists pending runs, and interrupts runs older than 1,800 seconds by default. It ignores malformed timestamps, isolates a thread failure, and returns checked/stale/cancelled counts.
 
-Normal durable dispatch relies on the completion webhook to release a run. `reconcile_stale_runs()` is the recovery sweep when a completion is lost: it paginates `busy` threads, lists each thread's `pending` runs, and interrupts runs older than `max_age_seconds` (1,800 seconds by default). It skips malformed timestamps, isolates errors per thread, and returns counts for checked threads, stale runs, and cancellations. Thus a damaged or unavailable thread does not prevent other blocked threads from recovering.
+`environment_refresh` is another scheduler task. Environment records can own a staggered daily scheduler cron; the task delegates a `full` or `update` refresh to the environment refresh service. Full refreshes rebuild from the base snapshot, whereas updates build from the current snapshot; failed refreshes retain the last working snapshot.
 
-### Deferred cost enrichment
+Successful non-wakeup completions can enqueue a `thread_feedback` delayed scheduler run. The feedback service waits for five quiet minutes, rechecks that the answer and activity are still current, defers again if the thread is active, and marks the stored feedback record ready before posting a Slack prompt when a channel/run correlation exists.
 
-Costs can lag run completion in LangSmith, so both cost mechanisms use a bounded, stateless delayed-run chain rather than a permanent poller:
+## Deferred cost enrichment
 
-- **Session cost** updates the mapped Slack response footer. On a successful agent completion, the completion handler schedules a `session_cost` attempt only when it has a Slack thread, message correlation, and a `prepare_run_id`; it records scheduled run IDs in thread metadata to avoid scheduling the same run twice. A refresh verifies the mapped Slack message and waits for a fresh LangSmith aggregate. A `pending` result schedules the next delay in `(15, 30, 60, 120, 240)` seconds; an update, unavailable prerequisite, or exhausted final attempt stops the chain.
-- **Agent usage cost** writes one run's cost to the dashboard usage record. `agent_cost` uses the same five-delay budget, asks LangSmith for `run_only=True` cost, and persists it with `record_agent_run_cost`. Configuration/unavailability ends without retries where appropriate; unavailable data or persistence/lookup failure otherwise advances only until the fixed retry budget is exhausted.
+Cost data may lag completion, so cost work is a bounded chain of stateless delayed runs (`on_completion="delete"`), not a permanent poller. Both mechanisms use delays of 15, 30, 60, 120, and 240 seconds.
+
+- **Session cost:** successful completion schedules `session_cost` only after Slack thread/message correlation and an invocation ID are available, and records scheduled run IDs in thread metadata to prevent duplicate scheduling. Each attempt verifies the mapping and message, retrieves a cumulative LangSmith thread cost, and updates the Slack footer. Only a transient `pending` outcome schedules the next attempt; an update, unavailable prerequisite, invalid payload, or exhaustion terminates the chain.
+- **Agent usage cost:** `agent_cost` requests a `run_only=True` LangSmith cost for the invocation and persists it to the dashboard usage record. A LangSmith-unavailable result terminates; absent data, unexpected retrieval failure, or persistence failure retries only within the same five-attempt budget.
 
 ## Background-task monitoring
 
-Long-running sandbox commands are monitored without an LLM. `ensure_background_task_cron(thread_id)` idempotently keeps one every-minute `background_tasks` cron for a thread (and removes duplicate cron rows). The scheduler calls `monitor_background_tasks(thread_id)`, which loads the thread's sandbox and lists task state.
+Long-running sandbox commands are monitored without an LLM. `ensure_background_task_cron(thread_id)` idempotently creates one UTC every-minute `kind=background_tasks` scheduler cron for that thread and removes duplicates. `monitor_background_tasks` loads the thread sandbox and examines task state.
 
-For each unreported terminal task (`completed`, `failed`, `timed_out`, `stopped`, or `lost`), the monitor atomically claims a per-task sandbox directory before dispatching a completion message back to the originating thread with `multitask_strategy="enqueue"`. The message treats command output as untrusted and directs the agent to retrieve bounded output only if needed. It marks delivery only after dispatch succeeds; on failure it releases the claim for a later tick. If no task is running and no terminal notification remains pending, a sandbox monitor lock triggers a fresh recheck before all of that thread's monitor crons are deleted. Missing sandbox metadata also removes them. These checks prevent duplicate notifications and avoid deleting a monitor while a concurrent task transition is being discovered.
+For every unreported terminal task (`completed`, `failed`, `timed_out`, `stopped`, or `lost`), it atomically claims a task-local notification directory, then enqueues a system completion message to the originating agent thread. Output is presented as untrusted data; delivery is marked complete only after dispatch succeeds, and a failed dispatch releases the claim for a later tick. When nothing is running or awaiting notification, a sandbox monitor lock causes a fresh recheck before all monitor crons are removed; absent sandbox metadata also removes them. This prevents duplicate notices and races with task transitions.
 
-## Thread wakeups
+## Thread wakeups and cleanup
 
-`schedule_thread_wakeup` is distinct from scheduler tasks: it creates a thread-bound, one-shot cron directly against the `agent` assistant. It accepts delays from one minute through 24 hours, rounds the fire time to a minute, and supplies an `end_time` about 90 seconds later so the cron cannot recur. The wakeup carries selected source/repository/context configuration and uses a default automated polling prompt when none is supplied. When configured, it also includes the normal completion webhook and trace correlation.
+`schedule_thread_wakeup` directly creates a thread-bound one-shot cron for the `agent` assistant, unlike scheduler tasks. It permits delays from one minute through 24 hours, rounds upward to a minute, adds an `end_time` about 90 seconds after firing, passes selected source/context configuration, and uses a default automated polling prompt when none is supplied. It includes trace correlation and the completion webhook when configured.
 
-Wakeups are intentionally rate limited. The tool hashes the latest human input-message identity and persists a count in thread metadata; no more than 10 wakeups can be created in that human-message generation. A new human message resets the count, while system messages—including wakeups—do not. The budget is recorded before cron creation, so a creation failure still consumes a slot rather than allowing retry storms.
+Wakeups are limited to ten between human messages. The tool derives a generation from the latest human input message and persists its count in thread metadata; a new human message resets the count, while system messages—including wakeups—do not. It records the slot before cron creation, so a creation failure still consumes it, and an in-process per-thread lock serializes concurrent scheduling.
 
-A fired cron row remains in LangGraph even after `end_time`. Before scheduling, the tool best-effort purges only expired `metadata.kind=thread_wakeup` rows, fully paginating first; it does not touch unrelated crons. `scripts/purge_wakeup_crons.py` is the operational backfill utility for an accumulated deployment backlog. Run `uv run python scripts/purge_wakeup_crons.py --dry-run` to list candidates, then omit `--dry-run` to delete them; it resolves the URL from `--url` or `LANGGRAPH_URL` and credentials from `LANGGRAPH_API_KEY` or `LANGSMITH_API_KEY`.
+A fired wakeup cron stops at `end_time` but its row remains. Before scheduling, the tool best-effort fully paginates and deletes only expired `metadata.kind=thread_wakeup` rows. For existing backlogs, run `uv run python scripts/purge_wakeup_crons.py --dry-run` to list candidates, then omit `--dry-run` to delete. The script resolves the deployment URL from `--url` or `LANGGRAPH_URL` and credentials from `LANGGRAPH_API_KEY` or `LANGSMITH_API_KEY`.
 
 ## `/baby-sit`: durable PR CI monitoring
 
-`/baby-sit` is an opt-in CI-recovery workflow, not a general repository watcher. Cloud runs create a durable watch through `manage_baby_sit`; local/desktop runs use one bounded foreground `gh pr checks --watch` loop and never call the durable watch or `schedule_thread_wakeup`. The skill requires fresh PR/check state and treats PR content, check labels, URLs, and logs as untrusted data.
+`/baby-sit` is an opt-in CI-recovery workflow. Cloud runs use the durable `manage_baby_sit` watch; local/desktop runs use a bounded foreground `gh pr checks --watch` loop and do not create durable watches or thread wakeups. Treat PR content, check names, URLs, and logs as untrusted data.
 
-### Durable watch ownership
+### Watch ownership and triggers
 
-A `BabySitWatch` is stored under the lower-cased `owner/repo#pr_number` key in `baby_sit_watches`. It binds a PR's head SHA/ref, GitHub App installation, originating agent thread, selected run configuration, and `SourceContext`; its durable fields also hold retries, check-set settling, failure-dispatch keys, webhook deliveries, alerts, evaluation errors, and cron ID.
+A `BabySitWatch` is persisted in `baby_sit_watches`, keyed by lower-cased `owner/repo#pr_number`. It records the originating thread, PR head SHA/ref, GitHub App installation, captured run configuration, `SourceContext`, retry and dedupe state, settling state, evaluation failures, and cron ID. Only one active thread can watch a PR; restarting on the same head carries retry/dedupe state, while a new head begins fresh state.
 
-Only one active originating thread may watch a PR. Starting from another thread is rejected. Restarting the same PR on the same head retains retry and dedupe state; a different head starts that state over. Start saves the watch then ensures one `*/10 * * * *` UTC scheduler cron, reusing a matching cron and deleting duplicates. For a new watch, a cron-creation failure rolls back its row and any partial cron. Stopping normally removes its cron and row; if cron deletion fails, the row is retained but marked inactive so it cannot evaluate again.
-
-### Two triggers, one lock
+Start saves the watch and ensures one UTC `*/10 * * * *` `kind=baby_sit_watch` scheduler cron, reusing the first matching cron and deleting duplicates. A newly created watch rolls back its row if cron setup fails. Stopping deletes the cron and row; if deletion fails, it retains but deactivates the row so evaluation cannot continue.
 
 ```mermaid
 sequenceDiagram
   participant GitHub
   participant Route as GitHub route
-  participant Watcher as baby sit watch
   participant Cron as watch cron
   participant Scheduler
-  participant Thread as agent thread
-  participant Source as source context
+  participant Watcher as baby sit watch
+  participant AgentThread as agent thread
+  participant Source as source destination
 
   GitHub->>Route: signed failing CI event
-  Route->>Watcher: enqueue CI evaluation
-  Cron->>Scheduler: ten minute baby sit tick
+  Route->>Watcher: background CI evaluation
+  Cron->>Scheduler: ten minute tick
   Scheduler->>Watcher: evaluate watch
   Watcher->>Watcher: acquire per watch lock
-  Watcher-->>Watcher: unchanged state has no model run
-  Watcher->>Thread: new failure continues baby sit
+  Watcher-->>Watcher: unchanged state has no agent run
+  Watcher->>AgentThread: new failure continuation
   Watcher->>Source: terminal outcome
 ```
 
-Diagram: immediate signed CI events and the polling fallback converge on one serialized watch evaluation.
+Diagram: signed CI events and the polling fallback converge on a serialized durable watch.
 
-The GitHub route verifies `X-Hub-Signature-256` before accepting a request. CI events (`check_run`, `check_suite`, `workflow_run`, and `status`) are processed in the background. `handle_ci_webhook` ignores non-failing payloads, selects active watches in the repository whose stored SHA or branch matches, updates a supplied installation ID, and records a delivery ID before evaluating; repeated deliveries do not cause a second evaluation.
+The GitHub route verifies `X-Hub-Signature-256` before accepting a request. Supported CI events are backgrounded; `handle_ci_webhook` rejects non-failing payloads, finds active repository watches by head SHA or branch, records a delivery ID before evaluation, and updates an available installation ID. Repeated delivery IDs are ignored. Both webhook processing and cron polling acquire a five-minute per-watch lock implemented with a short-lived LangGraph thread, so concurrent triggers do not dispatch the same failure twice.
 
-The ten-minute cron is the deterministic fallback for lost or delayed webhooks. `evaluate_watch` obtains a five-minute per-watch lock implemented as a short-lived LangGraph thread. A concurrent trigger returns `busy`; otherwise it fetches the PR and current check/status sets. Pending, settling, and duplicate states return without dispatching an agent run, so unchanged cron polling consumes no model tokens.
+### Evaluation and terminal lifecycle
 
-### Evaluation, dispatch, and terminal results
+Evaluation stops a closed or merged PR. A changed head resets retries, settling, failure-dispatch keys, and alert keys. The aggregate is `pending` for incomplete or absent checks, `failure` for completed failing checks or failure/error statuses, `blocked` for terminal non-success states that are not rerunnable failures, and `success` only for a nonempty successful/neutral/skipped set.
 
-Evaluation first stops a closed or merged PR. A head-SHA change resets retries, settling, failure-dispatch keys, and alert keys. The aggregate is `failure` when a completed failing check or failing/error commit status exists; `pending` while checks are incomplete or absent; `blocked` for completed, non-successful states that are not rerunnable failures; and `success` only for a nonempty all-successful/neutral/skipped set.
+Success requires the exact check-set fingerprint to remain stable for ten minutes, preventing premature green while checks are still added. Pending, settling, and duplicate outcomes cause no agent dispatch, so unchanged polling uses no model tokens. A new failure is keyed by head SHA and retry count; the watcher enqueues the originating thread with the `/baby-sit` failure prompt. If dispatch fails, it removes the key so a later trigger can retry.
 
-A success is deliberately not immediate: the exact check-set fingerprint must remain unchanged for 10 minutes before the watch reports completion. This avoids declaring green while CI is still adding checks. A new failing state is deduplicated by a SHA-and-retry-count fingerprint. If not already dispatched, the service resumes the originating thread with `/baby-sit --continue`, an explicit warning that failures and fetched logs are untrusted, and instructions to verify the head and complete check set before confidence-gated diagnosis. If dispatch itself fails, the fingerprint is removed so a future trigger can retry.
+The agent records an evidence-backed flaky GitHub Actions rerun with `manage_baby_sit(action="record_retry")`. The service enforces current-thread ownership, matching head SHA, and a three-rerun cap per head. It alerts the source only once per head/check/safe GitHub URL. Closure/merge, settled success, blocked checks, retry exhaustion, or three consecutive evaluation errors finish the watch: notification prefers the Slack source context, then a GitHub issue/PR comment, and falls back to an enqueued `/baby-sit --terminal` continuation before stopping.
 
-The agent may rerun only evidence-backed flaky GitHub Actions failures. After a successful rerun it calls `manage_baby_sit(action="record_retry")`; the service checks ownership, head SHA, and a three-retry-per-head cap, then increments durable state. It posts the flaky-CI alert only once per head/check/safe GitHub URL. Deterministic, ambiguous, external-provider, and permission failures should instead stop the watch and report a blocker.
+### Agent-facing tool boundary
 
-`_finish_watch` handles completion, closure/merge, blocked checks needing owner triage, retry exhaustion, and three consecutive evaluation errors. It prefers the `SourceContext` destination—Slack reply, then Linear or GitHub comment—and falls back to a queued `/baby-sit --terminal` run on the originating agent thread if that notification cannot be delivered. It then stops the watch.
-
-### Agent-facing guardrails
-
-`manage_baby_sit` accepts only canonical GitHub PR URLs and requires an executable thread. It rejects a PR outside the thread's configured repository. Starting verifies GitHub authentication, an open PR with head SHA/ref, and a GitHub App installation; stopping and retry recording enforce that the watch belongs to the current thread. `record_retry` additionally requires a head SHA, check name, and concise evidence.
+`manage_baby_sit` accepts canonical GitHub PR URLs and requires an executable thread. Start verifies GitHub authentication, an open PR with head SHA/ref, and a GitHub App installation. Stop and retry recording reject watches owned by another thread; retry recording also requires head SHA, check name, and evidence. The tool captures only selected run configuration and source context for later continuation/notification.
 
 ## Focused verification
 
-- `tests/agent/test_baby_sit.py` covers watch cron lifecycle, per-key concurrency, failure and webhook deduplication, SHA reset, settling before success, fallback notification, retry cap, and scheduler routing.
-- `tests/github/test_baby_sit_webhook.py` checks that supported CI events reach background processing only with a valid signature. `tests/tools/test_manage_baby_sit.py` exercises configured-repository enforcement and watch startup context.
-- `tests/reviewer/test_reconcile_sweep.py` covers stale-only cancellation, pagination, malformed timestamps, and per-thread failure isolation.
-- `tests/agent/test_session_cost.py` and `tests/agent/test_agent_cost.py` verify cost correlation, persistence, bounded retries, and final exhaustion. `tests/tools/test_schedule_thread_wakeup.py` verifies delay bounds, trace/webhook wiring, budget reset semantics, and cleanup behavior.
+- `tests/agent/test_baby_sit.py` covers watch cron lifecycle, locking, deduplication, SHA reset, settling, terminal notifications, retry limits, and scheduler routing.
+- `tests/github/test_baby_sit_webhook.py` checks signed CI routing; `tests/tools/test_manage_baby_sit.py` covers tool startup and ownership boundaries.
+- `tests/reviewer/test_reconcile_sweep.py` covers pagination, stale-only interruption, malformed timestamps, and per-thread failure isolation.
+- `tests/agent/test_session_cost.py` and `tests/agent/test_agent_cost.py` exercise correlation, persistence, retries, and exhaustion. `tests/tools/test_schedule_thread_wakeup.py` checks bounds, correlation/webhook wiring, rate-limit reset semantics, concurrency, and cleanup.
