@@ -5,6 +5,7 @@ import re
 from collections.abc import Mapping
 from typing import Annotated, Any
 
+from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from agent.dashboard.plan_store import (
@@ -22,37 +23,47 @@ logger = logging.getLogger(__name__)
 _MAX_PLAN_LINES = 20_000
 
 
-async def save_plan(
+async def _save_plan(
     plan_file_path: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Implement the `save_plan` tool."""
     if not isinstance(plan_file_path, str):
-        return {"success": False, "error": "plan_file_path must be a string"}
+        return {"success": False, "error": "plan_file_path must be a string"}, None
     path = plan_file_path.strip()
     if not path:
-        return {"success": False, "error": "plan_file_path cannot be empty"}
+        return {"success": False, "error": "plan_file_path cannot be empty"}, None
     if not _is_html_path(path):
-        return {
-            "success": False,
-            "error": f"plan_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}",
-        }
+        return (
+            {
+                "success": False,
+                "error": f"plan_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}",
+            },
+            None,
+        )
 
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
-        return {"success": False, "error": "no thread_id in run config"}
+        return {"success": False, "error": "no thread_id in run config"}, None
 
     try:
         content = (await _read_plan_file(str(thread_id), path)).strip()
         if not content:
-            return {"success": False, "error": "plan file cannot be empty"}
-        document = wrap_html_artifact(content, title=_title_from_path(path))
+            return {"success": False, "error": "plan file cannot be empty"}, None
+        title = _title_from_path(path)
+        document = wrap_html_artifact(content, title=title)
         await _save(str(thread_id), document, path, plan_mode=_active_plan_mode(state, cfg))
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
-        return {"success": False, "error": f"failed to save plan: {exc}"}
-    return {"success": True, "path": path}
+        return {"success": False, "error": f"failed to save plan: {exc}"}, None
+    return (
+        {"success": True, "path": path},
+        {"type": "plan", "html": document, "title": title, "path": path},
+    )
+
+
+save_plan = tool("save_plan", response_format="content_and_artifact")(_save_plan)
 
 
 async def _save(thread_id: str, content: str, path: str, *, plan_mode: bool) -> None:

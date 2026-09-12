@@ -95,6 +95,13 @@ export type OutputIframeDisplay =
       filename: string
     }
 
+export type PlanDisplay = {
+  type: "plan"
+  html: string
+  title: string
+  path: string
+}
+
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
@@ -105,7 +112,7 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
-  display?: OutputIframeDisplay
+  display?: OutputIframeDisplay | PlanDisplay
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData

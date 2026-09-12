@@ -6,15 +6,25 @@ import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFram
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { getPlan } from "@/lib/plan"
 
-export function InlinePlanArtifact({ threadId }: { threadId: string }) {
+export function InlinePlanArtifact({
+  threadId,
+  html,
+  markdown,
+}: {
+  threadId: string
+  html?: string
+  markdown?: string
+}) {
   const navigate = useNavigate()
+  const shouldFetch = html === undefined && markdown === undefined
   const query = useQuery({
     queryKey: ["plan", threadId],
     queryFn: () => getPlan(threadId),
+    enabled: shouldFetch,
   })
-  const html = query.data?.html.trim() ?? ""
-  const markdown = query.data?.markdown.trim() ?? ""
-  if (!html && !markdown) return null
+  const resolvedHtml = html?.trim() ?? query.data?.html.trim() ?? ""
+  const resolvedMarkdown = markdown?.trim() ?? query.data?.markdown.trim() ?? ""
+  if (!resolvedHtml && !resolvedMarkdown) return null
 
   return (
     <button
@@ -27,17 +37,17 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
           params: { threadId },
         })
       }
-      className="group relative mt-4 block h-[250px] w-full overflow-hidden rounded-xl border border-border bg-background text-left shadow-sm transition-[border-color,box-shadow] outline-none hover:border-foreground/25 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
+      className="group relative my-4 block h-[250px] w-full overflow-hidden rounded-xl border border-border bg-background text-left shadow-sm transition-[border-color,box-shadow] outline-none hover:border-foreground/25 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
     >
-      {html ? (
+      {resolvedHtml ? (
         <PlanArtifactFrame
-          html={html}
+          html={resolvedHtml}
           title="Plan preview"
           className="pointer-events-none h-[250px]"
         />
       ) : (
         <div className="pointer-events-none h-[250px] overflow-hidden p-5">
-          <Markdown content={markdown} />
+          <Markdown content={resolvedMarkdown} />
         </div>
       )}
       <span

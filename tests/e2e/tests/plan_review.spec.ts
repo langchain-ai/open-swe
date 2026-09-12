@@ -306,6 +306,66 @@ test.describe("Plan review", () => {
     await collabCtx.close();
   });
 
+  test("renders each published artifact inline at its thread position", async ({
+    page,
+    request,
+  }) => {
+    await request.post("/control/reset");
+    const send = await request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> E2E_INLINE_ARTIFACTS publish two artifacts",
+        mention_bot: true,
+      },
+    });
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+
+    await expect
+      .poll(
+        async () => {
+          const response = await request.get(`/threads/${threadId}/state`);
+          return JSON.stringify(await response.json());
+        },
+        { timeout: 60_000 },
+      )
+      .toContain("The second artifact is ready.");
+
+    await page.context().request.post("/control/login", { data: OWNER });
+    await page.goto(`/agents/${threadId}`, { waitUntil: "commit" });
+
+    const artifacts = page.getByTestId("inline-plan-artifact");
+    await expect(artifacts).toHaveCount(2);
+    await expect(
+      artifacts
+        .nth(0)
+        .getByTitle("Plan preview")
+        .contentFrame()
+        .getByText("First artifact"),
+    ).toBeVisible();
+    await expect(
+      artifacts
+        .nth(1)
+        .getByTitle("Plan preview")
+        .contentFrame()
+        .getByText("Second artifact"),
+    ).toBeVisible();
+
+    const positions = await Promise.all([
+      artifacts.nth(0).boundingBox(),
+      page
+        .getByText("The first artifact is ready.", { exact: true })
+        .boundingBox(),
+      artifacts.nth(1).boundingBox(),
+      page
+        .getByText("The second artifact is ready.", { exact: true })
+        .boundingBox(),
+    ]);
+    expect(positions.every(Boolean)).toBe(true);
+    const yPositions = positions.map((box) => box!.y);
+    expect(yPositions).toEqual(yPositions.toSorted((a, b) => a - b));
+  });
+
   test("plan decisions return to a connected conversation", async ({
     browser,
     request,
@@ -360,7 +420,7 @@ test.describe("Plan review", () => {
         "I'll wait for your review and approval before implementing.",
       ),
     ).toHaveCount(2, { timeout: 60_000 });
-    await expect(owner.getByTestId("inline-plan-artifact")).toBeVisible({
+    await expect(owner.getByTestId("inline-plan-artifact")).toHaveCount(2, {
       timeout: 60_000,
     });
 

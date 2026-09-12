@@ -20,6 +20,7 @@ import type { RenderItem } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
+import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
@@ -100,6 +101,7 @@ export function AgentTurn({
   isMarkdownLive,
   projectPath,
   activityLabel,
+  threadId,
   ...callbacks
 }: {
   message: Message
@@ -107,6 +109,7 @@ export function AgentTurn({
   isMarkdownLive?: boolean
   projectPath?: string
   activityLabel?: string
+  threadId?: string
 } & ApprovalCallbacks) {
   const renderItems = useMemo(
     () => buildRenderItems(message.chunks, message.id),
@@ -239,8 +242,17 @@ export function AgentTurn({
         return <ReplyCard key={item.key} chunk={item.chunk} />
 
       case "iframe-item":
-        return item.chunk.display ? (
+        return item.chunk.display?.type === "output_iframe" ? (
           <OutputIframe key={item.key} display={item.chunk.display} />
+        ) : null
+
+      case "plan-item":
+        return threadId && item.chunk.display?.type === "plan" ? (
+          <InlinePlanArtifact
+            key={item.key}
+            threadId={threadId}
+            html={item.chunk.display.html}
+          />
         ) : null
 
       case "tool-item":
