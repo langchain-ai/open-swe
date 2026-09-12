@@ -19,15 +19,26 @@ import {
   createLocalGraphClient,
   dashboardFetch,
 } from "@/lib/langgraph-client"
-import { selectStreamFor, useStreamPool } from "./streamPool"
+import {
+  MAX_RECONNECT_ATTEMPTS,
+  reconnectDelayMs,
+  selectConnectionFor,
+  selectStreamFor,
+  useStreamPool,
+} from "./streamPool"
 import type { ReactNode } from "react"
 import type {
   AgentStream,
   AgentThreadTransport,
+  StreamConnection,
   StreamPoolEntry,
 } from "./streamPool"
 
-export type { AgentStream, AgentThreadTransport } from "./streamPool"
+export type {
+  AgentStream,
+  AgentThreadTransport,
+  StreamConnection,
+} from "./streamPool"
 
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
@@ -59,6 +70,11 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+    reconnectDelayMs,
+    onReconnect: ({ attempt, delayMs }) =>
+      pool().streamReconnecting(entry.id, attempt, Date.now() + delayMs),
+    onConnected: () => pool().streamLive(entry.id),
     onThreadId: (threadId) => pool().rekey(entry.id, threadId),
     onCreated: () => {
       setIsOffloading(false)
@@ -94,6 +110,10 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     () => publish(entry.id, { ...stream, isOffloading }),
     [entry.id, publish, stream, isOffloading]
   )
+
+  useEffect(() => {
+    if (!stream.isLoading) pool().streamLive(entry.id)
+  }, [entry.id, pool, stream.isLoading])
 
   return null
 }
@@ -153,5 +173,15 @@ export function AgentStreamProvider({
         </AgentStreamContext.Provider>
       )}
     </>
+  )
+}
+
+/** Liveness of the bound thread's event stream. */
+export function useAgentStreamConnection(
+  transport: AgentThreadTransport,
+  threadId: string | null
+): StreamConnection {
+  return useStreamPool((state) =>
+    selectConnectionFor(state, transport, threadId)
   )
 }

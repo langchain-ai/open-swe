@@ -20,6 +20,20 @@ describe("Messages", () => {
     expect(screen.getByRole("status").textContent).toBe("Working…")
   })
 
+  it("shows reconnect activity in the existing status line", () => {
+    render(
+      <Messages
+        messages={[]}
+        isStreaming
+        reconnectLabel="Reconnecting… 3/12 (retrying in 4s)"
+      />
+    )
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Reconnecting… 3/12 (retrying in 4s)"
+    )
+  })
+
   it("renders a sent Slack reply before the work that follows it", () => {
     render(
       <Messages
