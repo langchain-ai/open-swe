@@ -222,6 +222,17 @@
       },
       "Environment": {
         "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
           "create_params": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -282,12 +293,127 @@
             "title": "Prompt",
             "type": "string"
           },
+          "refresh_cron_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Cron Id"
+          },
+          "refresh_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Error"
+          },
+          "refresh_finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Finished At"
+          },
+          "refresh_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "update"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Kind"
+          },
+          "refresh_log": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Log"
+          },
+          "refresh_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Run Id"
+          },
+          "refresh_sandbox_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Sandbox Id"
+          },
+          "refresh_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Started At"
+          },
+          "refresh_status": {
+            "default": "never",
+            "enum": [
+              "never",
+              "refreshing",
+              "success",
+              "failed"
+            ],
+            "title": "Refresh Status",
+            "type": "string"
+          },
+          "refresh_steps": {
+            "items": {
+              "$ref": "#/components/schemas/RefreshStep"
+            },
+            "title": "Refresh Steps",
+            "type": "array"
+          },
           "repos": {
             "items": {
               "type": "string"
             },
             "title": "Repos",
             "type": "array"
+          },
+          "setup_script": {
+            "default": "",
+            "title": "Setup Script",
+            "type": "string"
           },
           "slug": {
             "title": "Slug",
@@ -326,6 +452,17 @@
             "title": "Snapshot Status",
             "type": "string"
           },
+          "snapshot_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Tag"
+          },
           "source_sandbox_id": {
             "anyOf": [
               {
@@ -347,6 +484,11 @@
               }
             ],
             "title": "Status Message"
+          },
+          "update_script": {
+            "default": "",
+            "title": "Update Script",
+            "type": "string"
           },
           "updated_at": {
             "default": "",
@@ -373,6 +515,17 @@
       },
       "EnvironmentCreate": {
         "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
           "create_params": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -420,6 +573,27 @@
             "title": "Repos",
             "type": "array"
           },
+          "setup_script": {
+            "default": "",
+            "title": "Setup Script",
+            "type": "string"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "update_script": {
+            "default": "",
+            "title": "Update Script",
+            "type": "string"
+          },
           "vcpus": {
             "anyOf": [
               {
@@ -442,6 +616,17 @@
       "EnvironmentUpdate": {
         "description": "Partial update: only the fields present are written.",
         "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
           "create_params": {
             "anyOf": [
               {
@@ -515,6 +700,39 @@
               }
             ],
             "title": "Repos"
+          },
+          "setup_script": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup Script"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "update_script": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Script"
           },
           "vcpus": {
             "anyOf": [
@@ -1094,6 +1312,68 @@
           "state"
         ],
         "title": "PullRequestState",
+        "type": "object"
+      },
+      "RefreshStep": {
+        "description": "One stage of a refresh \u2014 booting the builder, a script, the capture.\n\nRecorded as it happens so a poll mid-rebuild can say how far it got. A\nrebuild is minutes to an hour, and a single terminal status at the end is\nnot enough to tell slow from wedged.",
+        "properties": {
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "log_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Path"
+          },
+          "started_at": {
+            "default": "",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "default": "running",
+            "enum": [
+              "running",
+              "success",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "RefreshStep",
         "type": "object"
       },
       "ReviewCommentCreate": {
@@ -3057,7 +3337,7 @@
     },
     "/dashboard/api/environments/options": {
       "get": {
-        "description": "Pickable environments for any signed-in user: names only, no prompts.",
+        "description": "Pickable environments for any signed-in user; refresh logs only for admins.",
         "operationId": "api_environment_options_dashboard_api_environments_options_get",
         "responses": {
           "200": {
@@ -3224,6 +3504,56 @@
           }
         ],
         "summary": "Api Update Environment",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/environments/{slug}/refresh": {
+      "post": {
+        "description": "Start a snapshot rebuild from the environment's scripts.\n\nStarted in the background rather than awaited: a rebuild takes minutes, and\nthe outcome lands on the record for the dashboard to poll.",
+        "operationId": "api_refresh_environment_dashboard_api_environments__slug__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Refresh Environment Dashboard Api Environments  Slug  Refresh Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Refresh Environment",
         "tags": [
           "dashboard"
         ]
