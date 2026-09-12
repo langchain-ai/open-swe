@@ -5,9 +5,11 @@ down_revision = "0004"
 branch_labels = None
 depends_on = None
 
+SQL = "SET search_path TO open_swe, public;\n\nALTER TABLE pr_projection ALTER COLUMN opening_run_id DROP NOT NULL;\n"
 
-def upgrade(migration_scripts: dict[str, str]) -> None:
-    execute_script(migration_scripts[revision])
+
+def upgrade() -> None:
+    execute_script(SQL)
 
 
 def downgrade() -> None:

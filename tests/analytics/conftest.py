@@ -40,11 +40,10 @@ async def analytics_db(monkeypatch):
     engine = create_async_engine(uri)
     schema = f"analytics_test_{uuid4().hex}"
     monkeypatch.setenv("ANALYTICS_SUMMARY_VERSION", "1")
-    migrations, scripts = database._load_migrations()
-    scripts = {revision: script.replace("open_swe", schema) for revision, script in scripts.items()}
+    migrations = database._load_migrations()
     async with engine.begin() as conn:
         await conn.execute(text(f"CREATE SCHEMA {schema}"))
-        await conn.run_sync(database._upgrade, migrations, scripts, schema)
+        await conn.run_sync(database._upgrade, migrations, schema)
         workspace = await conn.scalar(
             text(f"SELECT workspace_id FROM {schema}.deployment_metadata")
         )
