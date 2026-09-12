@@ -434,6 +434,32 @@ export interface EnvironmentOptionList {
   default_slug: string
 }
 
+export type EnvironmentAuthProxyScheme = "bearer" | "api_key"
+
+export interface EnvironmentAuthProxyRule {
+  id: string
+  host: string
+  header: string
+  scheme: EnvironmentAuthProxyScheme
+  has_credential: boolean
+}
+
+export interface EnvironmentAuthProxyRuleUpdate {
+  id: string
+  host: string
+  header: string
+  scheme: EnvironmentAuthProxyScheme
+  credential?: string
+}
+
+export interface EnvironmentAuthProxyRules {
+  rules: Array<EnvironmentAuthProxyRule>
+}
+
+export interface EnvironmentAuthProxyRulesUpdate {
+  rules: Array<EnvironmentAuthProxyRuleUpdate>
+}
+
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
 export type FindingConfidence = "low" | "medium" | "high"
 export type FindingStatus = "open" | "resolved" | "dismissed"
@@ -786,6 +812,19 @@ export const api = {
     }),
   listEnvironmentOptions: () =>
     request<EnvironmentOptionList>("/environments/options"),
+  getEnvironmentAuthProxy: (slug: string) =>
+    request<EnvironmentAuthProxyRules>(
+      `/environments/${encodeURIComponent(slug)}/auth-proxy`,
+      { cache: "no-store" }
+    ),
+  saveEnvironmentAuthProxy: (
+    slug: string,
+    body: EnvironmentAuthProxyRulesUpdate
+  ) =>
+    request<EnvironmentAuthProxyRules>(
+      `/environments/${encodeURIComponent(slug)}/auth-proxy`,
+      { method: "PUT", body: JSON.stringify(body) }
+    ),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {

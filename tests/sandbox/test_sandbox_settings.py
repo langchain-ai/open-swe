@@ -11,6 +11,8 @@ from agent.dashboard.sandbox_settings import (
     upsert_sandbox_settings,
 )
 
+pytestmark = pytest.mark.usefixtures("fake_store")
+
 
 def _store(item: object) -> MagicMock:
     client = MagicMock()

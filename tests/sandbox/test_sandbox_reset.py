@@ -6,6 +6,8 @@ import pytest
 from agent.sandboxes.lifecycle import reset_sandbox_for_thread
 from agent.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
 
+pytestmark = pytest.mark.usefixtures("fake_store")
+
 
 @pytest.mark.asyncio
 async def test_reset_sandbox_hands_off_after_metadata_persists() -> None:
@@ -65,6 +67,7 @@ async def test_reset_sandbox_hands_off_after_metadata_persists() -> None:
         "expiry",
         permissions=None,
         base_proxy_config={"rules": []},
+        environment_slug=None,
     )
     configure.assert_awaited_once_with(new_sandbox)
     update.assert_awaited_once_with(

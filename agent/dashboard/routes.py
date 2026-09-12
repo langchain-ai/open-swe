@@ -39,6 +39,12 @@ from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
 )
+from agent.dashboard.environment_auth import (
+    EnvironmentAuthRequestError,
+    get_environment_auth,
+    parse_environment_auth_update,
+    save_environment_auth,
+)
 from agent.dashboard.environment_refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
@@ -1178,6 +1184,33 @@ async def api_get_environment(
     if not record:
         raise HTTPException(404, "environment not found")
     return record
+
+
+@router.get("/environments/{slug}/auth-proxy")
+async def api_get_environment_auth_proxy(
+    slug: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    normalized = _normalized_slug(slug)
+    if await ENVIRONMENTS.get(normalized) is None:
+        raise HTTPException(404, "environment not found")
+    return await get_environment_auth(normalized)
+
+
+@router.put("/environments/{slug}/auth-proxy")
+async def api_set_environment_auth_proxy(
+    slug: str,
+    request: Request,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    normalized = _normalized_slug(slug)
+    if await ENVIRONMENTS.get(normalized) is None:
+        raise HTTPException(404, "environment not found")
+    try:
+        update = parse_environment_auth_update(await request.body())
+        return await save_environment_auth(normalized, update)
+    except EnvironmentAuthRequestError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 @router.put("/environments/{slug}")

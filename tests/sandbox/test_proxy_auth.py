@@ -21,6 +21,8 @@ from agent.sandboxes.providers.langsmith import (
 )
 from agent.sandboxes.state import SandboxBackendProxy
 
+pytestmark = pytest.mark.usefixtures("fake_store")
+
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
     """Wire an ``httpx2.AsyncClient`` mock class to yield ``inner`` from its
@@ -510,6 +512,7 @@ class TestCreateSandboxWithProxy:
             "sandbox-123",
             "ghs_install",
             base_proxy_config=environment.create_params["proxy_config"],
+            environment_slug="env",
         )
 
     @pytest.mark.asyncio
