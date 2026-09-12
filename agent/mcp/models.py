@@ -118,7 +118,14 @@ class MCPConnectionUpdate(BaseModel):
         return list(dict.fromkeys(name.strip() for name in value))
 
 
-class MCPConnection(BaseModel):
+class MCPToolDescription(BaseModel):
+    name: str
+    description: str = ""
+
+
+class MCPConnectionPublic(BaseModel):
+    """Connection settings safe to return to the dashboard; credentials stay server-side."""
+
     model_config = ConfigDict(hide_input_in_errors=True)
 
     name: str
@@ -126,12 +133,15 @@ class MCPConnection(BaseModel):
     transport: Literal["streamable_http", "sse"] = "streamable_http"
     enabled: bool = True
     allowed_tools: list[str] = Field(default_factory=list)
-    encrypted_headers: str = Field(default="", repr=False)
     header_names: list[str] = Field(default_factory=list)
     oauth: MCPOAuth | None = None
-    encrypted_client_secret: str = Field(default="", repr=False)
     revision: str
     updated_at: str
+
+
+class MCPConnection(MCPConnectionPublic):
+    encrypted_headers: str = Field(default="", repr=False)
+    encrypted_client_secret: str = Field(default="", repr=False)
 
     def public(self) -> dict[str, Any]:
         return self.model_dump(exclude={"encrypted_headers", "encrypted_client_secret"})

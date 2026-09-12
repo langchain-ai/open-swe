@@ -59,6 +59,9 @@ export function EnvironmentSelector({
       </button>
       {open && (
         <div className="absolute top-full left-0 z-50 mt-1 flex max-h-72 w-64 flex-col overflow-y-auto rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg">
+          <div className="px-2 pt-2 pb-1 text-muted-foreground">
+            Environment
+          </div>
           {environments.map((env) => {
             const isSelected = env.slug === selectedSlug
             return (

@@ -3,6 +3,7 @@ import { useState } from "react"
 
 import type { Theme } from "@/lib/theme"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -10,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import {
   notificationsEnabled,
@@ -17,6 +19,7 @@ import {
   requestNotificationPermission,
   setNotificationsPref,
 } from "@/lib/notifications"
+import { agentsApi } from "@/features/agents/lib/api"
 import { api } from "@/lib/api"
 import type { ThreadVisibility } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
@@ -40,9 +43,12 @@ export function PreferencesSection() {
     queryFn: api.getMyPreferences,
   })
   const savePreferences = useMutation({
-    mutationFn: (default_visibility: ThreadVisibility) =>
-      api.saveMyPreferences({ default_visibility }),
+    mutationFn: api.saveMyPreferences,
     onSuccess: (data) => qc.setQueryData(["myPreferences"], data),
+  })
+  const archiveThreads = useMutation({
+    mutationFn: agentsApi.resolveAllThreads,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-threads"] }),
   })
   const supported = notificationsSupported()
   const [enabled, setEnabled] = useState(() => notificationsEnabled())
@@ -95,7 +101,13 @@ export function PreferencesSection() {
         control={
           <Select
             value={preferences.data?.default_visibility ?? "private"}
-            onValueChange={(v) => v && savePreferences.mutate(v)}
+            onValueChange={(v) =>
+              v &&
+              savePreferences.mutate({
+                ...preferences.data!,
+                default_visibility: v,
+              })
+            }
             disabled={preferences.isLoading || savePreferences.isPending}
           >
             <SelectTrigger className="w-40">
@@ -109,6 +121,55 @@ export function PreferencesSection() {
               ))}
             </SelectContent>
           </Select>
+        }
+      />
+      <SettingsRow
+        label="Local tracing project"
+        description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
+        control={
+          <Input
+            className="w-56"
+            placeholder={
+              preferences.data?.default_local_tracing_project ??
+              "Shared cloud project"
+            }
+            defaultValue={preferences.data?.local_tracing_project ?? ""}
+            disabled={preferences.isLoading || savePreferences.isPending}
+            onBlur={(event) =>
+              savePreferences.mutate({
+                ...preferences.data!,
+                local_tracing_project: event.target.value.trim() || null,
+              })
+            }
+          />
+        }
+      />
+      <SettingsRow
+        label="Archive all threads"
+        description={
+          archiveThreads.error
+            ? `Could not archive threads: ${archiveThreads.error.message}`
+            : archiveThreads.isSuccess
+              ? `${archiveThreads.data.resolved} threads archived.`
+              : "Resolve all threads you have participated in for a clean slate. You can still find them in the resolved view."
+        }
+        control={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={archiveThreads.isPending}
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Archive all your threads? They will remain available in the resolved view."
+                )
+              ) {
+                archiveThreads.mutate()
+              }
+            }}
+          >
+            {archiveThreads.isPending ? "Archiving…" : "Archive all"}
+          </Button>
         }
       />
       <SettingsRow

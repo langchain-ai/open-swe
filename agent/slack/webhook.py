@@ -602,6 +602,9 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             if isinstance(timezone_value, str):
                 user_timezone = timezone_value.strip()
 
+    thread_metadata = await common.authorize_github_thread(
+        thread_id, await _slack_login(user_id, user_email) or ""
+    )
     context_thread_ts = reply_thread_ts or thread_ts
     thread_messages = (
         []
@@ -645,6 +648,16 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
     logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
+    if common.thread_is_private(thread_metadata):
+        context_messages = [
+            message
+            for message in context_messages
+            if common.thread_is_promptable(
+                thread_metadata, logins_by_user_id.get(str(message.get("user") or ""), "")
+            )
+        ]
+        if not message_update:
+            source_messages = context_messages
     context_source = "the beginning of the thread"
     if context_mode == "last_mention":
         context_source = (
@@ -719,10 +732,15 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     )
 
     mapped_login = await _slack_login(user_id, user_email)
+    thread_model_choice = await common.get_thread_model_choice(thread_id)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
+        resolved_model_id = (
+            thread_model_choice[0]
+            if thread_model_choice
+            else await common.resolve_agent_model_id(mapped_login)
+        )
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
             common.logger.info(
@@ -827,6 +845,10 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     thread_plan_mode = await common.get_thread_plan_mode(thread_id)
     if thread_plan_mode is not None:
         configurable["plan_mode"] = thread_plan_mode
+
+    if thread_model_choice and not image_model_override:
+        configurable["agent_model_id"], configurable["agent_effort"] = thread_model_choice
+        configurable["model_selection"] = "explicit"
 
     is_first_mention = not await common.thread_exists(thread_id)
     langgraph_client = get_langgraph_client()
