@@ -4,7 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from agent.analytics import database, emitter
+from agent.analytics import emitter
+from agent.database import analytics as database
 
 
 @pytest.mark.asyncio
