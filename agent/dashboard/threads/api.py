@@ -168,7 +168,7 @@ async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[s
 
 
 async def get_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
+    thread_id: str, login: str | None, *, email: str | None = None, mark_viewed: bool = True
 ) -> dict[str, Any]:
     client = langgraph_client()
     try:
@@ -214,7 +214,7 @@ async def get_dashboard_thread(
 
 
 async def send_dashboard_message(
-    thread_id: str, login: str, body: ThreadMessageBody, *, email: str | None = None
+    thread_id: str, login: str | None, body: ThreadMessageBody, *, email: str | None = None
 ) -> dict[str, Any]:
     client = langgraph_client()
     try:
@@ -275,15 +275,15 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
-        "surface": "web",
+        "surface": "web" if login else "automation",
         "queue_id": (
             str(body.client_message_id) if body.client_message_id else f"queued-{uuid.uuid4()}"
         ),
         "created_at_ms": now_ms,
         "sender": {
-            "id": f"github:{login}",
-            "platform": "github",
-            "github_login": login,
+            "id": f"github:{login}" if login else "system:workspace",
+            "platform": "github" if login else "open-swe",
+            **({"github_login": login} if login else {}),
             **({"email": email} if email else {}),
         },
     }
@@ -323,7 +323,7 @@ async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
 
 
 async def cancel_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str, login: str | None, *, email: str | None = None
 ) -> dict[str, Any]:
     """Interrupt every live run on a thread on behalf of its owner.
 
@@ -404,7 +404,9 @@ async def admin_cancel_dashboard_thread(
     return await _thread_summary(updated_thread)
 
 
-async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
+async def delete_dashboard_thread(
+    thread_id: str, login: str | None, *, email: str | None = None
+) -> None:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -552,7 +554,7 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
 
 
 async def resolve_dashboard_thread(
-    thread_id: str, login: str, *, resolved: bool, email: str | None = None
+    thread_id: str, login: str | None, *, resolved: bool, email: str | None = None
 ) -> dict[str, Any]:
     """Mark a thread resolved/unresolved via thread metadata."""
     client = langgraph_client()

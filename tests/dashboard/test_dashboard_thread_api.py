@@ -809,6 +809,41 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
     assert updates[-1]["participant_logins"] == {"first": True, "teammate": True}
 
 
+async def test_enrich_run_start_command_attributes_workspace_system_message(monkeypatch) -> None:
+    class FakeThreads:
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": []}}
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            pass
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    command = {
+        "method": "run.start",
+        "params": {"input": {"messages": [{"role": "user", "content": "fix the bug"}]}},
+    }
+
+    enriched = await thread_runs._enrich_run_start_command(
+        "tid",
+        None,
+        command,
+        metadata={"source": "schedule", "visibility": "public"},
+    )
+
+    entity = ElementTree.fromstring(enriched["params"]["input"]["messages"][0]["content"])
+    message = ElementTree.fromstring(enriched["params"]["input"]["messages"][-1]["content"])
+    assert entity.attrib["kind"] == "system"
+    assert entity.attrib["id"] == "system:workspace"
+    assert message.attrib["kind"] == "system"
+    assert message.attrib["surface"] == "automation"
+    configurable = enriched["params"]["config"]["configurable"]
+    assert "github_login" not in configurable
+    assert "user_email" not in configurable
+
+
 async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkeypatch) -> None:
     class FakeThreads:
         async def get_state(self, thread_id: str) -> dict[str, object]:
@@ -1620,6 +1655,13 @@ async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypa
     assert exc_info.value.detail == "only admins can send messages in this thread"
 
 
+def test_assert_thread_postable_allows_workspace_context() -> None:
+    thread_summary._assert_thread_postable(
+        {"source": "schedule", "thread_category": "automation"},
+        None,
+    )
+
+
 def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
 
@@ -1627,6 +1669,16 @@ def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
         {"source": "dashboard", "admin_thread": True},
         "workspace-admin",
     )
+
+
+def test_assert_thread_postable_rejects_private_workspace_context() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        thread_summary._assert_thread_postable(
+            {"source": "dashboard", "visibility": "private", "github_login": "owner"},
+            None,
+        )
+
+    assert exc_info.value.status_code == 404
 
 
 def test_assert_thread_postable_restricts_workspace_automation(monkeypatch) -> None:

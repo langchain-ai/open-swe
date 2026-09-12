@@ -278,24 +278,45 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 blocks = await _build_blocks_from_payload(content, model_id=resolved_model_id)
                 sender = content.get("sender")
                 if isinstance(sender, dict) and isinstance(sender.get("id"), str):
-                    person: PersonIdentity = {"id": sender["id"]}
-                    for key in (
-                        "display_name",
-                        "handle",
-                        "platform",
-                        "github_login",
-                        "email",
-                        "timezone",
-                    ):
-                        value = sender.get(key)
-                        if isinstance(value, str):
-                            cast(dict[str, str], person)[key] = value
-                    structured = build_input_messages(
-                        blocks,
-                        {"sender_id": person["id"], "surface": "web", "kind": "human"},
-                        people=[person],
-                        injected_dynamic_context_hashes=injected,
-                    )
+                    surface = content.get("surface")
+                    if surface == "automation":
+                        system: SystemIdentity = {
+                            "id": sender["id"],
+                            "display_name": str(sender.get("display_name") or "Open SWE"),
+                        }
+                        for key in ("display_name", "platform"):
+                            value = sender.get(key)
+                            if isinstance(value, str):
+                                cast(dict[str, str], system)[key] = value
+                        structured = build_input_messages(
+                            blocks,
+                            {
+                                "sender_id": system["id"],
+                                "surface": "automation",
+                                "kind": "system",
+                            },
+                            systems=[system],
+                            injected_dynamic_context_hashes=injected,
+                        )
+                    else:
+                        person: PersonIdentity = {"id": sender["id"]}
+                        for key in (
+                            "display_name",
+                            "handle",
+                            "platform",
+                            "github_login",
+                            "email",
+                            "timezone",
+                        ):
+                            value = sender.get(key)
+                            if isinstance(value, str):
+                                cast(dict[str, str], person)[key] = value
+                        structured = build_input_messages(
+                            blocks,
+                            {"sender_id": person["id"], "surface": "web", "kind": "human"},
+                            people=[person],
+                            injected_dynamic_context_hashes=injected,
+                        )
                     _flush_blocks(queued_updates, content_blocks, injected)
                     queue_id = content.get("queue_id")
                     if isinstance(queue_id, str) and structured:
