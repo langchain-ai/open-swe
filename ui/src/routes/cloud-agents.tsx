@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
+import { CheckIcon } from "@phosphor-icons/react"
 
 import type { ModelOption } from "@/lib/api"
 import {
@@ -49,6 +50,7 @@ function CloudAgentsPage() {
   const [baseBranch, setBaseBranch] = useState("")
   const [branchPrefix, setBranchPrefix] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [showSaved, setShowSaved] = useState(false)
   const initialized = useRef(false)
 
   const defaultModels = options.data?.models.filter(
@@ -108,6 +110,12 @@ function CloudAgentsPage() {
     defaultSubagentEffort,
   ])
 
+  useEffect(() => {
+    if (!showSaved) return
+    const timer = setTimeout(() => setShowSaved(false), 3000)
+    return () => clearTimeout(timer)
+  }, [showSaved])
+
   if (session.isLoading) {
     return (
       <main className="p-6">
@@ -126,6 +134,7 @@ function CloudAgentsPage() {
       .mutateAsync(
         buildProfileUpdate(profile.data, patch, fallbackModel, fallbackEffort)
       )
+      .then(() => setShowSaved(true))
       .catch((e: Error) => setError(e.message))
   }
 
@@ -355,6 +364,20 @@ function CloudAgentsPage() {
       </SettingsSection>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
+
+      {showSaved && (
+        <div
+          role="status"
+          className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-md bg-foreground px-3 py-2 text-xs/relaxed font-medium text-background shadow-md data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-bottom-2"
+        >
+          <CheckIcon
+            className="size-3.5 text-emerald-500"
+            weight="bold"
+            aria-hidden
+          />
+          Defaults saved
+        </div>
+      )}
     </AppShell>
   )
 }
