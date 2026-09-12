@@ -44,6 +44,11 @@ def _new_slack_context(
         "triggering_user_name": current.get("triggering_user_name", ""),
         "triggering_user_email": current.get("triggering_user_email", ""),
         "triggering_event_ts": thread_ts,
+        **{
+            key: current[key]
+            for key in ("team_id", "triggering_bot_id", "triggering_bot_app_id")
+            if key in current
+        },
     }
 
 

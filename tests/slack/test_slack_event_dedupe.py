@@ -150,6 +150,104 @@ async def test_mention_and_message_deliveries_start_one_run(
     }
 
 
+def _bot_payload(*, event_type: str = "message", with_user: bool = True) -> dict[str, Any]:
+    payload = _mention_payload()
+    payload.update({"team_id": "T123", "api_app_id": "AOWN"})
+    payload["event"].update(
+        {
+            "type": event_type,
+            "subtype": "bot_message",
+            "bot_id": "B123",
+            "app_id": "A123",
+            "user": "U123",
+        }
+    )
+    if not with_user:
+        payload["event"].pop("user")
+    return payload
+
+
+@pytest.mark.parametrize("event_type", ["message", "app_mention"])
+@pytest.mark.parametrize("with_user", [True, False])
+async def test_allowed_bot_mention_is_dispatched(
+    allowed_bot: None,
+    event_type: str,
+    with_user: bool,
+) -> None:
+    tasks = _FakeBackgroundTasks()
+    response = await _post(_bot_payload(event_type=event_type, with_user=with_user), tasks)
+    assert response["status"] == "accepted"
+    assert len(tasks.tasks) == 1
+    data = tasks.tasks[0][1][0]
+    assert data.triggering_bot_id == "B123"
+    assert data.team_id == "T123"
+    assert data.user_id == ("U123" if with_user else "")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"bot_id": "BOTHER"},
+        {"user": "UOTHER"},
+        {"app_id": "AOTHER"},
+        {"user": "BOT"},
+        {"app_id": "AOWN"},
+        {"text": "A status update"},
+        {"subtype": "message_deleted"},
+    ],
+)
+async def test_bot_must_be_allowed_and_explicitly_mention_us(
+    allowed_bot: None,
+    change: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "is_code_channel", AsyncMock(return_value=True))
+    payload = _bot_payload()
+    payload["event"].update(change)
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(payload, tasks))["status"] == "ignored"
+    assert tasks.tasks == []
+
+
+@pytest.mark.parametrize("team_id", ["", "TOTHER"])
+async def test_bot_allowlist_is_workspace_scoped(allowed_bot: None, team_id: str) -> None:
+    payload = _bot_payload()
+    payload["team_id"] = team_id
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(payload, tasks))["status"] == "ignored"
+    assert tasks.tasks == []
+
+
+async def test_bot_authorization_is_workspace_owned(
+    allowed_bot: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "someone-else")
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(_bot_payload(), tasks))["status"] == "accepted"
+    assert len(tasks.tasks) == 1
+
+
+async def test_allowed_bot_dual_delivery_starts_only_one_run(allowed_bot: None) -> None:
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(_bot_payload(), tasks))["status"] == "accepted"
+    second = _bot_payload(event_type="app_mention")
+    second["event_id"] = "Ev2"
+    assert (await _post(second, tasks))["status"] == "ignored"
+    assert len(tasks.tasks) == 1
+
+
+async def test_removed_bot_cannot_start_another_run(allowed_bot: None, fake_store: Any) -> None:
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(_bot_payload(), tasks))["status"] == "accepted"
+    await fake_store.delete_item(["allowed_slack_bots"], "T123:B123")
+    payload = _bot_payload()
+    payload["event_id"] = "Ev2"
+    payload["event"]["ts"] = "1786573370.551099"
+    assert (await _post(payload, tasks))["status"] == "ignored"
+    assert len(tasks.tasks) == 1
+
+
 async def test_distinct_messages_in_one_channel_both_run() -> None:
     background_tasks = _FakeBackgroundTasks()
 

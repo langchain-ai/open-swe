@@ -532,6 +532,7 @@ async def upsert_agent_thread_metadata(
     environment: str | None = None,
     visibility: str = "public",
     owner_login: str = "",
+    owner_type: str = "user",
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -578,6 +579,18 @@ async def upsert_agent_thread_metadata(
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     existing_context = SourceContext.from_metadata(existing_meta)
+    if owner_type == "system" and existing_meta:
+        expected_bot = source_context.slack_thread if source_context else None
+        saved_bot = existing_context.slack_thread
+        if (
+            existing_meta.get("owner_type") != "system"
+            or existing_meta.get("visibility") != "public"
+            or expected_bot is None
+            or saved_bot is None
+            or (saved_bot.team_id, saved_bot.triggering_bot_id)
+            != (expected_bot.team_id, expected_bot.triggering_bot_id)
+        ):
+            return False
     sender_login = github_login or await resolve_login_from_email_async(user_email) or ""
     if sender_login:
         metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
@@ -608,9 +621,9 @@ async def upsert_agent_thread_metadata(
         "visibility" not in existing_meta and existing_meta.get("created_at_ms") is None
     ):
         metadata["visibility"] = visibility
-        metadata["owner_type"] = "user"
+        metadata["owner_type"] = owner_type
         initiating_login = owner_login.strip() or sender_login.strip()
-        if initiating_login:
+        if initiating_login and owner_type == "user":
             metadata["owner_login"] = initiating_login
 
     try:
@@ -618,6 +631,18 @@ async def upsert_agent_thread_metadata(
             await langgraph_client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )
+            if owner_type == "system":
+                saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
+                saved_meta = saved.get("metadata") or {}
+                if any(
+                    saved_meta.get(key) != metadata.get(key)
+                    for key in (
+                        "owner_type",
+                        "visibility",
+                        "source_context",
+                    )
+                ):
+                    return False
         elif _pr_linked(existing_meta) or _pr_state_reset_for_user_activity(existing_meta):
             # A person is continuing the thread, so PR-driven resolution or the
             # "PRs closed" mark no longer applies. Only the PR webhook sets those,
