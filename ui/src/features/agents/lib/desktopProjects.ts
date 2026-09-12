@@ -4,12 +4,16 @@ import type { DesktopProject } from "@/desktop"
 
 export function useDesktopProjects() {
   const [projects, setProjects] = useState<Array<DesktopProject>>([])
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     const desktop = window.openSweDesktop
     if (!desktop) return
     const unsubscribe = desktop.onProjectsChanged(setProjects)
-    void desktop.listProjects().then(setProjects)
+    void desktop.listProjects().then((nextProjects) => {
+      setProjects(nextProjects)
+      setLoaded(true)
+    })
     return unsubscribe
   }, [])
 
@@ -32,5 +36,5 @@ export function useDesktopProjects() {
     return removed
   }, [])
 
-  return { projects, addProject, removeProject }
+  return { projects, loaded, addProject, removeProject }
 }

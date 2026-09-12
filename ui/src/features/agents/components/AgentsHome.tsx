@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
 import type {
@@ -16,8 +16,6 @@ import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeade
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Messages } from "@/features/agents/components/messages"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
-import { LocalProjectSelector } from "@/features/agents/components/composer/RunTargetSelector"
-import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { LocalProjectRightPanel } from "@/features/agents/components/LocalProjectRightPanel"
 import {
@@ -38,12 +36,17 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
-import { useAgentThreadRuntime } from "@/features/agents/lib/AgentThreadStreamProvider"
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import {
+  modelConfigurable,
+  promptMessage,
+} from "@/features/agents/lib/stream/promptMessage"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
+import { api } from "@/lib/api"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -58,19 +61,16 @@ const NEW_AGENT_PANEL_REF = {
   threadId: NEW_AGENT_PANEL_ID,
 }
 
-function promptContent(text: string, images: Array<ImageChunk>) {
-  const trimmed = text.trim()
-  const imageBlocks = images.map((image) => ({
-    type: "image",
-    base64: image.base64,
-    mime_type: image.mimeType,
-    ...(image.fileName ? { file_name: image.fileName } : {}),
-  }))
-  return [...imageBlocks, ...(trimmed ? [{ type: "text", text: trimmed }] : [])]
-}
-
-export function AgentsHome() {
-  const stream = useAgentThreadRuntime()
+export function AgentsHome({
+  initialRepo,
+  initialLocalProject,
+  initialNoProject,
+}: {
+  initialRepo?: string
+  initialLocalProject?: string
+  initialNoProject?: boolean
+}) {
+  const stream = useAgentStream()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
@@ -79,14 +79,28 @@ export function AgentsHome() {
   })
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
-  const activeSelection = selection ?? defaultSelection
-  const handleSelectionChange = (next: ModelSelection) => {
+  const [autoSelected, setAutoSelected] = useState(false)
+  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
+  const handleSelectionChange = (next: ModelSelection | null) => {
+    setAutoSelected(next === null)
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
   const cloudEnabled = Boolean(session.data)
+  const preferences = useQuery({
+    queryKey: ["myPreferences"],
+    queryFn: api.getMyPreferences,
+    enabled: cloudEnabled,
+  })
+  // Visibility is fixed once a thread exists, so the only choice is made here,
+  // seeded from the user's default and overridable per thread.
+  const [visibilityOverride, setVisibilityOverride] = useState<
+    "public" | "private" | null
+  >(null)
+  const visibility =
+    visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const environmentOptions = useEnvironmentOptions(cloudEnabled)
   const environments = environmentOptions.data?.environments ?? []
   // undefined = untouched, so the run falls back to the default environment.
@@ -111,12 +125,21 @@ export function AgentsHome() {
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
+  const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
+    initialLocalProject
+      ? "local"
+      : initialRepo || initialNoProject
+        ? "cloud"
+        : null
+  )
   const runTarget: RunTarget = isDesktop
     ? cloudEnabled
-      ? desktopThreadSource
+      ? (runTargetOverride ?? desktopThreadSource)
       : "local"
     : "cloud"
-  const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
+  const [localProjectPath, setLocalProjectPath] = useState<string | null>(
+    initialLocalProject ?? null
+  )
   const localProjectPathRef = useRef(localProjectPath)
   useEffect(() => {
     localProjectPathRef.current = localProjectPath
@@ -129,9 +152,15 @@ export function AgentsHome() {
   >([])
   const [localWorkspaceMode, setLocalWorkspaceMode] =
     useState<DesktopWorkspaceMode>("local")
+  const localWorkspaceModeRef = useRef(localWorkspaceMode)
+  useEffect(() => {
+    localWorkspaceModeRef.current = localWorkspaceMode
+  }, [localWorkspaceMode])
+  const branchRefreshId = useRef(0)
   const [localError, setLocalError] = useState<string | null>(null)
   const {
     projects: localProjects,
+    loaded: localProjectsLoaded,
     addProject,
     removeProject,
   } = useDesktopProjects()
@@ -141,7 +170,7 @@ export function AgentsHome() {
   const skills = useAgentSkills({ enabled: cloudEnabled })
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
-    undefined
+    initialNoProject ? null : initialRepo
   )
   const repo =
     repoOverride === undefined
@@ -168,24 +197,30 @@ export function AgentsHome() {
   }, [panelCollapsed, stream.threadId])
 
   useEffect(() => {
-    if (!isDesktop) return
+    if (!isDesktop || !localProjectsLoaded) return
     const stored = window.localStorage.getItem(LAST_LOCAL_PROJECT_KEY)
     const selected = localProjects.find(
       (project) => project.cwd === localProjectPath || project.cwd === stored
     )
     // oxlint-disable-next-line react/set-state-in-effect
     setLocalProjectPath(selected?.cwd ?? localProjects[0]?.cwd ?? null)
-  }, [isDesktop, localProjectPath, localProjects])
+  }, [isDesktop, localProjectPath, localProjects, localProjectsLoaded])
 
   const refreshLocalProjectBranch = useCallback(async () => {
     const cwd = localProjectPathRef.current
+    const refreshId = ++branchRefreshId.current
     const result = cwd
       ? await window.openSweDesktop?.getProjectBranches(cwd)
       : undefined
-    if (localProjectPathRef.current === cwd) {
+    if (
+      localProjectPathRef.current === cwd &&
+      branchRefreshId.current === refreshId
+    ) {
       const branches = result?.branches ?? []
       setLocalProjectBranch((selected) =>
-        selected && branches.some((ref) => ref.name === selected)
+        localWorkspaceModeRef.current === "worktree" &&
+        selected &&
+        branches.some((ref) => ref.name === selected)
           ? selected
           : (result?.current ?? null)
       )
@@ -210,6 +245,7 @@ export function AgentsHome() {
         (candidate) => candidate.name === branch
       )
       if (ref?.worktreePath) {
+        localWorkspaceModeRef.current = "worktree"
         setLocalWorkspaceMode("worktree")
         setLocalProjectBranch(branch)
         return
@@ -237,6 +273,7 @@ export function AgentsHome() {
   // the project's own checkout has to fall back to whatever it is really on.
   const selectLocalWorkspaceMode = useCallback(
     (next: DesktopWorkspaceMode) => {
+      localWorkspaceModeRef.current = next
       setLocalWorkspaceMode(next)
       setLocalError(null)
       if (next === "local") setLocalProjectBranch(null)
@@ -246,7 +283,22 @@ export function AgentsHome() {
   )
 
   useEffect(() => {
+    const desktop = window.openSweDesktop
+    const refreshSequence = branchRefreshId
+    let disposed = false
+    const unsubscribe = desktop?.onProjectHeadChanged((cwd) => {
+      if (cwd === localProjectPath) void refreshLocalProjectBranch()
+    })
+    void desktop?.watchProjectHead(localProjectPath).then(() => {
+      if (!disposed) void refreshLocalProjectBranch()
+    })
     void refreshLocalProjectBranch()
+    return () => {
+      disposed = true
+      refreshSequence.current++
+      unsubscribe?.()
+      void desktop?.watchProjectHead(null)
+    }
   }, [localProjectPath, refreshLocalProjectBranch])
 
   useEffect(() => {
@@ -255,12 +307,14 @@ export function AgentsHome() {
   }, [refreshLocalProjectBranch])
 
   const handleRunTargetChange = (next: RunTarget) => {
+    setRunTargetOverride(next)
     setDesktopThreadSource(next)
     setLocalError(null)
   }
 
   const handleSelectLocalProject = (cwd: string) => {
     setLocalProjectPath(cwd)
+    setRunTargetOverride("local")
     window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
     setDesktopThreadSource("local")
     setLocalError(null)
@@ -385,6 +439,7 @@ export function AgentsHome() {
       prompt,
       images,
       repo,
+      visibility,
       repo_explicitly_none: repoOverride === null,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
@@ -393,13 +448,11 @@ export function AgentsHome() {
     setSubmittedDraft(draft)
     setLocalError(null)
 
-    const configurable: Record<string, unknown> = {}
-    if (activeSelection?.modelId && activeSelection.effort) {
-      configurable.agent_model_id = activeSelection.modelId
-      configurable.agent_effort = activeSelection.effort
-    }
+    const configurable: Record<string, unknown> =
+      modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
+    configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
@@ -414,9 +467,7 @@ export function AgentsHome() {
     }
     void stream
       .submit(
-        {
-          messages: [{ type: "human", content: promptContent(prompt, images) }],
-        },
+        { messages: [promptMessage(prompt, images)] },
         {
           config: { configurable },
           onError: handleCloudSubmitError,
@@ -434,10 +485,6 @@ export function AgentsHome() {
     runTarget === "local"
       ? localProjects.find((project) => project.cwd === localProjectPath)
       : undefined
-  const hasProjects =
-    runTarget === "local"
-      ? localProjects.length > 0
-      : Boolean(repo || reposQuery.data?.repositories.length)
   const optimisticDraftThread = submittedDraft
     ? optimisticThread("pending", submittedDraft)
     : null
@@ -446,17 +493,15 @@ export function AgentsHome() {
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {session.data && !routePending && <OnboardingDialog />}
-        {optimisticDraftThread && (
-          <AgentThreadHeader
-            project={
-              runTarget === "local"
-                ? localProjectPath
-                : optimisticDraftThread.repoFullName
-            }
-            target={runTarget === "local" ? "This Mac" : "Cloud"}
-            panelCollapsed={panelCollapsed}
-          />
-        )}
+        <AgentThreadHeader
+          title={optimisticDraftThread?.title}
+          target={runTarget === "local" ? "This Mac" : "Cloud"}
+          panelCollapsed={panelCollapsed}
+          visibility={runTarget === "cloud" ? visibility : undefined}
+          onVisibilityChange={
+            submittedDraft ? undefined : setVisibilityOverride
+          }
+        />
         {optimisticDraftThread ? (
           <Messages
             messages={optimisticDraftThread.messages}
@@ -471,41 +516,8 @@ export function AgentsHome() {
                 alt=""
                 className="size-14 opacity-30 grayscale dark:opacity-20"
               />
-              <h1 className="flex flex-wrap items-baseline justify-center gap-x-1 text-center text-2xl tracking-tight sm:text-3xl">
-                {hasProjects ? (
-                  <>
-                    <span>What should we build in</span>
-                    {runTarget === "local" ? (
-                      <LocalProjectSelector
-                        onAddProject={() => void handleAddLocalProject()}
-                        onRemoveProject={(cwd) =>
-                          void handleRemoveLocalProject(cwd)
-                        }
-                        onSelectProject={handleSelectLocalProject}
-                        placeholder="a project"
-                        projects={localProjects}
-                        selectedProjectPath={localProjectPath}
-                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
-                      />
-                    ) : (
-                      <RepoSelector
-                        className="inline-flex"
-                        emptySelectionLabel="Don't work in a project"
-                        noMatchesLabel="No matching projects"
-                        onRepoChange={setRepoOverride}
-                        placeholder="a project"
-                        repos={reposQuery.data?.repositories}
-                        searchPlaceholder="Search projects…"
-                        selectedLabel={repo?.split("/").at(-1)}
-                        selectedRepo={repo}
-                        triggerClassName="max-w-[60vw] text-2xl text-muted-foreground underline decoration-dotted underline-offset-[6px] hover:text-foreground sm:text-3xl [&>svg]:hidden"
-                      />
-                    )}
-                    <span>?</span>
-                  </>
-                ) : (
-                  <span>What should we build?</span>
-                )}
+              <h1 className="text-center text-2xl tracking-tight sm:text-3xl">
+                What should we build?
               </h1>
             </div>
           </div>

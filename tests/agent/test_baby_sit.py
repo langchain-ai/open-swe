@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 from langgraph_sdk.errors import ConflictError
 
@@ -65,7 +65,7 @@ class _Threads:
         assert ttl == baby_sit.WATCH_LOCK_TTL_MINUTES
         async with self.create_lock:
             if thread_id in self.active:
-                response = httpx.Response(409, request=httpx.Request("POST", "http://test"))
+                response = httpx2.Response(409, request=httpx2.Request("POST", "http://test"))
                 raise ConflictError("already exists", response=response, body=None)
             self.active.add(thread_id)
 
@@ -294,6 +294,32 @@ async def test_success_waits_for_stable_check_set_before_notifying(
     assert notify.await_args is not None
     assert notify.await_args.args[:2] == ("C1", "1.2")
     assert watch_client.store.values == {}
+
+
+async def test_github_notification_uses_source_repository(
+    watch_client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    watch = await _start_watch(watch_client)
+    watch.source_context = SourceContext.parse(
+        {
+            "github_issue": {
+                "number": 12,
+                "url": "https://github.com/acme/default/issues/12",
+            }
+        }
+    )
+    watch.run_config = {
+        "source_repo": {"owner": "acme", "name": "default"},
+        "source_installation_id": 84,
+    }
+    token = AsyncMock(return_value="t")
+    post = AsyncMock(return_value=True)
+    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", token)
+    monkeypatch.setattr(baby_sit, "post_github_comment", post)
+
+    assert await baby_sit._notify_watch(watch, "done") is True
+    token.assert_awaited_once_with(installation_id=84)
+    post.assert_awaited_once_with({"owner": "acme", "name": "default"}, 12, "done", token="t")
 
 
 async def test_terminal_notification_falls_back_to_originating_agent_thread(

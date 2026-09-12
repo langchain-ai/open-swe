@@ -21,6 +21,7 @@ import type {
   ImageChunk,
   Message,
 } from "./types"
+import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 
@@ -536,17 +537,20 @@ export function useSidebarRecents({
   projectMode,
   includeAutomations = false,
   includeResolved = false,
+  sort = "created",
   enabled = true,
 }: {
   projectMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
+  sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
       ...sidebarPageParams({ includeAutomations, includeResolved }),
       ...(projectMode ? { ownerless: true } : {}),
+      sortBy: sort === "created" ? "created_at" : "updated_at",
     },
     enabled
   )
@@ -556,17 +560,20 @@ export function useSidebarProjectThreads({
   repoFullName,
   includeAutomations = false,
   includeResolved = false,
+  sort = "created",
   enabled = true,
 }: {
   repoFullName: string | null
   includeAutomations?: boolean
   includeResolved?: boolean
+  sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
       ...sidebarPageParams({ includeAutomations, includeResolved }),
       ...(repoFullName ? { repo: repoFullName } : {}),
+      sortBy: sort === "created" ? "created_at" : "updated_at",
     },
     enabled && Boolean(repoFullName)
   )
@@ -580,11 +587,17 @@ export function useAgentThread(threadId: string) {
     queryKey,
     queryFn: async ({ queryKey: key }) => {
       const thread = await agentsApi.getThread(threadId)
-      const queuedMessages =
-        queryClient.getQueryData<AgentThread>(key)?.queuedMessages
-      return thread.status === "running" && queuedMessages?.length
-        ? { ...thread, queuedMessages }
-        : thread
+      const cached = queryClient.getQueryData<AgentThread>(key)
+      const queuedMessages = cached?.queuedMessages
+      const pendingMessages = cached?.pendingMessages
+      if (!queuedMessages?.length && !pendingMessages?.length) return thread
+      return {
+        ...thread,
+        ...(thread.status === "running" && queuedMessages?.length
+          ? { queuedMessages }
+          : {}),
+        ...(pendingMessages?.length ? { pendingMessages } : {}),
+      }
     },
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
@@ -752,6 +765,7 @@ export function useDeleteAgentSchedule() {
 }
 
 export interface CreateAgentThreadVariables {
+  visibility?: "public" | "private"
   prompt: string
   images?: Array<ImageChunk>
   repo?: string | null
@@ -787,6 +801,7 @@ export function optimisticThread(
   }
   return {
     id: threadId,
+    visibility: vars.visibility ?? "public",
     title: text.slice(0, 80) || "New agent",
     repo: repoFullName.split("/")[1] ?? "",
     repoFullName,
@@ -811,6 +826,7 @@ export interface SendAgentMessageVariables {
   model_id?: string | null
   effort?: string | null
   plan_mode?: boolean
+  client_message_id?: string
 }
 
 export function useCancelAgentThread(threadId: string) {
@@ -854,12 +870,44 @@ export function useDeleteAgentThread() {
   })
 }
 
+export function useContinueThreadPrivately() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+
+  return useMutation({
+    mutationFn: (threadId: string) =>
+      agentsApi.continueThreadPrivately(threadId),
+    onSuccess: (thread) => {
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+      invalidateAgentThreadLists(queryClient)
+      navigate({ to: "/agents/$threadId", params: { threadId: thread.id } })
+    },
+  })
+}
+
 export function usePinAgentThread() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: (vars: { threadId: string; pinned: boolean }) =>
       agentsApi.pinThread(vars.threadId, vars.pinned),
+    onSettled: () => invalidateAgentThreadLists(queryClient),
+  })
+}
+
+export function useRenameAgentThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { threadId: string; title: string }) =>
+      agentsApi.renameThread(vars.threadId, vars.title),
+    onSuccess: (thread, vars) => {
+      queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
+      queryClient.setQueryData(
+        agentThreadKeys.sidebarActive(vars.threadId),
+        thread
+      )
+    },
     onSettled: () => invalidateAgentThreadLists(queryClient),
   })
 }

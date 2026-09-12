@@ -100,25 +100,14 @@ export async function transcribeAudio(audio: Blob): Promise<string> {
   return response.text
 }
 
-export interface PRTraceResolutionResult {
-  resolved: boolean
-  detail: string
-  project: string | null
-  thread_id: string | null
-  confidence: number | null
-  evidence: Array<string>
-  trace_url: string | null
-  run_count: number
-  first_turn: string | null
-  last_turn: string | null
-}
-
 export interface SessionUser {
   login: string
   email: string | null
   avatar_url: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
+  api_base_url?: string
+  slack_base_url?: string
 }
 
 export interface ModelOption {
@@ -150,6 +139,7 @@ export interface Profile {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  model_routing_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
@@ -164,24 +154,51 @@ export interface ProfileUpdate {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
+  model_routing_enabled?: boolean | null
   draft_prs?: boolean
   review_draft_prs?: boolean | null
+}
+
+export interface SlackBotOption {
+  team_id: string
+  bot_id: string
+  user_id: string
+  name: string
+  image_url: string
+}
+
+export interface AllowedSlackBot {
+  team_id: string
+  bot_id: string
+  user_id: string
+  app_id: string
+  name: string
+  created_by: string
+  created_at: string
+  image_url: string
 }
 
 export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  /** Tri-state adaptive model routing toggle; user preference overrides this org default. */
+  model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   transcription_model?: string
   fable_enabled?: boolean
-  review_tracing_project?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
   default_agent_subagent_reasoning_effort?: string | null
+  default_agent_routing_fast_model?: string | null
+  default_agent_routing_fast_reasoning_effort?: string | null
+  default_agent_routing_balanced_model?: string | null
+  default_agent_routing_balanced_reasoning_effort?: string | null
+  default_agent_routing_performance_model?: string | null
+  default_agent_routing_performance_reasoning_effort?: string | null
   default_repo?: string | null
   default_reviewer_model?: string | null
   default_reviewer_reasoning_effort?: string | null
@@ -196,40 +213,38 @@ export interface TeamSettings {
   updated_at?: string | null
 }
 
-export interface ProviderCredentialStatus {
-  connected: boolean
-  site?: string
-  endpoint?: string
-  api_key_last4?: string
-  updated_at?: string | null
+export interface MCPOAuth {
+  grant_type?: "client_credentials"
+  token_url: string
+  client_id: string
+  scope?: string
+  token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic"
 }
 
-export interface TeamCredentialsStatus {
-  datadog: ProviderCredentialStatus
-  langsmith: ProviderCredentialStatus
+export type MCPOAuthUpdate = MCPOAuth & {
+  client_secret?: string | null
 }
 
-export interface DatadogConnectBody {
-  site: string
-  api_key: string
-  app_key: string
+export interface MCPConnection {
+  name: string
+  url: string
+  transport: "streamable_http" | "sse"
+  enabled: boolean
+  allowed_tools: string[]
+  header_names: string[]
+  oauth?: MCPOAuth | null
+  revision: string
+  updated_at: string
 }
 
-export interface LangSmithConnectBody {
-  api_key: string
-  endpoint?: string | null
-}
-
-export interface ApiKeyCredentialStatus {
-  connected: boolean
-  api_key_last4?: string
-  updated_at?: string | null
-}
-
-export type CurrentsCredentialStatus = ApiKeyCredentialStatus
-
-export interface CurrentsConnectBody {
-  api_key: string
+export interface MCPConnectionUpdate {
+  name: string
+  url: string
+  transport: MCPConnection["transport"]
+  enabled: boolean
+  allowed_tools: string[]
+  headers?: Record<string, string> | null
+  oauth?: MCPOAuthUpdate | null
 }
 
 export interface NotionCredentialStatus {
@@ -265,7 +280,9 @@ export interface UsageLeaderboardRow {
     email: string | null
   }
   favorite_model: string
-  agent_runs: number
+  invocations: number
+  /** @deprecated Rolling compatibility with older clients. */
+  agent_runs?: number
   prs_opened: number
   merged_prs: number
   agent_loc: number
@@ -273,7 +290,9 @@ export interface UsageLeaderboardRow {
   deletions: number
   total_tokens: number
   total_cost_usd: number
-  avg_run_seconds: number
+  avg_invocation_seconds: number
+  /** @deprecated Rolling compatibility with older clients. */
+  avg_run_seconds?: number
 }
 
 export interface ReviewerStatsCounterRow {
@@ -361,6 +380,14 @@ export interface UserInstructions {
   updated_by?: string
 }
 
+export type ThreadVisibility = "public" | "private"
+
+export interface UserPreferences {
+  default_visibility: ThreadVisibility
+  local_tracing_project: string | null
+  default_local_tracing_project: string
+}
+
 export interface Skill {
   name: string
   description: string
@@ -394,10 +421,32 @@ export interface SandboxSettings {
 }
 
 /** What a non-admin needs to pick an environment for a new thread. */
+export type EnvironmentRefreshStatus =
+  | "never"
+  | "refreshing"
+  | "success"
+  | "failed"
+
+/** One stage of a rebuild: booting the builder, a script, the capture. */
+export interface EnvironmentRefreshStep {
+  label: string
+  status: "running" | "success" | "failed"
+  started_at?: string
+  finished_at?: string | null
+  exit_code?: number | null
+  log_path?: string | null
+}
+
 export interface EnvironmentOption {
   slug: string
   name: string
   has_snapshot: boolean
+  refresh_status?: EnvironmentRefreshStatus
+  refresh_kind?: "full" | "update" | null
+  refresh_finished_at?: string | null
+  refresh_error?: string | null
+  refresh_log_excerpt?: string | null
+  refresh_steps?: Array<EnvironmentRefreshStep>
 }
 
 export interface EnvironmentOptionList {
@@ -686,6 +735,12 @@ export const api = {
     }),
   deleteMyInstructions: () =>
     request<void>("/me/instructions", { method: "DELETE" }),
+  getMyPreferences: () => request<UserPreferences>("/me/preferences"),
+  saveMyPreferences: (preferences: UserPreferences) =>
+    request<UserPreferences>("/me/preferences", {
+      method: "PUT",
+      body: JSON.stringify(preferences),
+    }),
   listSkills: (offset = 0) =>
     request<SkillsPage>(`/skills?limit=100&offset=${offset}`),
   createSkill: (name: string, body: SkillInput) =>
@@ -752,6 +807,18 @@ export const api = {
   listEnvironmentOptions: () =>
     request<EnvironmentOptionList>("/environments/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
+  listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
+  allowSlackBot: (body: { bot_id: string }) =>
+    request<AllowedSlackBot>("/slack/allowed-bots", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeAllowedSlackBot: (teamId: string, botId: string) =>
+    request<{ ok: boolean }>(
+      `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
+      { method: "DELETE" }
+    ),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {
       method: "PUT",
@@ -762,47 +829,46 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ transcription_model }),
     }),
-  getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
-  connectDatadog: (body: DatadogConnectBody) =>
-    request<TeamCredentialsStatus>("/team-credentials/datadog", {
+  getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
+  revealWorkspaceMCPHeaders: (name: string) =>
+    request<Record<string, string>>(
+      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveWorkspaceMCP: (body: MCPConnectionUpdate) =>
+    request<MCPConnection>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  disconnectDatadog: () =>
-    request<TeamCredentialsStatus>("/team-credentials/datadog", {
+  deleteWorkspaceMCP: (name: string) =>
+    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
-  connectLangSmith: (body: LangSmithConnectBody) =>
-    request<TeamCredentialsStatus>("/team-credentials/langsmith", {
+  discoverWorkspaceMCP: (body: MCPConnectionUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),
+  revealMyMCPHeaders: (name: string) =>
+    request<Record<string, string>>(
+      `/my-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveMyMCP: (body: MCPConnectionUpdate) =>
+    request<MCPConnection>(`/my-mcps/${encodeURIComponent(body.name)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  disconnectLangSmith: () =>
-    request<TeamCredentialsStatus>("/team-credentials/langsmith", {
+  deleteMyMCP: (name: string) =>
+    request<void>(`/my-mcps/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
-  getMyCurrentsStatus: () =>
-    request<CurrentsCredentialStatus>("/my-credentials/currents"),
-  connectCurrents: (body: CurrentsConnectBody) =>
-    request<CurrentsCredentialStatus>("/my-credentials/currents", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  disconnectCurrents: () =>
-    request<CurrentsCredentialStatus>("/my-credentials/currents", {
-      method: "DELETE",
-    }),
-  getMyLangSmithStatus: () =>
-    request<ApiKeyCredentialStatus>("/my-credentials/langsmith"),
-  connectMyLangSmith: (body: CurrentsConnectBody) =>
-    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  disconnectMyLangSmith: () =>
-    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
-      method: "DELETE",
-    }),
+  discoverMyMCP: (body: MCPConnectionUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/my-mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   getMyNotionStatus: () =>
     request<NotionCredentialStatus>("/my-credentials/notion"),
   disconnectNotion: () =>
@@ -819,7 +885,15 @@ export const api = {
   usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
     request<UsageLeaderboardPayload>(
       `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
-    ),
+    ).then((payload) => ({
+      ...payload,
+      rows: payload.rows.map((row) => ({
+        ...row,
+        invocations: row.invocations ?? row.agent_runs ?? 0,
+        avg_invocation_seconds:
+          row.avg_invocation_seconds ?? row.avg_run_seconds ?? 0,
+      })),
+    })),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
@@ -866,11 +940,6 @@ export const api = {
       pr_url: string
     }>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
-      { method: "POST" }
-    ),
-  resolveTrace: (owner: string, repo: string, number: number) =>
-    request<PRTraceResolutionResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/resolve-trace`,
       { method: "POST" }
     ),
   createReviewComment: (

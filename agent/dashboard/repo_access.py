@@ -1,9 +1,10 @@
 """GitHub repository access checks for dashboard actions."""
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
+from agent.github.app import get_github_app_installation_token
 from agent.review.styles import normalize_repo_full_name
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
@@ -27,7 +28,7 @@ async def assert_repo_access(full_name: str, token: str) -> str:
         "X-GitHub-Api-Version": "2022-11-28",
     }
     owner, name = full_name.split("/", 1)
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         response = await client.get(
             f"https://api.github.com/repos/{owner}/{name}",
             headers=headers,
@@ -52,6 +53,23 @@ async def require_repo_access_for_user(login: str, full_name: str) -> str:
     return token
 
 
+async def require_repo_access_for_workspace(full_name: str) -> str:
+    token = await get_github_app_installation_token()
+    if not token:
+        raise HTTPException(503, "workspace GitHub App token unavailable")
+    try:
+        await assert_repo_access(full_name, token)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            raise HTTPException(502, "workspace GitHub App token rejected") from exc
+        if exc.status_code in (403, 404):
+            raise HTTPException(
+                exc.status_code, "repository unavailable to the workspace GitHub App"
+            ) from exc
+        raise
+    return token
+
+
 async def repo_config_for_user(login: str, full_name: str | None) -> dict[str, str] | None:
     if not isinstance(full_name, str) or not full_name.strip():
         return None
@@ -60,5 +78,17 @@ async def repo_config_for_user(login: str, full_name: str | None) -> dict[str, s
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     await require_repo_access_for_user(login, normalized)
+    owner, name = normalized.split("/", 1)
+    return {"owner": owner, "name": name}
+
+
+async def repo_config_for_workspace(full_name: str | None) -> dict[str, str] | None:
+    if not isinstance(full_name, str) or not full_name.strip():
+        return None
+    try:
+        normalized = normalize_repo_full_name(full_name)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await require_repo_access_for_workspace(normalized)
     owner, name = normalized.split("/", 1)
     return {"owner": owner, "name": name}

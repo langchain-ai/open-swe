@@ -1,16 +1,19 @@
-"""Open a GitHub pull request attributed to the triggering user."""
+"""Open a GitHub pull request using the thread's credential scope."""
 
 import logging
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2
+from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.credential_scope import pr_author_login, private_credential_login
 from agent.dashboard.agent_usage import record_agent_pr_usage
 from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
+from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,
@@ -29,7 +32,6 @@ from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
-_USER_TOKEN_SOURCES = ("slack", "linear", "dashboard")
 _REFERENCES_HEADING = "## References"
 _ACCESS_FAILURE_CODE = "github_app_access_missing_or_repo_not_found"
 _BRANCH_FAILURE_CODE = "github_pr_branch_not_visible"
@@ -49,31 +51,39 @@ _REPORTED_RESPONSE_HEADERS = (
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
-    """Return ``(token, kind)`` for opening the PR.
+    """Use the initiator's OAuth for user-owned threads and the bot for system threads."""
+    login = await pr_author_login()
+    if login is None:
+        return await get_github_app_installation_token(), "bot"
+    from agent.dashboard.profiles import get_valid_access_token
 
-    Prefers the triggering user's OAuth token (so the PR is created *as them*)
-    for Slack/Linear/dashboard runs with a mapped GitHub login, resolving it by
-    login from the dashboard OAuth store. Falls back to the GitHub App
-    installation token (creator = open-swe[bot]) for GitHub-triggered runs,
-    unmapped users, or bot-token-only deployments — preserving today's behavior.
+    token = await get_valid_access_token(login)
+    if not token:
+        raise GitHubUserAuthRequired(RunConfig.from_runtime().source or "private", login)
+    return token, "user"
 
-    The token is resolved by login rather than read from the shared thread
-    metadata: Slack thread ids are shared across a conversation, so a cached
-    token could belong to a prior triggering user.
-    """
-    cfg = RunConfig.from_runtime()
-    source = cfg.source
-    github_login = cfg.github_login
 
-    if source in _USER_TOKEN_SOURCES and github_login and github_login.strip():
-        from agent.dashboard.profiles import get_valid_access_token
-
-        user_token = await get_valid_access_token(github_login.strip())
-        if user_token:
-            return user_token, "user"
-        logger.info("No valid user token for %s; opening PR as open-swe[bot]", github_login.strip())
-
-    return await get_github_app_installation_token(), "bot"
+async def _workspace_has_repository(client: httpx2.AsyncClient, owner: str, repo: str) -> bool:
+    token = await get_github_app_installation_token()
+    if not token:
+        return False
+    page = 1
+    while True:
+        response = await client.get(
+            f"{GITHUB_API}/installation/repositories",
+            headers=_auth_headers(token),
+            params={"per_page": "100", "page": str(page)},
+        )
+        if response.status_code != 200:
+            return False
+        repositories = response.json().get("repositories", [])
+        if any(
+            item.get("full_name", "").lower() == f"{owner}/{repo}".lower() for item in repositories
+        ):
+            return True
+        if len(repositories) < 100:
+            return False
+        page += 1
 
 
 def _auth_headers(token: str) -> dict[str, str]:
@@ -84,7 +94,7 @@ def _auth_headers(token: str) -> dict[str, str]:
     }
 
 
-def _github_message(resp: httpx.Response) -> str:
+def _github_message(resp: httpx2.Response) -> str:
     try:
         data = resp.json()
     except Exception:
@@ -96,7 +106,7 @@ def _github_message(resp: httpx.Response) -> str:
     return resp.text.strip() or f"HTTP {resp.status_code}"
 
 
-def _github_response_summary(resp: httpx.Response | None) -> str:
+def _github_response_summary(resp: httpx2.Response | None) -> str:
     """Report what GitHub actually returned so the agent can diagnose it itself."""
     if resp is None:
         return ""
@@ -152,7 +162,7 @@ def _failure_payload(
     likely_cause: str,
     branch_pushed: bool | None,
     failed_step: str,
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
 ) -> dict[str, Any]:
     pushed = "unknown" if branch_pushed is None else "yes" if branch_pushed else "no"
     _record_open_pr_failure_telemetry(
@@ -233,7 +243,7 @@ def _access_failure_payload(
     reason: str,
     branch_pushed: bool | None,
     failed_step: str,
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
 ) -> dict[str, Any]:
     return _failure_payload(
         code=_ACCESS_FAILURE_CODE,
@@ -264,7 +274,7 @@ def _branch_failure_payload(
     http_status: int,
     branch: str,
     branch_role: str,
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
 ) -> dict[str, Any]:
     branch_pushed = False if branch_role == "head" else None
     return _failure_payload(
@@ -286,13 +296,13 @@ def _branch_failure_payload(
     )
 
 
-async def _github_get(client: httpx.AsyncClient, token: str, path: str) -> httpx.Response:
+async def _github_get(client: httpx2.AsyncClient, token: str, path: str) -> httpx2.Response:
     return await client.get(f"{GITHUB_API}{path}", headers=_auth_headers(token))
 
 
 async def _preflight_pr_access(
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     token: str,
     token_kind: str,
     owner: str,
@@ -433,7 +443,7 @@ async def _preflight_pr_access(
 
 
 async def _find_existing_pr(
-    client: httpx.AsyncClient, token: str, owner: str, repo: str, head: str
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, head: str
 ) -> dict[str, Any] | None:
     resp = await client.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
@@ -447,7 +457,7 @@ async def _find_existing_pr(
 
 
 async def _fetch_pr_details(
-    client: httpx.AsyncClient, token: str, owner: str, repo: str, pr_number: int
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, pr_number: int
 ) -> dict[str, Any]:
     resp = await client.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
@@ -472,6 +482,17 @@ def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[s
     repo = record.get("repo_full_name")
     number = record.get("number")
     url = record.get("url")
+    for item in existing:
+        if (
+            isinstance(item, dict)
+            and (
+                (item.get("repo_full_name") == repo and item.get("number") == number)
+                or item.get("url") == url
+            )
+            and isinstance(item.get("slack_feedback"), dict)
+        ):
+            record = {**record, "slack_feedback": item["slack_feedback"]}
+            break
     return [
         item
         for item in existing
@@ -530,7 +551,7 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
 
 async def _record_pr_telemetry(
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     token: str,
     owner: str,
     repo: str,
@@ -544,7 +565,8 @@ async def _record_pr_telemetry(
         return
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
-        cfg = RunConfig.from_runtime()
+        config = get_config()
+        cfg = RunConfig.from_config(config)
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
@@ -616,6 +638,12 @@ async def _record_pr_telemetry(
                 "diff_stats": diff_stats,
                 "resolves_thread": resolves_thread,
             }
+            run_id = config.get("run_id") or cfg.run_id
+            if run_id and cfg.slack_thread and cfg.slack_thread.channel_id:
+                record["slack_feedback"] = {
+                    "run_id": str(run_id),
+                    "channel_id": cfg.slack_thread.channel_id,
+                }
             pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",
@@ -738,7 +766,7 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
     return lines
 
 
-async def _is_private_repo(client: httpx.AsyncClient, token: str, owner: str, repo: str) -> bool:
+async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, repo: str) -> bool:
     """Return True only when GitHub confirms the repo is private."""
     resp = await client.get(f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token))
     if resp.status_code != 200:  # noqa: PLR2004
@@ -748,7 +776,7 @@ async def _is_private_repo(client: httpx.AsyncClient, token: str, owner: str, re
 
 
 async def _maybe_append_references(
-    client: httpx.AsyncClient, token: str, owner: str, repo: str, body: str
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, body: str
 ) -> str:
     """Append run references to the PR body."""
     try:
@@ -800,7 +828,23 @@ async def _open_pull_request(
             failed_step="resolve_pr_author_token",
         )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx2.AsyncClient(timeout=30.0) as client:
+        if (
+            kind == "user"
+            and await private_credential_login() is None
+            and not await _workspace_has_repository(client, owner, repo)
+        ):
+            return _access_failure_payload(
+                owner=owner,
+                repo=repo,
+                head=head,
+                base=base,
+                token_kind=kind,
+                http_status=None,
+                reason="Could not verify the target repository belongs to the workspace GitHub App installation",
+                branch_pushed=None,
+                failed_step="workspace_repo",
+            )
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,
@@ -912,40 +956,7 @@ async def open_pull_request(
     draft: bool = True,
     resolves_thread: bool = False,
 ) -> dict[str, Any]:
-    """Open a draft GitHub pull request attributed to the triggering user.
-
-    Use this to OPEN a NEW pull request (instead of `gh pr create`) so the PR is
-    created as the person who triggered the run rather than open-swe[bot]. Push
-    your branch with `git push origin <branch>` BEFORE calling this.
-
-    For everything else — updating an existing PR, marking it ready for review,
-    commenting, reading status — keep using `gh`. If a PR already
-    exists for the branch, this returns that PR's URL without creating a
-    duplicate; switch to `gh pr edit` for updates.
-
-    Args:
-        owner: Repository owner/org (e.g. "langchain-ai").
-        repo: Repository name (e.g. "open-swe").
-        head: The branch with your changes (already pushed to origin).
-        base: The branch you want to merge into (e.g. "main").
-        title: PR title.
-        body: PR description (Markdown).
-        draft: Requested draft status. The authenticated user's dashboard preference
-          overrides this value for newly created PRs; existing PRs are returned unchanged.
-        resolves_thread: Set True when merging or closing this PR finishes the
-          thread's work, so the thread auto-resolves once every PR it opened is
-          merged or closed. Prefer True. Use False only when you know more PRs
-          are coming for this thread (a stacked PR, a follow-up you still plan
-          to open) and set True on the last one instead. Threads whose PRs never
-          set this stay open until someone resolves them by hand.
-
-    Returns:
-        On success: {"success": True, "created": bool, "url": str, "number": int,
-        "author": str}. ``created`` is False when an open PR already existed.
-        On failure: {"success": False, "error": str}, where ``error`` states what
-        failed and quotes the request, status, headers, and body GitHub actually
-        returned — read it and decide what to do next.
-    """
+    """Implement the `open_pull_request` tool."""
     return await _open_pull_request(
         owner=owner,
         repo=repo,

@@ -6,11 +6,13 @@ import json
 import logging
 import posixpath
 import shlex
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Literal, Protocol, TypeVar
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
-import httpx
+import httpx2
 from fastapi import (
     APIRouter,
     Depends,
@@ -21,7 +23,8 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field, ValidationError
 
 from agent.config import ENV
 from agent.dashboard.admin import is_admin
@@ -36,6 +39,11 @@ from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
 )
+from agent.dashboard.environment_refresh import (
+    ensure_refresh_cron,
+    is_refresh_in_flight,
+    start_refresh_run,
+)
 from agent.dashboard.environments import (
     DEFAULT_ENVIRONMENT_SLUG,
     ENVIRONMENTS,
@@ -45,6 +53,7 @@ from agent.dashboard.environments import (
     list_environment_options,
     slugify,
 )
+from agent.dashboard.feedback import feedback_router
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -54,6 +63,7 @@ from agent.dashboard.notion_oauth import (
 )
 from agent.dashboard.oauth import (
     COOKIE_NAME,
+    SESSION_COOKIE,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
@@ -61,7 +71,7 @@ from agent.dashboard.oauth import (
     decode_terminal_ticket,
     desktop_callback_url,
     desktop_handoff_from_state,
-    enforce_org_login_gate,
+    enforce_github_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
@@ -102,7 +112,6 @@ from agent.dashboard.repo_cache import (
 )
 from agent.dashboard.review_api import (
     create_review_comment,
-    dry_run_trace_resolution,
     get_review,
     get_review_diff,
     list_review_comments,
@@ -148,15 +157,6 @@ from agent.dashboard.skills import (
     update_organization_skill,
     update_skill,
 )
-from agent.dashboard.team_credentials import (
-    DatadogCredentialsUpdate,
-    LangSmithCredentialsUpdate,
-    connect_datadog,
-    connect_langsmith,
-    disconnect_datadog,
-    disconnect_langsmith,
-    get_team_credentials_status,
-)
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     TranscriptionSettingsUpdate,
@@ -167,53 +167,50 @@ from agent.dashboard.team_settings import (
     update_team_transcription_model,
     upsert_team_settings,
 )
-from agent.dashboard.thread_api import (
-    ThreadMessageBody,
-    ThreadResolveBody,
+from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
+    continue_thread_privately,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
-    get_dashboard_thread_branch_diff,
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
-    get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
+    rename_dashboard_thread,
+    resolve_all_dashboard_threads,
+    resolve_dashboard_thread,
+    send_dashboard_message,
+)
+from agent.dashboard.threads.diffs import (
+    get_dashboard_thread_branch_diff,
+    get_dashboard_thread_recovery_patch,
     get_dashboard_thread_working_tree_diff,
+)
+from agent.dashboard.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_projects,
     list_dashboard_threads,
     list_dashboard_threads_page,
     pin_dashboard_thread,
+    unpin_dashboard_thread,
+)
+from agent.dashboard.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
-    resolve_dashboard_thread,
-    send_dashboard_message,
-    stream_dashboard_thread,
-    unpin_dashboard_thread,
+)
+from agent.dashboard.threads.runs import (
+    ThreadMessageBody,
+    ThreadRenameBody,
+    ThreadResolveBody,
 )
 from agent.dashboard.user_credentials import (
-    CurrentsCredentialsUpdate,
-    UserLangSmithCredentialsUpdate,
-    connect_currents,
     connect_notion,
-    disconnect_currents,
     disconnect_notion,
-    get_currents_status,
     get_notion_status,
-)
-from agent.dashboard.user_credentials import (
-    connect_langsmith as connect_user_langsmith,
-)
-from agent.dashboard.user_credentials import (
-    disconnect_langsmith as disconnect_user_langsmith,
-)
-from agent.dashboard.user_credentials import (
-    get_langsmith_status as get_user_langsmith_status,
 )
 from agent.dashboard.user_instructions import (
     UserInstructionsUpdate,
@@ -227,9 +224,34 @@ from agent.dashboard.user_mappings import (
     list_mappings,
     upsert_mapping,
 )
+from agent.dashboard.user_mcps import (
+    delete_user_mcp,
+    discover_user_mcp,
+    get_user_mcp,
+    list_user_mcps,
+    save_user_mcp,
+)
+from agent.dashboard.user_preferences import (
+    UserPreferencesUpdate,
+    get_user_preferences,
+    set_user_preferences,
+)
 from agent.dashboard.voice import transcribe_audio
+from agent.dashboard.workspace_mcps import (
+    MCPRoute,
+    delete_workspace_mcp,
+    get_workspace_mcp,
+    list_workspace_mcps,
+    save_workspace_mcp,
+)
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.mcp import (
+    MCPConnection,
+    MCPConnectionPublic,
+    MCPConnectionUpdate,
+    MCPToolDescription,
+)
 from agent.review.analyzer_cron import remove_continual_cron
 from agent.review.eval_jobs import (
     get_reviewer_eval_status,
@@ -246,6 +268,14 @@ from agent.review.styles import (
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
 )
+from agent.slack.allowed_bots import (
+    ALLOWED_SLACK_BOTS,
+    AllowedSlackBot,
+    AllowSlackBot,
+    SlackBotOption,
+    allow_slack_bot,
+    list_slack_bots,
+)
 from agent.slack.oauth import (
     SLACK_STATE_COOKIE_NAME,
     build_authorize_url,
@@ -254,12 +284,13 @@ from agent.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from agent.tool_loaders.workspace_mcp import discover_workspace_mcp
 from agent.utils.dashboard_links import (
     dashboard_api_base_url,
     dashboard_base_url,
     dashboard_is_same_origin,
 )
-from agent.utils.thread_ops import langgraph_url
+from agent.utils.thread_ops import langgraph_client, langgraph_url
 from agent.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
@@ -269,9 +300,16 @@ router = APIRouter(
     tags=["dashboard"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
-_GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+router.include_router(feedback_router)
+_GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
+# Long enough that a browsing session mints once, short enough that a revoked
+# dashboard session loses access soon after.
+_SERVICE_TOKEN_TTL_SECONDS = 3600
+# A stored token is reused while at least this much of its life is left, so a
+# proxied request never starts with one about to expire mid-connection.
+_SERVICE_TOKEN_MIN_REMAINING_SECONDS = 120
 # Module-level so a local harness can point the browser leg at a fake consent
 # page and still run the real login/callback code.
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
@@ -296,9 +334,20 @@ def _admin_session(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
 
 
 _ADMIN_DEP = Depends(_admin_session)
+_ADMIN_BEARER_DEP = Depends(
+    HTTPBearer(
+        scheme_name="AdminBearer",
+        description="An admin's GitHub user token or an allowlisted GitHub Actions OIDC token.",
+        auto_error=False,
+    )
+)
 
 
-async def _admin_session_or_ci_token(request: Request) -> dict[str, Any]:
+async def _admin_session_or_ci_token(
+    request: Request,
+    _cookie: str | None = Depends(SESSION_COOKIE),
+    _bearer: HTTPAuthorizationCredentials | None = _ADMIN_BEARER_DEP,
+) -> dict[str, Any]:
     """Admin gate that also accepts CI credentials: an Actions OIDC token, or an
     admin's GitHub personal access token."""
     token = bearer_github_token(request)
@@ -356,6 +405,10 @@ async def _filter_repo_models_for_user[RepoRecordT: _RepoScopedRecord](
 
 def _api_base_url() -> str:
     return dashboard_api_base_url()
+
+
+def _slack_base_url() -> str:
+    return (ENV.SLACK_PUBLIC_BASE_URL.get() or _api_base_url()).rstrip("/")
 
 
 def _frontend_base_url() -> str:
@@ -521,7 +574,7 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
-    await enforce_org_login_gate(login)
+    await enforce_github_login_gate(login)
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
@@ -576,6 +629,8 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "avatar_url": session.get("avatar_url"),
         "is_admin": _session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
+        "api_base_url": _api_base_url(),
+        "slack_base_url": _slack_base_url(),
     }
 
 
@@ -603,6 +658,27 @@ async def api_delete_my_instructions(
 ) -> Response:
     await delete_user_instructions(session["sub"])
     return Response(status_code=204)
+
+
+@router.get("/me/preferences")
+async def api_get_my_preferences(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return {
+        **await get_user_preferences(session["sub"]),
+        "default_local_tracing_project": ENV.LANGSMITH_PROJECT.get(),
+    }
+
+
+@router.put("/me/preferences")
+async def api_put_my_preferences(
+    body: UserPreferencesUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return {
+        **await set_user_preferences(session["sub"], body),
+        "default_local_tracing_project": ENV.LANGSMITH_PROJECT.get(),
+    }
 
 
 @router.get("/options")
@@ -659,56 +735,6 @@ async def get_my_mapping(
     """Return the logged-in user's own GitHub↔Slack mapping (or empty)."""
     mapping = await get_mapping(session["sub"])
     return mapping or {}
-
-
-@router.get("/my-credentials/currents")
-async def get_my_currents_status(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await get_currents_status(session["sub"])
-    return status.get("currents", {"connected": False})
-
-
-@router.put("/my-credentials/currents")
-async def connect_my_currents(
-    update: CurrentsCredentialsUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await connect_currents(session["sub"], update)
-    return status.get("currents", {"connected": False})
-
-
-@router.delete("/my-credentials/currents")
-async def disconnect_my_currents(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await disconnect_currents(session["sub"])
-    return status.get("currents", {"connected": False})
-
-
-@router.get("/my-credentials/langsmith")
-async def get_my_langsmith_status(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await get_user_langsmith_status(session["sub"])
-    return status.get("langsmith", {"connected": False})
-
-
-@router.put("/my-credentials/langsmith")
-async def connect_my_langsmith(
-    update: UserLangSmithCredentialsUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await connect_user_langsmith(session["sub"], update)
-    return status.get("langsmith", {"connected": False})
-
-
-@router.delete("/my-credentials/langsmith")
-async def disconnect_my_langsmith(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    status = await disconnect_user_langsmith(session["sub"])
-    return status.get("langsmith", {"connected": False})
 
 
 @router.get("/my-credentials/notion")
@@ -847,7 +873,7 @@ async def slack_login(
     """Start the Sign in with Slack flow to link the current GitHub account."""
     if not slack_oauth_configured():
         raise HTTPException(500, "Slack OAuth is not configured")
-    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
     nonce = new_state_nonce()
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
@@ -917,7 +943,7 @@ async def slack_callback(
 
 async def _verified_slack_identity(code: str) -> tuple[str, str]:
     """Resolve an authorization code to a Slack member id and verified email."""
-    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
     identity = await fetch_slack_identity(await exchange_slack_code(code, redirect_uri))
     verify_team(identity)
     if not identity.email or not identity.email_verified:
@@ -947,6 +973,38 @@ async def slack_desktop_exchange(
     return {"connected": True}
 
 
+@router.get("/slack/bots")
+async def api_list_slack_bots(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[SlackBotOption]:
+    return await list_slack_bots()
+
+
+@router.get("/slack/allowed-bots")
+async def api_list_allowed_slack_bots(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[AllowedSlackBot]:
+    return await ALLOWED_SLACK_BOTS.search_all()
+
+
+@router.post("/slack/allowed-bots")
+async def api_allow_slack_bot(
+    body: AllowSlackBot,
+    admin: dict[str, Any] = _ADMIN_DEP,
+) -> AllowedSlackBot:
+    return await allow_slack_bot(body, admin)
+
+
+@router.delete("/slack/allowed-bots/{team_id}/{bot_id}")
+async def api_remove_allowed_slack_bot(
+    team_id: str,
+    bot_id: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, bool]:
+    await ALLOWED_SLACK_BOTS.delete(f"{team_id}:{bot_id}")
+    return {"ok": True}
+
+
 @router.get("/team-settings")
 async def api_get_team_settings(
     session: dict[str, Any] = _SESSION_DEP,
@@ -970,41 +1028,112 @@ async def api_put_team_settings(
     return await upsert_team_settings(update)
 
 
-@router.get("/team-credentials")
-async def api_get_team_credentials(
+def _reveal_mcp_headers(record: MCPConnection | None) -> JSONResponse:
+    if record is None:
+        raise HTTPException(404, "MCP connection not found")
+    try:
+        headers = record.connection_headers()
+    except ValueError:
+        raise HTTPException(400, "MCP authentication headers could not be decrypted") from None
+    return JSONResponse(content=headers, headers={"Cache-Control": "no-store"})
+
+
+workspace_mcp_router = APIRouter(route_class=MCPRoute)
+
+
+@workspace_mcp_router.get("/workspace-mcps", response_model=list[MCPConnectionPublic])
+async def api_list_workspace_mcps(_admin: dict[str, Any] = _ADMIN_DEP) -> list[dict[str, Any]]:
+    return await list_workspace_mcps()
+
+
+@workspace_mcp_router.put("/workspace-mcps/{name}", response_model=MCPConnectionPublic)
+async def api_save_workspace_mcp(
+    name: str,
+    update: MCPConnectionUpdate,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await get_team_credentials_status()
+    try:
+        return await save_workspace_mcp(name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
-@router.put("/team-credentials/datadog")
-async def api_connect_datadog(
-    update: DatadogCredentialsUpdate,
+@workspace_mcp_router.delete("/workspace-mcps/{name}", status_code=204)
+async def api_delete_workspace_mcp(name: str, _admin: dict[str, Any] = _ADMIN_DEP) -> None:
+    await delete_workspace_mcp(name)
+
+
+@workspace_mcp_router.post("/workspace-mcps/{name}/headers/reveal")
+async def api_reveal_workspace_mcp_headers(
+    name: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await connect_datadog(update)
+) -> JSONResponse:
+    return _reveal_mcp_headers(await get_workspace_mcp(name))
 
 
-@router.delete("/team-credentials/datadog")
-async def api_disconnect_datadog(
+@workspace_mcp_router.post(
+    "/workspace-mcps/{name}/discover", response_model=list[MCPToolDescription]
+)
+async def api_discover_workspace_mcp(
+    name: str,
+    update: MCPConnectionUpdate | None = None,
     _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[dict[str, str]]:
+    try:
+        return await discover_workspace_mcp(name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+router.include_router(workspace_mcp_router)
+
+
+user_mcp_router = APIRouter(route_class=MCPRoute)
+
+
+@user_mcp_router.get("/my-mcps", response_model=list[MCPConnectionPublic])
+async def api_list_my_mcps(session: dict[str, Any] = _SESSION_DEP) -> list[dict[str, Any]]:
+    return await list_user_mcps(session["sub"])
+
+
+@user_mcp_router.put("/my-mcps/{name}", response_model=MCPConnectionPublic)
+async def api_save_my_mcp(
+    name: str,
+    update: MCPConnectionUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await disconnect_datadog()
+    try:
+        return await save_user_mcp(session["sub"], name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
-@router.put("/team-credentials/langsmith")
-async def api_connect_langsmith(
-    update: LangSmithCredentialsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await connect_langsmith(update)
+@user_mcp_router.delete("/my-mcps/{name}", status_code=204)
+async def api_delete_my_mcp(name: str, session: dict[str, Any] = _SESSION_DEP) -> None:
+    await delete_user_mcp(session["sub"], name)
 
 
-@router.delete("/team-credentials/langsmith")
-async def api_disconnect_langsmith(
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await disconnect_langsmith()
+@user_mcp_router.post("/my-mcps/{name}/headers/reveal")
+async def api_reveal_my_mcp_headers(
+    name: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> JSONResponse:
+    return _reveal_mcp_headers(await get_user_mcp(session["sub"], name))
+
+
+@user_mcp_router.post("/my-mcps/{name}/discover", response_model=list[MCPToolDescription])
+async def api_discover_my_mcp(
+    name: str,
+    update: MCPConnectionUpdate | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> list[dict[str, str]]:
+    try:
+        return await discover_user_mcp(session["sub"], name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+router.include_router(user_mcp_router)
 
 
 class EnabledReviewRepoUpdate(BaseModel):
@@ -1066,18 +1195,21 @@ async def api_create_environment(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Environment:
     try:
-        return await ENVIRONMENTS.create(body, _admin["sub"])
+        record = await ENVIRONMENTS.create(body, _admin["sub"])
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
+    if record.setup_script:
+        await ensure_refresh_cron(record.slug)
+    return record
 
 
 @router.get("/environments/options")
 async def api_environment_options(
-    _session: dict[str, Any] = _SESSION_DEP,
+    session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    """Pickable environments for any signed-in user: names only, no prompts."""
+    """Pickable environments for any signed-in user; refresh logs only for admins."""
     return {
-        "environments": await list_environment_options(),
+        "environments": await list_environment_options(include_logs=_session_is_admin(session)),
         "default_slug": DEFAULT_ENVIRONMENT_SLUG,
     }
 
@@ -1100,9 +1232,36 @@ async def api_update_environment(
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> Environment:
     try:
-        return await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
+        record = await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    if record.setup_script:
+        await ensure_refresh_cron(record.slug)
+    return record
+
+
+@router.post("/environments/{slug}/refresh")
+async def api_refresh_environment(
+    slug: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    """Start a snapshot rebuild from the environment's scripts.
+
+    Started in the background rather than awaited: a rebuild takes minutes, and
+    the outcome lands on the record for the dashboard to poll.
+    """
+    normalized = _normalized_slug(slug)
+    record = await ENVIRONMENTS.get(normalized)
+    if not record:
+        raise HTTPException(404, "environment not found")
+    if not record.setup_script:
+        raise HTTPException(400, "environment has no setup script to run")
+    if is_refresh_in_flight(record):
+        raise HTTPException(409, "a refresh of this environment is already running")
+    run_id = await start_refresh_run(normalized)
+    if run_id is None:
+        raise HTTPException(502, "could not start the refresh job")
+    return {"started": True, "run_id": run_id}
 
 
 @router.delete("/environments/{slug}")
@@ -1174,7 +1333,7 @@ def _github_api_http_exception(status_code: int) -> HTTPException:
 
 
 async def _paginate(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     url: str,
     *,
     headers: dict[str, str],
@@ -1195,15 +1354,15 @@ async def _paginate(
         params = {"per_page": "100"} if first else None
         try:
             r = await client.get(next_url, headers=headers, params=params)
-        except httpx.TimeoutException as exc:
+        except httpx2.TimeoutException as exc:
             logger.warning("GitHub API timed out while paginating %s", next_url)
             raise HTTPException(503, "github API request timed out") from exc
-        except httpx.RequestError as exc:
+        except httpx2.RequestError as exc:
             logger.warning("GitHub API request failed while paginating %s: %s", next_url, exc)
             raise HTTPException(502, "github API request failed") from exc
         try:
             r.raise_for_status()
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             logger.warning(
                 "GitHub API returned %s while paginating %s",
                 r.status_code,
@@ -1237,7 +1396,7 @@ async def _fetch_user_installations_and_repos(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
+    async with httpx2.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
         try:
             installations = await _paginate(
                 client,
@@ -1420,17 +1579,6 @@ async def api_re_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await trigger_re_review(owner, repo, pr_number, session["sub"])
-
-
-@router.post("/reviews/{owner}/{repo}/{pr_number}/resolve-trace")
-async def api_resolve_trace(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await dry_run_trace_resolution(owner, repo, pr_number)
 
 
 class ReviewCommentCreate(BaseModel):
@@ -1929,6 +2077,15 @@ async def api_list_threads(
     return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
 
 
+@router.post("/threads/resolve-all")
+async def api_resolve_all_threads(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, int]:
+    return {
+        "resolved": await resolve_all_dashboard_threads(session["sub"], email=session.get("email"))
+    }
+
+
 @router.get("/threads/projects")
 async def api_list_thread_projects(
     include_resolved: bool = False,
@@ -2122,6 +2279,101 @@ async def api_thread_terminal_connection(
     }
 
 
+class SandboxServiceToken(BaseModel):
+    """A LangSmith service credential for one port of one sandbox."""
+
+    service_url: str
+    token: str
+    expires_at: str
+
+    def usable_for(self, seconds: float) -> bool:
+        try:
+            expires = datetime.fromisoformat(self.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        return (expires - datetime.now(UTC)).total_seconds() > seconds
+
+
+def _service_token_namespace(sandbox_id: str) -> tuple[str, str]:
+    return ("sandbox_service", sandbox_id)
+
+
+async def _stored_service_token(sandbox_id: str, port: int) -> SandboxServiceToken | None:
+    """The token this deployment already minted for the port, while it stays usable."""
+    try:
+        item = await langgraph_client().store.get_item(
+            _service_token_namespace(sandbox_id), str(port)
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    value = item.get("value") if isinstance(item, Mapping) else None
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        stored = SandboxServiceToken.model_validate(value)
+    except ValidationError:
+        return None
+    return stored if stored.usable_for(_SERVICE_TOKEN_MIN_REMAINING_SECONDS) else None
+
+
+async def _store_service_token(sandbox_id: str, port: int, token: SandboxServiceToken) -> None:
+    try:
+        await langgraph_client().store.put_item(
+            _service_token_namespace(sandbox_id), str(port), token.model_dump()
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not store the sandbox service token", exc_info=True)
+
+
+@router.get("/threads/{thread_id}/service-url")
+async def api_thread_service_url(
+    thread_id: str,
+    port: int,
+    response: Response,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, str]:
+    """Mint a sandbox service credential for the dashboard's service proxy.
+
+    The token, not the ``browser_url`` that carries it, so it stays server-side:
+    the dashboard app attaches it as a header and the browser never holds it.
+    """
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
+        raise HTTPException(400, "sandbox services require a LangSmith sandbox")
+    if isinstance(port, bool) or not 1 <= port <= 65535:
+        raise HTTPException(422, "port must be between 1 and 65535")
+    sandbox_id, _ = await get_dashboard_terminal_sandbox(
+        thread_id, session["sub"], email=session.get("email")
+    )
+    response.headers["Cache-Control"] = "no-store"
+    stored = await _stored_service_token(sandbox_id, port)
+    if stored is not None:
+        return stored.model_dump()
+
+    from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+
+    try:
+        async with get_async_sandbox_client() as client:
+            service = await client.service(
+                sandbox_id, port, expires_in_seconds=_SERVICE_TOKEN_TTL_SECONDS
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Could not mint a sandbox service token",
+            extra={"thread_id": thread_id, "sandbox": sandbox_id, "service_port": port},
+            exc_info=True,
+        )
+        raise HTTPException(502, "could not reach the thread sandbox") from exc
+    minted = SandboxServiceToken(
+        service_url=service.service_url,
+        token=service.token,
+        expires_at=service.expires_at,
+    )
+    await _store_service_token(sandbox_id, port, minted)
+    return minted.model_dump()
+
+
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
     if ENV.SANDBOX_TYPE.get() != "langsmith":
         await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
@@ -2294,6 +2546,28 @@ async def api_send_thread_message(
     return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
 
 
+@router.patch("/threads/{thread_id}")
+async def api_rename_thread(
+    thread_id: str,
+    body: ThreadRenameBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await rename_dashboard_thread(
+        thread_id,
+        session["sub"],
+        title=body.title,
+        email=session.get("email"),
+    )
+
+
+@router.post("/threads/{thread_id}/continue-private")
+async def api_continue_thread_privately(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await continue_thread_privately(thread_id, session["sub"], email=session.get("email"))
+
+
 @router.post("/threads/{thread_id}/resolve")
 async def api_resolve_thread(
     thread_id: str,
@@ -2340,7 +2614,7 @@ async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = _ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await admin_cancel_dashboard_thread(thread_id)
+    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"], email=_admin.get("email"))
 
 
 @router.delete("/threads/{thread_id}")
@@ -2421,24 +2695,3 @@ async def api_thread_history(
         content_type=request.headers.get("content-type", "application/json"),
     )
     return Response(content=content, status_code=status_code, media_type=media_type)
-
-
-@router.get("/threads/{thread_id}/stream")
-async def api_stream_thread(
-    thread_id: str,
-    request: Request,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> StreamingResponse:
-    last_event_id = request.headers.get("last-event-id")
-
-    async def event_generator():
-        async for chunk in stream_dashboard_thread(
-            thread_id, session["sub"], email=session.get("email"), last_event_id=last_event_id
-        ):
-            yield chunk
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )

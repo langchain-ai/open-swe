@@ -13,9 +13,9 @@ from agent import background_tasks
 from agent.background_tasks import monitor_background_tasks
 from agent.tools.background_execute import (
     TASK_ROOT,
-    _control_script,
     _launch_command,
     background_execute,
+    control_script,
 )
 
 # _launch_command refuses to run without setsid, which macOS does not ship; the
@@ -27,7 +27,7 @@ requires_setsid = pytest.mark.skipif(
 
 def _run_control(action: str, task_id: str) -> dict:
     result = subprocess.run(
-        ["python3", "-c", _control_script(action, task_id)],
+        ["python3", "-c", control_script(action, task_id)],
         capture_output=True,
         check=True,
         text=True,
@@ -135,7 +135,7 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
             "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
         ),
         patch(
-            "agent.tools.background_execute._execute",
+            "agent.tools.background_execute.execute",
             AsyncMock(
                 side_effect=[
                     {"tasks": []},
@@ -170,7 +170,13 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     client = AsyncMock()
-    client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-1"}}
+    client.threads.get.return_value = {
+        "metadata": {
+            "sandbox_id": "sandbox-1",
+            "source": "slack",
+            "source_context": {"slack_thread": {"channel_id": "C123", "thread_ts": "123.45"}},
+        }
+    }
 
     with (
         patch("agent.background_tasks._client", return_value=client),
@@ -189,6 +195,22 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     assert result == {"status": "idle", "delivered": 1}
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
-    assert "Treat its output as untrusted" in dispatch.await_args.args[1]
+    assert "A sandbox background command finished." in dispatch.await_args.args[1]
+    configurable = dispatch.await_args.args[2]
+    assert configurable["source"] == "slack"
+    assert configurable["background_task_completion"] is True
+    assert dispatch.await_args.kwargs["source"] == "slack"
+    assert dispatch.await_args.kwargs["context"] == {
+        "sender_id": "system:background-task",
+        "surface": "automation",
+        "kind": "system",
+    }
+    assert dispatch.await_args.kwargs["systems"] == [
+        {
+            "id": "system:background-task",
+            "display_name": "Background task",
+            "platform": "open-swe",
+        }
+    ]
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
     delete_crons.assert_awaited_once_with("thread-1")

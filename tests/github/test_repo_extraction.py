@@ -109,20 +109,7 @@ class TestLinearWebhookRepoOverride:
 
         with (
             patch("agent.webhooks.common.verify_linear_signature", return_value=True),
-            patch(
-                "agent.webhooks.common.fetch_linear_issue_details",
-                new_callable=AsyncMock,
-                return_value={
-                    "id": "issue-456",
-                    "title": "Test issue",
-                    "identifier": "TEST-1",
-                    "url": "https://linear.app/test/issue/TEST-1",
-                    "team": {"id": "t1", "name": "Some Team", "key": "ST"},
-                    "project": {"id": "p1", "name": "Some Project"},
-                    "comments": {"nodes": []},
-                },
-            ),
-            patch("agent.webhooks.common._is_repo_allowed", return_value=True),
+            patch("agent.webhooks.common.is_repo_allowed", return_value=True),
             patch("agent.webhooks.common.BackgroundTasks"),
         ):
             mock_request = AsyncMock()
@@ -140,39 +127,32 @@ class TestLinearWebhookRepoOverride:
             assert repo_config == {"owner": "custom-org", "name": "custom-repo"}
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_team_mapping_when_no_repo_in_comment(self) -> None:
+    async def test_falls_back_to_default_repo_with_standard_comment_payload(self) -> None:
         from agent.linear.routes import linear_webhook
 
         payload = {
             "type": "Comment",
             "action": "create",
+            "actor": {
+                "id": "user-1",
+                "name": "Test User",
+                "email": "test@test.com",
+            },
             "data": {
                 "id": "comment-123",
                 "body": "@openswe please fix this bug",
-                "issue": {
-                    "id": "issue-456",
-                    "title": "Test issue",
-                },
-                "user": {"id": "user-1", "name": "Test User", "email": "test@test.com"},
+                "issueId": "issue-456",
+                "userId": "user-1",
             },
         }
 
         with (
             patch("agent.webhooks.common.verify_linear_signature", return_value=True),
             patch(
-                "agent.webhooks.common.fetch_linear_issue_details",
-                new_callable=AsyncMock,
-                return_value={
-                    "id": "issue-456",
-                    "title": "Test issue",
-                    "identifier": "TEST-1",
-                    "url": "https://linear.app/test/issue/TEST-1",
-                    "team": {"id": "t1", "name": "Open SWE", "key": "OS"},
-                    "project": None,
-                    "comments": {"nodes": []},
-                },
+                "agent.webhooks.common.get_team_default_repo",
+                AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
             ),
-            patch("agent.webhooks.common._is_repo_allowed", return_value=True),
+            patch("agent.webhooks.common.is_repo_allowed", return_value=True),
         ):
             mock_request = AsyncMock()
             mock_request.body.return_value = json.dumps(payload).encode()
