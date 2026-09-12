@@ -91,6 +91,7 @@ class PendingRequest(BaseModel):
 class PendingPublication(BaseModel):
     reason: str
     text: str
+    blocks: list[dict[str, Any]] = Field(default_factory=list)
     thread_ts: str | None = None
     key: str
     policy_version: int
@@ -109,6 +110,7 @@ class Incident(BaseModel):
     active_pass_id: str | None = None
     reset_conversation: bool = False
     anchor_ts: str | None = None
+    slack_session_thread_ts: str | None = None
     status: Literal[
         "pending", "investigating", "watching", "paused", "needs_attention", "completed"
     ] = "pending"
@@ -127,6 +129,7 @@ class Incident(BaseModel):
     last_published_digest: str = ""
     last_context_hash: str = ""
     pending_since: float = 0
+    pending_message_at: float = 0
     retry_after: float = 0
     setup_attempts: int = 0
     report: IncidentReport | None = None
@@ -150,6 +153,7 @@ class Receipt(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     actor: dict[str, Any] = Field(default_factory=dict)
     received_at: float
+    available_at: float = 0
     source_time: float = 0
     content_hash: str = ""
 
@@ -158,6 +162,7 @@ class Publication(BaseModel):
     id: str
     incident_id: str
     text: str
+    blocks: list[dict[str, Any]] = Field(default_factory=list)
     thread_ts: str | None = None
     reason: str
     status: Literal["pending", "sending", "sent", "unknown", "failed"] = "pending"

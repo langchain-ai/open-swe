@@ -26,6 +26,7 @@ const BASE_BOT_EVENTS = [
   "channel_created",
   "channel_rename",
   "channel_archive",
+  "agent_session_stopped",
 ]
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
@@ -88,12 +89,7 @@ export function slackAppManifest(
       event_subscriptions: {
         request_url: `${backendUrl}/webhooks/slack`,
         bot_events: codeChannelsEnabled
-          ? [
-              ...BASE_BOT_EVENTS,
-              "agent_session_stopped",
-              "code_channel_action",
-              "message.groups",
-            ]
+          ? [...BASE_BOT_EVENTS, "code_channel_action", "message.groups"]
           : BASE_BOT_EVENTS,
       },
       interactivity: {

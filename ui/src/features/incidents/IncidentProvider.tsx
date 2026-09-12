@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Markdown } from "@/features/agents/components/chat/Markdown"
 import {
   ErrorState,
   ExternalLink,
@@ -33,9 +34,9 @@ function ProviderDetails({ snapshot }: { snapshot: ProviderSnapshot }) {
           <summary className="cursor-pointer text-xs">
             Provider postmortem
           </summary>
-          <p className="mt-3 text-sm leading-7 whitespace-pre-wrap">
-            {snapshot.postmortem}
-          </p>
+          <div className="mt-3">
+            <Markdown content={snapshot.postmortem} />
+          </div>
         </details>
       )}
     </div>

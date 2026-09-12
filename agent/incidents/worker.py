@@ -6,7 +6,6 @@ import math
 import re
 import time
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 from agent.config import ENV
 from agent.dispatch import create_durable_run
@@ -23,12 +22,15 @@ from agent.incidents.models import (
     Publication,
     Receipt,
 )
+from agent.incidents.presentation import report_message
 from agent.store import now_iso
 from agent.utils.dashboard_links import dashboard_incident_url
 
 logger = logging.getLogger(__name__)
 _STOPPED_STATES = {"paused", "completed"}
 _MAX_PENDING_REQUESTS = 100
+_MESSAGE_QUIET_SECONDS = 15
+_MAX_MESSAGE_WAIT_SECONDS = 60
 
 
 class IncidentStopped(RuntimeError):
@@ -72,14 +74,16 @@ async def channel_receipts(record: Incident) -> list[Receipt]:
         [
             r
             for r in receipts
-            if r.workspace_id == record.workspace_id and r.id not in record.processed_receipts
+            if r.workspace_id == record.workspace_id
+            and r.id not in record.processed_receipts
+            and r.available_at <= time.time()
         ],
         key=lambda r: (receipt_time(r), r.received_at, r.id),
     )
 
 
 def receipt_time(receipt: Receipt) -> float:
-    if receipt.kind == "app_mention":
+    if receipt.kind in {"app_mention", "agent_session_stopped"}:
         try:
             timestamp = float(
                 receipt.payload.get("event_ts") or receipt.payload.get("ts") or receipt.source_time
@@ -103,9 +107,24 @@ def remember_control(record: Incident, receipt: Receipt, action: str) -> None:
     record.last_control_at, record.last_control_priority = control_order(receipt, action)
 
 
-async def command_for_receipt(receipt: Receipt, policy: IncidentPolicy) -> tuple[str, str]:
+async def command_for_receipt(
+    receipt: Receipt, policy: IncidentPolicy, record: Incident | None = None
+) -> tuple[str, str]:
     if receipt.kind == "command":
         return str(receipt.payload.get("action") or ""), str(receipt.payload.get("text") or "")
+    if receipt.kind == "agent_session_stopped":
+        if (
+            record is None
+            or not receipt.payload.get("thread_ts")
+            or receipt.payload["thread_ts"]
+            not in {record.anchor_ts, record.slack_session_thread_ts}
+            or not receipt.payload.get("user")
+            or receipt.payload.get("bot_id")
+        ):
+            return "", ""
+        info = await slack.request("users.info", user=receipt.payload["user"])
+        email = (info.get("user", {}).get("profile") or {}).get("email")
+        return ("pause", "") if is_observability_authorized(email) else ("", "")
     if receipt.kind != "app_mention":
         return "", ""
     raw = str(receipt.payload.get("text") or "").strip()
@@ -125,16 +144,27 @@ async def command_for_receipt(receipt: Receipt, policy: IncidentPolicy) -> tuple
     )
 
 
-def _merge_message(record: Incident, message: IncidentMessage) -> None:
+def _merge_message(record: Incident, message: IncidentMessage) -> bool:
     previous = next((m for m in record.messages if m.id == message.id), None)
+    if previous == message:
+        return False
     if previous and previous.deleted and not message.deleted:
-        return
+        return False
     if previous and float(previous.edited_at or previous.ts or 0) > float(
         message.edited_at or message.ts or 0
     ):
-        return
+        return False
     record.messages = [m for m in record.messages if m.id != message.id] + [message]
     record.messages = sorted(record.messages, key=lambda m: float(m.ts or 0))[-500:]
+    return True
+
+
+def debounce_delay(record: Incident, now: float) -> float:
+    if not record.pending_since:
+        return 0
+    quiet_until = (record.pending_message_at or record.pending_since) + _MESSAGE_QUIET_SECONDS
+    deadline = record.pending_since + _MAX_MESSAGE_WAIT_SECONDS
+    return max(0, min(quiet_until, deadline) - now)
 
 
 def _own_message(message: IncidentMessage, policy: IncidentPolicy) -> bool:
@@ -176,55 +206,22 @@ def _queue_publication(
 ) -> None:
     if record.is_archived:
         return
+    blocks: list[dict[str, Any]] = []
     if record.report and reason in {"findings", "answer", "completion"}:
-        text = report_text(record.report, text)
+        text, blocks = report_message(
+            record.report, text, dashboard_incident_url(record.id), reason=reason
+        )
     if not any(p.reason == reason and p.key == key for p in record.pending_publications):
         record.pending_publications.append(
             PendingPublication(
                 reason=reason,
                 text=text[:12000],
+                blocks=blocks,
                 key=key,
                 thread_ts=thread_ts,
                 policy_version=policy.version,
             )
         )
-
-
-def report_text(report: IncidentReport, text: str) -> str:
-    """Slack digest of a report: lead text, then impact, hypotheses, questions, gaps, evidence."""
-    sections = [text]
-    if report.impact:
-        sections.append(f"*Impact:* {report.impact}")
-    if report.hypotheses:
-        sections.append(
-            "*Hypotheses:*\n"
-            + "\n".join(f"• {h.title} ({h.assessment})" for h in report.hypotheses[:6])
-        )
-    if report.questions:
-        sections.append("*Open questions:*\n" + "\n".join(f"• {q}" for q in report.questions[:5]))
-    if report.gaps:
-        sections.append("*Coverage gaps:*\n" + "\n".join(f"• {g}" for g in report.gaps[:5]))
-    text = "\n\n".join(sections)
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    links = []
-    for index, evidence in enumerate(report.evidence[:20], start=1):
-        try:
-            url = urlsplit(evidence.url)
-            if (
-                url.scheme not in {"https", "http"}
-                or not url.hostname
-                or url.username
-                or url.password
-            ):
-                continue
-            if any(character.isspace() or character in "<>|" for character in evidence.url):
-                continue
-        except ValueError:
-            continue
-        link = f"<{evidence.url}|[{index}]>"
-        text = text.replace(f"[{evidence.id}]", link)
-        links.append(link)
-    return text + ("\nEvidence: " + " ".join(links) if links else "")
 
 
 def _apply_stop(record: Incident, policy: IncidentPolicy, action: str, key: str) -> None:
@@ -234,6 +231,8 @@ def _apply_stop(record: Incident, policy: IncidentPolicy, action: str, key: str)
         record.reason = "responder_" + action
     record.pending_requests = []
     record.pending_publications = []
+    record.pending_since = record.pending_message_at = 0
+    record.slack_session_thread_ts = record.slack_session_thread_ts or record.anchor_ts
     record.retry_after = 0
     note(
         record,
@@ -275,9 +274,9 @@ async def _apply_pending_stops(record: Incident, policy: IncidentPolicy) -> bool
                 flags=re.IGNORECASE,
             ):
                 continue
-        else:
+        elif receipt.kind != "agent_session_stopped":
             continue
-        action, _ = await command_for_receipt(receipt, policy)
+        action, _ = await command_for_receipt(receipt, policy, record)
         if action not in {"pause", "complete"} or stale_control(record, receipt, action):
             continue
         stops[receipt.id] = action
@@ -290,7 +289,7 @@ async def _apply_pending_stops(record: Incident, policy: IncidentPolicy) -> bool
             remember_control(record, receipt, action)
             _apply_stop(record, policy, action, receipt.id)
         else:
-            action, _ = await command_for_receipt(receipt, policy)
+            action, _ = await command_for_receipt(receipt, policy, record)
         if action:
             record.processed_receipts.append(receipt.id)
     await save(record)
@@ -337,7 +336,7 @@ async def _guard(
 
 
 def _introduction_text(record: Incident, policy: IncidentPolicy) -> str:
-    text = "Incidents is following this channel. Findings will appear here"
+    text = "Incidents is following this channel. Findings will appear in this channel"
     link = dashboard_incident_url(record.id)
     if link:
         text += f"; the full incident is at <{link}|Open incident>"
@@ -352,6 +351,7 @@ async def _publish(
     *,
     thread_ts: str | None = None,
     key: str = "",
+    blocks: list[dict[str, Any]] | None = None,
 ) -> None:
     if record.is_archived:
         return
@@ -375,6 +375,7 @@ async def _publish(
         id=publication_id,
         incident_id=record.id,
         text=text[:12000],
+        blocks=blocks or [],
         thread_ts=thread_ts,
         reason=reason,
         created_at=time.time(),
@@ -394,7 +395,11 @@ async def _publish(
         raise
     try:
         publication.slack_message_ts = await slack.publish(
-            record.channel_id, publication.text, thread_ts, publication.id
+            record.channel_id,
+            publication.text,
+            publication.thread_ts,
+            publication.id,
+            blocks=publication.blocks,
         )
         publication.status = "sent"
         record.last_published_at = time.time()
@@ -418,6 +423,7 @@ async def _flush_publications(record: Incident, policy: IncidentPolicy) -> None:
                 pending.text,
                 thread_ts=pending.thread_ts,
                 key=pending.key,
+                blocks=pending.blocks,
             )
         record.pending_publications.pop(0)
         await save(record)
@@ -425,6 +431,22 @@ async def _flush_publications(record: Incident, policy: IncidentPolicy) -> None:
 
 async def _consume_receipts(record: Incident, policy: IncidentPolicy, info: dict[str, Any]) -> None:
     for receipt in await channel_receipts(record):
+        if receipt.kind == "agent_followup":
+            from agent.incidents.followups import followup_current
+
+            if await followup_current(receipt, record, policy):
+                _merge_message(
+                    record,
+                    IncidentMessage(
+                        id=receipt.id,
+                        ts=str(receipt.available_at),
+                        event_type="agent_followup",
+                        text="System followup (context only; no new action authorization):\n"
+                        + str(receipt.payload.get("text") or ""),
+                    ),
+                )
+            record.processed_receipts.append(receipt.id)
+            continue
         if await documents.process_document_receipt(
             record, receipt
         ) or await providers.process_provider_receipt(record, receipt):
@@ -437,7 +459,7 @@ async def _consume_receipts(record: Incident, policy: IncidentPolicy, info: dict
             if _own_message(normalized, policy):
                 record.processed_receipts.append(receipt.id)
                 continue
-        action, text = await command_for_receipt(receipt, policy)
+        action, text = await command_for_receipt(receipt, policy, record)
         if action and stale_control(record, receipt, action):
             action = ""
         if action in {"pause", "complete"}:
@@ -449,6 +471,7 @@ async def _consume_receipts(record: Incident, policy: IncidentPolicy, info: dict
             if not record.is_archived and slack.channel_allowed(info, policy):
                 remember_control(record, receipt, action)
                 record.status, record.reason = "pending", ""
+                record.slack_session_thread_ts = record.anchor_ts
                 record.watch_started_at, record.retry_after = time.time(), 0
                 note(record, "control", "Incident watching resumed.")
                 _queue_publication(
@@ -466,7 +489,6 @@ async def _consume_receipts(record: Incident, policy: IncidentPolicy, info: dict
                     PendingRequest(
                         id=receipt.id,
                         text=text,
-                        # Answer in the channel unless the question itself came from a thread.
                         thread_ts=str(receipt.payload.get("thread_ts") or "") or None,
                     )
                 )
@@ -475,13 +497,14 @@ async def _consume_receipts(record: Incident, policy: IncidentPolicy, info: dict
         if receipt.kind in {"message", "app_mention"}:
             data = receipt.payload
             subtype = data.get("subtype")
+            changed = False
             if subtype == "message_deleted":
                 msg = slack.message(
                     record.channel_id,
                     {"ts": data.get("deleted_ts"), "edited": {"ts": data.get("event_ts")}},
                 )
                 msg.deleted = True
-                _merge_message(record, msg)
+                changed = _merge_message(record, msg)
                 record.report = None
                 record.reset_conversation = True
                 record.last_context_hash = ""
@@ -495,11 +518,15 @@ async def _consume_receipts(record: Incident, policy: IncidentPolicy, info: dict
                     data.get("message", data) if subtype == "message_changed" else data,
                 )
                 if msg.ts:
-                    _merge_message(record, msg)
+                    changed = _merge_message(record, msg)
                     if subtype != "message_changed":
                         record.last_source_activity_at = max(
                             record.last_source_activity_at, float(msg.ts or 0)
                         )
+            if changed and (msg.deleted or msg.text.strip()) and not action:
+                arrived = min(receipt.received_at, time.time())
+                record.pending_since = min(record.pending_since or arrived, arrived)
+                record.pending_message_at = max(record.pending_message_at, arrived)
         record.processed_receipts.append(receipt.id)
     await save(record)
 
@@ -516,7 +543,43 @@ def _failure(record: Incident, reason: str, *, retry_after: float = 60) -> None:
     )
 
 
+async def _session_status(
+    record: Incident, status: Literal["processing", "active", "suspended", "closed"]
+) -> bool:
+    if not record.slack_session_thread_ts or not record.can_read:
+        return True
+    try:
+        await slack.set_session_status(
+            record.channel_id, record.slack_session_thread_ts, status, record.title
+        )
+        return True
+    except Exception:
+        logger.warning(
+            "Incident Slack session status unavailable",
+            extra={"incident_id": record.id, "session_status": status},
+        )
+        return False
+
+
 async def process_channel(incident_id: str) -> dict[str, Any]:
+    try:
+        return await _process_channel(incident_id)
+    finally:
+        record = await service.INVESTIGATIONS.get(incident_id)
+        if record and record.slack_session_thread_ts:
+            status = (
+                "closed"
+                if record.status == "completed"
+                else "active"
+                if record.status in {"pending", "watching"}
+                else "suspended"
+            )
+            if await _session_status(record, status):
+                record.slack_session_thread_ts = None
+                await save(record)
+
+
+async def _process_channel(incident_id: str) -> dict[str, Any]:
     record = await service.INVESTIGATIONS.get(incident_id)
     if not record:
         return {"status": "ignored"}
@@ -648,26 +711,34 @@ async def process_channel(incident_id: str) -> dict[str, Any]:
         context_hash = service.fingerprint(context)
         if not context and not request:
             record.status, record.reason = return_status, return_reason or "awaiting_context"
+            record.pending_since = record.pending_message_at = 0
             await save(record)
             return {"status": record.status}
         if context_hash == record.last_context_hash and not explicit:
             record.status, record.reason = return_status, return_reason
+            record.pending_since = record.pending_message_at = 0
             await save(record)
             return {"status": record.status}
-        if record.report and not explicit:
+        if not explicit and (record.report or record.pending_since):
             record.pending_since = record.pending_since or now
-            if now - record.pending_since < 15:
+            delay = debounce_delay(record, time.time())
+            if delay:
                 await save(record)
-                await schedule_wake(15)
+                await schedule_wake(delay)
                 return {"status": "debouncing"}
         record.pass_return_status, record.pass_return_reason = return_status, return_reason
         record.status, record.reason, record.pending_since = "investigating", "", 0
+        record.pending_message_at = 0
+        record.slack_session_thread_ts = (
+            request.thread_ts if request else None
+        ) or record.anchor_ts
         await save(record)
 
         async def before_tool_call() -> None:
             await _guard(record, policy, explicit=explicit)
 
         await before_tool_call()
+        await _session_status(record, "processing")
         had_report = record.report is not None
         await providers.refresh_provider(record)
         document = await documents.document_context(record.id)
@@ -690,6 +761,7 @@ async def process_channel(incident_id: str) -> dict[str, Any]:
             record.agent_thread_id = current_record.agent_thread_id
             record.provider_scope = current_record.provider_scope
             record.evidence_scope = current_record.evidence_scope
+            record.messages = current_record.messages
         await documents.update_from_report(
             record, report, expected_revision=expected_revision, run_id=report.id
         )
@@ -704,16 +776,7 @@ async def process_channel(incident_id: str) -> dict[str, Any]:
                 queued for queued in record.pending_requests if queued.id != request.id
             ]
         note(record, "findings", report.summary)
-        # Steering model: every pass is analyzed, but the thread only hears about it
-        # when the findings actually moved. Direct questions are always answered.
-        digest = service.fingerprint(
-            [
-                report.summary,
-                report.impact,
-                [hypothesis.model_dump() for hypothesis in report.hypotheses],
-                report.questions,
-            ]
-        )
+        digest = service.fingerprint(report_message(report, report.summary, None)[0])
         if explicit or not had_report or digest != record.last_published_digest:
             _queue_publication(
                 record,
@@ -734,6 +797,7 @@ async def process_channel(incident_id: str) -> dict[str, Any]:
             record.agent_thread_id = current_record.agent_thread_id
             record.provider_scope = current_record.provider_scope
             record.evidence_scope = current_record.evidence_scope
+            record.messages = current_record.messages
             record.active_pass_id = current_record.active_pass_id
         _failure(record, "incident_failed", retry_after=getattr(exc, "retry_after", 60))
         logger.warning("Incident pass failed", extra={"incident_id": record.id}, exc_info=True)

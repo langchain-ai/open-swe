@@ -1,6 +1,6 @@
 # Incidents locally
 
-Incidents lives at `/incidents`. It enrolls public internal Slack channels after a new `channel_created` or `channel_rename` event matches the configured prefix. Each incident keeps a persistent, system-owned conversation on the main `agent` graph, using restricted evidence tools and workspace credentials. The dashboard separates agent activity, provider lifecycle, and public communication drafts.
+Incidents lives at `/incidents`. It enrolls public internal Slack channels after a new `channel_created` or `channel_rename` event matches the configured prefix. Each incident keeps a persistent, system-owned conversation on the main `agent` graph, using the normal sandbox, coding tools, subagents, and workspace integrations. The dashboard separates agent activity, provider lifecycle, and public communication drafts.
 
 ## Start the dashboard
 
@@ -26,7 +26,7 @@ Try asking a question, pausing, resuming, completing, and reopening the checkout
 
 1. Follow [Incidents setup](INSTALLATION.md#incidents), including the Slack manifest, `SLACK_APP_ID`, and responder access. Deliver events to the signed `/webhooks/slack` endpoint. For local development, use the [webhooks-only tunnel](DEVELOPMENT.md#3-tunnel-for-webhooks); keep the raw LangGraph APIs private.
 2. In **Incidents → Settings**, set a literal channel prefix such as `inc-`. The installed bot supplies the workspace identity, and `SLACK_APP_ID` supplies the app identity. Optionally choose a supported model and adjust the analysis limits.
-3. For incident.io, configure an existing connection under **Admin → Workspace MCPs**, then enter its name as **Default provider connection** in incident settings. The [workspace MCP guide](CUSTOMIZATION.md#workspace-mcp-servers) covers the incident.io endpoint and authentication configuration. Other evidence integrations, including Datadog, also use permitted workspace MCP read tools.
+3. For incident.io, configure an existing connection under **Admin → Workspace MCPs**, then enter its name as **Default provider connection** in incident settings. The [workspace MCP guide](CUSTOMIZATION.md#workspace-mcp-servers) covers the incident.io endpoint and authentication configuration. Other integrations, including Datadog and workspace-connected knowledge sources, use the same configured MCP tools as ordinary system threads.
 4. Enable Incidents and create a matching public internal channel, or rename an existing channel into the prefix. The bot should join and the incident should appear. Existing channels are not scanned for enrollment. Other bots' channel messages are evidence; Open SWE's own publications are excluded.
 5. Attach an incident.io incident from the detail page using its ID or link. Attachment requires the provider to report the same Slack channel. The provider panel shows status, severity, last sync, available actions, and errors. Historical provider search can read older incidents without enrolling their channels.
 
@@ -36,7 +36,7 @@ Provider lifecycle changes require an explicit responder action. Pausing or comp
 
 The postmortem starts with summary, impact, timeline, cause, mitigation, resolution, follow-ups, and evidence sections. Later reports append dated findings, preserving human edits. Each accepted change creates an immutable revision with author, time, source, and the expected prior revision. A conflicting save preserves the newer text and asks the responder to reload.
 
-The status-page draft is separate editable copy. Saving it does not publish externally or copy internal findings into customer-facing text. Provider postmortems remain separately attributed content. Status-page publishing, provider postmortem writes, code fixes, and production remediation are unsupported.
+The status-page draft is separate editable copy. Saving it does not publish externally or copy internal findings into customer-facing text. Provider postmortems remain separately attributed content. Status-page publishing and provider postmortem writes remain unsupported by the provider adapter. An authorized responder can ask the agent to implement a fix, open a PR, or perform a specified action through its configured workspace tools. Ordinary channel messages steer investigation; they do not authorize external changes.
 
 Use **History** to search retained incident metadata and postmortems. The agent can also search and read permitted historical incidents as context; a prior cause does not establish the current cause. Channel access is rechecked for history and revision reads. Expired or unavailable evidence is marked unavailable rather than restored from historical references.
 

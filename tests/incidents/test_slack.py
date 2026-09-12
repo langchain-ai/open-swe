@@ -1,7 +1,34 @@
+from unittest.mock import AsyncMock
+
 import pytest
 
 from agent.incidents import slack
 from agent.incidents.models import IncidentPolicy
+
+
+async def test_publication_preserves_blocks_and_delivery_metadata(monkeypatch):
+    request = AsyncMock(return_value={"ts": "1.2"})
+    monkeypatch.setattr(slack, "request", request)
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Update"}}]
+    assert await slack.publish("C1", "Update", "1.1", "pub", blocks=blocks) == "1.2"
+    payload = request.await_args.kwargs
+    assert payload["blocks"] == blocks and payload["thread_ts"] == "1.1"
+    assert payload["metadata"]["event_payload"] == {"publication_id": "pub"}
+    assert payload["unfurl_links"] is False
+
+
+async def test_session_status_uses_regular_channel_thread(monkeypatch):
+    request = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(slack, "request", request)
+    await slack.set_session_status("C1", "1.1", "processing", "Investigate API")
+    request.assert_awaited_once_with(
+        "agents.sessions.setStatus",
+        write=True,
+        channel_id="C1",
+        thread_ts="1.1",
+        status="processing",
+        title="Investigate API",
+    )
 
 
 @pytest.mark.parametrize(

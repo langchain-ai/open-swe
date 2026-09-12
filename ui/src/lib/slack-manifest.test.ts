@@ -37,6 +37,7 @@ describe("slackAppManifest", () => {
           "channel_created",
           "channel_rename",
           "channel_archive",
+          "agent_session_stopped",
           "message.channels",
           "app_mention",
           "message.im",

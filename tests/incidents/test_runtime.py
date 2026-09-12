@@ -2,13 +2,15 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
-from langchain_core.messages import AIMessage
+from langchain.agents.middleware.types import ModelRequest
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool, ToolException
 from langgraph.runtime import Runtime
+from langgraph.types import Command
 
 from agent.dashboard import workspace_mcps
 from agent.incidents import documents, providers, runtime, service
@@ -78,17 +80,80 @@ async def test_incident_thread_requires_system_ownership_and_saved_pass(incident
         )
 
 
-async def test_incident_middleware_blocks_fabricated_coding_tool():
-    from agent.incidents.runtime import IncidentMiddleware
-
-    session = SimpleNamespace(check=AsyncMock(), tools=[], prompt="Incident prompt")
-    middleware = IncidentMiddleware(session)
+async def test_incident_context_preserves_system_instructions_and_full_tools(live_pass):
+    live_pass.saved.explicit = True
+    live_pass.saved.question = "Open a PR for the retry fix"
+    await runtime.PASSES.put(live_pass.saved.id, live_pass.saved)
+    session = await runtime.load_incident_session(live_pass.config)
+    request = ModelRequest(
+        model=MagicMock(),
+        messages=[],
+        tools=[{"name": "execute"}, {"name": "open_pull_request"}],
+        system_message=SystemMessage(content="Normal system instructions"),
+        state={},
+    )
     handler = AsyncMock()
-    with pytest.raises(PermissionError, match="not available"):
-        await middleware.awrap_tool_call(
-            SimpleNamespace(tool_call={"name": "execute", "args": {"command": "echo bad"}}), handler
-        )
-    handler.assert_not_awaited()
+    await runtime.IncidentMiddleware(session).awrap_model_call(request, handler)
+    actual = handler.call_args.args[0]
+    assert actual.tools == request.tools
+    assert actual.system_message.text.startswith("Normal system instructions")
+    assert session.saved.question in actual.system_message.text
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_only_current_explicit_request_is_presented_as_authorized(live_pass, explicit):
+    live_pass.saved.explicit = explicit
+    live_pass.saved.question = "Open the requested PR"
+    await runtime.PASSES.put(live_pass.saved.id, live_pass.saved)
+    session = await runtime.load_incident_session(live_pass.config)
+    request = ModelRequest(model=MagicMock(), messages=[], tools=[], state={})
+    handler = AsyncMock()
+    await runtime.IncidentMiddleware(session).awrap_model_call(request, handler)
+    text = handler.call_args.args[0].system_message.text
+    assert (live_pass.saved.question in text) is explicit
+
+
+async def test_system_tool_result_is_citable_without_losing_command_updates(live_pass):
+    session = await runtime.load_incident_session(live_pass.config)
+    middleware = runtime.IncidentMiddleware(session)
+    original = ToolMessage(
+        content='{"url":"https://github.com/acme/api/pull/42"}',
+        tool_call_id="pr-call",
+        name="open_pull_request",
+    )
+    command = Command(update={"messages": [original], "pr_number": 42})
+    handler = AsyncMock(return_value=command)
+    result = await middleware.awrap_tool_call(
+        SimpleNamespace(
+            tool_call={
+                "id": "pr-call",
+                "name": "open_pull_request",
+                "args": {"title": "Fix retries"},
+            }
+        ),
+        handler,
+    )
+    handler.assert_awaited_once()
+    assert result.update["pr_number"] == 42
+    message = result.update["messages"][0]
+    assert message.tool_call_id == "pr-call"
+    assert original.content in message.content
+    evidence = next(item for item in session.collector.evidence if item.source == "tool")
+    assert evidence.id in message.content
+    assert evidence.url == "https://github.com/acme/api/pull/42"
+    await middleware.aafter_agent(
+        {
+            "messages": [
+                AIMessage(
+                    content=json.dumps(
+                        {"summary": [{"text": "Opened the fix PR", "evidence_ids": [evidence.id]}]}
+                    )
+                )
+            ]
+        },
+        Runtime(),
+    )
+    assert "Opened the fix PR" in (await runtime.PASSES.get(live_pass.saved.id)).report.summary
 
 
 async def test_revocation_latches_even_when_later_check_succeeds():
@@ -101,6 +166,50 @@ async def test_revocation_latches_even_when_later_check_succeeds():
         with pytest.raises(PermissionError, match="revoked"):
             await middleware.awrap_model_call(SimpleNamespace(), handler)
     handler.assert_not_awaited()
+
+
+@pytest.mark.parametrize("stop", ["timeout", "cancelled", "membership"])
+async def test_completed_tool_outcome_survives_stop_and_is_available_to_retry(
+    live_pass, monkeypatch, stop
+):
+    session = await runtime.load_incident_session(live_pass.config)
+    middleware = runtime.IncidentMiddleware(session)
+
+    async def perform(request):
+        if stop == "timeout":
+            monkeypatch.setattr(session, "check", AsyncMock(side_effect=TimeoutError("budget")))
+        elif stop == "cancelled":
+            live_pass.saved.cancelled = True
+            await runtime.PASSES.put(live_pass.saved.id, live_pass.saved)
+        else:
+            live_pass.info["is_member"] = False
+        return ToolMessage(
+            content='{"url":"https://github.com/acme/api/pull/42"}',
+            tool_call_id="pr-call",
+        )
+
+    request = SimpleNamespace(
+        tool_call={"id": "pr-call", "name": "open_pull_request", "args": {"title": "Fix"}}
+    )
+    with pytest.raises((PermissionError, TimeoutError)):
+        await middleware.awrap_tool_call(request, perform)
+    outcomes = await runtime.TOOL_OUTCOMES.search(filter={"thread_id": session.saved.thread_id})
+    assert len(outcomes) == 1
+    assert "https://github.com/acme/api/pull/42" in outcomes[0].result
+    assert (await runtime.PASSES.get(session.saved.id)).report is None
+
+    live_pass.info["is_member"] = True
+    retry = live_pass.saved.model_copy(update={"id": "retry", "cancelled": False})
+    await runtime.PASSES.put(retry.id, retry)
+    live_pass.record.active_pass_id = retry.id
+    await service.INVESTIGATIONS.put(live_pass.record.id, live_pass.record)
+    live_pass.config["configurable"]["incident_pass_id"] = retry.id
+    retried = await runtime.load_incident_session(live_pass.config)
+    handler = AsyncMock()
+    await runtime.IncidentMiddleware(retried).awrap_model_call(
+        ModelRequest(model=MagicMock(), messages=[], tools=[], state={}), handler
+    )
+    assert outcomes[0].result in handler.call_args.args[0].system_message.text
 
 
 @pytest.fixture
@@ -129,7 +238,6 @@ async def live_pass(incident_scope, monkeypatch):
         "is_pending_ext_shared": False,
     }
     monkeypatch.setattr(runtime.slack, "channel_info", AsyncMock(return_value=info))
-    monkeypatch.setattr(runtime, "load_workspace_mcp_tools", AsyncMock(return_value=[]))
     return SimpleNamespace(
         record=record,
         metadata=metadata,
@@ -237,6 +345,7 @@ async def test_provider_revision_change_revokes_loaded_analysis(live_pass, monke
     await providers.refresh_provider(live_pass.record)
     assert (await providers.BINDINGS.get(live_pass.record.id)).error is None
     live_pass.saved.provider_scope = await providers.analysis_scope(live_pass.record)
+    live_pass.saved.evidence_scope = await runtime.evidence_scope()
     await runtime.PASSES.put(live_pass.saved.id, live_pass.saved)
     session = await runtime.load_incident_session(live_pass.config)
 
@@ -257,7 +366,7 @@ async def test_evidence_connection_changes_revoke_loaded_pass(live_pass, change)
         MCPConnectionUpdate(
             name="telemetry",
             url="https://telemetry.example.com/mcp",
-            allowed_tools=["search_datadog_metrics"],
+            allowed_tools=["incident_update"],
         ),
     )
     live_pass.saved.evidence_scope = await runtime.evidence_scope()
@@ -271,7 +380,7 @@ async def test_evidence_connection_changes_revoke_loaded_pass(live_pass, change)
             name="telemetry",
             url="https://telemetry.example.com/mcp",
             enabled=change != "disabled",
-            allowed_tools=[] if change == "tool_removed" else ["search_datadog_metrics"],
+            allowed_tools=[] if change == "tool_removed" else ["incident_update"],
         ),
     )
     with pytest.raises(PermissionError, match="evidence"):
@@ -288,6 +397,8 @@ def telemetry_tool(mode):
             return [], {"structured_content": {"isError": True, "error": "Request failed"}}
         if mode == "structured":
             return [], {"structured_content": {"error_rate": 0.18, "query": query}}
+        if mode == "structured_with_text":
+            return "Query completed", {"structured_content": {"error_rate": 0.18, "query": query}}
         return [{"type": "text", "text": "API error rate is 18%"}], None
 
     return StructuredTool.from_function(
@@ -300,30 +411,42 @@ def telemetry_tool(mode):
     )
 
 
-@pytest.mark.parametrize("mode", ["text", "structured"])
-async def test_mcp_evidence_preserves_successful_observations(live_pass, monkeypatch, mode):
+@pytest.mark.parametrize("mode", ["text", "structured", "structured_with_text"])
+async def test_mcp_evidence_preserves_successful_observations(live_pass, mode):
     remote = telemetry_tool(mode)
-    monkeypatch.setattr(runtime, "load_workspace_mcp_tools", AsyncMock(return_value=[remote]))
     session = await runtime.load_incident_session(live_pass.config)
-    tool = next(tool for tool in session.tools if tool.name == remote.name)
-    result = await tool.ainvoke({"query": "service:api"})
-    assert "evidence_id" in result
-    assert ("18%" if mode == "text" else "0.18") in result["observation"]
-    evidence = next(item for item in session.collector.evidence if item.id == result["evidence_id"])
-    assert evidence.source == "mcp"
-    assert evidence.query is not None
+    call = {
+        "type": "tool_call",
+        "id": "metrics-call",
+        "name": remote.name,
+        "args": {"query": "service:api"},
+    }
+    result = await runtime.IncidentMiddleware(session).awrap_tool_call(
+        SimpleNamespace(tool_call=call), AsyncMock(return_value=await remote.ainvoke(call))
+    )
+    evidence = next(item for item in session.collector.evidence if item.source == "tool")
+    assert evidence.id in str(result.content)
+    assert ("18%" if mode == "text" else "0.18") in str(result.content)
     assert "service:api" in evidence.query
 
 
 @pytest.mark.parametrize("mode", ["error", "artifact_error", "structured_error"])
-async def test_mcp_errors_become_coverage_gaps_instead_of_evidence(live_pass, monkeypatch, mode):
+async def test_mcp_errors_are_not_successful_evidence(live_pass, mode):
     remote = telemetry_tool(mode)
-    monkeypatch.setattr(runtime, "load_workspace_mcp_tools", AsyncMock(return_value=[remote]))
     session = await runtime.load_incident_session(live_pass.config)
-    tool = next(tool for tool in session.tools if tool.name == remote.name)
-    result = await tool.ainvoke({"query": "service:api"})
-    assert "gap" in result
-    assert not any(evidence.source == "mcp" for evidence in session.collector.evidence)
+    call = {
+        "type": "tool_call",
+        "id": "metrics-call",
+        "name": remote.name,
+        "args": {"query": "service:api"},
+    }
+    original = await remote.ainvoke(call)
+    result = await runtime.IncidentMiddleware(session).awrap_tool_call(
+        SimpleNamespace(tool_call=call), AsyncMock(return_value=original)
+    )
+    assert result == original
+    assert not any(item.source == "tool" for item in session.collector.evidence)
+    assert session.collector.gaps
 
 
 @pytest.mark.parametrize("change", ["cancelled", "replaced", "membership"])
@@ -411,3 +534,17 @@ async def test_reading_related_incident_tracks_access_dependency_for_later_outpu
             Runtime(),
         )
     assert (await runtime.PASSES.get(live_pass.saved.id)).report is None
+
+
+async def test_slack_tools_use_the_saved_incident_destination(live_pass):
+    live_pass.record.anchor_ts = "123.456"
+    await service.INVESTIGATIONS.put(live_pass.record.id, live_pass.record)
+    config = {
+        "configurable": {
+            **live_pass.config["configurable"],
+            "slack_thread": {"channel_id": "ATTACKER", "thread_ts": "999"},
+        }
+    }
+    session = await runtime.load_incident_session(config)
+    assert session.slack_thread.channel_id == "C1"
+    assert session.slack_thread.thread_ts == "123.456"

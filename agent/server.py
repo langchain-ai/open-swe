@@ -414,6 +414,7 @@ def _general_purpose_subagent(
     sandbox_file_downloads: bool = False,
     offloading: ConversationOffloadingMiddleware | None = None,
     workspace_skills: WorkspaceSkillsMiddleware | None = None,
+    incident_middleware: AgentMiddleware | None = None,
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -432,6 +433,7 @@ def _general_purpose_subagent(
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),
                 *([offloading] if offloading else []),
@@ -599,7 +601,7 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
     """Return whether the run has trusted Slack source context."""
-    if cfg.source not in {"slack", "schedule"} or cfg.slack_thread is None:
+    if cfg.source not in {"slack", "schedule", "incidents_agent"} or cfg.slack_thread is None:
         return False
     return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
 
@@ -874,6 +876,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     )
 
     incident_session = await load_incident_session(config)
+    if incident_session is not None:
+        cfg.source = configurable["source"] = "incidents_agent"
+        cfg.slack_thread = incident_session.slack_thread
+        configurable["slack_thread"] = cfg.slack_thread.dump() if cfg.slack_thread else None
     profile_login = resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
@@ -895,11 +901,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             environment_slug=environment_slug(_cfg),
         )
 
-    if incident_session is not None:
-        backend: Any = StateBackend()
-    else:
-        backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-        backend.start()
+    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization. Personal integrations require verified private ownership.
@@ -1021,9 +1024,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     sender_draft_prs = profile_draft_prs(sender_profile)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
-    if incident_session is not None:
-        repo_instructions = None
-    elif isinstance(thread_settings.get("model_id"), str):
+    if isinstance(thread_settings.get("model_id"), str):
         repo_instructions = thread_settings.get("repo_instructions")
     else:
         async with aphase(thread_id, "factory.repo_instructions"):
@@ -1109,10 +1110,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
-    sandbox_file_downloads = incident_session is None and _sandbox_file_downloads_enabled(cfg)
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if not stop_summary_mode and not local_run and credential_scope_known and incident_session is None:
+    if not stop_summary_mode and not local_run and credential_scope_known:
         mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
@@ -1184,7 +1185,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     if incident_session is not None:
-        static_tools = incident_session.tools
+        static_tools.extend(incident_session.tools)
     static_tools = apply_tool_descriptions(static_tools)
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
@@ -1196,7 +1197,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "MCPs": mcp_tools,
         "Notion": notion_tools,
     }
-    if not stop_summary_mode and not local_run and incident_session is None:
+    if not stop_summary_mode and not local_run:
         browser_tools = load_browser_tools()
         if browser_tools:
             integration_tool_groups["Browser"] = browser_tools
@@ -1279,9 +1280,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model=main_model,
         system_prompt="",
         tools=static_tools,
-        subagents=[]
-        if incident_session is not None
-        else [
+        subagents=[
             _general_purpose_subagent(
                 subagent_model,
                 tools=subagent_tools,
@@ -1289,7 +1288,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 workspace_skills=workspace_skills,
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
-                offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
+                offloading=(
+                    IncidentOffloadingMiddleware(subagent_model, agent_backend, incident_session)
+                    if incident_session is not None
+                    else ConversationOffloadingMiddleware(subagent_model, agent_backend)
+                ),
+                incident_middleware=IncidentMiddleware(incident_session, finalize=False)
+                if incident_session is not None
+                else None,
             ),
         ],
         skills=skill_sources,
@@ -1303,9 +1309,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 else ConversationOffloadingMiddleware(
                     main_model, agent_backend, manual=cfg.offload_conversation is True
                 ),
-                IncidentMiddleware(incident_session)
-                if incident_session is not None
-                else PrepareAgentRunMiddleware(
+                PrepareAgentRunMiddleware(
                     credential_login=credential_login,
                     thread_id=thread_id,
                     config=config,
@@ -1322,6 +1326,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     plan_mode=plan_mode,
                     admin_environments=admin_thread,
                 ),
+                *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
                 *([workspace_skills] if workspace_skills else []),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
@@ -1348,13 +1353,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     initial_delay=1.0,
                     max_delay=10.0,
                 ),
-                *(
-                    []
-                    if local_run or incident_session is not None
-                    else [PullRequestCreationGuardMiddleware()]
-                ),
+                *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                 WorkflowPushGuardMiddleware(),
-                *([] if incident_session is not None else [refresh_github_proxy_before_model]),
+                refresh_github_proxy_before_model,
                 *(
                     []
                     if stop_summary_mode or incident_session is not None

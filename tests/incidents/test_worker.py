@@ -65,6 +65,7 @@ async def incident(fake_store, monkeypatch):
     monkeypatch.setattr(worker, "schedule_wake", AsyncMock())
     monkeypatch.setattr(service, "wake", AsyncMock())
     monkeypatch.setattr(worker.slack, "publish", AsyncMock(return_value="100.0"))
+    monkeypatch.setattr(worker.slack, "set_session_status", AsyncMock())
     return record
 
 
@@ -80,6 +81,156 @@ async def _request(key: str, text: str = "", action: str = "ask") -> None:
             received_at=time.time(),
         ),
     )
+
+
+@pytest.mark.parametrize("paused", [False, True])
+async def test_system_followup_runs_without_authorizing_actions_or_resuming_pause(
+    incident, paused, monkeypatch
+):
+    from agent.incidents.followups import enqueue_followup
+
+    await worker.process_channel(incident.id)
+    record = await service.INVESTIGATIONS.get(incident.id)
+    record.agent_thread_id = "conversation"
+    if paused:
+        record.status = "paused"
+    await service.INVESTIGATIONS.put(record.id, record)
+    worker.run_engine.reset_mock()
+    await enqueue_followup(record.agent_thread_id, "finished", "Build completed. Check output.")
+    await worker.process_channel(record.id)
+    now = time.time()
+    monkeypatch.setattr(worker.time, "time", lambda: now + 15)
+    await worker.process_channel(record.id)
+    if paused:
+        worker.run_engine.assert_not_awaited()
+        assert (await service.INVESTIGATIONS.get(record.id)).status == "paused"
+    else:
+        worker.run_engine.assert_awaited_once()
+        assert worker.run_engine.await_args.kwargs["explicit"] is False
+        messages = worker.run_engine.await_args.args[0]
+        assert any(message.event_type == "agent_followup" for message in messages)
+
+
+@pytest.mark.parametrize("has_report", [False, True])
+async def test_message_burst_waits_for_quiet_then_runs_once(incident, monkeypatch, has_report):
+    if not has_report:
+        worker.slack.history.return_value = ([], [])
+    await worker.process_channel("I1")
+    worker.run_engine.reset_mock()
+    worker.slack.publish.reset_mock()
+    started = time.time()
+    clock = [started]
+    monkeypatch.setattr(worker.time, "time", lambda: clock[0])
+
+    for index, offset in enumerate([0, 10]):
+        clock[0] = started + offset
+        await service.RECEIPTS.put(
+            f"burst-{index}",
+            Receipt(
+                id=f"burst-{index}",
+                workspace_id="T1",
+                channel_id="C1",
+                kind="message",
+                payload={"ts": str(clock[0]), "text": f"Alert update {index}", "user": "U1"},
+                received_at=clock[0],
+            ),
+        )
+        assert await worker.process_channel("I1") == {"status": "debouncing"}
+    clock[0] = started + 15
+    assert await worker.process_channel("I1") == {"status": "debouncing"}
+    worker.run_engine.assert_not_awaited()
+    worker.slack.publish.assert_not_awaited()
+
+    clock[0] = started + 25
+    await worker.process_channel("I1")
+    await worker.process_channel("I1")
+    worker.run_engine.assert_awaited_once()
+    messages = worker.run_engine.await_args.args[0]
+    assert {m.text for m in messages} >= {"Alert update 0", "Alert update 1"}
+    record = await service.INVESTIGATIONS.get("I1")
+    assert record.pending_since == record.pending_message_at == 0
+
+
+async def test_continuous_messages_cannot_defer_analysis_past_one_minute(incident, monkeypatch):
+    worker.slack.history.return_value = ([], [])
+    await worker.process_channel("I1")
+    started = time.time()
+    clock = [started]
+    monkeypatch.setattr(worker.time, "time", lambda: clock[0])
+    for offset in range(0, 61, 10):
+        clock[0] = started + offset
+        await service.RECEIPTS.put(
+            str(offset),
+            Receipt(
+                id=str(offset),
+                workspace_id="T1",
+                channel_id="C1",
+                kind="message",
+                payload={"ts": str(clock[0]), "text": f"Symptom {offset}", "user": "U1"},
+                received_at=clock[0],
+            ),
+        )
+        await worker.process_channel("I1")
+        assert worker.run_engine.await_count == (1 if offset == 60 else 0)
+
+
+@pytest.mark.parametrize("ignored", ["duplicate", "own_bot"])
+async def test_duplicate_and_own_messages_do_not_extend_debounce(incident, monkeypatch, ignored):
+    worker.slack.history.return_value = ([], [])
+    await worker.process_channel("I1")
+    started = time.time()
+    clock = [started]
+    monkeypatch.setattr(worker.time, "time", lambda: clock[0])
+    payload = {"ts": str(started), "text": "Error rate increased", "user": "U1"}
+    await service.RECEIPTS.put(
+        "alert",
+        Receipt(
+            id="alert",
+            workspace_id="T1",
+            channel_id="C1",
+            kind="message",
+            payload=payload,
+            received_at=clock[0],
+        ),
+    )
+    await worker.process_channel("I1")
+    clock[0] += 10
+    await service.RECEIPTS.put(
+        "ignored",
+        Receipt(
+            id="ignored",
+            workspace_id="T1",
+            channel_id="C1",
+            kind="message",
+            payload=payload
+            if ignored == "duplicate"
+            else {
+                "ts": str(clock[0]),
+                "text": "Bot update",
+                "app_id": "A1",
+            },
+            received_at=clock[0],
+        ),
+    )
+    await worker.process_channel("I1")
+    clock[0] = started + 15
+    await worker.process_channel("I1")
+    worker.run_engine.assert_awaited_once()
+    assert [message.text for message in worker.run_engine.await_args.args[0]] == [payload["text"]]
+
+
+@pytest.mark.parametrize("action", ["ask", "pause", "complete"])
+async def test_explicit_requests_bypass_message_debounce(incident, action):
+    await worker.process_channel("I1")
+    record = await service.INVESTIGATIONS.get("I1")
+    record.pending_since = time.time()
+    await service.INVESTIGATIONS.put("I1", record)
+    await _request("control", "Check impact", action=action)
+    worker.run_engine.reset_mock()
+    await worker.process_channel("I1")
+    assert worker.run_engine.await_count == (1 if action == "ask" else 0)
+    record = await service.INVESTIGATIONS.get("I1")
+    assert record.status == {"ask": "watching", "pause": "paused", "complete": "completed"}[action]
 
 
 @pytest.mark.parametrize("expired", [False, True])
@@ -177,6 +328,8 @@ async def test_real_engine_model_outage_keeps_question_for_retry(incident, monke
 
 
 def test_slack_findings_link_evidence_without_untrusted_mentions():
+    from agent.incidents.presentation import report_message
+
     report = IncidentReport(
         summary="Found a symptom [slack:1] <!channel>",
         evidence=[
@@ -189,7 +342,7 @@ def test_slack_findings_link_evidence_without_untrusted_mentions():
             Evidence(id="bad", source="slack", url="javascript:alert(1)", summary="invalid"),
         ],
     )
-    text = worker.report_text(report, report.summary)
+    text, _ = report_message(report, report.summary, None)
     assert "<https://slack.com/archives/C1/p123|[1]>" in text
     assert "[slack:1]" not in text
     assert "<!channel>" not in text
@@ -413,7 +566,7 @@ async def test_first_findings_publish_immediately_after_introduction(incident, m
     await worker.process_channel("I1")
 
     assert publish.await_count == 2
-    assert publish.await_args_list[1].args[1] == "Cause remains unknown."
+    assert "Cause remains unknown." in publish.await_args_list[1].args[1]
     assert publish.await_args_list[1].args[2] is None
 
 
@@ -435,13 +588,17 @@ async def test_crash_after_report_checkpoint_recovers_publication_without_rerunn
     with pytest.raises(SystemExit):
         await worker.process_channel("I1")
     monkeypatch.setattr(worker, "save", save)
+    checkpoint = await service.INVESTIGATIONS.get("I1")
+    blocks = checkpoint.pending_publications[0].blocks
+    assert blocks
 
     await worker.process_channel("I1")
     await worker.process_channel("I1")
 
     assert worker.run_engine.await_count == 1
     assert publish.await_count == 2
-    assert publish.await_args_list[1].args[1] == "Cause remains unknown."
+    assert "Cause remains unknown." in publish.await_args_list[1].args[1]
+    assert publish.await_args_list[1].kwargs["blocks"] == blocks
 
 
 async def test_pause_after_report_checkpoint_prevents_findings_publication(incident, monkeypatch):
@@ -498,7 +655,11 @@ async def test_failed_publication_preflight_retries_without_rerunning_model(inci
     assert (await service.INVESTIGATIONS.get("I1")).pending_publications == []
 
 
-async def test_bootstrap_merges_history_even_when_message_receipt_arrived_first(incident):
+async def test_bootstrap_merges_history_even_when_message_receipt_arrived_first(
+    incident, monkeypatch
+):
+    started = time.time()
+    monkeypatch.setattr(worker.time, "time", lambda: started)
     info = await worker.slack.channel_info("C1")
     info["topic"] = {"value": "Checkout incident"}
     await service.RECEIPTS.put(
@@ -513,6 +674,8 @@ async def test_bootstrap_merges_history_even_when_message_receipt_arrived_first(
         ),
     )
 
+    await worker.process_channel("I1")
+    monkeypatch.setattr(worker.time, "time", lambda: started + 15)
     await worker.process_channel("I1")
 
     texts = {message.text for message in worker.run_engine.await_args.args[0]}
@@ -645,13 +808,14 @@ async def test_findings_post_carries_the_report_digest(incident, monkeypatch):
     for fragment in (
         "Retries spiked after the deploy",
         "*Impact:* Checkout latency doubled.",
-        "• Deploy changed retry policy (plausible)",
-        "*Open questions:*\n• Which service owns the retry loop?",
-        "*Coverage gaps:*\n• No Datadog access.",
+        "No Datadog access.",
         "<https://slack.com/archives/C1/p2001|[1]>",
     ):
         assert fragment in findings
+    assert "Deploy changed retry policy" not in findings
+    assert "Open questions" not in findings
     assert publish.await_args_list[1].args[2] is None
+    assert publish.await_args_list[1].kwargs["blocks"]
 
 
 async def test_pause_and_resume_notices_are_posted_in_the_channel(incident, monkeypatch):
@@ -755,6 +919,8 @@ async def test_new_messages_steer_passes_without_an_hourly_cap(incident, monkeyp
 
 
 async def test_findings_post_again_only_when_the_report_changes(incident, monkeypatch):
+    from agent.incidents.models import Hypothesis
+
     publish = AsyncMock(return_value="100.1")
     monkeypatch.setattr(worker.slack, "publish", publish)
     await worker.process_channel("I1")
@@ -780,8 +946,15 @@ async def test_findings_post_again_only_when_the_report_changes(incident, monkey
 
     await steer("same conclusion", 1)
     assert publish.await_count == 2
+    worker.run_engine.return_value = IncidentReport(
+        summary="Cause remains unknown.",
+        hypotheses=[Hypothesis(title="Another speculative explanation")],
+        questions=["Any more details?"],
+    )
+    await steer("another hypothesis", 2)
+    assert publish.await_count == 2
     worker.run_engine.return_value = IncidentReport(summary="Deploy 42 caused it.")
-    await steer("look at deploy 42", 2)
+    await steer("look at deploy 42", 3)
     assert publish.await_count == 3
     assert "Deploy 42 caused it." in publish.await_args.args[1]
 
@@ -795,5 +968,92 @@ async def test_introduction_links_the_dashboard_and_anchors_the_thread(incident,
 
     intro = publish.await_args_list[0].args[1]
     assert "<https://swe.example.com/incidents/I1|Open incident>" in intro
-    assert "Findings will appear here" in intro
+    assert "Findings will appear in this channel" in intro
     assert (await service.INVESTIGATIONS.get("I1")).anchor_ts == "100.1"
+
+
+@pytest.mark.parametrize("failure", [False, True])
+async def test_agent_session_exits_processing_after_success_or_failure(incident, failure):
+    if failure:
+        worker.run_engine.side_effect = RuntimeError("model unavailable")
+    await worker.process_channel("I1")
+    statuses = worker.slack.set_session_status.await_args_list
+    assert statuses[0].args[1:3] == ("100.0", "processing")
+    assert statuses[-1].args[2] == ("suspended" if failure else "active")
+    assert (await service.INVESTIGATIONS.get("I1")).slack_session_thread_ts is None
+
+
+async def test_session_api_failure_does_not_block_report_delivery(incident):
+    worker.slack.set_session_status.side_effect = RuntimeError("unsupported agent")
+    await worker.process_channel("I1")
+    record = await service.INVESTIGATIONS.get("I1")
+    assert record.status == "watching" and record.report
+    assert worker.slack.publish.await_count == 2
+
+
+@pytest.mark.parametrize("thread_ts", [None, "250.1"])
+async def test_answers_follow_the_question_channel_or_thread(incident, monkeypatch, thread_ts):
+    monkeypatch.setattr(worker, "is_observability_authorized", lambda _: True)
+    monkeypatch.setattr(
+        worker.slack,
+        "request",
+        AsyncMock(return_value={"user": {"profile": {"email": "responder@example.com"}}}),
+    )
+    await service.RECEIPTS.put(
+        "question",
+        Receipt(
+            id="question",
+            workspace_id="T1",
+            channel_id="C1",
+            kind="app_mention",
+            payload={
+                "text": "<@UBOT> What is affected?",
+                "user": "U1",
+                "ts": "300.1",
+                **({"thread_ts": thread_ts} if thread_ts else {}),
+            },
+            received_at=time.time(),
+        ),
+    )
+    await worker.process_channel("I1")
+    assert worker.slack.publish.await_args.args[2] == thread_ts
+    assert worker.slack.set_session_status.await_args_list[0].args[1] == (thread_ts or "100.0")
+
+
+@pytest.mark.parametrize(
+    "authorized,thread_ts,stopped",
+    [(True, "100.0", True), (False, "100.0", False), (True, "other", False)],
+)
+async def test_native_stop_is_authorized_and_scoped_to_incident_session(
+    incident, monkeypatch, authorized, thread_ts, stopped
+):
+    monkeypatch.setattr(worker, "is_observability_authorized", lambda _: authorized)
+    monkeypatch.setattr(
+        worker.slack,
+        "request",
+        AsyncMock(return_value={"user": {"profile": {"email": "responder@example.com"}}}),
+    )
+
+    async def run(*args, **kwargs):
+        await service.RECEIPTS.put(
+            "stop",
+            Receipt(
+                id="stop",
+                workspace_id="T1",
+                channel_id="C1",
+                kind="agent_session_stopped",
+                payload={"user": "U1", "thread_ts": thread_ts, "event_ts": str(time.time())},
+                received_at=time.time(),
+            ),
+        )
+        await kwargs["before_tool_call"]()
+        return IncidentReport(summary="New findings.")
+
+    worker.run_engine.side_effect = run
+    await worker.process_channel("I1")
+    record = await service.INVESTIGATIONS.get("I1")
+    assert (record.status == "paused") is stopped
+    assert (record.report is None) is stopped
+    assert worker.slack.set_session_status.await_args.args[2] == (
+        "suspended" if stopped else "active"
+    )

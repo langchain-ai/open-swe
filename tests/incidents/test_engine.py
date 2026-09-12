@@ -466,10 +466,17 @@ async def test_edit_reset_uses_fresh_conversation_and_drops_old_report_from_inpu
     original_thread = saved_record.agent_thread_id
     saved_record.active_pass_id = None
     saved_record.reset_conversation = True
+    old_followup = IncidentMessage(
+        id="old-followup",
+        ts="2",
+        text="Old integration observation",
+        event_type="agent_followup",
+    )
+    saved_record.messages.append(old_followup)
     await service.INVESTIGATIONS.put(record.id, saved_record)
 
     corrected = await engine.incidents(
-        [IncidentMessage(id="1", ts="1", text="Corrected claim", edited_at="2")],
+        [IncidentMessage(id="1", ts="1", text="Corrected claim", edited_at="2"), old_followup],
         policy,
         previous_report=first,
         incident_id=record.id,
@@ -479,6 +486,8 @@ async def test_edit_reset_uses_fresh_conversation_and_drops_old_report_from_inpu
     assert run["thread_id"] != original_thread
     content = json.loads(run["input"]["messages"][-1]["content"])
     assert content["context"][0]["text"] == "Corrected claim"
+    assert len(content["context"]) == 1
+    assert not (await service.INVESTIGATIONS.get(record.id)).messages
     assert content["previous_findings"] is None
     assert content["postmortem"] is None
     assert corrected.id != first.id

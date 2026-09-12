@@ -135,6 +135,38 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+it("renders document Markdown by default and preserves unsaved edits across preview changes", async () => {
+  const markdown =
+    "## Impact\n\n- **Checkout** requests failed\n\n[Monitor](https://example.com/monitor)"
+  const { writes } = setup((path) =>
+    path === "/dashboard/api/incidents/documents/local-1"
+      ? Response.json({ ...documents, postmortem: { ...revision, markdown } })
+      : undefined
+  )
+  await screen.findByRole("heading", { name: "Impact", level: 2 })
+  expect(screen.getByText("Checkout", { selector: "li strong" })).toBeTruthy()
+  expect(screen.getByRole("link", { name: "Monitor" })).toHaveProperty(
+    "href",
+    "https://example.com/monitor"
+  )
+  expect(screen.queryByRole("textbox", { name: "Postmortem" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Edit postmortem" }))
+  const editor = screen.getByRole("textbox", { name: "Postmortem" })
+  expect(editor).toHaveProperty("value", markdown)
+  const edited = `${markdown}\n\n### Recovery\n\nRollback completed.`
+  fireEvent.change(editor, { target: { value: edited } })
+  fireEvent.click(screen.getByRole("button", { name: "Preview postmortem" }))
+  expect(
+    screen.getByRole("heading", { name: "Recovery", level: 3 })
+  ).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Edit postmortem" }))
+  expect(screen.getByRole("textbox", { name: "Postmortem" })).toHaveProperty(
+    "value",
+    edited
+  )
+  expect(writes).toEqual([])
+})
+
 it("retains provider status until a responder update is confirmed, separately from paused analysis", async () => {
   let succeeded = false
   const { client, writes } = setup((path, init) => {
@@ -198,7 +230,10 @@ it("preserves a responder edit when the expected document revision conflicts", a
         error: "A newer revision was saved.",
       })
   })
-  const editor = await screen.findByRole("textbox", { name: "Postmortem" })
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit postmortem" })
+  )
+  const editor = screen.getByRole("textbox", { name: "Postmortem" })
   fireEvent.change(editor, {
     target: { value: "Confirmed: database failover" },
   })
@@ -236,7 +271,7 @@ it("loads external historical incident detail using reads without attaching or e
         incident: {
           ...snapshot,
           title: "Past checkout outage",
-          postmortem: "Prior cause: connection pool exhausted",
+          postmortem: "## Prior cause\n\nConnection pool exhausted",
         },
       })
   })
@@ -248,7 +283,9 @@ it("loads external historical incident detail using reads without attaching or e
   fireEvent.click(
     await screen.findByRole("button", { name: "Past checkout outage" })
   )
-  await screen.findByText("Prior cause: connection pool exhausted")
+  fireEvent.click(await screen.findByText("Provider postmortem"))
+  await screen.findByRole("heading", { name: "Prior cause", level: 2 })
+  expect(screen.getByText("Connection pool exhausted")).toBeTruthy()
   expect(writes).toEqual([
     {
       path: "/dashboard/api/incidents/providers/search",
@@ -273,6 +310,9 @@ it("copies a status-page draft without offering unsupported publishing", async (
   const copy = vi.fn().mockResolvedValue(undefined)
   vi.stubGlobal("navigator", { clipboard: { writeText: copy } })
   setup()
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit status-page draft" })
+  )
   const draft = await screen.findByRole("textbox", {
     name: "Status-page draft",
   })
@@ -289,12 +329,29 @@ it("copies a status-page draft without offering unsupported publishing", async (
 })
 
 it("keeps historical document reads available while hiding unauthorized mutation controls", async () => {
-  setup((path) =>
-    path === "/dashboard/api/incidents/records/local-1"
-      ? Response.json({ ...record, allowed_actions: [] })
-      : undefined
-  )
-  await screen.findByText("Cause remains unknown")
+  setup((path) => {
+    if (path === "/dashboard/api/incidents/records/local-1")
+      return Response.json({ ...record, allowed_actions: [] })
+    if (path === "/dashboard/api/incidents/documents/local-1")
+      return Response.json({
+        ...documents,
+        postmortem: {
+          ...revision,
+          markdown: "## Findings\n\nCause remains unknown",
+        },
+        status_page_draft: {
+          ...revision,
+          kind: "status_page_draft",
+          markdown: "## Customer update\n\nInvestigating checkout errors.",
+        },
+      })
+  })
+  await screen.findByRole("heading", { name: "Findings", level: 2 })
+  expect(
+    screen.getByRole("heading", { name: "Customer update", level: 2 })
+  ).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Edit postmortem" })).toBeNull()
+  expect(screen.queryByRole("textbox", { name: "Postmortem" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Save postmortem" })).toBeNull()
   expect(
     screen.queryByRole("button", { name: "Update incident status" })
@@ -375,6 +432,9 @@ it("shows last confirmed provider state and sync failure without hiding document
   )
   await screen.findByText("Investigating impact", { selector: "dd" })
   expect(screen.getByText(/Provider could not be reached/)).toBeTruthy()
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit postmortem" })
+  )
   expect(
     await screen.findByRole("textbox", { name: "Postmortem" })
   ).toHaveProperty("value", "Cause remains unknown")
@@ -395,7 +455,11 @@ it("loads immutable revision content and displays unavailable evidence without l
       : path.endsWith("/revisions")
         ? Response.json({
             items: [
-              { ...revision, revision: 1, markdown: "First observation" },
+              {
+                ...revision,
+                revision: 1,
+                markdown: "## First observation\n\n- Elevated latency",
+              },
             ],
           })
         : undefined
@@ -404,7 +468,9 @@ it("loads immutable revision content and displays unavailable evidence without l
   fireEvent.click(
     screen.getAllByRole("button", { name: "Revision history" })[0]!
   )
-  await screen.findByText("First observation")
+  fireEvent.click(await screen.findByText(/Revision 1 · Alex/))
+  await screen.findByRole("heading", { name: "First observation", level: 2 })
+  expect(screen.getByText("Elevated latency", { selector: "li" })).toBeTruthy()
   expect(screen.queryByRole("link", { name: "Expired trace" })).toBeNull()
 })
 
@@ -415,7 +481,10 @@ it("preserves unsaved documents through a transient refresh failure", async () =
       ? Response.json({ detail: "Temporarily unavailable" }, { status: 503 })
       : undefined
   )
-  const editor = await screen.findByRole("textbox", { name: "Postmortem" })
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit postmortem" })
+  )
+  const editor = screen.getByRole("textbox", { name: "Postmortem" })
   fireEvent.change(editor, { target: { value: "Unsaved responder finding" } })
   unavailable = true
   await client.invalidateQueries({
@@ -437,12 +506,13 @@ it.each([403, 404])(
         ? Response.json({ detail: "Access revoked" }, { status })
         : undefined
     )
-    await screen.findByRole("textbox", { name: "Postmortem" })
+    await screen.findByText("Cause remains unknown")
     revoked = true
     await client.invalidateQueries({
       queryKey: ["incidents", "documents", "local-1", "current"],
     })
     await screen.findByText("Access revoked")
+    expect(screen.queryByText("Cause remains unknown")).toBeNull()
     expect(screen.queryByRole("textbox", { name: "Postmortem" })).toBeNull()
   }
 )

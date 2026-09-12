@@ -1,6 +1,6 @@
 """Narrow Slack operations used by the incident coordinator and publisher."""
 
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -139,7 +139,30 @@ async def history(
     return sorted(messages.values(), key=lambda item: float(item.ts or 0))[-500:], gaps
 
 
-async def publish(channel_id: str, text: str, thread_ts: str | None, publication_id: str) -> str:
+async def set_session_status(
+    channel_id: str,
+    thread_ts: str,
+    status: Literal["processing", "active", "suspended", "closed"],
+    title: str,
+) -> None:
+    await request(
+        "agents.sessions.setStatus",
+        write=True,
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+        status=status,
+        title=title[:200],
+    )
+
+
+async def publish(
+    channel_id: str,
+    text: str,
+    thread_ts: str | None,
+    publication_id: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+) -> str:
     params: dict[str, Any] = {
         "channel": channel_id,
         "text": text[:12000],
@@ -152,4 +175,6 @@ async def publish(channel_id: str, text: str, thread_ts: str | None, publication
     }
     if thread_ts:
         params["thread_ts"] = thread_ts
+    if blocks:
+        params["blocks"] = blocks
     return str((await request("chat.postMessage", write=True, **params))["ts"])

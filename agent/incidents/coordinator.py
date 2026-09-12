@@ -9,7 +9,7 @@ import httpx
 from agent.dispatch import create_durable_run
 from agent.incidents import documents, service
 from agent.incidents.models import CoordinatorState, Incident, IncidentPolicy
-from agent.incidents.worker import channel_receipts
+from agent.incidents.worker import channel_receipts, debounce_delay
 from agent.store import store_client
 
 
@@ -22,7 +22,7 @@ async def cleanup(records: list[Incident]) -> list[Incident]:
             and datetime.fromisoformat(record.created_at).timestamp() <= now - 30 * 86400
         ):
             await documents.preserve_metadata(record)
-            from agent.incidents.runtime import PASSES
+            from agent.incidents.runtime import PASSES, TOOL_OUTCOMES
 
             passes = await PASSES.search_all(filter={"incident_id": record.id})
             conversations = {saved.thread_id for saved in passes}
@@ -36,6 +36,8 @@ async def cleanup(records: list[Incident]) -> list[Incident]:
                         raise
             for saved_pass in passes:
                 await PASSES.delete(saved_pass.id)
+            for outcome in await TOOL_OUTCOMES.search_all(filter={"incident_id": record.id}):
+                await TOOL_OUTCOMES.delete(outcome.id)
             record = Incident(
                 id=record.id,
                 workspace_id=record.workspace_id,
@@ -185,6 +187,13 @@ async def coordinate() -> dict[str, Any]:
             or (record.pending_since and not stopped)
         )
         if not pending_work and stopped:
+            continue
+        if (
+            not pending_receipts
+            and not record.pending_requests
+            and not record.pending_publications
+            and debounce_delay(record, now) > 0
+        ):
             continue
         if record.retry_after > now and not any(
             r.kind in {"command", "app_mention"} for r in pending_receipts

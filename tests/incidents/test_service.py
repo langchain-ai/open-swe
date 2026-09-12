@@ -111,6 +111,26 @@ async def test_messages_after_accepted_creation_route_before_registration(config
     assert len(await service.RECEIPTS.search_all()) == 2
 
 
+async def test_native_stop_routes_only_to_the_matching_incident_session(configured):
+    record = Incident(
+        id=service.incident_id("T1", "C1"),
+        workspace_id="T1",
+        channel_id="C1",
+        thread_id="worker",
+        anchor_ts="100.1",
+        slack_session_thread_ts="200.1",
+    )
+    await service.INVESTIGATIONS.put(record.id, record)
+    payload = event("agent_session_stopped", "C1")
+    payload["event"].update(thread_ts="unrelated", user="U1")
+    assert await service.accept_slack_event(payload) is None
+    payload["event"]["thread_ts"] = "200.1"
+    assert await service.accept_slack_event(payload) == {"status": "accepted"}
+    assert await service.accept_slack_event(payload) == {"status": "duplicate"}
+    receipt = (await service.RECEIPTS.search_all())[0]
+    assert receipt.kind == "agent_session_stopped" and receipt.payload["thread_ts"] == "200.1"
+
+
 async def test_invalid_policy_is_a_client_error(configured):
     with pytest.raises(HTTPException) as error:
         await service.update_settings({"channel_prefix": "*"}, 0, {"id": "github:admin"})

@@ -113,6 +113,7 @@ async def accept_slack_event(payload: dict[str, Any]) -> dict[str, str] | None:
         "channel_archive",
         "message",
         "app_mention",
+        "agent_session_stopped",
     }:
         return None
     policy = await get_policy()
@@ -122,6 +123,12 @@ async def accept_slack_event(payload: dict[str, Any]) -> dict[str, str] | None:
         return None
     record = await INVESTIGATIONS.get(incident_id(policy.workspace_id, channel_id))
     if record and record.reason == "code_channel":
+        return None
+    if kind == "agent_session_stopped" and (
+        record is None
+        or not event.get("thread_ts")
+        or event["thread_ts"] not in {record.anchor_ts, record.slack_session_thread_ts}
+    ):
         return None
     enrollment = kind in {"channel_created", "channel_rename"}
     awaiting_registration = False

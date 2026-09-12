@@ -870,6 +870,13 @@ async def notion_desktop_exchange(
     return {"connected": True}
 
 
+def _slack_redirect_uri() -> str:
+    return (
+        ENV.SLACK_OAUTH_REDIRECT_URI.optional()
+        or f"{_slack_base_url()}/dashboard/api/slack/callback"
+    )
+
+
 @router.get("/slack/login")
 async def slack_login(
     desktop_handoff: str | None = None,
@@ -879,7 +886,7 @@ async def slack_login(
     """Start the Sign in with Slack flow to link the current GitHub account."""
     if not slack_oauth_configured():
         raise HTTPException(500, "Slack OAuth is not configured")
-    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
+    redirect_uri = _slack_redirect_uri()
     nonce = new_state_nonce()
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
@@ -949,7 +956,7 @@ async def slack_callback(
 
 async def _verified_slack_identity(code: str) -> tuple[str, str]:
     """Resolve an authorization code to a Slack member id and verified email."""
-    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
+    redirect_uri = _slack_redirect_uri()
     identity = await fetch_slack_identity(await exchange_slack_code(code, redirect_uri))
     verify_team(identity)
     if not identity.email or not identity.email_verified:

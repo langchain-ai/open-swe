@@ -270,6 +270,11 @@ ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
 ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention detection.")
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
+ENV.var(
+    "SLACK_OAUTH_REDIRECT_URI",
+    "Registered Sign in with Slack callback URL; defaults to the dashboard API callback. "
+    "Local development can use an HTTPS tunnel that redirects back to localhost.",
+)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
 ENV.var(
     "SLACK_PUBLIC_BASE_URL",

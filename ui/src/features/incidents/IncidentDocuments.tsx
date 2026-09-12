@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Markdown } from "@/features/agents/components/chat/Markdown"
 import {
   ErrorState,
   ExternalLink,
@@ -36,6 +37,7 @@ function DocumentEditor({
     null
   )
   const [showHistory, setShowHistory] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
   const [copyNotice, setCopyNotice] = useState("")
   const identity = useRef<{ key: string; id: string } | null>(null)
   const value = draft?.markdown ?? current?.markdown ?? ""
@@ -143,13 +145,42 @@ function DocumentEditor({
           unsupported; copy the draft into your status page.
         </p>
       )}
-      {canEdit ? (
+      {canEdit && (
+        <div className="flex items-center gap-2">
+          <div role="group" aria-label={`${title} view`} className="flex gap-1">
+            <Button
+              size="sm"
+              variant={isEditing ? "ghost" : "secondary"}
+              aria-label={`Preview ${title.toLowerCase()}`}
+              aria-pressed={!isEditing}
+              onClick={() => setIsEditing(false)}
+            >
+              Preview
+            </Button>
+            <Button
+              size="sm"
+              variant={isEditing ? "secondary" : "ghost"}
+              aria-label={`Edit ${title.toLowerCase()}`}
+              aria-pressed={isEditing}
+              onClick={() => setIsEditing(true)}
+            >
+              Edit
+            </Button>
+          </div>
+          {draft && (
+            <span className="text-xs text-muted-foreground">
+              Unsaved changes
+            </span>
+          )}
+        </div>
+      )}
+      {canEdit && isEditing ? (
         <Textarea
           aria-label={title}
           value={value}
           maxLength={200000}
           disabled={pending}
-          className={kind === "postmortem" ? "min-h-64" : "min-h-32"}
+          className={`font-mono ${kind === "postmortem" ? "min-h-64" : "min-h-32"}`}
           placeholder={
             kind === "postmortem"
               ? "Summary, impact, timeline, cause, mitigation, resolution, follow-ups, and evidence…"
@@ -162,10 +193,10 @@ function DocumentEditor({
             })
           }
         />
+      ) : value ? (
+        <Markdown content={value} />
       ) : (
-        <p className="text-sm leading-7 whitespace-pre-wrap">
-          {value || "No document yet."}
-        </p>
+        <p className="text-sm text-muted-foreground">No document yet.</p>
       )}
       {current?.evidence?.length ? (
         <ul className="space-y-2 text-xs">
@@ -211,7 +242,9 @@ function DocumentEditor({
             <summary className="cursor-pointer">
               Read saved revision {current.revision}
             </summary>
-            <p className="mt-3 whitespace-pre-wrap">{current.markdown}</p>
+            <div className="mt-3">
+              <Markdown content={current.markdown} />
+            </div>
           </details>
           <Button
             size="sm"
@@ -289,9 +322,9 @@ function DocumentEditor({
                   {formatTime(revision.created_at)} ·{" "}
                   {humanize(revision.source)}
                 </summary>
-                <p className="mt-3 text-sm leading-7 whitespace-pre-wrap">
-                  {revision.markdown}
-                </p>
+                <div className="mt-3">
+                  <Markdown content={revision.markdown} />
+                </div>
               </details>
             ))
           )}
