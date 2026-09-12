@@ -107,13 +107,14 @@ export function AssistantMessage(callbacks: ApprovalCallbacks) {
   )
   const isContext =
     role === "system" || source?.structuredSenderKind === "system"
-  const activity = source?.chunks.filter(
-    (chunk): chunk is ToolExecutionChunk =>
-      role === "assistant" &&
-      !isContext &&
-      chunk.kind === "tool-execution" &&
-      isRoutineActivity(chunk)
-  ) ?? []
+  const activity =
+    source?.chunks.filter(
+      (chunk): chunk is ToolExecutionChunk =>
+        role === "assistant" &&
+        !isContext &&
+        chunk.kind === "tool-execution" &&
+        isRoutineActivity(chunk)
+    ) ?? []
   const activityRunning = activity.some(
     (chunk) => chunk.status === "pending" || chunk.status === "in_progress"
   )
@@ -147,7 +148,8 @@ export function AssistantMessage(callbacks: ApprovalCallbacks) {
           )
         if (part.type === "tool-call" && part.artifact) {
           const chunk = part.artifact as ToolExecutionChunk
-          if (role === "assistant" && !isContext && isRoutineActivity(chunk)) return null
+          if (role === "assistant" && !isContext && isRoutineActivity(chunk))
+            return null
           return <Tool chunk={chunk} {...callbacks} />
         }
         if (part.type === "data" && part.name === "error")
@@ -215,8 +217,12 @@ export function AssistantMessage(callbacks: ApprovalCallbacks) {
                 ) : (
                   <ChevronRight className="size-3.5 transition-transform group-open/activity:rotate-90" />
                 )}
-                <span className="group-open/activity:hidden">Show activity</span>
-                <span className="hidden group-open/activity:inline">Hide activity</span>
+                <span className="group-open/activity:hidden">
+                  Show activity
+                </span>
+                <span className="hidden group-open/activity:inline">
+                  Hide activity
+                </span>
                 <span className="text-xs">
                   · {activity.length} {activity.length === 1 ? "call" : "calls"}
                   {activityRunning && " · Running"}
