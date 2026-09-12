@@ -6,6 +6,7 @@ import json
 import logging
 import shlex
 from abc import ABC, abstractmethod
+from fnmatch import fnmatchcase
 from typing import Any
 
 import httpx2
@@ -20,6 +21,7 @@ from langsmith.sandbox import (
 )
 
 from agent.config import ENV
+from agent.dashboard.environment_auth import resolve_environment_auth_rules
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
 
@@ -383,11 +385,29 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
+def _proxy_rule_matches_host(rule: dict[str, Any], host: str) -> bool:
+    if rule.get("enabled") is False:
+        return False
+    # Provider auth precedes header rules and has implicit destination matching.
+    rule_type = rule.get("type")
+    rule_type = rule_type.strip().lower() if isinstance(rule_type, str) else ""
+    if rule_type == "gcp":
+        return host == "googleapis.com" or host.endswith(".googleapis.com")
+    if rule_type == "aws":
+        return host.endswith(".amazonaws.com")
+    return any(
+        fnmatchcase(host, pattern.lower())
+        for pattern in (rule.get("match_hosts") or [])
+        if isinstance(pattern, str)
+    )
+
+
 async def configure_github_proxy(
     sandbox_name: str,
     github_token: str,
     *,
     base_proxy_config: dict[str, Any] | None = None,
+    environment_slug: str | None = None,
 ) -> None:
     """Configure sandbox proxy to inject managed credentials for outbound traffic.
 
@@ -399,9 +419,12 @@ async def configure_github_proxy(
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
         github_token: GitHub token to inject as Authorization header.
         base_proxy_config: Additional persisted proxy settings to preserve.
+        environment_slug: Environment whose current credentials should be injected.
     """
     api_key = _get_langsmith_api_key()
     if not api_key:
+        if environment_slug is not None:
+            raise RuntimeError("Cannot configure environment auth proxy without a sandbox API key")
         logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
         return
     langsmith_endpoint = _get_sandbox_endpoint()
@@ -414,25 +437,62 @@ async def configure_github_proxy(
         for rule in (custom_rules if isinstance(custom_rules, list) else [])
         if not isinstance(rule, dict) or rule.get("name") != "open-swe-langsmith"
     ]
-    proxy_config["rules"] = [
+    rules = [
         *preserved_rules,
         *_github_proxy_rules(github_token),
         *_stagehand_proxy_rules(),
     ]
+    environment_rules = (
+        await resolve_environment_auth_rules(environment_slug) if environment_slug else []
+    )
+    # Callback configuration has no enabled/type fields; ignore unknown fields
+    # here just as the provider does when decoding a callback.
+    callbacks = [
+        {"match_hosts": callback.get("match_hosts", [])}
+        for callback in (proxy_config.get("callbacks") or [])
+        if isinstance(callback, dict)
+    ]
+    for environment_rule in environment_rules:
+        for existing in [*rules, *callbacks]:
+            if not isinstance(existing, dict) or existing.get("enabled") is False:
+                continue
+            # Header rules also preempt authorization callbacks on matching hosts.
+            if existing.get("name") == environment_rule["name"] or any(
+                _proxy_rule_matches_host(existing, host) for host in environment_rule["match_hosts"]
+            ):
+                raise ValueError(
+                    "Environment auth proxy rule conflicts with an existing proxy rule"
+                )
+    proxy_config["rules"] = [*rules, *environment_rules]
     payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
+        needs_start = False
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
         except httpx2.HTTPStatusError as exc:
             if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
+                if environment_slug is not None:
+                    raise RuntimeError("Failed to configure environment auth proxy") from None
                 raise
+            needs_start = True
+        except Exception:
+            if environment_slug is not None:
+                raise RuntimeError("Failed to configure environment auth proxy") from None
+            raise
+        # Leave the exception handler before retrying: startup errors must not
+        # inherit a proxy response that may have echoed an opaque header value.
+        if needs_start:
             logger.warning(
-                "Proxy config rejected for sandbox %s; starting it and retrying: %s",
-                sandbox_name,
-                exc,
+                "Proxy config rejected; starting sandbox before retry",
+                extra={"sandbox_id": sandbox_name},
             )
-            await _start_sandbox_best_effort(sandbox_name)
-            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+            try:
+                await _start_sandbox_best_effort(sandbox_name)
+                await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+            except Exception:
+                if environment_slug is not None:
+                    raise RuntimeError("Failed to configure environment auth proxy") from None
+                raise
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
 
 
@@ -531,6 +591,7 @@ async def create_langsmith_sandbox(
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
     create_params: dict[str, Any] | None = None,
+    environment_slug: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
@@ -549,6 +610,7 @@ async def create_langsmith_sandbox(
         vcpus: Optional virtual CPU count override for a newly-created sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
         create_params: Optional additional fields merged into the sandbox create body.
+        environment_slug: Environment auth applied before setup scripts run.
 
     Returns:
         SandboxBackendProtocol instance
@@ -587,14 +649,12 @@ async def create_langsmith_sandbox(
 
     if sandbox_id is None and github_token:
         proxy_config = get_sandbox_proxy_config(create_params)
+        configure_kwargs: dict[str, Any] = {}
         if proxy_config is not None:
-            await configure_github_proxy(
-                backend.id,
-                github_token,
-                base_proxy_config=proxy_config,
-            )
-        else:
-            await configure_github_proxy(backend.id, github_token)
+            configure_kwargs["base_proxy_config"] = proxy_config
+        if environment_slug is not None:
+            configure_kwargs["environment_slug"] = environment_slug
+        await configure_github_proxy(backend.id, github_token, **configure_kwargs)
 
     return backend
 

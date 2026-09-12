@@ -49,7 +49,7 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
     configure.assert_awaited_once_with(new_sandbox)
     update.assert_awaited_once_with(
         thread_id=thread_id,
-        metadata={"sandbox_id": "sandbox-new"},
+        metadata={"sandbox_id": "sandbox-new", "sandbox_environment_slug": None},
     )
     assert SANDBOX_BACKENDS[thread_id] is proxy
     assert proxy.current is new_sandbox
