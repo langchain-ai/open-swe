@@ -1997,8 +1997,8 @@ async def api_pr_merge_rate_by_model(
     from asyncpg import PostgresError
     from sqlalchemy.exc import SQLAlchemyError
 
-    from agent.database.analytics import configured
     from agent.analytics.queries import pr_merge_rate_by_model
+    from agent.database.analytics import configured
 
     try:
         if not configured():
