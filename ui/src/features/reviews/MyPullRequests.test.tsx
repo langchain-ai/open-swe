@@ -304,7 +304,7 @@ describe("My PRs", () => {
     ])
   })
 
-  it("opens the fix thread and shows progress while the request runs", async () => {
+  it("queues the fix in the background and keeps the button disabled after success", async () => {
     let resolve!: (value: { thread_id: string }) => void
     vi.mocked(api.fixPullRequest).mockImplementation(
       () =>
@@ -319,17 +319,17 @@ describe("My PRs", () => {
     expect(
       (
         (await screen.findByRole("button", {
-          name: "Opening thread…",
+          name: "Queuing fix…",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)
-    expect(api.fixPullRequest).toHaveBeenCalledWith("acme/other", 2)
+    expect(api.fixPullRequest).toHaveBeenCalledWith(payload.pullRequests[0])
     resolve({ thread_id: "fix-thread" })
-    await waitFor(() =>
-      expect(navigate).toHaveBeenCalledWith({
-        to: "/agents/$threadId",
-        params: { threadId: "fix-thread" },
-      })
-    )
+    const queued = await screen.findByRole("button", { name: "Fix queued" })
+    expect((queued as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(queued)
+    expect(api.fixPullRequest).toHaveBeenCalledTimes(1)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(screen.getByRole("table")).toBeTruthy()
   })
 })

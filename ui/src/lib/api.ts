@@ -905,10 +905,10 @@ export const api = {
     request<OpenPullRequestsPayload>(
       `/my-pull-requests?repo=${encodeURIComponent(repo)}`
     ),
-  fixPullRequest: (repo: string, number: number) =>
+  fixPullRequest: (pr: OpenPullRequest) =>
     request<{ thread_id: string }>(
-      `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/fix`,
-      { method: "POST" }
+      `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/fix`,
+      { method: "POST", body: JSON.stringify(pr) }
     ),
   reviewSummaries: (pullRequests: Array<{ repo: string; number: number }>) =>
     request<Record<string, ReviewSummary | null>>("/reviews/summaries", {

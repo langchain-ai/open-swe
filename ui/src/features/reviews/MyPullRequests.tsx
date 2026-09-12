@@ -1,5 +1,4 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
 import { BugBeetleIcon, FlagIcon } from "@phosphor-icons/react"
 
 import { Button } from "@/components/ui/button"
@@ -29,21 +28,25 @@ function overallStatus(pr: OpenPullRequest) {
 }
 
 function FixPullRequest({ pr }: { pr: OpenPullRequest }) {
-  const navigate = useNavigate()
   const fix = useMutation({
-    mutationFn: () => api.fixPullRequest(pr.repo, pr.number),
-    onSuccess: ({ thread_id }) =>
-      navigate({ to: "/agents/$threadId", params: { threadId: thread_id } }),
+    mutationFn: () => api.fixPullRequest(pr),
   })
   return (
     <div className="mt-2">
       <Button
         size="sm"
         variant="outline"
-        disabled={fix.isPending}
+        disabled={fix.isPending || fix.isSuccess}
+        aria-live="polite"
         onClick={() => fix.mutate()}
       >
-        {fix.isPending ? "Opening thread…" : "Fix in Open SWE"}
+        {fix.isPending
+          ? "Queuing fix…"
+          : fix.isSuccess
+            ? "Fix queued"
+            : fix.isError
+              ? "Retry fix"
+              : "Fix in Open SWE"}
       </Button>
       {fix.error && (
         <p role="alert" className="mt-1 text-destructive">

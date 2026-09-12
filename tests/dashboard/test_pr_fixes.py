@@ -1,3 +1,4 @@
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -73,3 +74,23 @@ async def test_denied_repo_never_reads_or_starts_threads(setup):
         await pr_fixes.fix_pull_request("acme", "app", 12, "alice")
     setup.threads.search.assert_not_awaited()
     pr_fixes.dispatch_agent_run.assert_not_awaited()
+
+
+async def test_fix_message_includes_full_displayed_failure_context(setup):
+    context = pr_fixes.PullRequestFixContext(
+        title="Broken build",
+        headRef="feature/fix",
+        headSha="abc123",
+        mergeable=False,
+        mergeState="dirty",
+        ci="failing",
+        failingChecks=["lint", "unit", "build", "integration"],
+        pendingChecks=["e2e"],
+        statusAvailable=True,
+        updatedAt="2026-09-12T12:00:00Z",
+        reviewDecision="changes_requested",
+    )
+    await pr_fixes.fix_pull_request("acme", "app", 12, "alice", context=context)
+    prompt = pr_fixes.dispatch_agent_run.await_args.args[1]
+    assert json.loads(prompt[prompt.index("{\n") :]) == context.model_dump()
+    assert "may be stale" in prompt

@@ -197,6 +197,7 @@ from agent.dashboard.threads.listing import (
     pin_dashboard_thread,
     unpin_dashboard_thread,
 )
+from agent.dashboard.threads.pr_fixes import PullRequestFixContext, fix_pull_request
 from agent.dashboard.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
@@ -1538,11 +1539,12 @@ async def api_fix_pull_request(
     owner: str,
     repo: str,
     pr_number: int,
+    context: PullRequestFixContext,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, str]:
-    from agent.dashboard.threads.pr_fixes import fix_pull_request
-
-    return await fix_pull_request(owner, repo, pr_number, session["sub"], session.get("email"))
+    return await fix_pull_request(
+        owner, repo, pr_number, session["sub"], session.get("email"), context=context
+    )
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}")
