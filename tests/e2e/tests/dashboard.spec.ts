@@ -18,6 +18,60 @@ import {
 // Drives the REAL built ui/ app (served same-origin from the harness) for the
 // Slack → web handoff. Only the LLM/GitHub/Slack/token boundaries are faked.
 test.describe("Slack → web handoff (real dashboard UI)", () => {
+  test("keeps sidebar resizing responsive with an open chat", async ({
+    page,
+  }, testInfo) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+
+    const sidebar = page.locator("[data-sidebar-frame]");
+    await expect(sidebar).toBeVisible();
+    const box = await sidebar.boundingBox();
+    expect(box).not.toBeNull();
+    const initialWidth = box!.width;
+    const edge = box!.x + box!.width;
+    let writes = 0;
+    await page.evaluate(() => {
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (...args) {
+        if (args[0] === "open-swe.sidebar.width") {
+          document.documentElement.dataset.sidebarWidthWrites = String(
+            Number(document.documentElement.dataset.sidebarWidthWrites ?? 0) +
+              1,
+          );
+        }
+        return original.apply(this, args);
+      };
+    });
+    await page.mouse.move(edge, box!.y + 100);
+    await page.mouse.down();
+    await page.mouse.move(edge + 80, box!.y + 100, { steps: 20 });
+    await expect
+      .poll(() =>
+        sidebar.evaluate((element) => element.getBoundingClientRect().width),
+      )
+      .toBeGreaterThan(initialWidth + 70);
+    writes = await page.evaluate(() =>
+      Number(document.documentElement.dataset.sidebarWidthWrites ?? 0),
+    );
+    expect(writes).toBe(0);
+    await page.mouse.up();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Number(document.documentElement.dataset.sidebarWidthWrites ?? 0),
+        ),
+      )
+      .toBe(1);
+
+    const screenshotPath = testInfo.outputPath("resized-sidebar.png");
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach("resized-sidebar", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+  });
+
   test("the SAME user continues the conversation in the web app", async ({
     page,
   }) => {

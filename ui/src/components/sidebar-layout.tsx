@@ -18,12 +18,16 @@ export const SIDEBAR_DEFAULT_WIDTH = 260
 export const SIDEBAR_MIN_WIDTH = 200
 export const SIDEBAR_MAX_WIDTH = 420
 
+function clampWidth(width: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width))
+}
+
 function readStoredWidth(): number {
   if (typeof window === "undefined") return SIDEBAR_DEFAULT_WIDTH
   const raw = window.localStorage.getItem(STORAGE_WIDTH)
   const parsed = raw ? Number(raw) : NaN
   if (!Number.isFinite(parsed)) return SIDEBAR_DEFAULT_WIDTH
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, parsed))
+  return clampWidth(parsed)
 }
 
 function readStoredCollapsed(): boolean {
@@ -41,10 +45,7 @@ export function useSidebarLayout() {
   )
 
   const setWidth = useCallback((next: number) => {
-    const clamped = Math.min(
-      SIDEBAR_MAX_WIDTH,
-      Math.max(SIDEBAR_MIN_WIDTH, next)
-    )
+    const clamped = clampWidth(next)
     setWidthState(clamped)
     window.localStorage.setItem(STORAGE_WIDTH, String(clamped))
   }, [])
@@ -151,9 +152,7 @@ export function SidebarFrame({
       )}
     >
       {children}
-      <div className="max-md:hidden">
-        <ResizeHandle width={width} onResize={setWidth} />
-      </div>
+      <ResizeHandle width={width} onResize={setWidth} />
     </aside>
   )
 }
@@ -165,25 +164,36 @@ function ResizeHandle({
   width: number
   onResize: (next: number) => void
 }) {
+  const frameRef = useRef<HTMLElement | null>(null)
   const startRef = useRef<{ x: number; width: number } | null>(null)
   const [dragging, setDragging] = useState(false)
 
+  const finishResize = useCallback(() => {
+    if (!startRef.current) return
+    startRef.current = null
+    setDragging(false)
+    const next = frameRef.current?.getBoundingClientRect().width
+    if (next !== undefined) onResize(next)
+  }, [onResize])
+
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault()
+    frameRef.current = e.currentTarget.closest("aside")
     startRef.current = { x: e.clientX, width }
     setDragging(true)
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!startRef.current) return
-    const next = startRef.current.width + (e.clientX - startRef.current.x)
-    onResize(next)
+    if (!startRef.current || !frameRef.current) return
+    const next = clampWidth(
+      startRef.current.width + (e.clientX - startRef.current.x)
+    )
+    frameRef.current.style.width = `${next}px`
   }
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    startRef.current = null
-    setDragging(false)
+    finishResize()
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId)
     }
@@ -193,10 +203,12 @@ function ResizeHandle({
     if (!dragging) return
     const prev = document.body.style.cursor
     document.body.style.cursor = "col-resize"
+    window.addEventListener("blur", finishResize)
     return () => {
+      window.removeEventListener("blur", finishResize)
       document.body.style.cursor = prev
     }
-  }, [dragging])
+  }, [dragging, finishResize])
 
   return (
     <div
@@ -205,9 +217,10 @@ function ResizeHandle({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={finishResize}
+      onLostPointerCapture={finishResize}
       className={cn(
-        "absolute top-0 right-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
+        "absolute top-0 -right-1 z-20 h-full w-2 cursor-col-resize touch-none select-none max-md:hidden",
         "after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-transparent after:transition-colors",
         "hover:after:bg-border",
         dragging && "after:bg-border"
