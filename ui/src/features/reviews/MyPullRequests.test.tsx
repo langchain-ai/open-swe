@@ -150,6 +150,12 @@ describe("My PRs", () => {
   })
 
   it("filters conflicts and sends the applied repository to the server", async () => {
+    vi.mocked(api.myPullRequests).mockImplementation(async (repo) => ({
+      ...payload,
+      pullRequests: payload.pullRequests.filter(
+        (pr) => !repo || repo.split(",").includes(pr.repo)
+      ),
+    }))
     mount()
     await screen.findByText("Change 1")
     fireEvent.click(screen.getByLabelText("Filter by status"))
@@ -163,6 +169,8 @@ describe("My PRs", () => {
     expect(titles()).toEqual(["Change 1", "Change 2"])
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
     fireEvent.click(screen.getByLabelText("Filter by repository"))
+    expect(api.repos).not.toHaveBeenCalled()
+    expect(await screen.findAllByRole("menuitemcheckbox")).toHaveLength(2)
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: "acme/other" })
     )

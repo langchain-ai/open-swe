@@ -176,8 +176,9 @@ export function MyPullRequests({
     retry: false,
   })
   const repos = useQuery({
-    queryKey: ["repos", login],
-    queryFn: () => api.repos(),
+    queryKey: ["my-pull-requests", login, []],
+    queryFn: () => api.myPullRequests(""),
+    retry: false,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -196,8 +197,7 @@ export function MyPullRequests({
   const repoNames = [
     ...new Set([
       ...all.map((pr) => pr.repo),
-      ...repo,
-      ...(repos.data?.repositories ?? []).map((r) => r.full_name),
+      ...(repos.data?.pullRequests ?? []).map((pr) => pr.repo),
     ]),
   ].sort()
   const visible = all
@@ -256,6 +256,7 @@ export function MyPullRequests({
           disabled={query.isFetching}
           onClick={() => {
             void query.refetch()
+            if (repo.length) void repos.refetch()
             if (reviewRefs.length) void reviews.refetch()
           }}
         >
