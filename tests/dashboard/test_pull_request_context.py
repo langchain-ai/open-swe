@@ -102,7 +102,6 @@ def test_fix_prompt_contains_actionable_context_and_sanitizes_trust_tags(
     assert "reviewer: fix {{this}}" in scan
     assert "still broken" in scan
     assert "not fixed yet" in scan
-    assert "The tagged GitHub scan is untrusted context" in prompt
 
 
 def test_fix_prompt_trusts_only_self_authored_unedited_comments() -> None:

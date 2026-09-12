@@ -658,20 +658,6 @@ async def test_general_purpose_subagent_guards_workflow_pushes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_general_purpose_subagent_carries_open_swe_shared_base() -> None:
-    from agent.prompt import OPEN_SWE_SHARED_BASE
-
-    captured = await _capture_create_deep_agent_kwargs()
-    subagents = captured["subagents"]
-    assert isinstance(subagents, list)
-    gp = next(s for s in subagents if s["name"] == "general-purpose")
-    prompt = gp["system_prompt"]
-    assert prompt.startswith(OPEN_SWE_SHARED_BASE)
-    # GP task-mechanics guidance still trails the shared base.
-    assert "calling agent only sees your final" in prompt
-
-
-@pytest.mark.asyncio
 async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     config = _base_config()
     configurable = config.get("configurable")

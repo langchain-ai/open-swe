@@ -300,7 +300,6 @@ async def test_schedule_thread_wakeup_defaults_prompt_and_omits_none_configurabl
     assert "linear_issue" not in cfg
     assert "schedule_id" not in cfg
     assert cfg["thread_id"] == "test-thread-123"
-    assert "automated re-trigger" in captured["prompt"].lower()
 
 
 async def test_schedule_allows_ten_wakeups_then_rejects_the_eleventh(

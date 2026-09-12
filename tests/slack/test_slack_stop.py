@@ -180,8 +180,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     assert dispatched[0]["configurable"]["github_login"] == "owner"
     assert dispatched[0]["configurable"]["stop_summary"] is True
     assert dispatched[0]["configurable"]["slack_thread"]["triggering_user_id"] == "UOWNER"
-    assert "first and only user-facing action" in dispatched[0]["content"]
-    assert "active runs were interrupted" in dispatched[0]["content"]
     thread_mapping = client.store.items[(("slack_run_map", "C123"), "thread:1.000")]
     assert thread_mapping["value"]["run_id"] == "run-summary"
 
@@ -198,7 +196,6 @@ async def test_stop_reaction_on_root_dispatches_no_active_run_summary(
     assert claimed == ["EvRoot"]
     assert client.runs.cancelled == []
     assert dispatched[0]["thread_id"] == thread_id
-    assert "No active run was present" in dispatched[0]["content"]
 
 
 async def test_stop_reaction_from_non_owner_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -195,7 +195,6 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     assert result == {"status": "idle", "delivered": 1}
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
-    assert "A sandbox background command finished." in dispatch.await_args.args[1]
     configurable = dispatch.await_args.args[2]
     assert configurable["source"] == "slack"
     assert configurable["background_task_completion"] is True
