@@ -27,6 +27,7 @@ from agent.input_messages import (
 from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
+from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
@@ -344,6 +345,7 @@ def _slack_context_input(
     request_text: str,
     request_blocks: list[dict[str, Any]],
     operational_context: str,
+    trigger_bot: AllowedSlackBot | None = None,
 ) -> RunInput:
     channel_entity_id = f"slack:{channel_id}"
     run_messages = [channel_introduction({"id": channel_entity_id, "platform": "slack"})]
@@ -409,7 +411,18 @@ def _slack_context_input(
         user_names_by_id.get(trigger_id, ""),
         logins_by_user_id.get(trigger_id, ""),
     )
-    if trigger_person["id"] not in introduced:
+    trigger_sender_id = trigger_person["id"]
+    trigger_kind: MessageKind = "human"
+    if trigger_bot is not None:
+        trigger_sender_id, bot_identity, trigger_kind = _slack_sender(
+            {"bot_id": trigger_bot.bot_id, "bot_profile": {"name": trigger_bot.name}},
+            {},
+            {},
+            bot_user_id,
+        )
+        if trigger_sender_id not in introduced:
+            run_messages.append(system_introduction(cast(SystemIdentity, bot_identity)))
+    elif trigger_person["id"] not in introduced:
         run_messages.append(person_introduction(trigger_person))
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
@@ -420,13 +433,13 @@ def _slack_context_input(
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
     run_messages.append(
-        human_input(
+        (system_input if trigger_bot is not None else human_input)(
             request_blocks,
             {
-                "sender_id": trigger_person["id"],
+                "sender_id": trigger_sender_id,
                 "channel_id": channel_entity_id,
                 "surface": "slack",
-                "kind": "human",
+                "kind": trigger_kind,
                 "data": {"timestamp": event_ts},
             },
         )
@@ -502,7 +515,7 @@ async def _mark_slack_thread_errored(
         visibility = _slack_thread_visibility(request.channel_context)
         # An unlinked sender is turned away at the account gate; a private thread
         # nobody owns would be unreachable, so persist nothing for them.
-        if visibility == "public" or owner_login:
+        if not request.triggering_bot_id and (visibility == "public" or owner_login):
             clean_text = (
                 common.strip_bot_mention(
                     request.text, request.bot_user_id, bot_username=common.SLACK_BOT_USERNAME
@@ -538,7 +551,9 @@ async def _mark_slack_thread_errored(
                 "updated_at_ms": int(datetime.now(UTC).timestamp() * 1000),
             },
         )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        if request.triggering_bot_id and common.is_not_found_error(exc):
+            return
         common.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
 
 
@@ -576,6 +591,38 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     thread_id = request.thread_id or await common.resolve_slack_thread_id(
         langgraph_client, channel_id, thread_ts
     )
+    allowed_bot = None
+    if request.triggering_bot_id:
+        allowed_bot = await resolve_allowed_slack_bot(
+            request.team_id,
+            request.triggering_bot_id,
+            user_id=user_id,
+            app_id=request.triggering_bot_app_id,
+        )
+        if allowed_bot is None:
+            return
+        if _slack_thread_visibility(channel_context) == "private":
+            return
+        try:
+            existing_thread = await langgraph_client.threads.get(thread_id)
+        except Exception as exc:
+            if not common.is_not_found_error(exc):
+                raise
+        else:
+            existing_metadata = existing_thread.get("metadata") or {}
+            opening_slack = SourceContext.from_metadata(existing_metadata).slack_thread
+            if (
+                existing_metadata.get("owner_type") != "system"
+                or existing_metadata.get("visibility") != "public"
+                or opening_slack is None
+                or opening_slack.triggering_bot_id != allowed_bot.bot_id
+                or opening_slack.team_id != allowed_bot.team_id
+            ):
+                common.logger.info(
+                    "Ignoring Slack bot mention in a thread with another owner",
+                    extra={"agent_thread_id": thread_id, "slack_bot_id": allowed_bot.bot_id},
+                )
+                return
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
         await common.refresh_user_mapping_cache()
@@ -583,9 +630,9 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         common.logger.debug("Could not refresh user mapping cache for Slack mention", exc_info=True)
 
     user_email = None
-    user_name = ""
+    user_name = allowed_bot.name if allowed_bot is not None else ""
     user_timezone = ""
-    if user_id:
+    if user_id and allowed_bot is None:
         slack_user = await common.get_slack_user_info(user_id)
         if slack_user:
             profile = slack_user.get("profile", {})
@@ -603,7 +650,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
                 user_timezone = timezone_value.strip()
 
     thread_metadata = await common.authorize_github_thread(
-        thread_id, await _slack_login(user_id, user_email) or ""
+        thread_id, (await _slack_login(user_id, user_email) or "") if allowed_bot is None else ""
     )
     context_thread_ts = reply_thread_ts or thread_ts
     thread_messages = (
@@ -622,6 +669,11 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
                 "text": text,
                 "user": user_id,
                 "attachments": attachments,
+                **(
+                    {"bot_id": allowed_bot.bot_id, "bot_profile": {"name": allowed_bot.name}}
+                    if allowed_bot is not None
+                    else {}
+                ),
             }
         )
     elif current_message is not None and attachments and not current_message.get("attachments"):
@@ -731,7 +783,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         + image_urls_from_links
     )
 
-    mapped_login = await _slack_login(user_id, user_email)
+    mapped_login = await _slack_login(user_id, user_email) if allowed_bot is None else None
     thread_model_choice = await common.get_thread_model_choice(thread_id)
 
     image_model_override: tuple[str, str] | None = None
@@ -777,7 +829,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             user_token = None
     has_valid_user_token = bool(user_token)
 
-    if not has_valid_user_token:
+    if allowed_bot is None and not has_valid_user_token:
         # A stored-but-unusable token means "sign in again"; no record at all
         # means the user has never connected GitHub + Slack via the dashboard.
         # Guard the store read like token resolution above so a transient
@@ -815,11 +867,15 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         "thread_ts": thread_ts,
         "triggering_user_id": user_id,
         "triggering_user_name": user_name,
-        "triggering_user_email": user_email,
+        "triggering_user_email": user_email or "",
         "triggering_event_ts": event_ts,
     }
     if user_timezone:
         slack_thread_context["triggering_user_timezone"] = user_timezone
+    if allowed_bot is not None:
+        slack_thread_context["triggering_bot_id"] = allowed_bot.bot_id
+        slack_thread_context["triggering_bot_app_id"] = allowed_bot.app_id
+        slack_thread_context["team_id"] = allowed_bot.team_id
     if code_channel and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
@@ -871,10 +927,11 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         slack_participant_user_ids=[*logins_by_user_id] if not is_first_mention else [],
         visibility=visibility,
         owner_login=mapped_login or "",
+        owner_type="system" if allowed_bot else "user",
     )
-    if visibility == "private" and not persisted:
+    if (visibility == "private" or allowed_bot is not None) and not persisted:
         # Dispatch would create the thread itself, with no metadata and so public.
-        raise RuntimeError("could not persist private thread metadata")
+        raise RuntimeError("could not persist thread authorization metadata")
 
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that
@@ -905,6 +962,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         request_text=clean_text,
         request_blocks=content_blocks,
         operational_context=operational_context,
+        trigger_bot=allowed_bot,
     )
     if code_channel:
         await common.set_session_status(channel_id, "processing")

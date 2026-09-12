@@ -2,6 +2,7 @@ import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
+import type { ReactNode } from "react"
 
 import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
@@ -28,6 +29,7 @@ import {
   slackManifestPlaceholdersRemain,
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
+import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { useRepos } from "@/lib/profile"
@@ -65,7 +67,11 @@ function AdminPage() {
         )}
       />
 
-      <SlackIntegrationSection backendUrl={session.data.api_base_url} />
+      <SlackIntegrationSection
+        backendUrl={session.data.slack_base_url ?? session.data.api_base_url}
+      >
+        <AllowedSlackBotsSection />
+      </SlackIntegrationSection>
       <MCPConnectionsSection scope="workspace" />
 
       <LLMGatewaySection />
@@ -106,8 +112,10 @@ const SLACK_CODE_CHANNELS_STORAGE_KEY =
 
 export function SlackIntegrationSection({
   backendUrl,
+  children,
 }: {
   backendUrl?: string
+  children?: ReactNode
 }) {
   const [enabled, setEnabled] = useState(false)
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
@@ -149,7 +157,7 @@ export function SlackIntegrationSection({
   return (
     <SettingsSection
       title="Slack integration"
-      description="Select the Slack app manifest for this installation. This browser-only setting does not change backend behavior."
+      description="Configure Slack and choose which bots can start Open SWE runs."
     >
       <SettingsRow
         htmlFor="slack-code-channels"
@@ -186,6 +194,7 @@ export function SlackIntegrationSection({
               : "Copy manifest"}
         </Button>
       </div>
+      {children}
     </SettingsSection>
   )
 }

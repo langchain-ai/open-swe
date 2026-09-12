@@ -668,7 +668,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     @staticmethod
-    def _sender_context_messages(state: PrepareRunState, sender_context: str) -> list[Any]:
+    def _sender_context_messages(
+        state: PrepareRunState, sender_context: str, *, sender_id: str | None = None
+    ) -> list[Any]:
         """Sender context as its own message, appended after the run's input.
 
         Splicing it into the triggering message rewrote history: that message is
@@ -681,15 +683,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
         ):
             return []
-        sender_id = next(
-            (
-                sender_id
-                for candidate in reversed(state.get("messages") or [])
-                if isinstance(candidate, HumanMessage)
-                and (sender_id := message_sender_id(candidate.content, kind="human")) is not None
-            ),
-            None,
-        )
+        if sender_id is None:
+            sender_id = next(
+                (
+                    candidate_id
+                    for candidate in reversed(state.get("messages") or [])
+                    if isinstance(candidate, HumanMessage)
+                    and (candidate_id := message_sender_id(candidate.content, kind="human"))
+                    is not None
+                ),
+                None,
+            )
         if sender_id is None:
             return []
         identity: SystemIdentity = {
@@ -786,7 +790,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
                 participant_identities=participant_identities,
             )
-        sender_messages = self._sender_context_messages(state, sender_context)
+        bot_id = (
+            cfg.slack_thread.triggering_bot_id
+            if self._source == "slack" and cfg.slack_thread
+            else ""
+        )
+        sender_messages = self._sender_context_messages(
+            state, sender_context, sender_id=f"system:slack-bot-{bot_id}" if bot_id else None
+        )
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
