@@ -16,7 +16,7 @@ from agent.analytics.events import (
     RunCostRecordedPayload,
     RunStartedPayload,
 )
-from agent.database import analytics as database
+from agent.database import postgres
 from tests.analytics.helpers import DAY, event
 
 
@@ -196,7 +196,7 @@ async def test_additive_migration_preserves_expired_and_unsummarized_totals(
     async with transaction() as conn:
         await conn.execute(text("DROP TABLE additive_event_projection"))
         schema = await conn.scalar(text("SELECT current_schema()"))
-        revision = database._load_migrations().get_revision("0006")
+        revision = postgres.load_migrations().get_revision("0006")
         script = revision.module.SQL.replace("open_swe", schema)
         raw = await conn.get_raw_connection()
         await raw.driver_connection.execute(script)
