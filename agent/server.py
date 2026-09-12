@@ -400,6 +400,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "manage_code_channel",
         "list_threads",
         "manage_thread",
+        "mark_question_answered",
         "notify_automation_channel",
         "read_user_settings",
     }
@@ -1160,6 +1161,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    if source != "dashboard":
+        static_tools = [tool for tool in static_tools if tool is not mark_question_answered]
     static_tools = apply_tool_descriptions(static_tools)
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
