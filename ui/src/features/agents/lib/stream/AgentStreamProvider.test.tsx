@@ -10,6 +10,10 @@ import type { ReactNode } from "react"
 
 interface StreamOptions {
   threadId: string | null
+  maxReconnectAttempts: number
+  reconnectDelayMs: (attempt: number) => number
+  onReconnect: (options: { attempt: number; delayMs: number }) => void
+  onConnected: () => void
   onThreadId: (threadId: string) => void
   onCreated: () => void
   onCompleted: () => void
@@ -107,6 +111,31 @@ describe("AgentStreamProvider", () => {
     emit("started")
     act(() => mocks.streams.at(-1)?.onCompleted())
     expect(view.container.textContent).toBe("idle")
+  })
+
+  it("tracks reconnect attempts until the stream reconnects", () => {
+    render(
+      wrapper(
+        <AgentStreamProvider threadId="one">
+          <Probe />
+        </AgentStreamProvider>
+      )
+    )
+    const stream = mocks.streams[0]
+    if (!stream) throw new Error("stream was not mounted")
+
+    expect(stream.maxReconnectAttempts).toBe(12)
+    expect(stream.reconnectDelayMs(12)).toBe(300_000)
+    act(() => stream.onReconnect({ attempt: 3, delayMs: 4_000 }))
+    expect(useStreamPool.getState().entries[0]?.connection).toMatchObject({
+      status: "reconnecting",
+      attempt: 3,
+    })
+
+    act(() => stream.onConnected())
+    expect(useStreamPool.getState().entries[0]?.connection).toEqual({
+      status: "live",
+    })
   })
 
   it("serves the stream bound to the requested thread", () => {

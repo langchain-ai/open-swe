@@ -135,4 +135,29 @@ describe("streamPool", () => {
     expect(retained).toContain("current")
     expect(retained).toHaveLength(MAX_IDLE_STREAMS + 1)
   })
+
+  describe("connection", () => {
+    it("reports each retry with the deadline its delay implies", () => {
+      pool().activate("cloud", "one")
+      const id = activeEntry()!.id
+
+      pool().streamReconnecting(id, 3, NOW + 4_000)
+
+      expect(activeEntry()!.connection).toEqual({
+        status: "reconnecting",
+        attempt: 3,
+        retryAt: NOW + 4_000,
+      })
+    })
+
+    it("returns to live once a stream opens again", () => {
+      pool().activate("cloud", "one")
+      const id = activeEntry()!.id
+      pool().streamReconnecting(id, 1, NOW)
+
+      pool().streamLive(id)
+
+      expect(activeEntry()!.connection).toEqual({ status: "live" })
+    })
+  })
 })
