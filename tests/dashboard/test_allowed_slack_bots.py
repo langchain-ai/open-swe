@@ -11,7 +11,7 @@ from agent.dashboard import profiles, routes
 
 @pytest.fixture
 def directory() -> dict[str, Any]:
-    return {"pages": {}, "calls": [], "error": None}
+    return {"pages": {}, "calls": [], "auth_calls": 0, "error": None}
 
 
 @pytest.fixture
@@ -29,7 +29,13 @@ def client(
     }
 
     def slack(request: httpx2.Request) -> httpx2.Response:
+        assert request.method == ("POST" if request.url.path == "/api/auth.test" else "GET")
+        assert request.headers["authorization"] in {
+            "Bearer test-slack-token",
+            "Bearer another-test-token",
+        }
         if request.url.path == "/api/auth.test":
+            directory["auth_calls"] += 1
             data = {"ok": True, "team_id": "T123", "user_id": "UOWN", "bot_id": "BOWN"}
         elif request.url.path == "/api/users.list":
             directory["calls"].append(str(request.url.params.get("cursor", "")))
@@ -75,7 +81,8 @@ def client(
     return TestClient(app)
 
 
-def test_admin_can_add_list_and_remove_bot(client: TestClient) -> None:
+def test_admin_can_add_list_and_remove_bot(client: TestClient, directory: dict[str, Any]) -> None:
+    assert client.get("/dashboard/api/slack/bots").json() == []
     assert client.get("/dashboard/api/slack/allowed-bots").json() == []
     response = client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": " U123 "})
     assert response.status_code == 200, response.text
@@ -88,6 +95,7 @@ def test_admin_can_add_list_and_remove_bot(client: TestClient) -> None:
         "name": "Release bot",
     }
     assert client.get("/dashboard/api/slack/allowed-bots").json() == [bot]
+    assert directory["auth_calls"] == 1
     assert client.delete("/dashboard/api/slack/allowed-bots/T123/B123").status_code == 200
     assert client.get("/dashboard/api/slack/allowed-bots").json() == []
 
@@ -214,6 +222,7 @@ def test_bot_directory_does_not_reuse_another_installation_cache(
     monkeypatch.setenv("SLACK_BOT_TOKEN", "another-test-token")
     directory["pages"] = {"": {"ok": True, "members": []}}
     assert client.get("/dashboard/api/slack/bots").json() == []
+    assert directory["auth_calls"] == 2
 
 
 def test_bot_directory_reports_rate_limit_without_partial_results(
@@ -229,7 +238,9 @@ def test_bot_directory_reports_rate_limit_without_partial_results(
 
 
 def test_bot_directory_reports_missing_scope(client: TestClient, directory: dict[str, Any]) -> None:
-    directory["error"] = httpx2.Response(200, json={"ok": False, "error": "missing_scope"})
+    directory["error"] = httpx2.Response(
+        200, json={"ok": False, "error": "missing_scope", "needed": "users:read"}
+    )
     response = client.get("/dashboard/api/slack/bots")
     assert response.status_code == 400
     assert "users:read" in response.json()["detail"]
