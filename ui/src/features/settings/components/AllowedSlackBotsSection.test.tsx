@@ -78,9 +78,8 @@ describe("Allowed Slack bots", () => {
     })
     fireEvent.change(search, { target: { value: "Release" } })
     expect(screen.queryByRole("button", { name: "Allow Build bot" })).toBeNull()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Allow Release bot" })
-    )
+    fireEvent.click(await screen.findByText("Release bot"))
+    await screen.findByRole("button", { name: "Remove Release bot" })
     expect(await screen.findByText("Release bot")).toBeTruthy()
     expect(
       screen.queryByRole("textbox", { name: "Search Slack bots" })

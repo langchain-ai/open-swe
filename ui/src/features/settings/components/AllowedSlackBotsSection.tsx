@@ -178,9 +178,17 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
                         item.bot_id === bot.bot_id
                     )
                     return (
-                      <div
+                      <button
                         key={`${bot.team_id}:${bot.bot_id}`}
-                        className="flex items-center gap-2.5 rounded-md px-2 py-2"
+                        type="button"
+                        disabled={allowed || unavailable}
+                        aria-label={
+                          allowed
+                            ? `${bot.name} is already allowed`
+                            : `Allow ${bot.name}`
+                        }
+                        onClick={() => allow(bot.user_id)}
+                        className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring enabled:hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Avatar size="sm">
                           <AvatarImage src={bot.image_url} alt="" />
@@ -188,36 +196,26 @@ export function AllowedSlackBotsSection({ isAdmin }: { isAdmin: boolean }) {
                             {bot.name.slice(0, 1).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <p
-                            className="truncate text-xs font-medium"
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className="block truncate text-xs font-medium"
                             title={bot.name}
                           >
                             {bot.name}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
+                          </span>
+                          <span className="block text-[11px] text-muted-foreground">
                             {bot.bot_id}
-                          </p>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={allowed || unavailable}
-                          aria-label={
-                            allowed
-                              ? `${bot.name} is already allowed`
-                              : `Allow ${bot.name}`
-                          }
-                          onClick={() => allow(bot.user_id)}
-                        >
+                          </span>
+                        </span>
+                        <span className="px-2 text-xs" aria-hidden="true">
                           {allowed
                             ? "Allowed"
                             : add.isPending &&
                                 add.variables.bot_id === bot.user_id
                               ? "Verifying…"
                               : "Allow"}
-                        </Button>
-                      </div>
+                        </span>
+                      </button>
                     )
                   })}
                 </div>
