@@ -5,10 +5,12 @@ from contextvars import ContextVar
 from typing import Any, NotRequired
 
 from deepagents.middleware.summarization import (
+    DEEPAGENTS_DEFAULT_SUMMARY_PROMPT,
     SummarizationMiddleware,
     SummarizationState,
     compute_summarization_defaults,
 )
+from langchain.agents.middleware.internal_call_transformer import internal_call_metadata
 from langchain.agents.middleware.types import (
     AgentState,
     ExtendedModelResponse,
@@ -16,7 +18,7 @@ from langchain.agents.middleware.types import (
     ModelResponse,
     hook_config,
 )
-from langchain_core.messages import AnyMessage
+from langchain_core.messages import AnyMessage, get_buffer_string, trim_messages
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
@@ -42,6 +44,7 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
             model=summary_model, backend=backend, **compute_summarization_defaults(model)
         )
         self.manual = manual
+        self.trim_tokens_to_summarize = self._lc_helper.trim_tokens_to_summarize
 
     def _status(self, status: str, **details: Any) -> dict[str, Any]:
         payload = {
@@ -64,7 +67,30 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
     async def _acreate_summary(self, messages_to_summarize: list[AnyMessage]) -> str:
         self._status("started")
         try:
-            return await super()._acreate_summary(messages_to_summarize)
+            if self.trim_tokens_to_summarize is not None:
+                summary_messages = trim_messages(
+                    messages_to_summarize,
+                    max_tokens=self.trim_tokens_to_summarize,
+                    token_counter=self.token_counter,
+                    strategy="last",
+                    allow_partial=True,
+                    include_system=True,
+                    text_splitter=lambda text: list(text),
+                )
+                if summary_messages:
+                    messages_to_summarize = summary_messages
+            response = await self.model.ainvoke(
+                DEEPAGENTS_DEFAULT_SUMMARY_PROMPT.format(
+                    messages=get_buffer_string(messages_to_summarize, format="xml")
+                ).rstrip(),
+                config={
+                    "metadata": {
+                        "lc_source": "summarization",
+                        **internal_call_metadata(),
+                    }
+                },
+            )
+            return response.text.strip()
         except Exception:
             self._status("failed")
             raise
