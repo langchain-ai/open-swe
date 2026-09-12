@@ -21,6 +21,7 @@ import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
+import { ShowUserCard } from "@/features/agents/components/chat/ShowUserCard"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
 
@@ -239,8 +240,13 @@ export function AgentTurn({
         return <ReplyCard key={item.key} chunk={item.chunk} />
 
       case "iframe-item":
-        return item.chunk.display ? (
+        return item.chunk.display?.type === "output_iframe" ? (
           <OutputIframe key={item.key} display={item.chunk.display} />
+        ) : null
+
+      case "show-user-item":
+        return item.chunk.display?.type === "show_user" ? (
+          <ShowUserCard key={item.key} display={item.chunk.display} />
         ) : null
 
       case "tool-item":

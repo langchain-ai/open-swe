@@ -14,6 +14,7 @@ import type {
   DiffData,
   Message,
   OutputIframeDisplay,
+  ShowUserDisplay,
   ToolExecutionChunk,
 } from "./types"
 
@@ -268,6 +269,77 @@ function isHttpUrl(value: unknown): value is string {
   }
 }
 
+function showFileDisplay(
+  toolMessage: ToolMessage | undefined
+): ShowUserDisplay | undefined {
+  const artifact = toolMessage?.artifact
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return undefined
+  }
+  const value = artifact as Record<string, unknown>
+  if (
+    value.type !== "show_user" ||
+    typeof value.path !== "string" ||
+    typeof value.filename !== "string" ||
+    typeof value.title !== "string"
+  ) {
+    return undefined
+  }
+  const base = {
+    type: "show_user" as const,
+    path: value.path,
+    filename: value.filename,
+    title: value.title,
+  }
+  if (value.kind === "text" && typeof value.content === "string") {
+    const totalLines =
+      typeof value.total_lines === "number" ? value.total_lines : 0
+    return {
+      ...base,
+      kind: "text",
+      content: value.content,
+      totalLines,
+      startLine: typeof value.start_line === "number" ? value.start_line : 1,
+      endLine: typeof value.end_line === "number" ? value.end_line : totalLines,
+    }
+  }
+  if (value.kind === "diff" && typeof value.content === "string") {
+    return { ...base, kind: "diff", content: value.content }
+  }
+  if (value.kind === "diagram" && typeof value.content === "string") {
+    return { ...base, kind: "diagram", content: value.content }
+  }
+  if (value.kind === "markdown" && typeof value.content === "string") {
+    return { ...base, kind: "markdown", content: value.content }
+  }
+  if (
+    value.kind === "html" &&
+    isHttpUrl(value.preview_url) &&
+    isHttpUrl(value.download_url)
+  ) {
+    return {
+      ...base,
+      kind: "html",
+      previewUrl: value.preview_url,
+      downloadUrl: value.download_url,
+    }
+  }
+  if (
+    value.kind === "image" &&
+    typeof value.mime_type === "string" &&
+    value.mime_type.startsWith("image/") &&
+    typeof value.content_base64 === "string"
+  ) {
+    return {
+      ...base,
+      kind: "image",
+      mimeType: value.mime_type,
+      contentBase64: value.content_base64,
+    }
+  }
+  return undefined
+}
+
 function outputIframeDisplay(
   toolMessage: ToolMessage | undefined
 ): OutputIframeDisplay | undefined {
@@ -452,7 +524,8 @@ export function streamMessagesToUi(
         }
         const output = toolOutputText(assembled, toolMessage)
         if (output) chunk.output = output
-        const display = outputIframeDisplay(toolMessage)
+        const display =
+          outputIframeDisplay(toolMessage) ?? showFileDisplay(toolMessage)
         if (display) chunk.display = display
         const diffData = maybeDiffFromArgs(args)
         if (diffData) chunk.diffData = diffData

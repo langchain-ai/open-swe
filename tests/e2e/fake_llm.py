@@ -10,6 +10,7 @@ the preceding tool result, exactly as a real model would.
 import json
 import os
 import re
+import shlex
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -137,6 +138,34 @@ _IFRAME_HTML = """<!doctype html>
 </body>
 </html>
 """
+
+_SHOW_USER_DIFF_LINES = (
+    "diff --git a/greet.py b/greet.py",
+    "--- a/greet.py",
+    "+++ b/greet.py",
+    "@@ -1,2 +1,2 @@",
+    " def greet(name):",
+    '-    return "hi " + name',
+    '+    return f"hi {name}"',
+)
+# The command produces the patch itself: the harness runs SANDBOX_TYPE=local, so a
+# path written through the filesystem tools is not visible to a shell command.
+_SHOW_USER_DIFF_COMMAND = "printf '%s\\n' " + " ".join(
+    shlex.quote(line) for line in _SHOW_USER_DIFF_LINES
+)
+
+_SHOW_USER_MERMAID_LINES = (
+    "flowchart LR",
+    "    A[User request] --> B[show_user]",
+    "    B --> C{File type}",
+)
+_SHOW_USER_MERMAID_COMMAND = "printf '%s\\n' " + " ".join(
+    shlex.quote(line) for line in _SHOW_USER_MERMAID_LINES
+)
+
+_SHOW_USER_BAD_MERMAID_COMMAND = "printf '%s\\n' " + " ".join(
+    shlex.quote(line) for line in ("flowchart LR", "    A --> --> ((", "    !!!")
+)
 
 _DESKTOP_PR_PAYLOAD = json.dumps(
     {
@@ -734,12 +763,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     ),
     "iframe": (
         _tool_step(
-            "Acknowledging the iframe preview request.",
-            "slack_thread_reply",
-            {"message": "Preparing the iframe preview now."},
-            "call-iframe-ack",
-        ),
-        _tool_step(
             "Writing the iframe HTML.",
             "write_file",
             {"file_path": _IFRAME_HTML_PATH, "content": _IFRAME_HTML},
@@ -747,14 +770,58 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _tool_step(
             "Rendering the iframe preview.",
-            "output_iframe",
+            "show_user",
             {
                 "path": _IFRAME_HTML_PATH,
                 "title": "Iframe E2E Preview",
             },
-            "call-output-iframe",
+            "call-show-user-html",
         ),
         StepSpec(content="Rendered the iframe preview."),
+    ),
+    "show_user_diff": (
+        _tool_step(
+            "Showing the diff.",
+            "show_user",
+            {"command": _SHOW_USER_DIFF_COMMAND, "title": "Show User E2E Diff"},
+            "call-show-user-diff",
+        ),
+        StepSpec(content="Showed the diff card."),
+    ),
+    "show_user_diagram": (
+        _tool_step(
+            "Showing the diagram.",
+            "show_user",
+            {
+                "command": _SHOW_USER_MERMAID_COMMAND,
+                "path": ".open-swe/artifacts/demo.mmd",
+                "title": "Mermaid Diagram",
+            },
+            "call-show-user-diagram",
+        ),
+        StepSpec(content="Showed the diagram card."),
+    ),
+    "show_user_bad_diagram": (
+        _tool_step(
+            "Showing a diagram that will not parse.",
+            "show_user",
+            {
+                "command": _SHOW_USER_BAD_MERMAID_COMMAND,
+                "path": ".open-swe/artifacts/broken.mmd",
+                "title": "Broken Diagram",
+            },
+            "call-show-user-bad-diagram",
+        ),
+        StepSpec(content="Showed the unparseable diagram."),
+    ),
+    "show_user_command_failure": (
+        _tool_step(
+            "Showing output from a command that fails.",
+            "show_user",
+            {"command": "printf 'partial\\n'; printf 'boom-e2e\\n' >&2; exit 3"},
+            "call-show-user-fail",
+        ),
+        StepSpec(content="The command failed, so no card was rendered."),
     ),
     "desktop": (
         _tool_step(
@@ -1061,6 +1128,22 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: ctx.human_count <= 1 and "E2E_CODE_CHANNEL" in ctx.first_text,
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
+    ScriptRule(
+        "show_user_command_failure",
+        lambda ctx: ctx.human_count <= 1 and "E2E_SHOW_USER_FAIL" in ctx.first_text,
+    ),
+    ScriptRule(
+        "show_user_diff",
+        lambda ctx: ctx.human_count <= 1 and "E2E_SHOW_USER_DIFF" in ctx.first_text,
+    ),
+    ScriptRule(
+        "show_user_bad_diagram",
+        lambda ctx: ctx.human_count <= 1 and "E2E_SHOW_USER_BAD_DIAGRAM" in ctx.first_text,
+    ),
+    ScriptRule(
+        "show_user_diagram",
+        lambda ctx: ctx.human_count <= 1 and "E2E_SHOW_USER_DIAGRAM" in ctx.first_text,
+    ),
     ScriptRule(
         "desktop",
         lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,

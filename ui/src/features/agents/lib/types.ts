@@ -95,6 +95,37 @@ export type OutputIframeDisplay =
       filename: string
     }
 
+interface ShowUserDisplayBase {
+  type: "show_user"
+  path: string
+  filename: string
+  title: string
+}
+
+export type ShowUserDisplay =
+  | (ShowUserDisplayBase & {
+      kind: "text"
+      content: string
+      totalLines: number
+      startLine: number
+      endLine: number
+    })
+  | (ShowUserDisplayBase & { kind: "diff"; content: string })
+  | (ShowUserDisplayBase & { kind: "diagram"; content: string })
+  | (ShowUserDisplayBase & { kind: "markdown"; content: string })
+  | (ShowUserDisplayBase & {
+      kind: "html"
+      previewUrl: string
+      downloadUrl: string
+    })
+  | (ShowUserDisplayBase & {
+      kind: "image"
+      mimeType: string
+      contentBase64: string
+    })
+
+export type ToolDisplay = OutputIframeDisplay | ShowUserDisplay
+
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
@@ -105,7 +136,7 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
-  display?: OutputIframeDisplay
+  display?: ToolDisplay
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData

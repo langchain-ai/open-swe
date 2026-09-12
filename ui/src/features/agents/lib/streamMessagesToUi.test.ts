@@ -228,6 +228,52 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("attaches show_user artifacts as a typed display", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "show_user",
+            args: { path: "src/app.py", start_line: 2, end_line: 3 },
+            type: "tool_call",
+          },
+        ],
+      }),
+      new ToolMessage({
+        tool_call_id: "call-1",
+        content: "Displayed src/app.py lines 2-3 of 4 in the dashboard.",
+        artifact: {
+          type: "show_user",
+          kind: "text",
+          path: "src/app.py",
+          filename: "app.py",
+          title: "src/app.py",
+          content: "a\nb\nc\nd\n",
+          total_lines: 4,
+          start_line: 2,
+          end_line: 3,
+        },
+      }),
+    ])
+
+    const agent = messages.find((message) => message.author === "agent")
+    const tool = agent?.chunks.find((chunk) => chunk.kind === "tool-execution")
+    expect(tool?.kind === "tool-execution" ? tool.display : undefined).toEqual({
+      type: "show_user",
+      kind: "text",
+      path: "src/app.py",
+      filename: "app.py",
+      title: "src/app.py",
+      content: "a\nb\nc\nd\n",
+      totalLines: 4,
+      startLine: 2,
+      endLine: 3,
+    })
+  })
+
   it("rejects non-HTTP iframe artifact URLs", () => {
     const messages = streamMessagesToUi([
       new AIMessage({
