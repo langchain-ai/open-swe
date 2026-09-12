@@ -33,6 +33,8 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.2",
     "stagehand>=3.23.0,<4.0.0",
     "websockets>=16.1.1",
+    "slack-sdk>=3.44.1,<4.0.0",
+    "aiohttp>=3.14.3,<4.0.0",
 ]
 
 [project.optional-dependencies]

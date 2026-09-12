@@ -7,16 +7,13 @@ from collections.abc import Mapping
 from typing import Any, Literal
 from urllib.parse import quote
 
-import httpx2
 from langgraph_sdk.client import LangGraphClient
 
 from agent.slack.client import (
-    SLACK_API_BASE_URL,
     SLACK_BOT_TOKEN,
     get_slack_channel_info,
-    slack_headers,
 )
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error
 
 logger = logging.getLogger(__name__)
 
@@ -77,27 +74,19 @@ async def is_code_channel(channel_id: str) -> bool:
 async def _call(method: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-        try:
-            response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/{method}",
-                headers=slack_headers(),
-                json=payload,
-            )
-            if response.status_code == 429:
-                return None, "rate_limited"
-            response.raise_for_status()
-            data = response.json()
-        except (httpx2.HTTPError, ValueError) as exc:
-            logger.exception("Slack %s request failed", method)
-            return None, f"http_error: {type(exc).__name__}"
-        if not isinstance(data, dict):
+    try:
+        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            response = await client.api_call(method, json=payload)
+        if not isinstance(response.data, dict):
             return None, "invalid_response"
-        if not data.get("ok"):
-            error = str(data.get("error") or "unknown_error")
-            logger.warning("Slack %s failed: %s", method, error)
-            return None, error
-        return data, None
+        return response.data, None
+    except SLACK_REQUEST_ERRORS as exc:
+        error = slack_error(exc)
+        logger.warning(
+            "Slack code channel request failed",
+            extra={"slack_method": method, "slack_error": error},
+        )
+        return None, "rate_limited" if error.startswith("rate_limited") else error
 
 
 def _content_error(content: str) -> str | None:

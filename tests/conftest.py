@@ -138,3 +138,15 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
         return True
 
     monkeypatch.setattr(webhook_common, "is_review_repo_enabled", _enabled)
+
+
+@pytest.fixture
+def slack_api(monkeypatch: pytest.MonkeyPatch):
+    from agent.slack import client, code_channels, http
+    from tests.support.slack_api import slack_api_server
+
+    with slack_api_server() as api:
+        monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url)
+        monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "test-slack-token")
+        monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
+        yield api
