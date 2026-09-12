@@ -211,8 +211,14 @@ test.describe("Plan review", () => {
     });
     await expect(ownerArtifact).toHaveAttribute(
       "sandbox",
-      "allow-scripts allow-downloads",
+      "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox",
     );
+    const popupPromise = owner.waitForEvent("popup");
+    await ownerArtifact.contentFrame().locator("#plan-link").click();
+    const popup = await popupPromise;
+    await popup.waitForLoadState();
+    expect(popup.url()).toBe("about:blank");
+    await popup.close();
     const embeddedSummaryBox = await owner
       .getByTestId("plan-summary")
       .boundingBox();

@@ -42,7 +42,9 @@ describe("PlanArtifactFrame", () => {
     render(<PlanArtifactFrame html="<h1>Plan</h1>" />)
 
     const iframe = screen.getByTitle("Plan artifact")
-    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts allow-downloads")
+    expect(iframe.getAttribute("sandbox")).toBe(
+      "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox"
+    )
     expect(iframe.getAttribute("srcdoc")).toContain("<h1>Plan</h1>")
     expect(iframe.getAttribute("referrerpolicy")).toBe("no-referrer")
   })

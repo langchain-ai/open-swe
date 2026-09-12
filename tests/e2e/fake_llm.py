@@ -437,6 +437,7 @@ PLAN_HTML = """<!doctype html>
     <main>
       <h1>Add greet() helper</h1>
       <p class="lede">Add a tiny greeting helper to the demo repo.</p>
+      <a id="plan-link" href="about:blank" target="_blank">Open reference</a>
 
       <h2>Files to change</h2>
       <ul>
