@@ -8,7 +8,8 @@ import pytest
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from agent.analytics import database
+from agent.database import analytics as database
+from agent.database import postgres
 
 
 @pytest.fixture
@@ -40,10 +41,10 @@ async def analytics_db(monkeypatch):
     engine = create_async_engine(uri)
     schema = f"analytics_test_{uuid4().hex}"
     monkeypatch.setenv("ANALYTICS_SUMMARY_VERSION", "1")
-    migrations = database._load_migrations()
+    migrations = postgres.load_migrations()
     async with engine.begin() as conn:
         await conn.execute(text(f"CREATE SCHEMA {schema}"))
-        await conn.run_sync(database._upgrade, migrations, schema)
+        await conn.run_sync(postgres.upgrade, migrations, schema)
         workspace = await conn.scalar(
             text(f"SELECT workspace_id FROM {schema}.deployment_metadata")
         )
