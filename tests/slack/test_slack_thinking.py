@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock
+import asyncio
+from unittest.mock import AsyncMock, call
 
 from agent.slack import thinking as slack_thinking
 
@@ -186,3 +187,47 @@ def test_namespaced_tool_events_have_stable_distinct_ids() -> None:
     assert len(stream.steps) == 2
     assert {step.title for step in stream.steps.values()} == {"Reading auth.py"}
     assert len({step.task_id for step in stream.steps.values()}) == 2
+
+
+async def test_thinking_status_refreshes_until_the_run_ends(monkeypatch) -> None:
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.0)
+
+    class ThreadStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        def subscribe(self, channels):
+            assert channels == ["lifecycle"]
+
+            async def iterator():
+                running = _event("lifecycle", {"event": "running"})
+                running["event_id"] = "synth:run-1:lc||running"
+                yield running
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                completed = _event("lifecycle", {"event": "completed"})
+                completed["event_id"] = "synth:run-1:lc||completed"
+                yield completed
+
+            return iterator()
+
+    client = AsyncMock()
+    client.threads.stream = lambda *_args, **_kwargs: ThreadStream()
+
+    await slack_thinking.show_slack_thinking_status(
+        client=client,
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="1.0",
+    )
+
+    assert set_status.await_args_list == [
+        call("C1", "1.0", slack_thinking._THINKING_STATUS),
+        call("C1", "1.0", slack_thinking._THINKING_STATUS),
+    ]

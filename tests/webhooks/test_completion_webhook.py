@@ -1,5 +1,5 @@
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -466,6 +466,76 @@ async def test_no_reply_channel_does_not_flag(monkeypatch: pytest.MonkeyPatch) -
 
     assert result["status"] == "ignored"
     assert client.threads.updates == []
+
+
+class _FakeRuns:
+    def __init__(self, active: bool) -> None:
+        self._active = active
+
+    async def list(self, thread_id: str, status: str, limit: int) -> list[dict[str, Any]]:
+        return [{"run_id": "run-2"}] if self._active else []
+
+
+class _FakeActiveRunClient(_FakeClient):
+    def __init__(self, metadata: dict[str, Any], active: bool) -> None:
+        super().__init__(metadata)
+        self.runs = _FakeRuns(active)
+
+
+def _slack_metadata() -> dict[str, Any]:
+    return {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_success_clears_thinking_status_when_no_run_is_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeActiveRunClient(_slack_metadata(), active=False)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    cleared = create_autospec(completion.clear_slack_thread_status)
+    monkeypatch.setattr(completion, "clear_slack_thread_status", cleared)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "success"}
+    )
+
+    cleared.assert_awaited_once_with("C1", "123.45", "")
+
+
+@pytest.mark.asyncio
+async def test_success_keeps_thinking_status_while_another_run_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeActiveRunClient(_slack_metadata(), active=True)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    cleared = create_autospec(completion.clear_slack_thread_status)
+    monkeypatch.setattr(completion, "clear_slack_thread_status", cleared)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "success"}
+    )
+
+    cleared.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_error_clears_thinking_status_when_no_run_is_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeActiveRunClient(_slack_metadata(), active=False)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", AsyncMock(return_value=True))
+    cleared = create_autospec(completion.clear_slack_thread_status)
+    monkeypatch.setattr(completion, "clear_slack_thread_status", cleared)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    cleared.assert_awaited_once_with("C1", "123.45", "")
 
 
 @pytest.mark.asyncio
