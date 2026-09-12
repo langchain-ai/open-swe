@@ -13,8 +13,9 @@ from pydantic import BaseModel, Field
 from agent.slack.client import (
     get_slack_channel_context,
     lookup_slack_run_message_mapping,
+    open_slack_direct_message,
     open_slack_modal,
-    post_slack_ephemeral_message,
+    post_slack_top_level_message_with_ts,
     respond_to_slack_interaction,
     slack_channel_allows_operations,
     slack_thread_mutation_lock,
@@ -42,6 +43,7 @@ class ThreadFeedback(BaseModel):
     thread_ts: str
     message_ts: str
     user_id: str
+    dm_channel_id: str = ""
     prompted: bool = False
     dismissed: bool = False
     rating: int | None = Field(default=None, ge=1, le=5)
@@ -68,12 +70,13 @@ async def _locked_feedback(
         yield await _store(record.channel_id).get(record.run_id)
 
 
-def _dismiss_button(run_id: str) -> dict[str, Any]:
+def _dismiss_button(run_id: str, channel_id: str = "") -> dict[str, Any]:
+    value = json.dumps({"run_id": run_id, "channel_id": channel_id}) if channel_id else run_id
     return {
         "type": "button",
         "text": {"type": "plain_text", "text": "Dismiss"},
         "action_id": _DISMISS_ACTION,
-        "value": run_id,
+        "value": value,
     }
 
 
@@ -94,7 +97,7 @@ def _comment_input() -> dict[str, Any]:
     }
 
 
-def feedback_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
+def feedback_blocks(run_id: str, thread_id: str, channel_id: str = "") -> list[dict[str, Any]]:
     url = dashboard_thread_url(thread_id)
     thread_link = f"<{url}|this thread>" if url else "this thread"
     return [
@@ -110,18 +113,22 @@ def feedback_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
                     "action_id": _FEEDBACK_ACTION,
                     "positive_button": {
                         "text": {"type": "plain_text", "text": "Good"},
-                        "value": json.dumps({"run_id": run_id, "choice": "good"}),
+                        "value": json.dumps(
+                            {"run_id": run_id, "channel_id": channel_id, "choice": "good"}
+                        ),
                         "accessibility_label": "Rate this thread Good",
                     },
                     "negative_button": {
                         "text": {"type": "plain_text", "text": "Bad"},
-                        "value": json.dumps({"run_id": run_id, "choice": "bad"}),
+                        "value": json.dumps(
+                            {"run_id": run_id, "channel_id": channel_id, "choice": "bad"}
+                        ),
                         "accessibility_label": "Rate this thread Bad",
                     },
                 }
             ],
         },
-        {"type": "actions", "elements": [_dismiss_button(run_id)]},
+        {"type": "actions", "elements": [_dismiss_button(run_id, channel_id)]},
     ]
 
 
@@ -193,14 +200,16 @@ async def post_slack_feedback_prompt(
 
                 if not await feedback_event_is_ready(thread_id, expected_event_id):
                     return
-            posted = await post_slack_ephemeral_message(
-                channel_id,
-                record.user_id,
+            dm_channel_id, _ = await open_slack_direct_message(record.user_id)
+            if not dm_channel_id:
+                return
+            message_ts, _ = await post_slack_top_level_message_with_ts(
+                dm_channel_id,
                 "How did Open SWE do on this thread? Choose Good or Bad.",
-                thread_ts=record.thread_ts if record.thread_ts != "0" else None,
-                blocks=feedback_blocks(run_id, thread_id),
+                blocks=feedback_blocks(run_id, thread_id, channel_id),
             )
-            if posted:
+            if message_ts:
+                record.dm_channel_id = dm_channel_id
                 record.prompted = True
                 await store.put(run_id, record)
     except Exception:
@@ -225,6 +234,15 @@ def _action(payload: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _action_value(payload: dict[str, Any]) -> dict[str, Any]:
+    value = _action(payload).get("value")
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else None
+    except json.JSONDecodeError:
+        parsed = None
+    return parsed if isinstance(parsed, dict) else {"run_id": value}
+
+
 def is_slack_feedback_payload(payload: dict[str, Any]) -> bool:
     return (payload.get("type") == "block_actions" and bool(_action(payload))) or (
         payload.get("type") == "view_submission"
@@ -232,11 +250,18 @@ def is_slack_feedback_payload(payload: dict[str, Any]) -> bool:
     )
 
 
-async def _load_feedback(channel_id: str, run_id: str, user_id: str) -> ThreadFeedback | None:
+async def _load_feedback(
+    channel_id: str, run_id: str, user_id: str, *, interaction_channel_id: str = ""
+) -> ThreadFeedback | None:
     if not channel_id or not run_id or not user_id:
         return None
     record = await _store(channel_id).get(run_id)
     if record is None or record.user_id != user_id or record.channel_id != channel_id:
+        return None
+    if interaction_channel_id and interaction_channel_id not in {
+        record.channel_id,
+        record.dm_channel_id,
+    }:
         return None
     context = await get_slack_channel_context(channel_id, use_cache=False)
     return record if slack_channel_allows_operations(context) else None
@@ -300,15 +325,17 @@ async def _acknowledge(record: ThreadFeedback, *, response_url: str) -> None:
                 return
             async with asyncio.timeout(8):
                 if not current.acknowledged:
-                    # Ephemeral response_url updates can also appear at the channel root.
-                    posted = await post_slack_ephemeral_message(
-                        current.channel_id,
-                        current.user_id,
-                        "✅ Feedback completed. Thanks!",
-                        thread_ts=current.thread_ts if current.thread_ts != "0" else None,
-                    )
-                    if not posted:
+                    dm_channel_id = current.dm_channel_id
+                    if not dm_channel_id:
+                        dm_channel_id, _ = await open_slack_direct_message(current.user_id)
+                    if not dm_channel_id:
                         return
+                    message_ts, _ = await post_slack_top_level_message_with_ts(
+                        dm_channel_id, "✅ Feedback completed. Thanks!"
+                    )
+                    if not message_ts:
+                        return
+                    current.dm_channel_id = dm_channel_id
                     async with _locked_feedback(current) as latest:
                         if latest is None:
                             return
@@ -320,10 +347,17 @@ async def _acknowledge(record: ThreadFeedback, *, response_url: str) -> None:
 
 
 async def _dismiss_feedback(payload: dict[str, Any]) -> None:
-    channel_id = str(_object(payload.get("channel")).get("id") or "")
+    interaction_channel_id = str(_object(payload.get("channel")).get("id") or "")
+    selection = _action_value(payload)
+    channel_id = str(selection.get("channel_id") or interaction_channel_id)
     user_id = str(_object(payload.get("user")).get("id") or "")
     try:
-        record = await _load_feedback(channel_id, str(_action(payload).get("value") or ""), user_id)
+        record = await _load_feedback(
+            channel_id,
+            str(selection.get("run_id") or ""),
+            user_id,
+            interaction_channel_id=interaction_channel_id,
+        )
         if record is None:
             return
         async with _locked_feedback(record, purpose="feedback_response") as current:
@@ -379,14 +413,16 @@ def _comment_error(text: str) -> FeedbackResponse:
 async def _record_rating(payload: dict[str, Any], background_tasks: BackgroundTasks) -> None:
     try:
         async with asyncio.timeout(2.5):
-            selection = _object(json.loads(str(_action(payload).get("value") or "{}")))
+            selection = _action_value(payload)
             choice = selection.get("choice")
             if choice not in {"good", "bad"}:
                 return
+            interaction_channel_id = str(_object(payload.get("channel")).get("id") or "")
             record = await _load_feedback(
-                str(_object(payload.get("channel")).get("id") or ""),
+                str(selection.get("channel_id") or interaction_channel_id),
                 str(selection.get("run_id") or ""),
                 str(_object(payload.get("user")).get("id") or ""),
+                interaction_channel_id=interaction_channel_id,
             )
             if record is None:
                 return

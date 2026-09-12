@@ -673,6 +673,35 @@ async def post_slack_top_level_message_with_ts(
     )
 
 
+async def open_slack_direct_message(user_id: str) -> tuple[str | None, str | None]:
+    """Open the app's direct-message conversation with a Slack user."""
+    if not SLACK_BOT_TOKEN:
+        return None, "missing_slack_bot_token"
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/conversations.open",
+                headers=slack_headers(),
+                json={"users": user_id},
+            )
+            error = _slack_response_error(response)
+            if error:
+                logger.warning("Slack conversations.open failed", extra={"slack_error": error})
+                return None, error
+            data = response.json()
+            channel = data.get("channel")
+            channel_id = channel.get("id") if isinstance(channel, Mapping) else None
+            if isinstance(channel_id, str) and channel_id:
+                return channel_id, None
+            return None, "missing_channel_id"
+        except httpx2.HTTPError as exc:
+            logger.warning("Slack conversations.open request failed", exc_info=True)
+            return None, f"http_error: {type(exc).__name__}"
+        except TypeError, ValueError:
+            logger.warning("Slack conversations.open returned an invalid response", exc_info=True)
+            return None, "invalid_slack_response"
+
+
 class SlackStreamError(Exception):
     def __init__(self, code: str, *, retry_after: float | None = None) -> None:
         super().__init__(code)
