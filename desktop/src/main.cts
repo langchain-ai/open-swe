@@ -12,6 +12,7 @@ const {
   nativeTheme,
   net,
   protocol,
+  powerMonitor,
   safeStorage,
   session,
   shell,
@@ -124,6 +125,28 @@ function setUpdateState(
   }
 }
 
+let lastUpdateCheck = 0;
+let updateCheck: ReturnType<typeof autoUpdater.checkForUpdates> | null = null;
+
+function checkForUpdates() {
+  lastUpdateCheck = Date.now();
+  updateCheck ??= autoUpdater.checkForUpdates().finally(() => {
+    updateCheck = null;
+  });
+  return updateCheck;
+}
+
+function checkForUpdatesInBackground() {
+  if (
+    updateState.status !== "idle" ||
+    Date.now() - lastUpdateCheck < 60 * 60 * 1000
+  )
+    return;
+  void checkForUpdates().catch((error) =>
+    console.warn("Could not check for desktop updates", error),
+  );
+}
+
 function configureAutoUpdater() {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = true;
@@ -137,13 +160,41 @@ function configureAutoUpdater() {
   );
   autoUpdater.on("error", (error) => {
     console.warn("Desktop update failed", error);
-    setUpdateState("idle", undefined);
+    if (updateState.status === "downloading") setUpdateState("idle");
   });
-  void autoUpdater
-    .checkForUpdates()
-    .catch((error) =>
-      console.warn("Could not check for desktop updates", error),
+  checkForUpdatesInBackground();
+  const timer = setInterval(checkForUpdatesInBackground, 4 * 60 * 60 * 1000);
+  timer.unref();
+  powerMonitor.on("resume", checkForUpdatesInBackground);
+  app.on("activate", checkForUpdatesInBackground);
+  app.on("browser-window-focus", checkForUpdatesInBackground);
+}
+
+async function checkForDesktopUpdates() {
+  try {
+    if (updateState.status === "ready" || updateState.status === "installing")
+      return;
+    const result = await checkForUpdates();
+    if (result?.isUpdateAvailable) {
+      await dialog.showMessageBox({
+        type: "info",
+        message: `${appRuntime.name} ${result.updateInfo.version} is available`,
+        detail: "The update is downloading and will be ready to install soon.",
+      });
+      return;
+    }
+    await dialog.showMessageBox({
+      type: "info",
+      message: `${appRuntime.name} is up to date`,
+      detail: `Version ${app.getVersion()} is the latest available version.`,
+    });
+  } catch (error) {
+    console.warn("Could not check for desktop updates", error);
+    dialog.showErrorBox(
+      `Could not check for ${appRuntime.name} updates`,
+      error.message,
     );
+  }
 }
 
 function sendDesktopCommand(commandId) {
@@ -962,6 +1013,11 @@ function createMenu() {
     accelerator: "CmdOrCtrl+,",
     click: () => sendDesktopCommand("open-settings"),
   };
+  const checkForUpdatesItem = {
+    label: "Check for Updates…",
+    enabled: app.isPackaged,
+    click: () => void checkForDesktopUpdates(),
+  };
   const template = [
     ...(process.platform === "darwin"
       ? [
@@ -970,6 +1026,7 @@ function createMenu() {
             submenu: [
               { role: "about" },
               settingsItem,
+              checkForUpdatesItem,
               backendSettingsItem,
               { type: "separator" },
               { role: "services" },
@@ -1030,7 +1087,10 @@ function createMenu() {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
           click: () => {
-            if (mainWindow) void loadApp(mainWindow);
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            if (isAppUrl(mainWindow.webContents.getURL()))
+              mainWindow.webContents.reload();
+            else void loadApp(mainWindow);
           },
         },
         ...(isDevelopment ? [{ role: "toggleDevTools" }] : []),
@@ -1042,10 +1102,12 @@ function createMenu() {
         { role: "togglefullscreen" },
       ],
     },
-    {
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
-    },
+    process.platform === "darwin"
+      ? { role: "windowMenu" }
+      : {
+          label: "Window",
+          submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
+        },
     {
       role: "help",
       submenu: [
@@ -1421,6 +1483,25 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
+      tracingEnv: async () => {
+        if (!backendUrl) return {};
+        try {
+          const response = await backendFetch(
+            new URL("/dashboard/api/me/preferences", backendUrl).toString(),
+            { signal: AbortSignal.timeout(2_000) },
+          );
+          if (!response.ok) return {};
+          const preferences = await response.json();
+          const project =
+            preferences.local_tracing_project ||
+            preferences.default_local_tracing_project;
+          return project
+            ? { LANGSMITH_PROJECT: project, LANGSMITH_TRACING: "true" }
+            : {};
+        } catch {
+          return {};
+        }
+      },
       providerEnv: () => openAiOAuth?.backendEnv() || {},
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&

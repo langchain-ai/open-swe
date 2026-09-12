@@ -120,7 +120,7 @@ def test_auto_review_enablement_uses_dashboard_opt_in(monkeypatch) -> None:
 
     assert (
         asyncio.run(
-            webhook_common._is_repo_auto_review_enabled(
+            webhook_common.is_repo_auto_review_enabled(
                 {"owner": "langchain-ai", "name": "open-swe-app"}
             )
         )
@@ -129,7 +129,7 @@ def test_auto_review_enablement_uses_dashboard_opt_in(monkeypatch) -> None:
     assert seen == {"owner": "langchain-ai", "name": "open-swe-app"}
     assert (
         asyncio.run(
-            webhook_common._is_repo_auto_review_enabled(
+            webhook_common.is_repo_auto_review_enabled(
                 {"owner": "langchain-ai", "name": "open-swe"}
             )
         )
@@ -147,7 +147,7 @@ def test_github_webhook_skips_automatic_review_when_disabled(monkeypatch) -> Non
         nonlocal called
         called = True
 
-    monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
+    monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(github_webhooks, "process_github_pr_ready", fake_process_github_pr_ready)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
@@ -317,7 +317,7 @@ def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> 
         "process_github_review_finding_reply",
         fake_process_github_review_finding_reply,
     )
-    monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
+    monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(app)
@@ -389,7 +389,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
 
-    monkeypatch.setattr(webhook_common, "_get_thread_metadata_safe", fake_get_thread_metadata_safe)
+    monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", fake_get_thread_metadata_safe)
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token_with_expiry", fake_get_token_with_expiry
     )
@@ -398,7 +398,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     monkeypatch.setattr(webhook_common, "reconcile_findings_with_review_threads", fake_reconcile)
     monkeypatch.setattr(webhook_common, "list_reviewer_findings", fake_list_findings)
     monkeypatch.setattr(webhook_common, "append_finding_interaction", fake_append_interaction)
-    monkeypatch.setattr(webhook_common, "_store_current_reviewer_run_id", fake_store_current_run_id)
+    monkeypatch.setattr(webhook_common, "store_current_reviewer_run_id", fake_store_current_run_id)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
 
     asyncio.run(
@@ -467,7 +467,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
 
-    monkeypatch.setattr(webhook_common, "_get_thread_metadata_safe", fake_get_thread_metadata_safe)
+    monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", fake_get_thread_metadata_safe)
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token_with_expiry", fake_get_token_with_expiry
     )
@@ -476,7 +476,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     monkeypatch.setattr(webhook_common, "reconcile_findings_with_review_threads", fake_reconcile)
     monkeypatch.setattr(webhook_common, "list_reviewer_findings", fake_list_findings)
     monkeypatch.setattr(webhook_common, "append_finding_interaction", fake_append_interaction)
-    monkeypatch.setattr(webhook_common, "_store_current_reviewer_run_id", fake_store_current_run_id)
+    monkeypatch.setattr(webhook_common, "store_current_reviewer_run_id", fake_store_current_run_id)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
 
     asyncio.run(
@@ -727,7 +727,7 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
     monkeypatch.setattr(
         webhook_common,
-        "_is_repo_allowed",
+        "is_repo_allowed",
         lambda repo_config: (_ for _ in ()).throw(
             AssertionError("Slack webhook should not gate inferred repos with allowlists")
         ),
@@ -1079,7 +1079,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         captured["set_metadata_thread_id"] = thread_id
         captured["set_metadata_kwargs"] = kwargs
 
-    monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
+    monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
@@ -1230,7 +1230,7 @@ def test_process_github_pr_comment_without_email_skips(
     )
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react)
     monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fake_fetch_comments)
-    monkeypatch.setattr(webhook_common, "_trigger_or_queue_run", fake_trigger_or_queue_run)
+    monkeypatch.setattr(webhook_common, "trigger_or_queue_run", fake_trigger_or_queue_run)
 
     asyncio.run(
         github_webhooks.process_github_pr_comment(
@@ -1284,7 +1284,7 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
 
     monkeypatch.setattr(
         webhook_common,
-        "_get_or_resolve_thread_github_token",
+        "get_or_resolve_thread_github_token",
         fake_get_or_resolve_thread_github_token,
     )
     monkeypatch.setattr(
@@ -1365,7 +1365,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
 
     monkeypatch.setattr(
         webhook_common,
-        "_get_or_resolve_thread_github_token",
+        "get_or_resolve_thread_github_token",
         fake_get_or_resolve_thread_github_token,
     )
     monkeypatch.setattr(

@@ -42,13 +42,13 @@ _THREAD_POST_COMMAND_METHODS = frozenset(
 )
 
 
-def _require_json_content_type(content_type: str) -> None:
+def require_json_content_type(content_type: str) -> None:
     media_type = content_type.split(";", 1)[0].strip().lower()
     if media_type != "application/json":
         raise HTTPException(415, "Content-Type must be application/json")
 
 
-def _langgraph_proxy_headers(
+def langgraph_proxy_headers(
     *, content_type: str = "application/json", accept: str | None = None
 ) -> dict[str, str]:
     headers = {"Content-Type": content_type}
@@ -70,18 +70,18 @@ async def proxy_dashboard_thread_stream_events(
 ) -> AsyncIterator[bytes]:
     # Preflight here (not in the generator) so auth/content-type failures
     # surface as real HTTP errors before the SSE response starts streaming.
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
-    return _stream_thread_events(thread_id, body, content_type)
+    return stream_thread_events(thread_id, body, content_type)
 
 
-async def _stream_thread_events(
+async def stream_thread_events(
     thread_id: str,
     body: bytes,
     content_type: str,
 ) -> AsyncIterator[bytes]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
-    headers = _langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
+    headers = langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
 
     try:
         async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
@@ -147,7 +147,7 @@ async def proxy_dashboard_thread_commands(
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     received_at_ms = _now_ms()
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -160,7 +160,7 @@ async def proxy_dashboard_thread_commands(
     # yet. That command lazily creates + stamps + owns the thread (in
     # ``_enrich_run_start_command``); any other command against a missing thread
     # is a 404. On an existing thread, ``run.start`` (the posting path) is open
-    # to any org member and attributed in ``_enrich_run_start_command``. Input
+    # to any allowed user and attributed in ``_enrich_run_start_command``. Input
     # commands on admin threads require an admin; other threads keep unattributed
     # commands such as ``input.respond`` owner-only.
     method = parsed.get("method")
@@ -182,14 +182,14 @@ async def proxy_dashboard_thread_commands(
         if post_command:
             _assert_thread_postable(metadata, login, email)
         else:
-            _assert_thread_readable(metadata)
+            _assert_thread_readable(metadata, login, email)
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            _assert_thread_readable(metadata)
+            _assert_thread_readable(metadata, login, email)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
-    headers = _langgraph_proxy_headers(content_type=content_type)
+    headers = langgraph_proxy_headers(content_type=content_type)
 
     enriched = await _enrich_run_start_command(
         thread_id,
@@ -273,7 +273,7 @@ async def proxy_dashboard_thread_history(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
-    _require_json_content_type(content_type)
+    require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
     try:
         payload = json.loads(body or b"{}")
@@ -287,7 +287,7 @@ async def proxy_dashboard_thread_history(
     if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
         payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
-    headers = _langgraph_proxy_headers(content_type=content_type)
+    headers = langgraph_proxy_headers(content_type=content_type)
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
@@ -305,7 +305,7 @@ async def proxy_dashboard_thread_run_cancel(
 ) -> tuple[int, bytes, str | None]:
     await _authorized_thread_metadata(thread_id, login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
-    headers = _langgraph_proxy_headers()
+    headers = langgraph_proxy_headers()
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(
             url,

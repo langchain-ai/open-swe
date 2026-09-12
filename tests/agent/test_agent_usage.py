@@ -49,8 +49,8 @@ async def test_usage_records_runs_and_reads_every_page(monkeypatch):
     agent_usage._USAGE_CACHE.clear()
 
     for run_id in ("run-1", "run-2"):
-        await agent_usage.record_agent_run_usage(
-            run_id=run_id,
+        await agent_usage.record_agent_invocation_usage(
+            invocation_id=run_id,
             thread_id="shared-thread",
             github_login="octo",
             user_email="octo@example.com",
@@ -58,8 +58,8 @@ async def test_usage_records_runs_and_reads_every_page(monkeypatch):
             effort=None,
             source="dashboard",
         )
-    await agent_usage.record_agent_run_usage(
-        run_id="run-1",
+    await agent_usage.record_agent_invocation_usage(
+        invocation_id="run-1",
         thread_id="shared-thread",
         github_login="octo",
         user_email="octo@example.com",
@@ -72,8 +72,11 @@ async def test_usage_records_runs_and_reads_every_page(monkeypatch):
         period="all", limit=10, current_login="octo", current_email="octo@example.com"
     )
 
+    assert payload["rows"][0]["invocations"] == 2
     assert payload["rows"][0]["agent_runs"] == 2
-    assert (tuple(agent_usage.AGENT_RUN_NAMESPACE), 1) in store.search_calls
+    records = await agent_usage._all(agent_usage.AGENT_INVOCATION_NAMESPACE)
+    assert all(record["invocation_id"] == record["run_id"] for record in records)
+    assert (tuple(agent_usage.AGENT_INVOCATION_NAMESPACE), 1) in store.search_calls
 
 
 @pytest.mark.asyncio
@@ -81,8 +84,8 @@ async def test_updates_for_unknown_runs_write_nothing(monkeypatch):
     store = FakeStore()
     monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
 
-    await agent_usage.record_agent_run_cost(run_id="missing", cost_usd=1.25)
-    await agent_usage.mark_agent_cost_refresh_scheduled(run_id="missing")
+    await agent_usage.record_agent_invocation_cost(invocation_id="missing", cost_usd=1.25)
+    await agent_usage.mark_agent_invocation_cost_refresh_scheduled(invocation_id="missing")
 
     assert store.values == {}
 
@@ -92,8 +95,8 @@ async def test_run_completion_is_idempotent(monkeypatch):
     store = FakeStore()
     monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
     monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_010_000)
-    await agent_usage.record_agent_run_usage(
-        run_id="run-1",
+    await agent_usage.record_agent_invocation_usage(
+        invocation_id="run-1",
         thread_id="thread-1",
         github_login="octo",
         user_email=None,
@@ -108,11 +111,11 @@ async def test_run_completion_is_idempotent(monkeypatch):
         output_tokens=50,
     )
 
-    await agent_usage.record_agent_run_completion(run_id="run-1", usage=usage)
+    await agent_usage.record_agent_invocation_completion(invocation_id="run-1", usage=usage)
     monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_020_000)
-    await agent_usage.record_agent_run_completion(run_id="run-1", usage=usage)
+    await agent_usage.record_agent_invocation_completion(invocation_id="run-1", usage=usage)
 
-    record = (await agent_usage._all(agent_usage.AGENT_RUN_NAMESPACE))[0]
+    record = (await agent_usage._all(agent_usage.AGENT_INVOCATION_NAMESPACE))[0]
     assert record["input_tokens"] == 100
     assert record["output_tokens"] == 50
     assert record["total_tokens"] == 150
@@ -124,8 +127,8 @@ async def test_cost_refresh_scheduling_state_is_idempotent(monkeypatch):
     store = FakeStore()
     monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
     monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_010_000)
-    await agent_usage.record_agent_run_usage(
-        run_id="run-1",
+    await agent_usage.record_agent_invocation_usage(
+        invocation_id="run-1",
         thread_id="thread-1",
         github_login="octo",
         user_email=None,
@@ -133,16 +136,16 @@ async def test_cost_refresh_scheduling_state_is_idempotent(monkeypatch):
         effort=None,
         source="dashboard",
     )
-    await agent_usage.record_agent_run_completion(run_id="run-1", usage=None)
+    await agent_usage.record_agent_invocation_completion(invocation_id="run-1", usage=None)
 
-    assert await agent_usage.agent_run_needs_cost_refresh(run_id="run-1") is True
+    assert await agent_usage.agent_invocation_needs_cost_refresh(invocation_id="run-1") is True
 
-    await agent_usage.mark_agent_cost_refresh_scheduled(run_id="run-1")
+    await agent_usage.mark_agent_invocation_cost_refresh_scheduled(invocation_id="run-1")
     monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_020_000)
-    await agent_usage.mark_agent_cost_refresh_scheduled(run_id="run-1")
+    await agent_usage.mark_agent_invocation_cost_refresh_scheduled(invocation_id="run-1")
 
-    assert await agent_usage.agent_run_needs_cost_refresh(run_id="run-1") is False
-    record = (await agent_usage._all(agent_usage.AGENT_RUN_NAMESPACE))[0]
+    assert await agent_usage.agent_invocation_needs_cost_refresh(invocation_id="run-1") is False
+    record = (await agent_usage._all(agent_usage.AGENT_INVOCATION_NAMESPACE))[0]
     assert record["cost_refresh_scheduled_at_ms"] == 1_800_000_010_000
 
 
@@ -152,7 +155,7 @@ async def test_leaderboard_aggregates_run_usage_with_partial_data(monkeypatch):
     monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
     monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_000_000)
     agent_usage._USAGE_CACHE.clear()
-    namespace = tuple(agent_usage.AGENT_RUN_NAMESPACE)
+    namespace = tuple(agent_usage.AGENT_INVOCATION_NAMESPACE)
     base = {
         "thread_id": "thread-1",
         "github_login": "octo",
@@ -188,7 +191,9 @@ async def test_leaderboard_aggregates_run_usage_with_partial_data(monkeypatch):
     row = payload["rows"][0]
     assert row["total_tokens"] == 400
     assert row["total_cost_usd"] == 2.25
+    assert row["avg_invocation_seconds"] == 20
     assert row["avg_run_seconds"] == 20
+    assert row["agent_runs"] == row["invocations"] == 3
 
 
 @pytest.mark.asyncio
@@ -253,8 +258,8 @@ async def test_current_user_row_survives_the_limit(monkeypatch):
     monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_000_000)
     agent_usage._USAGE_CACHE.clear()
     for index in range(4):
-        await agent_usage.record_agent_run_usage(
-            run_id=f"run-{index}",
+        await agent_usage.record_agent_invocation_usage(
+            invocation_id=f"run-{index}",
             thread_id=f"thread-{index}",
             github_login=f"user-{index}",
             user_email=None,
@@ -310,7 +315,7 @@ async def test_legacy_records_are_backfilled_once(monkeypatch):
     payload = await agent_usage.list_agent_usage_leaderboard(
         period="all", limit=10, current_login="octo", current_email=None
     )
-    assert payload["rows"][0]["agent_runs"] == 1
+    assert payload["rows"][0]["invocations"] == 1
     assert payload["rows"][0]["merged_prs"] == 1
     assert payload["reviewer_stats"]["reviewed_prs"] == 1
     assert payload["reviewer_stats"]["surfaced_findings"] == 1
@@ -319,4 +324,4 @@ async def test_legacy_records_are_backfilled_once(monkeypatch):
     await agent_usage.list_agent_usage_leaderboard(
         period="all", limit=10, current_login="octo", current_email=None
     )
-    assert len(await agent_usage._all(agent_usage.AGENT_RUN_NAMESPACE)) == 1
+    assert len(await agent_usage._all(agent_usage.AGENT_INVOCATION_NAMESPACE)) == 1

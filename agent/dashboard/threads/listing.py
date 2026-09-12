@@ -18,13 +18,13 @@ from agent.dashboard.threads.summary import (
     _metadata_string,
     _refresh_latest_run_metadata,
     _thread_id,
-    _thread_is_readable,
     _thread_metadata,
-    _thread_source,
     _thread_summary,
     _thread_timestamp_ms,
     _thread_updated_ms,
     _ThreadSortBy,
+    thread_is_readable,
+    thread_source,
 )
 from agent.utils.json_types import JsonObject, ThreadLike
 from agent.utils.thread_ops import langgraph_client
@@ -60,6 +60,7 @@ def _search_metadata_filter(
     resolved: bool | None = None,
     source: str | None = None,
     automation_id: str | None = None,
+    admin_threads: bool | None = None,
 ) -> dict[str, Any]:
     metadata = dict(search_filter)
     if resolved is True:
@@ -68,6 +69,8 @@ def _search_metadata_filter(
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id
+    if admin_threads is True:
+        metadata["admin_thread"] = True
     return metadata
 
 
@@ -105,12 +108,15 @@ def _metadata_matches_filters(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    admin_threads: bool | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
     thread_repo = _metadata_repo(metadata)[2]
     if repo and thread_repo.lower() != repo.lower():
         return False
     if ownerless and thread_repo:
+        return False
+    if admin_threads is not None and (metadata.get("admin_thread") is True) is not admin_threads:
         return False
     is_automation = _is_automation_thread(metadata)
     if scope == "interactive" and is_automation:
@@ -121,7 +127,7 @@ def _metadata_matches_filters(
         return False
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
-    if source and _thread_source(metadata) != source:
+    if source and thread_source(metadata) != source:
         return False
     if query:
         pull_requests = metadata.get("pull_requests")
@@ -250,6 +256,10 @@ async def _collect_thread_candidates(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    admin_threads: bool | None = None,
+    viewer_login: str | None = None,
+    viewer_email: str | None = None,
+    include_private: bool = True,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
@@ -263,6 +273,7 @@ async def _collect_thread_candidates(
             resolved=resolved,
             source=source,
             automation_id=automation_id,
+            admin_threads=admin_threads,
         )
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
@@ -276,7 +287,12 @@ async def _collect_thread_candidates(
                 break
             for thread in batch:
                 metadata = _thread_metadata(thread)
-                if surfaced_only and _thread_source(metadata) not in _SURFACED_SOURCES:
+                if metadata.get("visibility", "public") != "public" and (
+                    not include_private
+                    or not thread_is_readable(metadata, viewer_login, viewer_email)
+                ):
+                    continue
+                if surfaced_only and thread_source(metadata) not in _SURFACED_SOURCES:
                     continue
                 if not _metadata_matches_filters(
                     metadata,
@@ -287,6 +303,7 @@ async def _collect_thread_candidates(
                     automation_id=automation_id,
                     repo=repo,
                     ownerless=ownerless,
+                    admin_threads=admin_threads,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -302,6 +319,30 @@ async def _collect_thread_candidates(
     return sorted(
         seen.values(), key=lambda thread: _thread_timestamp_ms(thread, sort_by), reverse=True
     )
+
+
+async def list_unresolved_dashboard_threads(
+    login: str, *, email: str | None = None
+) -> list[ThreadLike]:
+    client = langgraph_client()
+    seen: dict[str, ThreadLike] = {}
+    for metadata in _participant_search_filters(login, email=email):
+        offset = 0
+        while batch := await _search_threads_batch(
+            client, metadata, limit=_THREADS_SEARCH_PAGE, offset=offset
+        ):
+            for thread in batch:
+                thread_metadata = _thread_metadata(thread)
+                thread_id = _thread_id(thread)
+                if (
+                    thread_id
+                    and thread_source(thread_metadata) in _SURFACED_SOURCES
+                    and thread_is_readable(thread_metadata, login, email)
+                    and not _is_thread_resolved(thread_metadata)
+                ):
+                    seen.setdefault(thread_id, thread)
+            offset += len(batch)
+    return list(seen.values())
 
 
 async def list_dashboard_threads(
@@ -328,7 +369,9 @@ async def _pinned_thread_summaries(
         except Exception:  # noqa: BLE001
             logger.debug("Could not fetch pinned sidebar thread %s", thread_id, exc_info=True)
             return None
-        if not isinstance(thread, Mapping) or not _thread_is_readable(_thread_metadata(thread)):
+        if not isinstance(thread, Mapping) or not thread_is_readable(
+            _thread_metadata(thread), login, email
+        ):
             return None
         return await _summarize_thread(client, thread)
 
@@ -357,6 +400,8 @@ async def list_dashboard_thread_projects(
     candidates = await _collect_thread_candidates(
         langgraph_client(),
         _participant_search_filters(login, email=email, include_all=include_all),
+        viewer_login=login,
+        viewer_email=email,
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
     )
@@ -385,7 +430,7 @@ async def pin_dashboard_thread(thread_id: str, login: str) -> None:
         raise HTTPException(404, "thread not found") from exc
     if not isinstance(thread, Mapping):
         raise HTTPException(404, "thread not found")
-    _assert_thread_readable(_thread_metadata(thread))
+    _assert_thread_readable(_thread_metadata(thread), login)
     await pin_thread(login, thread_id)
 
 
@@ -410,7 +455,9 @@ async def list_dashboard_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     filter_participant_login: str | None = None,
+    include_private: bool = True,
     surfaced_only: bool = False,
+    admin_threads: bool | None = None,
     sort_by: _ThreadSortBy = "updated_at",
 ) -> dict[str, Any]:
     client = langgraph_client()
@@ -436,6 +483,10 @@ async def list_dashboard_threads_page(
         automation_id=automation_id,
         repo=repo,
         ownerless=ownerless,
+        admin_threads=admin_threads,
+        viewer_login=login,
+        viewer_email=email,
+        include_private=include_private,
         target_per_search=target,
         surfaced_only=surfaced_only,
         sort_by=sort_by,

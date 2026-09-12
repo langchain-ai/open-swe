@@ -1,8 +1,11 @@
 import asyncio
 import sys
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx2
+import langgraph_sdk
 import pytest
 
 import agent.tools.open_pull_request  # noqa: F401
@@ -58,6 +61,8 @@ class _FakeClient:
         self, url: str, *, headers: dict[str, str], params: dict[str, str] | None = None
     ) -> _FakeResponse:
         self.get_calls.append({"url": url, "headers": headers, "params": params})
+        if url.endswith("/installation/repositories"):
+            return _FakeResponse(200, {"repositories": [{"full_name": "langchain-ai/open-swe"}]})
         if self._get is not None:
             return self._get
         return _FakeResponse(200, {"name": "ok"})
@@ -98,8 +103,31 @@ def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _Rout
     monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **_kwargs: client)
 
 
-def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -> None:
+def _set_config(
+    monkeypatch: pytest.MonkeyPatch,
+    configurable: dict[str, Any],
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    configurable.setdefault("thread_id", "pr-thread")
+    metadata = (
+        metadata
+        if metadata is not None
+        else (
+            {"visibility": "public"}
+            if configurable.get("source") == "github"
+            else {"visibility": "private", "owner_login": configurable.get("github_login")}
+        )
+    )
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": metadata}))
+        ),
+    )
     monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable}, raising=False)
 
 
 def _open(base: str = "main") -> dict[str, Any]:
@@ -116,8 +144,76 @@ def _open(base: str = "main") -> dict[str, Any]:
     )
 
 
-def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+@pytest.mark.parametrize(
+    "workspace_access", ["allowed", "other_account", "unavailable", "no_token"]
+)
+def test_public_pr_cannot_use_initiator_authority_outside_workspace(
+    monkeypatch: pytest.MonkeyPatch, workspace_access: str
+) -> None:
+    _set_config(
+        monkeypatch,
+        {"source": "slack", "github_login": "bob"},
+        metadata={"visibility": "public", "owner_type": "user", "owner_login": "Alice"},
+    )
+    monkeypatch.setattr(
+        "agent.dashboard.profiles.get_valid_access_token", AsyncMock(return_value="alice-token")
+    )
+    monkeypatch.setattr(
+        opr,
+        "get_github_app_installation_token",
+        AsyncMock(return_value=None if workspace_access == "no_token" else "workspace-token"),
+    )
+    monkeypatch.setattr(opr, "_record_pr_telemetry", AsyncMock())
+    monkeypatch.setattr(opr, "get_plan_content", AsyncMock(return_value=None))
+    requests: list[httpx2.Request] = []
+
+    async def github(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        if request.url.path == "/installation/repositories":
+            assert request.headers["Authorization"] == "Bearer workspace-token"
+            if workspace_access == "unavailable":
+                return httpx2.Response(503)
+            if request.url.params["page"] == "1":
+                return httpx2.Response(
+                    200,
+                    json={
+                        "repositories": [{"full_name": f"workspace/repo-{i}"} for i in range(100)]
+                    },
+                )
+            full_name = (
+                "langchain-ai/open-swe" if workspace_access == "allowed" else "other/open-swe"
+            )
+            return httpx2.Response(200, json={"repositories": [{"full_name": full_name}]})
+        # OAuth has broader access, including branches already pushed by someone else.
+        assert request.headers["Authorization"] == "Bearer alice-token"
+        if request.method == "POST":
+            return httpx2.Response(201, json={"number": 1, "user": {"login": "Alice"}})
+        return httpx2.Response(200, json={"name": "existing-branch", "private": False})
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
+    monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **kwargs: client)
+    result = _open()
+
+    if workspace_access == "allowed":
+        assert result["success"] is True
+        assert result["author"] == "Alice"
+        assert result["token_kind"] == "user"
+        assert any(request.method == "POST" for request in requests)
+    else:
+        assert result["success"] is False
+        assert "workspace" in result["error"]
+        assert all(request.headers["Authorization"] != "Bearer alice-token" for request in requests)
+
+
+@pytest.mark.parametrize("visibility", ["public", "private"])
+def test_uses_user_token_for_slack_with_login(
+    monkeypatch: pytest.MonkeyPatch, visibility: str
+) -> None:
+    _set_config(
+        monkeypatch,
+        {"source": "slack", "github_login": "johannes117"},
+        metadata={"visibility": visibility, "owner_type": "user", "owner_login": "johannes117"},
+    )
 
     from agent.dashboard import profiles
 
@@ -128,7 +224,8 @@ def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(profiles, "get_valid_access_token", fake_user_token)
 
     async def fail_bot() -> str | None:
-        raise AssertionError("bot token should not be used when a user token exists")
+        assert visibility == "public", "private PRs should not need workspace credentials"
+        return "workspace-token"
 
     monkeypatch.setattr(opr, "get_github_app_installation_token", fail_bot)
 
@@ -208,8 +305,12 @@ def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) 
     assert client.post_calls[0]["headers"]["Authorization"] == "Bearer user-tok"
 
 
-def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
+def test_system_thread_uses_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {"source": "github", "github_login": "johannes117"},
+        metadata={"visibility": "public", "owner_type": "system"},
+    )
 
     from agent.dashboard import profiles
 
@@ -236,7 +337,7 @@ def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) ->
     assert client.post_calls[0]["headers"]["Authorization"] == "Bearer bot-tok"
 
 
-def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_private_pr_requires_user_token(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
     from agent.dashboard import profiles
@@ -254,7 +355,8 @@ def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPat
     client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 3, "user": {}}))
     _install_client(monkeypatch, client)
 
-    assert _open()["token_kind"] == "bot"
+    with pytest.raises(opr.GitHubUserAuthRequired):
+        _open()
 
 
 def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -403,6 +505,7 @@ def _open_with_body(body: str) -> dict[str, Any]:
 
 
 def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda: _coro(("tok", "user")))
 
 
@@ -862,10 +965,24 @@ def test_resolves_thread_flag_defaults_to_false(monkeypatch: pytest.MonkeyPatch)
     assert record_telemetry.await_args.kwargs["resolves_thread"] is False
 
 
+@pytest.mark.parametrize("top_level_run_id", [False, True])
 async def test_record_pr_telemetry_persists_resolves_thread_flag(
     monkeypatch: pytest.MonkeyPatch,
+    top_level_run_id: bool,
 ) -> None:
-    _set_config(monkeypatch, {"source": "slack", "thread_id": "t1", "github_login": "octo"})
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "thread_id": "t1",
+            "github_login": "octo",
+            "run_id": "old-run" if top_level_run_id else "run-1",
+            "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+        },
+    )
+    if top_level_run_id:
+        config = {**opr.get_config(), "run_id": "run-1"}
+        monkeypatch.setattr(opr, "get_config", lambda: config)
     monkeypatch.setattr(opr, "record_agent_pr_usage", AsyncMock())
     monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
     langgraph = MagicMock()
@@ -911,5 +1028,23 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
             "created_at": "",
             "diff_stats": {"files": 0, "additions": 0, "deletions": 0},
             "resolves_thread": True,
+            "slack_feedback": {"run_id": "run-1", "channel_id": "C1"},
         }
     ]
+
+
+def test_updating_pr_preserves_original_feedback_run() -> None:
+    original = {
+        "url": "https://github.com/lc/repo/pull/7",
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "slack_feedback": {"run_id": "original-run", "channel_id": "C1"},
+    }
+    updated = {
+        **original,
+        "state": "open",
+        "slack_feedback": {"run_id": "later-run", "channel_id": "C2"},
+    }
+    result = opr._upsert_pull_request([original], updated)
+    assert result[0]["slack_feedback"] == original["slack_feedback"]
+    assert result[0]["state"] == "open"

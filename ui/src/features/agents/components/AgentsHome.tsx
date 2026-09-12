@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
 import type {
@@ -46,6 +46,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
+import { api } from "@/lib/api"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -63,9 +64,11 @@ const NEW_AGENT_PANEL_REF = {
 export function AgentsHome({
   initialRepo,
   initialLocalProject,
+  initialNoProject,
 }: {
   initialRepo?: string
   initialLocalProject?: string
+  initialNoProject?: boolean
 }) {
   const stream = useAgentStream()
   const queryClient = useQueryClient()
@@ -76,14 +79,28 @@ export function AgentsHome({
   })
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
-  const activeSelection = selection ?? defaultSelection
-  const handleSelectionChange = (next: ModelSelection) => {
+  const [autoSelected, setAutoSelected] = useState(false)
+  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
+  const handleSelectionChange = (next: ModelSelection | null) => {
+    setAutoSelected(next === null)
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
   const cloudEnabled = Boolean(session.data)
+  const preferences = useQuery({
+    queryKey: ["myPreferences"],
+    queryFn: api.getMyPreferences,
+    enabled: cloudEnabled,
+  })
+  // Visibility is fixed once a thread exists, so the only choice is made here,
+  // seeded from the user's default and overridable per thread.
+  const [visibilityOverride, setVisibilityOverride] = useState<
+    "public" | "private" | null
+  >(null)
+  const visibility =
+    visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const environmentOptions = useEnvironmentOptions(cloudEnabled)
   const environments = environmentOptions.data?.environments ?? []
   // undefined = untouched, so the run falls back to the default environment.
@@ -109,7 +126,11 @@ export function AgentsHome({
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
   const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
-    initialLocalProject ? "local" : initialRepo ? "cloud" : null
+    initialLocalProject
+      ? "local"
+      : initialRepo || initialNoProject
+        ? "cloud"
+        : null
   )
   const runTarget: RunTarget = isDesktop
     ? cloudEnabled
@@ -149,7 +170,7 @@ export function AgentsHome({
   const skills = useAgentSkills({ enabled: cloudEnabled })
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
-    initialRepo
+    initialNoProject ? null : initialRepo
   )
   const repo =
     repoOverride === undefined
@@ -418,6 +439,7 @@ export function AgentsHome({
       prompt,
       images,
       repo,
+      visibility,
       repo_explicitly_none: repoOverride === null,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
@@ -430,6 +452,7 @@ export function AgentsHome({
       modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
+    configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
@@ -470,13 +493,15 @@ export function AgentsHome({
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {session.data && !routePending && <OnboardingDialog />}
-        {optimisticDraftThread && (
-          <AgentThreadHeader
-            title={optimisticDraftThread.title}
-            target={runTarget === "local" ? "This Mac" : "Cloud"}
-            panelCollapsed={panelCollapsed}
-          />
-        )}
+        <AgentThreadHeader
+          title={optimisticDraftThread?.title}
+          target={runTarget === "local" ? "This Mac" : "Cloud"}
+          panelCollapsed={panelCollapsed}
+          visibility={runTarget === "cloud" ? visibility : undefined}
+          onVisibilityChange={
+            submittedDraft ? undefined : setVisibilityOverride
+          }
+        />
         {optimisticDraftThread ? (
           <Messages
             messages={optimisticDraftThread.messages}

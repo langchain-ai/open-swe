@@ -2,12 +2,15 @@ from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
 
+from agent.dashboard.threads.summary import thread_is_private
 from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
     get_active_slack_thread,
+    invite_to_slack_channel,
     slack_thread_mutation_lock,
+    slack_user_ids,
 )
 from agent.slack.code_channels import (
     CODE_CHANNEL_SESSION_TS,
@@ -36,8 +39,9 @@ from agent.slack.code_channels import (
     store_block_suggestions,
 )
 from agent.source_context import SourceContext
-from agent.tools.create_sandbox_file_download_url import _resolve_sandbox_file
+from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
 
@@ -58,6 +62,7 @@ async def manage_code_channel(
         "archive",
     ],
     title: str = "",
+    invite: list[str] | None = None,
     team_id: str = "",
     is_private: bool = False,
     status: SessionStatus = "active",
@@ -81,21 +86,7 @@ async def manage_code_channel(
     csp: dict[str, list[str]] | None = None,
     include_resolved: bool = False,
 ) -> dict[str, Any]:
-    """Manage the complete Slack code-channel surface for this session.
-
-    Use `create` to promote the current Slack thread using its generated title. Use
-    `status`, `rename`, `context`, `summary`, `resource`, and `commands` for channel chrome. `view`
-    upserts an `html`, `diff`, `block_kit`, or `canvas` tab; HTML and diff content
-    can be passed directly or read from `file_path`, while Block Kit uses `blocks`
-    plus optional external-select `suggestions`, and canvas uses `canvas_id`. Use
-    `list_views` and `remove_view` to reconcile
-    tabs. Use `get_canvas` to read markdown and comments and `set_canvas` to
-    replace its markdown while preserving comment anchors. Post a closing summary
-    before `archive` and pass its timestamp as `summary_message_ts`.
-
-    Files must be inside the active sandbox work directory, valid UTF-8, and at
-    most 1 MB. Never publish secrets or credentials in a view.
-    """
+    """Implement the `manage_code_channel` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
@@ -111,6 +102,15 @@ async def manage_code_channel(
     thread_ts = str(active.get("thread_ts") or "")
 
     if action == "create":
+        try:
+            metadata = thread_metadata(await client.threads.get(thread_id))
+        except Exception:
+            return {"success": False, "error": "Cannot verify thread credential scope"}
+        if thread_is_private(metadata):
+            return {
+                "success": False,
+                "error": "Private threads cannot be promoted to code channels",
+            }
         if is_code_channel_session(thread_ts):
             return {"success": False, "error": "This session is already a code channel"}
         return await _create(
@@ -119,6 +119,7 @@ async def manage_code_channel(
             active,
             await _code_channel_title(client, thread_id, title),
             cfg.repo.model_dump() if cfg.repo else None,
+            invite=invite or [],
             team_id=team_id,
             is_private=is_private,
         )
@@ -259,7 +260,7 @@ async def _resolve_content(content: str, file_path: str) -> tuple[str, str | Non
     if not file_path:
         return content, None
     try:
-        backend, path, _ = await _resolve_sandbox_file(file_path)
+        backend, path, _ = await resolve_sandbox_file(file_path)
         downloads = await backend.adownload_files([path])
     except Exception as exc:  # noqa: BLE001
         return "", f"Could not read file_path: {exc}"
@@ -281,6 +282,7 @@ async def _create(
     title: str,
     repo: dict[str, Any] | None,
     *,
+    invite: list[str],
     team_id: str = "",
     is_private: bool = False,
 ) -> dict[str, Any]:
@@ -356,6 +358,12 @@ async def _create(
         }
 
     warnings: list[str] = []
+    invited: list[str] = []
+    invitees = slack_user_ids(invite)
+    if invitees:
+        invited, invite_error = await invite_to_slack_channel(channel_id, invitees)
+        if invite_error:
+            warnings.append(f"Could not invite {invite_error}")
     _, status_error = await set_session_status_result(channel_id, "processing")
     if status_error:
         warnings.append(f"Could not set processing status: {status_error}")
@@ -375,6 +383,7 @@ async def _create(
         "action": "create",
         "channel_id": channel_id,
         "dashboard_url": dashboard_thread_url(thread_id),
+        "invited": invited,
     }
     if warnings:
         result["warnings"] = warnings

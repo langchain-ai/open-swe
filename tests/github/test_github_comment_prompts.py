@@ -98,10 +98,10 @@ def test_construct_system_prompt_renders_working_environment_path() -> None:
 
 
 def test_slack_information_only_response_uses_single_output_path() -> None:
-    from agent.slack.tools.thread_reply import slack_thread_reply
+    from agent.prompts import load_prompt
 
     prompt = construct_system_prompt(working_dir="/workspace", source="slack", slack_context=True)
-    tool_guidance = " ".join((slack_thread_reply.__doc__ or "").split())
+    tool_guidance = " ".join(load_prompt("tools/slack_thread_reply.md").split())
 
     assert "`slack_thread_reply` is the canonical user-facing output" in prompt
     assert "put the complete answer there" in prompt
@@ -131,7 +131,7 @@ def test_dashboard_prompt_uses_normal_assistant_responses() -> None:
 
 def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
     expected = {
-        "linear": "Use `linear_comment`",
+        "linear": "Use the configured Linear MCP tools",
         "github": "Use `gh issue comment` or `gh pr comment`",
         "schedule": "call `notify_automation_channel` once",
     }

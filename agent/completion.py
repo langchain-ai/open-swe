@@ -2,8 +2,9 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
-Slack runs enqueue deferred session-cost enrichment; failures (``error`` /
-``timeout``) post a short reply so a run that died never leaves the user silent.
+Slack runs enqueue deferred session-cost enrichment and offer private feedback
+when a question was answered. Failures (``error`` / ``timeout``) post a short reply
+so a run that died never leaves the user silent.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -18,19 +19,21 @@ from typing import Any
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
-from agent.agent_cost import finalize_agent_run_usage
+from agent.agent_cost import finalize_agent_invocation_usage
 from agent.config import ENV
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
-from agent.linear.client import comment_on_linear_issue
+from agent.invocation import resolve_invocation_id, with_invocation_id
+from agent.linear.notifications import post_linear_notification
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
-from agent.utils.dashboard_links import dashboard_thread_url
+from agent.thread_feedback import schedule_answer_feedback
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
+from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.user_messages import warning
 
@@ -92,9 +95,7 @@ _REASON_FOLLOW_UP = {
 }
 
 
-def _failure_text(
-    status: str, dashboard_url: str | None = None, reason_code: str | None = None
-) -> str:
+def _failure_text(status: str, trace_url: str | None = None, reason_code: str | None = None) -> str:
     reason = _REASON_TEXT.get(reason_code or "")
     if reason is None:
         if status == "timeout":
@@ -105,8 +106,8 @@ def _failure_text(
             reason = "the run hit an unexpected error"
     follow_up = _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
     text = warning(f"Open SWE wasn't able to finish that — {reason}. {follow_up}")
-    if dashboard_url:
-        text += f" You can view the error in <{dashboard_url}|Open SWE Web>."
+    if trace_url:
+        text += f" View the error in <{trace_url}|LangSmith>."
     return text
 
 
@@ -183,24 +184,25 @@ async def _post_failure_reply(
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
     ctx = SourceContext.from_metadata(metadata)
-    text = _failure_text(status, reason_code=reason_code)
 
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            slack_text = _failure_text(status, dashboard_thread_url(thread_id), reason_code)
+            trace_url = await get_langsmith_trace_url(thread_id)
+            slack_text = _failure_text(status, trace_url, reason_code)
             return await post_slack_thread_reply(
                 location[0],
                 location[1],
                 slack_text,
                 agent_thread_id=thread_id,
-                include_trace_link=True,
             )
         return False
 
     if source == "linear":
         if ctx.linear_issue and ctx.linear_issue.id:
-            return await comment_on_linear_issue(ctx.linear_issue.id, text)
+            return await post_linear_notification(
+                ctx.linear_issue.id, _failure_text(status, reason_code=reason_code)
+            )
         return False
 
     if source in ("github", "github_issue"):
@@ -211,7 +213,12 @@ async def _post_failure_reply(
         if isinstance(repo_config, dict) and isinstance(number, int):
             token = await get_github_app_installation_token()
             if token:
-                return await post_github_comment(repo_config, number, text, token=token)
+                return await post_github_comment(
+                    repo_config,
+                    number,
+                    _failure_text(status, reason_code=reason_code),
+                    token=token,
+                )
         return False
 
     logger.info("No failure-reply channel for thread %s (source=%s)", thread_id, source)
@@ -256,10 +263,15 @@ def _cost_refresh_metadata(metadata: dict[str, Any], run_id: str) -> dict[str, A
     }
 
 
-def _prepare_run_id(payload: dict[str, Any]) -> str | None:
+def _invocation_id(payload: dict[str, Any]) -> str | None:
     metadata = payload.get("metadata")
-    value = metadata.get("prepare_run_id") if isinstance(metadata, dict) else None
-    return value if isinstance(value, str) and value else None
+    if not isinstance(metadata, dict):
+        return None
+    try:
+        return resolve_invocation_id(metadata)
+    except ValueError:
+        logger.warning("run-complete: conflicting invocation identifiers")
+        return None
 
 
 async def _finalize_agent_usage_telemetry(
@@ -268,8 +280,8 @@ async def _finalize_agent_usage_telemetry(
     """Finalize Agent telemetry from the platform's terminal webhook payload."""
     if status not in _TERMINAL_RUN_STATUSES:
         return
-    prepare_run_id = _prepare_run_id(payload)
-    if prepare_run_id is None:
+    invocation_id = _invocation_id(payload)
+    if invocation_id is None:
         return
     values = payload.get("values")
     state = dict(values) if isinstance(values, dict) else None
@@ -278,8 +290,8 @@ async def _finalize_agent_usage_telemetry(
             state["messages"] = convert_to_messages(state["messages"])
         except _MESSAGE_CONVERSION_ERRORS:
             state = None
-    await finalize_agent_run_usage(
-        run_id=prepare_run_id,
+    await finalize_agent_invocation_usage(
+        invocation_id=invocation_id,
         thread_id=thread_id,
         state=state,
     )
@@ -305,7 +317,7 @@ async def _settle_code_channel_session(
     await set_session_status(slack_thread.channel_id, "active")
 
 
-async def _schedule_success_cost_refresh(
+async def _handle_successful_run(
     thread_id: str, run_id: str | None, payload: dict[str, Any]
 ) -> dict[str, str]:
     if run_id is None:
@@ -322,9 +334,18 @@ async def _schedule_success_cost_refresh(
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
-    prepare_run_id = _prepare_run_id(payload)
-    if prepare_run_id is None:
-        return {"status": "ignored", "reason": "missing prepare_run_id"}
+    payload_metadata = payload.get("metadata")
+    automated = (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
+    )
+    if not automated:
+        try:
+            await schedule_answer_feedback(thread_id, run_id, metadata)
+        except Exception:
+            logger.warning("Could not schedule completion feedback", extra={"thread_id": thread_id})
+    invocation_id = _invocation_id(payload)
+    if invocation_id is None:
+        return {"status": "ignored", "reason": "missing or conflicting invocation_id"}
     if run_id in _scheduled_cost_run_ids(metadata):
         return {"status": "ignored", "reason": "cost refresh already scheduled for run"}
 
@@ -340,7 +361,7 @@ async def _schedule_success_cost_refresh(
         {
             "agent_thread_id": thread_id,
             "run_id": run_id,
-            "prepare_run_id": prepare_run_id,
+            **with_invocation_id(None, invocation_id),
             "channel_id": channel_id,
             "thread_ts": thread_ts,
         },
@@ -361,7 +382,7 @@ async def _schedule_success_cost_refresh(
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
-    Enqueues successful Slack cost refreshes and posts failure replies idempotently.
+    Prompts for Slack feedback, enqueues cost refreshes, and posts failure replies.
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")
@@ -371,7 +392,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     if status == "success":
-        return await _schedule_success_cost_refresh(thread_id, run_id, payload)
+        return await _handle_successful_run(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
     if (
         status in _TERMINAL_FAILURE_STATUSES

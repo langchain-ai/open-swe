@@ -27,6 +27,7 @@ from agent.slack.request import SlackRequest
 from agent.slack.responses import (
     BlockSuggestionResponse,
     ChallengeResponse,
+    FeedbackResponse,
     HealthResponse,
     SlashCommandResponse,
     WebhookResponse,
@@ -34,6 +35,7 @@ from agent.slack.responses import (
     ephemeral,
     ignored,
 )
+from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
@@ -41,6 +43,19 @@ from agent.webhooks import common
 router = APIRouter()
 
 _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
+_MEMBERSHIP_SUBTYPES = frozenset(
+    {
+        "channel_join",
+        "channel_leave",
+        "group_join",
+        "group_leave",
+        "channel_topic",
+        "channel_purpose",
+        "channel_name",
+        "channel_archive",
+        "channel_unarchive",
+    }
+)
 _EXTERNAL_CHANNEL_REFUSAL = "Open SWE does not operate in channels with external participants."
 _OPTION_ACTION_ID = "open_swe_option_select"
 
@@ -127,6 +142,36 @@ async def _queue_code_channel_turn(
         return accepted("Code channel interaction queued")
 
     return await answer_slack_request(target, dispatch)
+
+
+async def _queue_channel_housekeeping(channel_id: str, text: str) -> None:
+    """Leave a note about who joined or left, for the session's next turn.
+
+    Nothing is being asked, so this must not start a run of its own; the queue
+    is drained before the next model call, whatever triggers it.
+    """
+    client = get_langgraph_client()
+    try:
+        thread_id = await common.lookup_slack_thread_id(
+            client, channel_id, common.CODE_CHANNEL_SESSION_TS
+        )
+    except common.SlackThreadMappingError:
+        return
+    if not thread_id or not text.strip():
+        return
+    await common.queue_message_for_thread(
+        thread_id,
+        [
+            {
+                "type": "text",
+                "text": (
+                    "This channel's membership changed while you were idle: "
+                    f"{text.strip()}\nNothing is being asked of you. Note who is here "
+                    "and carry on with whatever comes next."
+                ),
+            }
+        ],
+    )
 
 
 async def _lookup_delivered_message_update(
@@ -388,6 +433,11 @@ async def slack_webhook(
     if event.is_from_bot or updated_message.is_from_bot:
         return ignored("Event from a bot")
 
+    if {event.subtype, updated_message.subtype} & _MEMBERSHIP_SUBTYPES:
+        if in_code_channel and await common.claim_slack_event(event_id, channel_id, event_ts):
+            background_tasks.add_task(_queue_channel_housekeeping, channel_id, text)
+        return {"status": "ignored", "reason": "Slack channel housekeeping, not a request"}
+
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
 
@@ -507,7 +557,7 @@ async def slack_code_channel_command(
 @router.post("/webhooks/slack/interactivity")
 async def slack_interactivity(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> WebhookResponse | BlockSuggestionResponse:
+) -> WebhookResponse | BlockSuggestionResponse | FeedbackResponse:
     """Handle Slack Block Kit interactions."""
     body = await request.body()
     _verify_signature(request, body, "interactivity")
@@ -518,6 +568,9 @@ async def slack_interactivity(
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
+    if is_slack_feedback_payload(payload):
+        return await handle_slack_feedback_interaction(payload, background_tasks)
+
     interaction = SlackInteraction.parse(payload)
     if interaction is None:
         return ignored("Invalid Slack interaction")

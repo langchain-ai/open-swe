@@ -13,8 +13,8 @@ from langgraph_sdk.client import LangGraphClient
 from agent.slack.client import (
     SLACK_API_BASE_URL,
     SLACK_BOT_TOKEN,
-    _slack_headers,
     get_slack_channel_info,
+    slack_headers,
 )
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
@@ -81,7 +81,7 @@ async def _call(method: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | 
         try:
             response = await http_client.post(
                 f"{SLACK_API_BASE_URL}/{method}",
-                headers=_slack_headers(),
+                headers=slack_headers(),
                 json=payload,
             )
             if response.status_code == 429:
