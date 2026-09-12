@@ -113,6 +113,12 @@ def upgrade(
         context.run_migrations()
 
 
+def execute_revision(conn: Connection, migrations: ScriptDirectory, revision: str) -> None:
+    context = MigrationContext.configure(connection=conn)
+    with Operations.context(context):
+        migrations.get_revision(revision).module.upgrade()
+
+
 async def close() -> None:
     global _ENGINE, _ENGINE_URI
     if _ENGINE is not None:
