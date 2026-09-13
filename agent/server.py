@@ -120,6 +120,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.model_selection import ModelSelectionState
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
@@ -783,7 +784,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             attribution_effort = self._effort
             attribution_route = None
             if self._model_selection is not None:
-                attribution_route = await self._model_selection.select_route(state)
+                attribution_route = await self._model_selection.select_route(
+                    cast(ModelSelectionState, state), plan_mode=self._plan_mode
+                )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
             sender_context = construct_sender_context(
                 triggering_user_identity,
@@ -833,7 +836,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             **({"messages": sender_messages} if sender_messages else {}),
-            **({"model_route": attribution_route} if attribution_route else {}),
+            **(
+                {"model_route": attribution_route}
+                if attribution_route and not self._plan_mode
+                else {}
+            ),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),

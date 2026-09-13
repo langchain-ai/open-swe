@@ -71,12 +71,17 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             RouteDecision, method="json_schema"
         )
 
-    async def select_route(self, state: ModelSelectionState) -> Route:
+    async def select_route(
+        self,
+        state: ModelSelectionState,
+        *,
+        plan_mode: bool | None = None,
+    ) -> Route:
         """Select the model route for a turn."""
+        if state.get("plan_mode") if plan_mode is None else plan_mode:
+            return "performance"
         if model_route := state.get("model_route"):
             return model_route
-        if state.get("plan_mode"):
-            return "performance"
         messages = state.get("messages", [])
         approved_plan = next(
             (
