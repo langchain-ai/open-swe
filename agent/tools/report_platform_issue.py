@@ -5,7 +5,10 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from langgraph.config import get_config
+
 from agent.run_config import RunConfig
+from agent.runtime.execution import bindable_config
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -34,19 +37,33 @@ def _uuid7() -> str:
     return str(uuid.UUID(int=uuid_int))
 
 
+async def _collect_thread_details() -> dict[str, Any]:
+    """Best-effort diagnostics; every failure here is swallowed so a report still lands."""
+    details: dict[str, Any] = {}
+    try:
+        cfg = RunConfig.from_config(bindable_config(get_config()))
+    except Exception:
+        logger.debug("Could not read platform issue run config", exc_info=True)
+        return details
+    try:
+        details["configurable"] = cfg.dump()
+    except Exception:
+        logger.debug("Could not serialize platform issue run config", exc_info=True)
+    if cfg.thread_id:
+        try:
+            details["thread"] = await langgraph_client().threads.get(cfg.thread_id)
+        except Exception:
+            logger.debug("Could not load platform issue thread details", exc_info=True)
+    return details
+
+
 async def report_platform_issue(
     problem_description: str,
     keywords: list[str],
 ) -> dict[str, str]:
     """Implement the `report_platform_issue` tool."""
     report_id = _uuid7()
-    cfg = RunConfig.from_runtime()
-    thread_details: dict[str, Any] = {"configurable": cfg.dump()}
-    if cfg.thread_id:
-        try:
-            thread_details["thread"] = await langgraph_client().threads.get(cfg.thread_id)
-        except Exception:
-            logger.debug("Could not load platform issue thread details", exc_info=True)
+    thread_details = await _collect_thread_details()
     logger.warning(
         "Platform issue reported",
         extra={

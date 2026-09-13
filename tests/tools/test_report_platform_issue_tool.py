@@ -9,6 +9,10 @@ import pytest
 from agent.tools import report_platform_issue
 
 
+class _Unserializable:
+    """Stands in for LangGraph runtime objects, which have no JSON form."""
+
+
 @pytest.mark.asyncio
 async def test_report_platform_issue_logs_report_and_thread_details(
     monkeypatch: pytest.MonkeyPatch,
@@ -28,17 +32,20 @@ async def test_report_platform_issue_logs_report_and_thread_details(
             assert thread_id == "thread-1"
             return thread
 
+    module = importlib.import_module("agent.tools.report_platform_issue")
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        module,
+        "get_config",
         lambda: {
             "configurable": {
                 "thread_id": "thread-1",
                 "source": "slack",
                 "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+                "__pregel_runtime": _Unserializable(),
+                "__pregel_send": lambda writes: writes,
             }
         },
     )
-    module = importlib.import_module("agent.tools.report_platform_issue")
     monkeypatch.setattr(module, "langgraph_client", lambda: SimpleNamespace(threads=Threads()))
 
     with caplog.at_level(logging.WARNING, logger="agent.tools.report_platform_issue"):
@@ -70,3 +77,31 @@ async def test_report_platform_issue_logs_report_and_thread_details(
             },
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_report_platform_issue_survives_undiagnosable_run(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    module = importlib.import_module("agent.tools.report_platform_issue")
+    monkeypatch.setattr(
+        module,
+        "get_config",
+        lambda: {
+            "configurable": {"thread_id": "thread-1", "langgraph_auth_user": _Unserializable()}
+        },
+    )
+
+    def broken_client() -> SimpleNamespace:
+        raise RuntimeError("no client")
+
+    monkeypatch.setattr(module, "langgraph_client", broken_client)
+
+    with caplog.at_level(logging.WARNING, logger="agent.tools.report_platform_issue"):
+        result = await report_platform_issue(problem_description="broken", keywords=["sandbox"])
+
+    assert uuid.UUID(result["report_id"]).version == 7
+    record = caplog.records[-1]
+    assert record.message == "Platform issue reported"
+    assert record.platform_issue_thread_details == {}
