@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
+import { Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { citationMarkdown } from "./citations"
 import {
   ErrorState,
   ExternalLink,
@@ -13,26 +15,24 @@ import {
 import { workspaceApi } from "./workspace-api"
 import type {
   IncidentDocuments as DocumentPayload,
-  DocumentKind,
   DocumentOperation,
   DocumentRevision,
 } from "./workspace-api"
 
 function DocumentEditor({
   incidentId,
-  kind,
   current,
   canEdit,
   operations,
 }: {
   incidentId: string
-  kind: DocumentKind
   current: DocumentRevision | null
   canEdit: boolean
   operations: DocumentOperation[]
 }) {
   const client = useQueryClient()
-  const title = kind === "postmortem" ? "Postmortem" : "Status-page draft"
+  const kind = "postmortem"
+  const title = "Postmortem"
   const [draft, setDraft] = useState<{ markdown: string; base: number } | null>(
     null
   )
@@ -121,11 +121,13 @@ function DocumentEditor({
   })
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value)
-      setCopyNotice("Draft copied.")
+      await navigator.clipboard.writeText(
+        citationMarkdown(value, current?.evidence ?? [])
+      )
+      setCopyNotice("Incident copied as Markdown.")
     } catch {
       setCopyNotice(
-        "Unable to copy. Select the draft text to copy it manually."
+        "Unable to copy. Select the incident text to copy it manually."
       )
     }
   }
@@ -133,18 +135,23 @@ function DocumentEditor({
     <section className="space-y-4 rounded-xl border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium">{title}</h2>
-        <span className="text-xs text-muted-foreground">
-          {current
-            ? `Revision ${current.revision} · ${current.author} · ${formatTime(current.created_at)}`
-            : "No saved revision"}
-        </span>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs text-muted-foreground">
+            {current
+              ? `Revision ${current.revision} · ${current.author} · ${formatTime(current.created_at)}`
+              : "No saved revision"}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!value.trim()}
+            onClick={() => void copy()}
+          >
+            <Copy className="size-3.5" />
+            Copy incident
+          </Button>
+        </div>
       </div>
-      {kind === "status_page_draft" && (
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Prepare a customer-facing update here. Publishing to a status page is
-          unsupported; copy the draft into your status page.
-        </p>
-      )}
       {canEdit && (
         <div className="flex items-center gap-2">
           <div role="group" aria-label={`${title} view`} className="flex gap-1">
@@ -180,12 +187,8 @@ function DocumentEditor({
           value={value}
           maxLength={200000}
           disabled={pending}
-          className={`font-mono ${kind === "postmortem" ? "min-h-64" : "min-h-32"}`}
-          placeholder={
-            kind === "postmortem"
-              ? "Summary, impact, timeline, cause, mitigation, resolution, follow-ups, and evidence…"
-              : "Customer impact, affected services, and the next update…"
-          }
+          className="min-h-64 font-mono"
+          placeholder="Summary, impact, timeline, cause, mitigation, resolution, follow-ups, and evidence…"
           onChange={(event) =>
             setDraft({
               markdown: event.target.value,
@@ -194,17 +197,21 @@ function DocumentEditor({
           }
         />
       ) : value ? (
-        <Markdown content={value} />
+        <div className="mx-auto max-w-3xl py-5 sm:px-4">
+          <Markdown
+            content={citationMarkdown(value, current?.evidence ?? [])}
+          />
+        </div>
       ) : (
         <p className="text-sm text-muted-foreground">No document yet.</p>
       )}
       {current?.evidence?.length ? (
         <ul className="space-y-2 text-xs">
-          {current.evidence.map((evidence) => (
+          {current.evidence.map((evidence, index) => (
             <li key={evidence.id}>
               {evidence.available ? (
                 <ExternalLink href={evidence.url}>
-                  {evidence.source}
+                  [{index + 1}] {humanize(evidence.source)} source
                 </ExternalLink>
               ) : (
                 `${evidence.source}: evidence unavailable`
@@ -243,7 +250,12 @@ function DocumentEditor({
               Read saved revision {current.revision}
             </summary>
             <div className="mt-3">
-              <Markdown content={current.markdown} />
+              <Markdown
+                content={citationMarkdown(
+                  current.markdown,
+                  current.evidence ?? []
+                )}
+              />
             </div>
           </details>
           <Button
@@ -274,17 +286,7 @@ function DocumentEditor({
               })
             }
           >
-            {kind === "postmortem" ? "Save postmortem" : "Save draft"}
-          </Button>
-        )}
-        {kind === "status_page_draft" && (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!value}
-            onClick={() => void copy()}
-          >
-            Copy draft
+            Save postmortem
           </Button>
         )}
         <Button
@@ -323,7 +325,12 @@ function DocumentEditor({
                   {humanize(revision.source)}
                 </summary>
                 <div className="mt-3">
-                  <Markdown content={revision.markdown} />
+                  <Markdown
+                    content={citationMarkdown(
+                      revision.markdown,
+                      revision.evidence ?? []
+                    )}
+                  />
                 </div>
               </details>
             ))
@@ -379,16 +386,12 @@ export function IncidentDocuments({
           {documents.error.message}
         </p>
       )}
-      {(["postmortem", "status_page_draft"] as const).map((kind) => (
-        <DocumentEditor
-          key={kind}
-          incidentId={incidentId}
-          kind={kind}
-          current={documents.data[kind]}
-          canEdit={canEdit}
-          operations={documents.data.operations}
-        />
-      ))}
+      <DocumentEditor
+        incidentId={incidentId}
+        current={documents.data.postmortem}
+        canEdit={canEdit}
+        operations={documents.data.operations}
+      />
     </>
   )
 }

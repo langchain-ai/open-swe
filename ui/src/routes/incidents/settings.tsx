@@ -1,5 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { IncidentSettings } from "@/features/incidents/IncidentSettings"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/incidents/settings")({
@@ -14,5 +13,5 @@ function IncidentSettingsPage() {
         Incidents settings are available to workspace administrators.
       </div>
     )
-  return <IncidentSettings />
+  return <Navigate to="/admin" hash="incidents" replace />
 }

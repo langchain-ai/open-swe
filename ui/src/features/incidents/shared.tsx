@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { ApiError } from "@/lib/api"
 import type { IncidentReport, IncidentView, Timestamp } from "./api"
+import { citationIndices, citationPreview } from "./citations"
 
 export const incidentViews: Array<{
   value: IncidentView
@@ -135,26 +136,46 @@ export function CitedText({
   evidence: IncidentReport["evidence"]
 }) {
   return text.split(/(\[[^\]\n]+\])/g).map((part, index) => {
-    const evidenceIndex =
-      part.startsWith("[") && part.endsWith("]")
-        ? evidence.findIndex((item) => item.id === part.slice(1, -1))
-        : -1
-    const source = evidence[evidenceIndex]
-    return source ? (
+    const indices = citationIndices(part, evidence)
+    return indices.length ? (
       <sup key={index}>
-        <ExternalLink
-          href={source.url}
-          className="mx-0.5 text-[10px] font-medium text-info-foreground [&_svg]:hidden"
-        >
-          <span aria-label={`Evidence ${evidenceIndex + 1}: ${source.source}`}>
-            [{evidenceIndex + 1}]
-          </span>
-        </ExternalLink>
+        {indices.map((evidenceIndex) => {
+          const source = evidence[evidenceIndex]!
+          return (
+            <ExternalLink
+              key={source.id}
+              href={source.url}
+              className="mx-0.5 text-[10px] font-medium text-info-foreground [&_svg]:hidden"
+            >
+              <span
+                aria-label={`Evidence ${evidenceIndex + 1}: ${source.source}`}
+              >
+                [{evidenceIndex + 1}]
+              </span>
+            </ExternalLink>
+          )
+        })}
       </sup>
+    ) : part.startsWith("[") && !citationPreview(part) ? (
+      <span key={index} className="text-xs text-muted-foreground">
+        [source unavailable]
+      </span>
     ) : (
       part
     )
   })
+}
+
+export function sourceLabel(summary: string, channelName: string) {
+  return /^Slack message at [\d.]+; author .+\.$/.test(summary) ||
+    summary === "Message in the incident channel"
+    ? `Message in #${channelName}`
+    : summary
+}
+
+export function slackMessageTime(url: string | null | undefined) {
+  const timestamp = url?.match(/\/archives\/[^/]+\/p(\d{10})(\d{6})(?:[?#]|$)/)
+  return timestamp ? Number(timestamp[1]) : null
 }
 
 export function IncidentsMark({ className }: { className?: string }) {

@@ -145,6 +145,8 @@ async def command_for_receipt(
 
 
 def _merge_message(record: Incident, message: IncidentMessage) -> bool:
+    if message.subtype in {"channel_join", "channel_leave"}:
+        return False
     previous = next((m for m in record.messages if m.id == message.id), None)
     if previous == message:
         return False
@@ -456,7 +458,10 @@ async def _consume_receipts(record: Incident, policy: IncidentPolicy, info: dict
         if receipt.kind in {"message", "app_mention"}:
             data = receipt.payload
             normalized = slack.message(record.channel_id, data.get("message", data))
-            if _own_message(normalized, policy):
+            if _own_message(normalized, policy) or normalized.subtype in {
+                "channel_join",
+                "channel_leave",
+            }:
                 record.processed_receipts.append(receipt.id)
                 continue
         action, text = await command_for_receipt(receipt, policy, record)

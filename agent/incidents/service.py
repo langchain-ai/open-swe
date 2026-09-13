@@ -7,6 +7,7 @@ import time
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+import httpx
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -343,12 +344,30 @@ def summary(record: Incident) -> dict[str, Any]:
     }
 
 
-async def readable(record: Incident, policy: IncidentPolicy) -> bool:
+async def readable(
+    record: Incident, policy: IncidentPolicy, *, raise_on_unavailable: bool = False
+) -> bool:
     if record.reason == "code_channel" or record.channel_id in policy.excluded_channel_ids:
         return False
     try:
         info = await slack.channel_info(record.channel_id)
-    except Exception:
+    except Exception as exc:
+        unavailable = True
+        if isinstance(exc, slack.SlackError):
+            unavailable = str(exc) in {
+                "rate_limited",
+                "ratelimited",
+                "internal_error",
+                "fatal_error",
+                "request_timeout",
+                "service_unavailable",
+            }
+        elif isinstance(exc, httpx.HTTPStatusError):
+            unavailable = exc.response.status_code == 429 or exc.response.status_code >= 500
+        if raise_on_unavailable and unavailable:
+            raise HTTPException(
+                503, "Slack access verification is temporarily unavailable. Try again."
+            ) from exc
         return False
     return slack.channel_allowed(info, policy, for_read=True)
 
@@ -414,7 +433,7 @@ async def get_incident(id: str, *, include_setup: bool = False) -> dict[str, Any
     policy = await get_policy()
     if not record or record.workspace_id != policy.workspace_id:
         raise HTTPException(404, "Incident not found")
-    if not await readable(record, policy):
+    if not await readable(record, policy, raise_on_unavailable=record.joined or not include_setup):
         if include_setup and not record.joined:
             return {
                 "incident": setup_summary(record),

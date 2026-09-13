@@ -93,6 +93,7 @@ def message(channel_id: str, data: dict[str, Any]) -> IncidentMessage:
         bot_id=str(data.get("bot_id") or ""),
         app_id=str(data.get("app_id") or (data.get("bot_profile") or {}).get("app_id") or ""),
         event_type=str((data.get("metadata") or {}).get("event_type") or ""),
+        subtype=str(data.get("subtype") or ""),
         text=redact(text, 8000),
         edited_at=str((data.get("edited") or {}).get("ts") or ts),
         source_url=f"https://slack.com/archives/{channel_id}/p{ts.replace('.', '')}",

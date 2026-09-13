@@ -143,6 +143,10 @@ def test_report_keeps_supported_claims_and_drops_invented_or_partial_citations(p
                 {"text": "Unsupported inference", "evidence_ids": []},
             ],
             "impact": [{"text": "Entire fleet is down", "evidence_ids": ["slack:1", "missing"]}],
+            "next_steps": [
+                {"text": "Consider rolling back the reported change", "evidence_ids": ["slack:1"]},
+                {"text": "Disable authentication", "evidence_ids": ["missing"]},
+            ],
             "hypotheses": [
                 {"title": "Observed regression", "evidence_ids": ["slack:1"]},
                 {"title": "Fabricated diagnosis", "evidence_ids": ["missing"]},
@@ -155,6 +159,7 @@ def test_report_keeps_supported_claims_and_drops_invented_or_partial_citations(p
     assert report.summary == "Responders observed errors [slack:1]"
     assert report.outcome == "findings"
     assert "Entire fleet" not in report.impact
+    assert report.next_steps == ["Consider rolling back the reported change [slack:1]"]
     assert [hypothesis.title for hypothesis in report.hypotheses] == ["Observed regression"]
     assert report.gaps
     assert [evidence.id for evidence in report.evidence] == ["slack:1"]
@@ -201,6 +206,22 @@ def test_edited_context_replaces_citation_identity_and_deleted_messages_are_unav
         }
     )
     assert engine.finalize_report(draft, collected).summary == "Current symptom [slack:1:2]"
+
+
+def test_channel_membership_events_are_not_incident_evidence(policy):
+    from agent.incidents import slack
+
+    collected = collector(policy)
+    messages = [
+        slack.message("C1", {"ts": "1", "subtype": "channel_join", "text": "<@U1> joined"}),
+        slack.message("C1", {"ts": "2", "subtype": "channel_leave", "text": "<@U1> left"}),
+        slack.message("C1", {"ts": "3", "subtype": "bot_message", "text": "Latency alert"}),
+    ]
+    context = engine.message_context(messages, policy, collected)
+
+    assert [item["text"] for item in context] == ["Latency alert"]
+    assert len(collected.evidence) == 1
+    assert collected.evidence[0].summary == "Message in the incident channel"
 
 
 class AgentRunServer:

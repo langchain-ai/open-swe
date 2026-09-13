@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from agent.incidents import service
 from agent.incidents.models import (
     Evidence,
+    Hypothesis,
     Incident,
     IncidentMessage,
     IncidentPolicy,
@@ -54,6 +55,8 @@ def report(summary="Error rate increased"):
     return IncidentReport(
         summary=summary,
         impact="API requests failed",
+        next_steps=["Consider reverting the deploy [slack-1]"],
+        hypotheses=[Hypothesis(title="Cache regression", assessment="rejected")],
         evidence=[
             Evidence(
                 id="slack-1",
@@ -123,6 +126,8 @@ async def test_successive_reports_retain_human_sections_and_deduplicate_retries(
     assert current["revision"] == 3
     assert "Human-owned task" in current["markdown"]
     assert "Roll back reduced errors" in current["markdown"]
+    assert "Suggested next steps:\n- Consider reverting the deploy [slack-1]" in current["markdown"]
+    assert "\n\nWorking hypotheses:\n- Cache regression (rejected)" in current["markdown"]
     assert "Raw sensitive evidence excerpt" not in current["markdown"]
     revisions = (await documents.list_revisions(record.id, "postmortem"))["items"]
     assert len(revisions) == 3
@@ -203,6 +208,40 @@ async def test_worker_rechecks_scope_and_rejects_queued_edit_after_revocation(re
     assert await documents.process_document_receipt(record, receipt)
     assert await documents.REVISIONS.search_all() == []
     assert (await documents.OPERATIONS.get(operation["id"])).status == "rejected"
+
+
+@pytest.mark.parametrize(
+    "code,status", [("rate_limited", 503), ("channel_not_found", 404), ("token_revoked", 404)]
+)
+async def test_document_and_detail_reads_distinguish_outages_from_revocation(
+    record, monkeypatch, code, status
+):
+    from agent.incidents import documents
+
+    monkeypatch.setattr(
+        service.slack, "channel_info", AsyncMock(side_effect=service.slack.SlackError(code))
+    )
+    for read in (documents.document_context, service.get_incident):
+        with pytest.raises(HTTPException) as error:
+            await read(record.id)
+        assert error.value.status_code == status
+
+
+async def test_temporary_slack_failure_keeps_document_edit_queued(record, monkeypatch):
+    from agent.incidents import documents
+
+    operation = await edit(record, "Responder mitigation notes", 0)
+    channel_info = service.slack.channel_info
+    monkeypatch.setattr(
+        service.slack, "channel_info", AsyncMock(side_effect=httpx.ConnectTimeout("offline"))
+    )
+    with pytest.raises(HTTPException) as error:
+        await apply(record, operation)
+    assert error.value.status_code == 503
+    assert await documents.REVISIONS.search_all() == []
+    assert await documents.OPERATIONS.get(operation["id"]) is None
+    monkeypatch.setattr(service.slack, "channel_info", channel_info)
+    assert (await apply(record, operation))["status"] == "applied"
 
 
 async def test_documents_api_requires_responder_and_rechecks_channel_scope(record, monkeypatch):

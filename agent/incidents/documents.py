@@ -38,11 +38,7 @@ async def require_access(incident_id: str) -> Incident:
         )
     ):
         raise HTTPException(404, "Incident not found")
-    try:
-        channel = await service.slack.channel_info(record.channel_id)
-    except Exception as exc:
-        raise HTTPException(404, "Incident not found") from exc
-    if not service.slack.channel_allowed(channel, policy, for_read=True):
+    if not await service.readable(record, policy, raise_on_unavailable=True):
         raise HTTPException(404, "Incident not found")
     return record
 
@@ -261,7 +257,9 @@ async def process_document_receipt(record: Incident, receipt: Receipt) -> bool:
         return True
     try:
         await require_access(record.id)
-    except HTTPException:
+    except HTTPException as exc:
+        if exc.status_code >= 500:
+            raise
         operation.status = "rejected"
         operation.error = "Incident access is unavailable"
         await OPERATIONS.put(operation.id, operation)
@@ -280,6 +278,10 @@ def _findings(report: IncidentReport) -> str:
     lines = [f"### Findings — {report.created_at}", "", report.summary]
     if report.impact:
         lines.extend(["", f"Impact: {report.impact}"])
+    if report.next_steps:
+        lines.extend(["", "Suggested next steps:", *[f"- {item}" for item in report.next_steps]])
+    if report.hypotheses:
+        lines.extend(["", "Working hypotheses:"])
     for hypothesis in report.hypotheses:
         citations = " ".join(f"[{item}]" for item in hypothesis.evidence_ids)
         lines.append(f"- {hypothesis.title} ({hypothesis.assessment}) {citations}".rstrip())

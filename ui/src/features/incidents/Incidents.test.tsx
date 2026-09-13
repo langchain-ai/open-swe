@@ -242,7 +242,7 @@ it("retains a failed question and retries it with the same command identity", as
     return Response.json(detail)
   })
   mount(<IncidentDetail incidentId="incident-1" />)
-  const input = await screen.findByRole("textbox", { name: "Ask Incidents" })
+  const input = await screen.findByRole("textbox", { name: "Ask Open SWE" })
   fireEvent.change(input, {
     target: { value: "  Did database latency change?  " },
   })
@@ -272,6 +272,7 @@ it("renders findings and referenced evidence while hiding unauthorized commands"
         summary:
           "Retry volume increased [trace-1]. Unknown source [unverified].",
         impact: "Checkout requests are slow [trace-1]",
+        next_steps: ["Consider reducing retries [trace-1]"],
         outcome: "inconclusive",
         hypotheses: [
           {
@@ -300,7 +301,8 @@ it("renders findings and referenced evidence while hiding unauthorized commands"
   await screen.findByText("Retry amplification")
   expect(screen.getByText("Plausible")).toBeTruthy()
   const citations = screen.getAllByRole("link", { name: "Evidence 1: Datadog" })
-  expect(citations).toHaveLength(2)
+  expect(citations).toHaveLength(3)
+  expect(screen.getByText(/Consider reducing retries/)).toBeTruthy()
   expect(citations[0]?.getAttribute("href")).toBe(
     "https://app.datadoghq.com/apm/trace/1"
   )
@@ -313,7 +315,7 @@ it("renders findings and referenced evidence while hiding unauthorized commands"
   ).toBe("https://app.datadoghq.com/apm/trace/1")
   expect(screen.getByText("Missing deployed revision")).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Pause" })).toBeNull()
-  expect(screen.queryByRole("textbox", { name: "Ask Incidents" })).toBeNull()
+  expect(screen.queryByRole("textbox", { name: "Ask Open SWE" })).toBeNull()
   expect(
     screen.getByRole("link", { name: /Open trace/ }).getAttribute("href")
   ).toBe("https://smith.langchain.com/o/org/projects/p/proj/t/thread-1")
@@ -385,4 +387,25 @@ it("searches durable incident history and links records after operational cleanu
   await waitFor(() =>
     expect(paths.some((path) => path.includes("q=outage"))).toBe(true)
   )
+})
+
+it("removes machine citation IDs from incident list previews", async () => {
+  stubFetch(async () =>
+    Response.json({
+      items: [
+        {
+          ...summary,
+          latest_finding:
+            "Synthetic errors recovered [slack:1, datadog:2]. Impact [unverified].",
+        },
+      ],
+      next_cursor: null,
+    })
+  )
+  mount(<IncidentList view="active" onViewChange={() => {}} />)
+  const row = await screen.findByRole("link", { name: /Checkout latency/ })
+  expect(row.textContent).toContain(
+    "Synthetic errors recovered. Impact [unverified]."
+  )
+  expect(row.textContent).not.toContain("slack:1")
 })

@@ -59,19 +59,14 @@ def report_message(
         reason, "Investigation update"
     )
     summary = compact(text, 2400 if reason == "answer" else 800)
-    sections = [summary or "No evidence-backed conclusion was established."]
-    if report.impact and reason != "answer":
-        sections.append("*Impact:* " + compact(report.impact, 300))
+    sections = [f"*{heading}*\n{summary or 'No evidence-backed conclusion was established.'}"]
+    if report.next_steps and reason == "findings":
+        sections.append("*Suggested next step*\n" + compact(report.next_steps[0], 350))
     blocks: list[dict[str, Any]] = [
-        {"type": "header", "text": {"type": "plain_text", "text": heading}},
-        *(
-            {"type": "section", "text": {"type": "mrkdwn", "text": section, "verbatim": True}}
-            for section in sections
-        ),
+        {"type": "section", "text": {"type": "mrkdwn", "text": section, "verbatim": True}}
+        for section in sections
     ]
     footer = []
-    if report.gaps:
-        footer.append("Limited evidence: " + compact(report.gaps[0], 200))
     urls = list(
         dict.fromkeys(evidence[item].url for item in cited if _safe_url(evidence[item].url))
     )[:3]
@@ -81,12 +76,12 @@ def report_message(
             + " ".join(f"<{html.escape(url, quote=False)}|[{i}]>" for i, url in enumerate(urls, 1))
         )
     if incident_url and _safe_url(incident_url):
-        footer.append(f"<{html.escape(incident_url, quote=False)}|Full report &amp; postmortem>")
+        footer.append(f"<{html.escape(incident_url, quote=False)}|View investigation>")
     if footer:
         blocks.append(
             {
                 "type": "context",
-                "elements": [{"type": "mrkdwn", "text": "\n".join(footer), "verbatim": True}],
+                "elements": [{"type": "mrkdwn", "text": " · ".join(footer), "verbatim": True}],
             }
         )
-    return "\n\n".join([heading, *sections, *footer]), blocks
+    return "\n\n".join([*sections, *footer]), blocks

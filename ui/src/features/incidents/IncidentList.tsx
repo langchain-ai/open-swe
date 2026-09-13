@@ -1,12 +1,13 @@
 import { Link } from "@tanstack/react-router"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
-import { ArrowRight, Hash, Search } from "lucide-react"
+import { ArrowRight, Search } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { incidentsApi } from "./api"
+import { citationPreview } from "./citations"
 import { workspaceApi } from "./workspace-api"
 import type { IncidentView } from "./api"
 import {
@@ -57,7 +58,10 @@ export function IncidentList({
   const filtered = Boolean(search.trim())
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-10 sm:py-10">
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight">Incidents</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Incidents</h1>
+      <p className="mt-2 mb-6 text-sm text-muted-foreground">
+        Investigations, findings, and the context to act.
+      </p>
       <div className="rounded-xl border border-border bg-card">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border p-4">
           <div
@@ -138,29 +142,26 @@ export function IncidentList({
                 key={item.id}
                 to="/incidents/$incidentId"
                 params={{ incidentId: item.id }}
-                className="group flex items-start gap-4 px-5 py-5 transition-colors hover:bg-accent/40"
+                className="group flex flex-wrap items-start gap-4 px-5 py-5 transition-colors hover:bg-accent/40"
               >
-                <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                  <Hash className="size-4" />
-                </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-sm font-medium">
                       {item.title || item.channel_name}
                     </h2>
-                    <StatusBadge status={item.status} />
                     {item.is_archived && (
                       <span className="text-[11px] text-muted-foreground">
                         Channel archived
                       </span>
                     )}
                   </div>
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    #{item.channel_name}
+                  <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+                    {item.latest_finding
+                      ? citationPreview(item.latest_finding)
+                      : "Gathering incident context. Findings will appear here."}
                   </p>
-                  <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
-                    {item.latest_finding ||
-                      "Gathering incident context. Findings will appear here."}
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    #{item.channel_name}
                   </p>
                   {item.reason && (
                     <p className="mt-2 text-xs text-warning-foreground">
@@ -169,6 +170,7 @@ export function IncidentList({
                   )}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-3 text-[11px] text-muted-foreground">
+                  <StatusBadge status={item.status} />
                   <time>{formatTime(item.updated_at)}</time>
                   <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
                 </div>

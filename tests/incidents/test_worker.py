@@ -83,6 +83,29 @@ async def _request(key: str, text: str = "", action: str = "ask") -> None:
     )
 
 
+@pytest.mark.parametrize("subtype", ["channel_join", "channel_leave"])
+async def test_membership_events_do_not_extend_watching_or_queue_analysis(incident, subtype):
+    previous_activity = incident.last_source_activity_at
+    await service.RECEIPTS.put(
+        "membership",
+        Receipt(
+            id="membership",
+            workspace_id="T1",
+            channel_id="C1",
+            kind="message",
+            payload={"subtype": subtype, "ts": str(time.time() + 10), "text": "Membership update"},
+            received_at=time.time(),
+        ),
+    )
+    await worker._consume_receipts(
+        incident, await service.get_policy(), await worker.slack.channel_info("C1")
+    )
+    assert incident.last_source_activity_at == previous_activity
+    assert incident.messages == []
+    assert incident.pending_since == 0
+    assert "membership" in incident.processed_receipts
+
+
 @pytest.mark.parametrize("paused", [False, True])
 async def test_system_followup_runs_without_authorizing_actions_or_resuming_pause(
     incident, paused, monkeypatch
@@ -786,6 +809,7 @@ async def test_findings_post_carries_the_report_digest(incident, monkeypatch):
     worker.run_engine.return_value = IncidentReport(
         summary="Retries spiked after the deploy [slack:200.1].",
         impact="Checkout latency doubled.",
+        next_steps=["Review the retry policy before rolling back [slack:200.1]."],
         hypotheses=[Hypothesis(title="Deploy changed retry policy", assessment="plausible")],
         questions=["Which service owns the retry loop?"],
         gaps=["No Datadog access."],
@@ -807,12 +831,13 @@ async def test_findings_post_carries_the_report_digest(incident, monkeypatch):
     findings = publish.await_args_list[1].args[1]
     for fragment in (
         "Retries spiked after the deploy",
-        "*Impact:* Checkout latency doubled.",
-        "No Datadog access.",
+        "Review the retry policy before rolling back",
         "<https://slack.com/archives/C1/p2001|[1]>",
     ):
         assert fragment in findings
     assert "Deploy changed retry policy" not in findings
+    assert "Checkout latency doubled" not in findings
+    assert "No Datadog access" not in findings
     assert "Open questions" not in findings
     assert publish.await_args_list[1].args[2] is None
     assert publish.await_args_list[1].kwargs["blocks"]

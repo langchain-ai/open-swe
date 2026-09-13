@@ -29,6 +29,7 @@ class _Claim(BaseModel):
 class ReportDraft(BaseModel):
     summary: list[_Claim] = Field(default_factory=list, max_length=6)
     impact: list[_Claim] = Field(default_factory=list, max_length=6)
+    next_steps: list[_Claim] = Field(default_factory=list, max_length=3)
     hypotheses: list[Hypothesis] = Field(default_factory=list, max_length=8)
     gaps: list[str] = Field(default_factory=list, max_length=10)
     questions: list[str] = Field(default_factory=list, max_length=5)
@@ -54,7 +55,7 @@ question if present. previous_findings describe the last pass: build on them, tr
 new messages as steering for what to check next, and do not repeat prior findings
 without new support.
 
-Every summary/impact claim and hypothesis requires evidence_ids from the current
+Every summary/impact claim, suggested next step, and hypothesis requires evidence_ids from the current
 context or returned tools. Cite only evidence actually supporting the claim. Do not
 invent IDs or links. A claim with no evidence belongs in an open question, not a finding.
 Respect each source tool's scope and time window; disclose incomplete coverage.
@@ -65,6 +66,9 @@ The summary is also used as a Slack update: use at most two short sentences abou
 what changed or the direct answer. Preserve replay/test context and uncertainty.
 Use one sentence for impact. Keep detailed hypotheses, checks, and open questions in
 their own fields. Consolidate repeated access failures into one gap per source.
+Use next_steps for up to three concrete recommendations, highest priority first.
+Cite the observations motivating each suggestion. These are proposed actions, never
+claims of completed work. Leave next_steps empty when there is no useful recommendation.
 Use an empty summary when no supported observation can be made. Use gaps to describe
 missing coverage and questions for the few missing facts a responder could supply.
 """
@@ -75,7 +79,13 @@ def message_context(
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     remaining = 30_000
-    eligible = [message for message in messages if not message.deleted and message.text.strip()]
+    eligible = [
+        message
+        for message in messages
+        if not message.deleted
+        and message.text.strip()
+        and message.subtype not in {"channel_join", "channel_leave"}
+    ]
     for message in reversed(eligible[-500:]):
         if remaining <= 0:
             break
@@ -92,9 +102,9 @@ def message_context(
                 source=source,
                 url=url,
                 summary=(
-                    f"System followup at {message.ts}."
+                    "Background investigation update"
                     if source == "system"
-                    else f"Slack message at {message.ts}; author {message.bot_id or message.user or 'unknown'}."
+                    else "Message in the incident channel"
                 ),
             )
         )
@@ -131,15 +141,16 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
             dropped = True
         return valid
 
-    def render(claims: list[_Claim]) -> str:
-        return " ".join(
+    def render(claims: list[_Claim]) -> list[str]:
+        return [
             f"{redact(claim.text, 1200)} [{', '.join(dict.fromkeys(claim.evidence_ids))}]"
             for claim in claims
             if valid_refs(claim.evidence_ids)
-        )
+        ]
 
-    summary = render(draft.summary)
-    impact = render(draft.impact)
+    summary = " ".join(render(draft.summary))
+    impact = " ".join(render(draft.impact))
+    next_steps = render(draft.next_steps)
     hypotheses = [
         Hypothesis(
             title=redact(hypothesis.title, 1200),
@@ -155,6 +166,7 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
     return IncidentReport(
         summary=summary or "No evidence-backed conclusion was established.",
         impact=impact or "Impact remains unverified.",
+        next_steps=next_steps,
         outcome="findings" if summary else "inconclusive",
         hypotheses=hypotheses,
         evidence=collector.evidence,

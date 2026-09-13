@@ -42,6 +42,7 @@ class IncidentMessage(BaseModel):
     bot_id: str = ""
     app_id: str = ""
     event_type: str = ""
+    subtype: str = ""
     deleted: bool = False
     edited_at: str = ""
     source_url: str = ""
@@ -66,6 +67,7 @@ class IncidentReport(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     summary: str
     impact: str = ""
+    next_steps: list[str] = Field(default_factory=list)
     outcome: Literal["inconclusive", "findings"] = "inconclusive"
     hypotheses: list[Hypothesis] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)

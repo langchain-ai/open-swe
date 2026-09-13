@@ -210,7 +210,7 @@ export function IncidentProvider({
         </p>
       )}
       {allowedActions.includes("attach_provider") && (
-        <details open={!binding}>
+        <details>
           <summary className="cursor-pointer text-xs">
             {binding
               ? "Change provider attachment"
@@ -359,7 +359,7 @@ export function IncidentProvider({
                 : "Provider update pending. Waiting for confirmation."}
         </p>
       )}
-      <details className="border-t border-border pt-4" open>
+      <details className="border-t border-border pt-4">
         <summary className="cursor-pointer text-sm font-medium">
           Related provider history
         </summary>

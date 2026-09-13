@@ -8,6 +8,7 @@ def test_digest_groups_citations_and_keeps_details_in_report():
     report = IncidentReport(
         summary="Historical replay: 429s exceeded 10%. [slack:1, slack:2] Recovered later. [slack:2]",
         impact="Customer impact is unknown. [slack:1]",
+        next_steps=["Review the retry policy before changing the monitor. [slack:2]"],
         hypotheses=[Hypothesis(title="Retry storm")],
         questions=["Who owns retries?", "Was there a deploy?"],
         gaps=["Datadog access unavailable.", "Repository access unavailable."],
@@ -22,16 +23,25 @@ def test_digest_groups_citations_and_keeps_details_in_report():
         ],
     )
     text, blocks = report_message(report, report.summary, "https://swe.example/incidents/I1")
-    assert "Historical replay" in text and "Customer impact is unknown" in text
+    assert "Historical replay" in text
+    assert "Suggested next step" in text and "Review the retry policy" in text
+    assert "Customer impact is unknown" not in text
     assert text.count("https://slack.com/archives/C1/p1") == 1
     assert text.count("https://slack.com/archives/C1/p2") == 1
     assert "p3" not in text and "[slack:" not in text
     assert "Retry storm" not in text and "Who owns retries" not in text
-    assert "Datadog access unavailable" in text
-    assert "Full report &amp; postmortem" in text
-    assert blocks[0]["type"] == "header"
+    assert "Datadog access unavailable" not in text
+    assert "View investigation" in text
+    assert blocks[0]["type"] == "section"
     assert len(text) < 700
     assert len(report.questions) == 2 and len(report.hypotheses) == 1
+
+
+def test_answers_do_not_repeat_suggestions_from_an_earlier_report():
+    report = IncidentReport(summary="Earlier finding", next_steps=["Earlier suggestion"])
+    text, _ = report_message(report, "Answer to the responder", None, reason="answer")
+    assert "Answer to the responder" in text
+    assert "Earlier suggestion" not in text
 
 
 def test_digest_bounds_untrusted_text_without_mentions_or_unsafe_links():
@@ -52,5 +62,5 @@ def test_digest_bounds_untrusted_text_without_mentions_or_unsafe_links():
 def test_escaping_cannot_exceed_slack_block_limits(character):
     report = IncidentReport(summary=character * 10000)
     text, blocks = report_message(report, report.summary, None, reason="answer")
-    assert len(blocks[1]["text"]["text"]) <= 2400
+    assert len(blocks[0]["text"]["text"]) <= 2500
     assert text.endswith(";…")

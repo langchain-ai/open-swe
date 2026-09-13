@@ -135,6 +135,30 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+it("preserves a postmortem draft while switching between overview and timeline", async () => {
+  setup()
+  const overview = await screen.findByRole("tab", { name: "Overview" })
+  expect(overview.getAttribute("aria-selected")).toBe("true")
+  expect(screen.queryByRole("button", { name: "Edit postmortem" })).toBeNull()
+  fireEvent.click(screen.getByRole("tab", { name: "Postmortem" }))
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit postmortem" })
+  )
+  fireEvent.change(screen.getByRole("textbox", { name: "Postmortem" }), {
+    target: { value: "Unsaved mitigation notes" },
+  })
+  fireEvent.click(screen.getByRole("tab", { name: "Timeline" }))
+  expect(screen.queryByRole("textbox", { name: "Postmortem" })).toBeNull()
+  expect(screen.getByRole("tabpanel", { name: "Timeline" })).toBeTruthy()
+  fireEvent.click(overview)
+  expect(screen.getByRole("tabpanel", { name: "Overview" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("tab", { name: "Postmortem" }))
+  expect(screen.getByRole("textbox", { name: "Postmortem" })).toHaveProperty(
+    "value",
+    "Unsaved mitigation notes"
+  )
+})
+
 it("renders document Markdown by default and preserves unsaved edits across preview changes", async () => {
   const markdown =
     "## Impact\n\n- **Checkout** requests failed\n\n[Monitor](https://example.com/monitor)"
@@ -143,6 +167,7 @@ it("renders document Markdown by default and preserves unsaved edits across prev
       ? Response.json({ ...documents, postmortem: { ...revision, markdown } })
       : undefined
   )
+  fireEvent.click(await screen.findByRole("tab", { name: "Postmortem" }))
   await screen.findByRole("heading", { name: "Impact", level: 2 })
   expect(screen.getByText("Checkout", { selector: "li strong" })).toBeTruthy()
   expect(screen.getByRole("link", { name: "Monitor" })).toHaveProperty(
@@ -230,6 +255,7 @@ it("preserves a responder edit when the expected document revision conflicts", a
         error: "A newer revision was saved.",
       })
   })
+  fireEvent.click(await screen.findByRole("tab", { name: "Postmortem" }))
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit postmortem" })
   )
@@ -275,6 +301,7 @@ it("loads external historical incident detail using reads without attaching or e
         },
       })
   })
+  fireEvent.click(await screen.findByText("Related provider history"))
   fireEvent.change(
     await screen.findByRole("searchbox", { name: "Search provider history" }),
     { target: { value: "checkout" } }
@@ -306,26 +333,65 @@ it("loads external historical incident detail using reads without attaching or e
   ])
 })
 
-it("copies a status-page draft without offering unsupported publishing", async () => {
+it("copies the visible incident Markdown and source links without saving edits", async () => {
   const copy = vi.fn().mockResolvedValue(undefined)
   vi.stubGlobal("navigator", { clipboard: { writeText: copy } })
-  setup()
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Edit status-page draft" })
+  const { writes } = setup((path) =>
+    path === "/dashboard/api/incidents/documents/local-1"
+      ? Response.json({
+          ...documents,
+          postmortem: {
+            ...revision,
+            markdown: "## Findings\n\nRecovered [slack:1].",
+            evidence: [
+              {
+                id: "slack:1",
+                source: "slack",
+                url: "https://slack.com/archives/C1/p1",
+                available: true,
+              },
+            ],
+          },
+        })
+      : undefined
   )
-  const draft = await screen.findByRole("textbox", {
-    name: "Status-page draft",
-  })
-  fireEvent.change(draft, {
-    target: { value: "We are investigating elevated checkout latency." },
-  })
-  fireEvent.click(screen.getByRole("button", { name: "Copy draft" }))
+  fireEvent.click(await screen.findByRole("tab", { name: "Postmortem" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Copy incident" }))
   await waitFor(() =>
-    expect(copy).toHaveBeenCalledWith(
-      "We are investigating elevated checkout latency."
+    expect(copy).toHaveBeenLastCalledWith(
+      "## Findings\n\nRecovered [1](<https://slack.com/archives/C1/p1>)."
     )
   )
-  expect(screen.queryByRole("button", { name: /Publish/ })).toBeNull()
+  await screen.findByText("Incident copied as Markdown.")
+  fireEvent.click(screen.getByRole("button", { name: "Edit postmortem" }))
+  fireEvent.change(screen.getByRole("textbox", { name: "Postmortem" }), {
+    target: { value: "## Follow-ups\n\n- Compare the rollout [slack:1]." },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Copy incident" }))
+  await waitFor(() =>
+    expect(copy).toHaveBeenLastCalledWith(
+      "## Follow-ups\n\n- Compare the rollout [1](<https://slack.com/archives/C1/p1>)."
+    )
+  )
+  expect(writes).toEqual([])
+  expect(
+    screen.queryByRole("heading", { name: "Status-page draft" })
+  ).toBeNull()
+})
+
+it("preserves incident text and explains a clipboard failure", async () => {
+  vi.stubGlobal("navigator", {
+    clipboard: {
+      writeText: vi.fn().mockRejectedValue(new Error("Clipboard denied")),
+    },
+  })
+  setup()
+  fireEvent.click(await screen.findByRole("tab", { name: "Postmortem" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Copy incident" }))
+  await screen.findByText(
+    "Unable to copy. Select the incident text to copy it manually."
+  )
+  expect(screen.getByText("Cause remains unknown")).toBeTruthy()
 })
 
 it("keeps historical document reads available while hiding unauthorized mutation controls", async () => {
@@ -346,10 +412,12 @@ it("keeps historical document reads available while hiding unauthorized mutation
         },
       })
   })
+  fireEvent.click(await screen.findByRole("tab", { name: "Postmortem" }))
   await screen.findByRole("heading", { name: "Findings", level: 2 })
   expect(
-    screen.getByRole("heading", { name: "Customer update", level: 2 })
-  ).toBeTruthy()
+    screen.queryByRole("heading", { name: "Customer update", level: 2 })
+  ).toBeNull()
+  expect(screen.getByRole("button", { name: "Copy incident" })).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Edit postmortem" })).toBeNull()
   expect(screen.queryByRole("textbox", { name: "Postmortem" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Save postmortem" })).toBeNull()
@@ -401,6 +469,9 @@ it("attaches a selected workspace connection through an explicit responder comma
     if (path.endsWith("/operations/attach-1"))
       return Response.json({ id: "attach-1", status: "accepted", error: null })
   })
+  fireEvent.click(
+    await screen.findByText("Attach provider incident", { selector: "summary" })
+  )
   fireEvent.change(
     await screen.findByRole("textbox", { name: "Provider incident ID" }),
     { target: { value: "new-provider-1" } }
@@ -432,6 +503,7 @@ it("shows last confirmed provider state and sync failure without hiding document
   )
   await screen.findByText("Investigating impact", { selector: "dd" })
   expect(screen.getByText(/Provider could not be reached/)).toBeTruthy()
+  fireEvent.click(await screen.findByRole("tab", { name: "Postmortem" }))
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit postmortem" })
   )
@@ -464,6 +536,7 @@ it("loads immutable revision content and displays unavailable evidence without l
           })
         : undefined
   )
+  fireEvent.click(await screen.findByRole("tab", { name: "Postmortem" }))
   await screen.findByText("Expired trace: evidence unavailable")
   fireEvent.click(
     screen.getAllByRole("button", { name: "Revision history" })[0]!
@@ -481,6 +554,7 @@ it("preserves unsaved documents through a transient refresh failure", async () =
       ? Response.json({ detail: "Temporarily unavailable" }, { status: 503 })
       : undefined
   )
+  fireEvent.click(await screen.findByRole("tab", { name: "Postmortem" }))
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit postmortem" })
   )
@@ -506,6 +580,7 @@ it.each([403, 404])(
         ? Response.json({ detail: "Access revoked" }, { status })
         : undefined
     )
+    fireEvent.click(await screen.findByRole("tab", { name: "Postmortem" }))
     await screen.findByText("Cause remains unknown")
     revoked = true
     await client.invalidateQueries({
@@ -583,6 +658,9 @@ it("preselects the workspace default and attaches only after an explicit submiss
         error: null,
       })
   })
+  fireEvent.click(
+    await screen.findByText("Attach provider incident", { selector: "summary" })
+  )
   const connection = await screen.findByRole("combobox", {
     name: "Workspace connection",
   })
@@ -624,6 +702,7 @@ it("preserves the current binding and an explicit connection choice ahead of the
         default_connection_name: "incident-default",
       })
   })
+  fireEvent.click(await screen.findByText("Related provider history"))
   const connection = await screen.findByRole("combobox", {
     name: "History connection",
   })

@@ -166,8 +166,12 @@ function PolicyForm({
     save.mutate(policy)
   }
   return (
-    <form onSubmit={onSubmit} className="space-y-8">
-      <SettingsSection title="Automatic analysis">
+    <form onSubmit={onSubmit} className="space-y-4">
+      <SettingsSection
+        title="Incidents"
+        description="Investigate matching Slack channels and maintain incident summaries with Open SWE."
+      >
+        <SlackConnectionStatus settings={settings} />
         <SettingsRow
           label="Enable Incidents"
           htmlFor="policy-enabled"
@@ -195,8 +199,7 @@ function PolicyForm({
             />
           </div>
         </SettingsPanel>
-      </SettingsSection>
-      <SettingsSection title="Incident provider">
+
         <SettingsPanel>
           <Field
             name="provider_connection_name"
@@ -206,67 +209,70 @@ function PolicyForm({
             description="Name of an existing incident.io connection in workspace MCP settings. This connection is preselected when you attach a provider incident."
           />
         </SettingsPanel>
-      </SettingsSection>
-      <SettingsSection title="Analysis limits">
-        <SettingsPanel>
-          <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">
-            {[
-              {
-                name: "max_model_calls",
-                label: "Model calls per pass",
-                value: initial.max_model_calls,
-                min: 1,
-                max: 20,
-              },
-              {
-                name: "max_pass_seconds",
-                label: "Pass timeout (seconds)",
-                value: initial.max_pass_seconds,
-                min: 10,
-                max: 300,
-              },
-              {
-                name: "idle_timeout_seconds",
-                label: "Idle timeout (seconds)",
-                value: initial.idle_timeout_seconds,
-                min: 60,
-                max: 86400,
-              },
-              {
-                name: "max_watch_seconds",
-                label: "Maximum watch duration (seconds)",
-                value: initial.max_watch_seconds,
-                min: 60,
-                max: 86400,
-              },
-            ].map(({ name, label, value, min, max }) => (
-              <label
-                key={name}
-                htmlFor={`policy-${name}`}
-                className="space-y-2"
-              >
-                <span className="block text-xs font-medium">{label}</span>
-                <Input
-                  type="number"
-                  min={min}
-                  max={max}
-                  step={1}
-                  required
-                  id={`policy-${name}`}
-                  name={name}
-                  defaultValue={value}
-                  className="h-9 bg-background"
-                />
-              </label>
-            ))}
-            <Field
-              name="model"
-              label="Model"
-              value={initial.model ?? ""}
-              placeholder="Server default"
-            />
-          </div>
-        </SettingsPanel>
+        <details>
+          <summary className="cursor-pointer px-4 py-3 text-xs font-medium">
+            Model and analysis limits
+          </summary>
+          <SettingsPanel>
+            <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">
+              {[
+                {
+                  name: "max_model_calls",
+                  label: "Model calls per pass",
+                  value: initial.max_model_calls,
+                  min: 1,
+                  max: 20,
+                },
+                {
+                  name: "max_pass_seconds",
+                  label: "Pass timeout (seconds)",
+                  value: initial.max_pass_seconds,
+                  min: 10,
+                  max: 300,
+                },
+                {
+                  name: "idle_timeout_seconds",
+                  label: "Idle timeout (seconds)",
+                  value: initial.idle_timeout_seconds,
+                  min: 60,
+                  max: 86400,
+                },
+                {
+                  name: "max_watch_seconds",
+                  label: "Maximum watch duration (seconds)",
+                  value: initial.max_watch_seconds,
+                  min: 60,
+                  max: 86400,
+                },
+              ].map(({ name, label, value, min, max }) => (
+                <label
+                  key={name}
+                  htmlFor={`policy-${name}`}
+                  className="space-y-2"
+                >
+                  <span className="block text-xs font-medium">{label}</span>
+                  <Input
+                    type="number"
+                    min={min}
+                    max={max}
+                    step={1}
+                    required
+                    id={`policy-${name}`}
+                    name={name}
+                    defaultValue={value}
+                    className="h-9 bg-background"
+                  />
+                </label>
+              ))}
+              <Field
+                name="model"
+                label="Model"
+                value={initial.model ?? ""}
+                placeholder="Server default"
+              />
+            </div>
+          </SettingsPanel>
+        </details>
       </SettingsSection>
       {validation && <Notice error>{validation}</Notice>}
       {save.error && <Notice error>{save.error.message}</Notice>}
@@ -319,6 +325,66 @@ function PolicyForm({
   )
 }
 
+function SlackConnectionStatus({
+  settings,
+}: {
+  settings: IncidentSettingsPayload
+}) {
+  const { connection, policy } = settings
+  const connectionError =
+    connection.error ||
+    (!connection.slack_configured
+      ? "Slack is not configured. Connect the workspace before enabling Incidents."
+      : connection.required_scopes_present === false
+        ? "Required Slack scopes are missing."
+        : null)
+  return (
+    <div className="px-4 py-4">
+      <div className="flex items-start gap-3">
+        {connectionError ? (
+          <CircleAlert className="mt-0.5 size-5 text-warning-foreground" />
+        ) : (
+          <Radio className="mt-0.5 size-5 text-info-foreground" />
+        )}
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-medium">
+            {connectionError
+              ? "Slack connection needs attention"
+              : "Slack connection configured"}
+          </h2>
+          {connectionError && (
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {connectionError}
+            </p>
+          )}
+          <dl className="mt-4 grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+            <div>
+              <dt className="text-muted-foreground">Workspace</dt>
+              <dd className="mt-1 font-mono">
+                {connection.workspace_id ||
+                  policy.workspace_id ||
+                  "Not configured"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Slack app</dt>
+              <dd className="mt-1 font-mono">
+                {connection.slack_app_id ||
+                  policy.slack_app_id ||
+                  "Not configured"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Last verified</dt>
+              <dd className="mt-1">{formatTime(connection.verified_at)}</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function IncidentSettings() {
   const [formVersion, setFormVersion] = useState(0)
   const settings = useQuery({
@@ -337,67 +403,8 @@ export function IncidentSettings() {
         />
       </div>
     )
-  const { connection, policy } = settings.data
-  const connectionError =
-    connection.error ||
-    (!connection.slack_configured
-      ? "Slack is not configured. Connect the workspace before enabling Incidents."
-      : connection.required_scopes_present === false
-        ? "Required Slack scopes are missing."
-        : null)
   return (
-    <div className="mx-auto w-full max-w-4xl px-5 py-8 sm:px-10 sm:py-10">
-      <header className="mb-8">
-        <div className="mb-2 text-xs text-muted-foreground">
-          Incidents / Settings
-        </div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Incident policy
-        </h1>
-      </header>
-      <div className="mb-8 rounded-xl border border-border bg-card p-5">
-        <div className="flex items-start gap-3">
-          {connectionError ? (
-            <CircleAlert className="mt-0.5 size-5 text-warning-foreground" />
-          ) : (
-            <Radio className="mt-0.5 size-5 text-info-foreground" />
-          )}
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-medium">
-              {connectionError
-                ? "Slack connection needs attention"
-                : "Slack connection configured"}
-            </h2>
-            {connectionError && (
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {connectionError}
-              </p>
-            )}
-            <dl className="mt-4 grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
-              <div>
-                <dt className="text-muted-foreground">Workspace</dt>
-                <dd className="mt-1 font-mono">
-                  {connection.workspace_id ||
-                    policy.workspace_id ||
-                    "Not configured"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Slack app</dt>
-                <dd className="mt-1 font-mono">
-                  {connection.slack_app_id ||
-                    policy.slack_app_id ||
-                    "Not configured"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Last verified</dt>
-                <dd className="mt-1">{formatTime(connection.verified_at)}</dd>
-              </div>
-            </dl>
-          </div>
-        </div>
-      </div>
+    <div>
       <PolicyForm
         key={formVersion}
         settings={settings.data}

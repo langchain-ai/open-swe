@@ -90,7 +90,8 @@ export function IncidentsShell({
           {user.is_admin && (
             <div className="mt-6 px-2">
               <Link
-                to="/incidents/settings"
+                to="/admin"
+                hash="incidents"
                 onClick={layout.closeOnMobile}
                 activeProps={{
                   className:
@@ -99,7 +100,7 @@ export function IncidentsShell({
                 className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-sidebar-row-hover"
               >
                 <Settings2 className="size-4" />
-                Settings
+                Admin settings
               </Link>
             </div>
           )}
