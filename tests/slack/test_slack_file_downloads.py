@@ -58,6 +58,10 @@ def _file(name: str, url: str, mimetype: str = "application/zip") -> dict[str, A
     return {"name": name, "url_private": url, "mimetype": mimetype}
 
 
+def _entry(name: str, url: str) -> slack_webhook.SlackFileEntry:
+    return slack_webhook.SlackFileEntry(name=name, url=url)
+
+
 def test_slack_file_entries_skips_images_and_dedupes_by_url() -> None:
     messages = [
         {
@@ -72,7 +76,7 @@ def test_slack_file_entries_skips_images_and_dedupes_by_url() -> None:
 
     entries = slack_webhook._slack_file_entries(messages)
 
-    assert [entry["name"] for entry in entries] == ["bundle.zip"]
+    assert [entry.name for entry in entries] == ["bundle.zip"]
 
 
 def test_slack_file_entries_caps_attachment_count() -> None:
@@ -110,10 +114,12 @@ async def test_download_slack_files_stages_into_sandbox(monkeypatch: pytest.Monk
     )
 
     staged = await slack_webhook._download_slack_files_to_sandbox(
-        [_file("bundle.zip", "https://files.slack.com/a/bundle.zip")], "thread-1"
+        [_entry("bundle.zip", "https://files.slack.com/a/bundle.zip")], "thread-1"
     )
 
-    assert staged == [("bundle.zip", f"{slack_webhook._SLACK_FILE_DIR}/bundle.zip")]
+    assert staged == [
+        slack_webhook.StagedSlackFile("bundle.zip", f"{slack_webhook._SLACK_FILE_DIR}/bundle.zip")
+    ]
     uploaded_path, uploaded_content = backend.aupload_files.await_args.args[0][0]
     assert uploaded_path == f"{slack_webhook._SLACK_FILE_DIR}/bundle.zip"
     assert uploaded_content == b"zip"
@@ -134,13 +140,15 @@ async def test_download_slack_files_skips_failed_download(monkeypatch: pytest.Mo
 
     staged = await slack_webhook._download_slack_files_to_sandbox(
         [
-            _file("huge.zip", "https://files.slack.com/a/huge.zip"),
-            _file("small.zip", "https://files.slack.com/a/small.zip"),
+            _entry("huge.zip", "https://files.slack.com/a/huge.zip"),
+            _entry("small.zip", "https://files.slack.com/a/small.zip"),
         ],
         "thread-1",
     )
 
-    assert staged == [("small.zip", f"{slack_webhook._SLACK_FILE_DIR}/small.zip")]
+    assert staged == [
+        slack_webhook.StagedSlackFile("small.zip", f"{slack_webhook._SLACK_FILE_DIR}/small.zip")
+    ]
 
 
 @pytest.mark.asyncio
@@ -153,7 +161,7 @@ async def test_download_slack_files_tolerates_unreachable_sandbox(
     )
 
     staged = await slack_webhook._download_slack_files_to_sandbox(
-        [_file("bundle.zip", "https://files.slack.com/a/bundle.zip")], "thread-1"
+        [_entry("bundle.zip", "https://files.slack.com/a/bundle.zip")], "thread-1"
     )
 
     assert staged == []
@@ -297,15 +305,15 @@ async def test_download_slack_files_uploads_before_downloading_next_file(
 
     staged = await slack_webhook._download_slack_files_to_sandbox(
         [
-            _file("bundle.zip", "https://files.slack.com/first.zip"),
-            _file("bundle.zip", "https://files.slack.com/second.zip"),
+            _entry("bundle.zip", "https://files.slack.com/first.zip"),
+            _entry("bundle.zip", "https://files.slack.com/second.zip"),
         ],
         "thread-1",
     )
 
     assert staged == [
-        ("bundle.zip", "/workspace/.open-swe/slack-files/bundle.zip"),
-        ("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
+        slack_webhook.StagedSlackFile("bundle.zip", "/workspace/.open-swe/slack-files/bundle.zip"),
+        slack_webhook.StagedSlackFile("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
     ]
     assert (tmp_path / "bundle-1").read_bytes() == b"zip"
 

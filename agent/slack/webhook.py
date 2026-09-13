@@ -6,6 +6,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 import posixpath
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -272,9 +273,25 @@ _SLACK_FILE_DIR = "/workspace/.open-swe/slack-files"
 _MAX_SLACK_FILE_ATTACHMENTS = 10
 
 
-def _slack_file_entries(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+@dataclass(frozen=True)
+class SlackFileEntry:
+    """A non-image file Slack attached to a message."""
+
+    name: str
+    url: str
+
+
+@dataclass(frozen=True)
+class StagedSlackFile:
+    """A Slack file staged in the thread's sandbox."""
+
+    filename: str
+    sandbox_path: str
+
+
+def _slack_file_entries(messages: list[dict[str, Any]]) -> list[SlackFileEntry]:
     """Non-image files attached to the given messages, in first-seen order."""
-    entries: list[dict[str, Any]] = []
+    entries: list[SlackFileEntry] = []
     seen: set[str] = set()
     for message in messages:
         files = message.get("files")
@@ -290,14 +307,19 @@ def _slack_file_entries(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if url in seen:
                 continue
             seen.add(url)
-            entries.append(file_info)
+            entries.append(
+                SlackFileEntry(
+                    name=file_info.get("name") if isinstance(file_info.get("name"), str) else "",
+                    url=url,
+                )
+            )
             if len(entries) >= _MAX_SLACK_FILE_ATTACHMENTS:
                 return entries
     return entries
 
 
-def _sanitize_slack_filename(name: Any, url: str) -> str:
-    filename = name.strip() if isinstance(name, str) else ""
+def _sanitize_slack_filename(name: str, url: str) -> str:
+    filename = name.strip()
     if not filename or "/" in filename or "\x00" in filename:
         parsed = urlparse(url).path
         filename = posixpath.basename(parsed) if parsed else ""
@@ -306,11 +328,10 @@ def _sanitize_slack_filename(name: Any, url: str) -> str:
 
 
 async def _download_slack_files_to_sandbox(
-    entries: list[dict[str, Any]], thread_id: str, *, environment_slug: str | None = None
-) -> list[tuple[str, str]]:
+    entries: list[SlackFileEntry], thread_id: str, *, environment_slug: str | None = None
+) -> list[StagedSlackFile]:
     """Download Slack files and stage them in the thread's sandbox.
 
-    Returns ``(filename, sandbox_path)`` pairs for the files that made it.
     Best-effort: a missing sandbox or a failed download only skips that file.
     """
     if not entries:
@@ -326,17 +347,16 @@ async def _download_slack_files_to_sandbox(
             exc_info=True,
         )
         return []
-    staged: list[tuple[str, str]] = []
+    staged: list[StagedSlackFile] = []
     used_names: set[str] = set()
     for entry in entries:
-        url = str(entry.get("url_private"))
-        content, error = await slack_utils.download_slack_file(url)
+        content, error = await slack_utils.download_slack_file(entry.url)
         if content is None:
             common.logger.info(
                 "Slack file download skipped", extra={"slack_error": error or "unknown"}
             )
             continue
-        filename = _sanitize_slack_filename(entry.get("name"), url)
+        filename = _sanitize_slack_filename(entry.name, entry.url)
         base = filename
         suffix = 1
         while filename in used_names:
@@ -361,17 +381,17 @@ async def _download_slack_files_to_sandbox(
                 "Slack file staging failed", extra={"slack_error": str(error), "file": filename}
             )
             continue
-        staged.append((filename, sandbox_path))
+        staged.append(StagedSlackFile(filename, sandbox_path))
     return staged
 
 
-def _slack_files_section(staged: list[tuple[str, str]]) -> str:
+def _slack_files_section(staged: list[StagedSlackFile]) -> str:
     lines = [
         "## Slack File Attachments",
         "These files from Slack were staged into this thread's sandbox:",
         *[
-            f"- `{path}` (originally uploaded to Slack as `{filename}`)"
-            for filename, path in staged
+            f"- `{file.sandbox_path}` (originally uploaded to Slack as `{file.filename}`)"
+            for file in staged
         ],
     ]
     return "\n".join(lines)
