@@ -42,7 +42,9 @@ _HANDLED_EVENTS = frozenset(
     }
 )
 _MEMBERSHIP_SUBTYPES = frozenset({"channel_join", "channel_leave", "group_join", "group_leave"})
-_MENTION = re.compile(r"\s*<@[A-Z0-9]+>\s*(.*)", re.DOTALL)
+# Bounded repetitions: the text is stripped first, and the gap between the mention and
+# the request cannot backtrack polynomially on long runs of spaces.
+_MENTION = re.compile(r"<@[A-Z0-9]{1,20}>[ \t]{0,64}(.*)", re.DOTALL)
 
 
 def parse_mention(text: str) -> tuple[str, str]:
