@@ -42,7 +42,7 @@ async def test_report_platform_issue_logs_report_and_thread_details(
                 "source": "slack",
                 "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
                 "__pregel_runtime": _Unserializable(),
-                "__pregel_send": lambda writes: writes,
+                "__pregel_task_id": "task-1",
             }
         },
     )
@@ -85,18 +85,11 @@ async def test_report_platform_issue_survives_undiagnosable_run(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     module = importlib.import_module("agent.tools.report_platform_issue")
-    monkeypatch.setattr(
-        module,
-        "get_config",
-        lambda: {
-            "configurable": {"thread_id": "thread-1", "langgraph_auth_user": _Unserializable()}
-        },
-    )
 
-    def broken_client() -> SimpleNamespace:
-        raise RuntimeError("no client")
+    def no_runtime() -> dict[str, Any]:
+        raise RuntimeError("called outside of a runnable context")
 
-    monkeypatch.setattr(module, "langgraph_client", broken_client)
+    monkeypatch.setattr(module, "get_config", no_runtime)
 
     with caplog.at_level(logging.WARNING, logger="agent.tools.report_platform_issue"):
         result = await report_platform_issue(problem_description="broken", keywords=["sandbox"])

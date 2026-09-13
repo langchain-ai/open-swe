@@ -45,10 +45,7 @@ async def _collect_thread_details() -> dict[str, Any]:
     except Exception:
         logger.debug("Could not read platform issue run config", exc_info=True)
         return details
-    try:
-        details["configurable"] = cfg.dump()
-    except Exception:
-        logger.debug("Could not serialize platform issue run config", exc_info=True)
+    details["configurable"] = cfg.dump()
     if cfg.thread_id:
         try:
             details["thread"] = await langgraph_client().threads.get(cfg.thread_id)
