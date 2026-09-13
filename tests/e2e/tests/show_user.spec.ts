@@ -1,0 +1,89 @@
+import { test, expect, type Page } from "@playwright/test";
+
+import {
+  SAME_USER,
+  dismissOnboardingIfShown,
+  loginAs,
+  typeIntoComposer,
+} from "./helpers/dashboard";
+
+const DIFF_TITLE = "Show User E2E Diff";
+
+// `show_user` is wired only for dashboard/desktop runs, so these drive the real
+// dashboard composer rather than the Slack mock other specs use.
+async function startWebThread(page: Page, prompt: string) {
+  await loginAs(page, SAME_USER);
+  await page.goto("/agents");
+  await dismissOnboardingIfShown(page);
+  await typeIntoComposer(page, prompt);
+  await expect(page).toHaveURL(/\/agents\/[^/]+$/);
+}
+
+test.describe("show_user", () => {
+  // Covers the whole path for real: the tool runs a command in the sandbox,
+  // captures its stdout, and the artifact reaches the transcript as a diff card.
+  // Line selection and composer quoting are covered by ShowUserCard's unit tests.
+  test("renders a command's captured output as a diff card", async ({
+    page,
+  }) => {
+    await startWebThread(page, "E2E_SHOW_USER_DIFF show me the change");
+
+    const card = page.locator("section").filter({ hasText: DIFF_TITLE });
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    await expect(card).toContainText("greet.py");
+    await expect(card).toContainText('return f"hi {name}"');
+
+    // Nothing is selected yet, so there is nothing to quote.
+    await expect(card.getByRole("button", { name: /^Comment/ })).toBeDisabled();
+  });
+
+  // Mermaid renders through Streamdown's diagram plugin, which needs a real
+  // browser: jsdom has no SVG layout, so only an e2e can prove it draws.
+  test("renders a .mmd file as a drawn diagram, not source", async ({
+    page,
+  }) => {
+    await startWebThread(page, "E2E_SHOW_USER_DIAGRAM show me the flow");
+
+    const card = page.locator("section").filter({ hasText: "Mermaid Diagram" });
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    // A drawn diagram, not highlighted source. Scoped to the diagram container
+    // because the card header's chevron is an <svg> too, so a bare `svg`
+    // locator passes without anything having been drawn.
+    const diagram = card.locator("[data-mermaid-diagram]");
+    await expect(diagram).toBeVisible({ timeout: 30_000 });
+    await expect(diagram.locator("svg")).toBeVisible();
+    // Mermaid puts node labels in the SVG, so finding them proves it drew.
+    await expect(diagram).toContainText("show_user");
+    await expect(diagram).toContainText("File type");
+  });
+
+  // Mermaid attaches its own "Syntax error" graphic to document.body before
+  // rejecting unless error rendering is suppressed, which would sit outside the
+  // card on top of the fallback.
+  test("falls back to source for an unparseable diagram, with no stray graphic", async ({
+    page,
+  }) => {
+    await startWebThread(page, "E2E_SHOW_USER_BAD_DIAGRAM show me the flow");
+
+    const card = page.locator("section").filter({ hasText: "Broken Diagram" });
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    await expect(card).toContainText("flowchart LR", { timeout: 30_000 });
+    await expect(card.locator("[data-mermaid-diagram]")).toHaveCount(0);
+    await expect(page.getByText("Syntax error")).toHaveCount(0);
+    await expect(page.locator('svg[aria-roledescription="error"]')).toHaveCount(
+      0,
+    );
+  });
+
+  test("renders no card when the command fails", async ({ page }) => {
+    await startWebThread(page, "E2E_SHOW_USER_FAIL show me the output");
+
+    await expect(page.getByText("no card was rendered")).toBeVisible({
+      timeout: 60_000,
+    });
+    // The tool raised instead of building a card from the partial stdout.
+    await expect(
+      page.locator("section").filter({ hasText: "Show User" }),
+    ).toHaveCount(0);
+  });
+});

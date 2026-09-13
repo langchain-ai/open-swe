@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import "streamdown/styles.css"
 import { CodeBlock } from "./CodeBlock"
+import { MermaidDiagram } from "./MermaidDiagram"
 import {
   orderedListGutterStyle,
   remarkGithubAlerts,
@@ -136,6 +137,8 @@ const COMPONENTS: Components = {
   pre: ({ node, children, ...props }: ExtraProps & ComponentProps<"pre">) => {
     const fence = fencedCode(node)
     if (!fence) return <pre {...props}>{children}</pre>
+    if (fence.language === "mermaid")
+      return <MermaidDiagram text={fence.text} />
     return (
       <CodeBlock
         text={fence.text}
@@ -218,9 +221,8 @@ interface BoundaryState {
   key: string
 }
 
-// Streamdown bundles Mermaid and renders ```mermaid blocks itself; a diagram it
-// can't parse throws during render and, with no boundary, white-screens the
-// whole page. Contain it and fall back to the raw markdown text.
+// A render failure anywhere in the markdown tree would otherwise white-screen
+// the whole page. Contain it and fall back to the raw markdown text.
 class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   state: BoundaryState = { failed: false, key: this.props.content }
 

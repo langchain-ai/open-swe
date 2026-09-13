@@ -1,14 +1,15 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 
-const USER = { login: "alice", email: "alice@example.com" };
+import {
+  SAME_USER,
+  dismissOnboardingIfShown,
+  loginAs,
+  typeIntoComposer,
+} from "./helpers/dashboard";
+
 const TITLE = "Iframe E2E Preview";
 
-async function login(page: Page) {
-  const response = await page.request.post("/control/login", { data: USER });
-  expect(response.ok()).toBeTruthy();
-}
-
-test.describe("output_iframe", () => {
+test.describe("show_user html", () => {
   test.skip(
     process.env.SANDBOX_TYPE !== "langsmith",
     "requires LangSmith sandbox download URLs",
@@ -17,20 +18,13 @@ test.describe("output_iframe", () => {
   test("renders and controls sandboxed HTML from a real tool artifact", async ({
     page,
   }) => {
-    await login(page);
-    await page.goto("/mock/slack");
-    await page.locator("#reset").click();
-    await page.locator("#text").fill("<@U0BOT> E2E_IFRAME render the preview");
-    await page.locator("#send").click();
-
-    const reply = page
-      .locator(".msg.bot")
-      .filter({ hasText: "Preparing the iframe preview now." });
-    await expect(reply).toBeVisible();
-    const webLink = reply.locator('a[href*="/agents/"]');
-    await expect(webLink).toBeVisible();
-    await webLink.click();
-    await expect(page).toHaveURL(/\/agents\//);
+    // `show_user` is wired only for dashboard/desktop runs, so this drives the
+    // real dashboard composer rather than the Slack mock.
+    await loginAs(page, SAME_USER);
+    await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
+    await typeIntoComposer(page, "E2E_IFRAME render the preview");
+    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
 
     const iframe = page.locator(`iframe[title="${TITLE}"]`);
     await expect(iframe).toBeVisible({ timeout: 60_000 });

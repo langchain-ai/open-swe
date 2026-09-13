@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils"
 
 const IFRAME_HEIGHT = 480
 
-function openDownload(url: string) {
+export function openDownload(url: string) {
   const anchor = document.createElement("a")
   anchor.href = url
   anchor.rel = "noreferrer"

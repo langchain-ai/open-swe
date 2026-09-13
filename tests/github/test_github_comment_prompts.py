@@ -152,7 +152,7 @@ def test_construct_system_prompt_includes_shared_base_explicitly() -> None:
 
     prompt = construct_system_prompt(working_dir="/workspace")
 
-    assert prompt.endswith(OPEN_SWE_SHARED_BASE)
+    assert OPEN_SWE_SHARED_BASE in prompt
     assert "base prompt replaces deepagents" not in prompt
 
 

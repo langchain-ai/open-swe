@@ -28,7 +28,6 @@ _TOOL_MODULES = {
     "mark_question_answered": ".mark_question_answered",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
-    "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
@@ -48,6 +47,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": "agent.github.tools.search_repo_code",
+    "show_user": ".show_user",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_move_thread": "agent.slack.tools.move_thread",
@@ -86,7 +86,6 @@ __all__ = [
     "mark_question_answered",
     "notify_automation_channel",
     "open_pull_request",
-    "output_iframe",
     "publish_review",
     "read_repo_file",
     "read_user_settings",
@@ -106,6 +105,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
+    "show_user",
     "slack_add_reaction",
     "slack_attach_html",
     "slack_move_thread",
@@ -159,7 +159,6 @@ if TYPE_CHECKING:
     from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
-    from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
     from agent.tools.read_user_settings import read_user_settings
     from agent.tools.recreate_sandbox import recreate_sandbox
@@ -170,6 +169,7 @@ if TYPE_CHECKING:
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
+    from agent.tools.show_user import show_user
     from agent.tools.threads import get_thread, list_threads, manage_thread
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill

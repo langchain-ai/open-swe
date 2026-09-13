@@ -243,6 +243,14 @@ const DEV_PORT = Number(process.env.PORT) || 3000
 const config = defineConfig({
   base: BASE_PATH,
   server: { port: DEV_PORT, strictPort: true, hmr: { clientPort: DEV_PORT } },
+  // Preview inherits `server` when unset, which handed the build's prerender
+  // step the dev port under `strictPort` — so a build failed whenever anything
+  // else (another worktree's dev server) held it. A build must not depend on
+  // which servers are running, hence its own port, free to move if taken.
+  preview: {
+    port: Number(process.env.VITE_PREVIEW_PORT) || 4173,
+    strictPort: false,
+  },
   resolve: { tsconfigPaths: true },
   optimizeDeps: {
     include: [
