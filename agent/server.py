@@ -150,7 +150,6 @@ from agent.sandboxes.state import (
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
-from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
     approve_plan,
     background_execute,
@@ -338,10 +337,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
-        "browser_act",
-        "browser_extract",
-        "browser_navigate",
-        "browser_observe",
         "create_sandbox_service_url",
         "http_request",
         "manage_baby_sit",
@@ -1182,10 +1177,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "MCPs": mcp_tools,
         "Notion": notion_tools,
     }
-    if not stop_summary_mode and not local_run:
-        browser_tools = load_browser_tools()
-        if browser_tools:
-            integration_tool_groups["Browser"] = browser_tools
     if integration_tool_groups:
         candidate = DynamicToolMiddleware(
             integration_tool_groups,

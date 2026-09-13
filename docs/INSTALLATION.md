@@ -95,7 +95,7 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 | Provider | Variable | Notes |
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | Default model when it is the only key set |
-| OpenAI | `OPENAI_API_KEY` | Default model otherwise; also used for voice dictation in the dashboard. `OPENAI_BASE_URL` points at an OpenAI-compatible API |
+| OpenAI | `OPENAI_API_KEY` | Default model otherwise. `OPENAI_BASE_URL` points at an OpenAI-compatible API |
 | Google | `GOOGLE_API_KEY` | `google_genai:` models |
 | Fireworks | `FIREWORKS_API_KEY` | `fireworks:` models |
 | Groq | `GROQ_API_KEY` | `groq:` models |
