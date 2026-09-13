@@ -150,9 +150,6 @@ function PolicyForm({
       excluded_channel_ids: list(form, "excluded_channel_ids"),
       model: String(form.get("model") ?? "").trim() || null,
       max_model_calls: Number(form.get("max_model_calls")),
-      max_pass_seconds: Number(form.get("max_pass_seconds")),
-      idle_timeout_seconds: Number(form.get("idle_timeout_seconds")),
-      max_watch_seconds: Number(form.get("max_watch_seconds")),
     }
     if (!/^[a-z0-9_-]+$/.test(policy.channel_prefix)) {
       setValidation(
@@ -206,31 +203,10 @@ function PolicyForm({
               {[
                 {
                   name: "max_model_calls",
-                  label: "Model calls per pass",
+                  label: "Model calls per turn",
                   value: initial.max_model_calls,
                   min: 1,
                   max: 20,
-                },
-                {
-                  name: "max_pass_seconds",
-                  label: "Pass timeout (seconds)",
-                  value: initial.max_pass_seconds,
-                  min: 10,
-                  max: 300,
-                },
-                {
-                  name: "idle_timeout_seconds",
-                  label: "Idle timeout (seconds)",
-                  value: initial.idle_timeout_seconds,
-                  min: 60,
-                  max: 86400,
-                },
-                {
-                  name: "max_watch_seconds",
-                  label: "Maximum watch duration (seconds)",
-                  value: initial.max_watch_seconds,
-                  min: 60,
-                  max: 86400,
                 },
               ].map(({ name, label, value, min, max }) => (
                 <label

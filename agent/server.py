@@ -401,7 +401,10 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "list_threads",
         "manage_thread",
         "notify_automation_channel",
+        "read_incident",
         "read_user_settings",
+        "record_incident_report",
+        "search_incidents",
     }
 
 
@@ -869,17 +872,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(bindable_config(config))
 
-    from agent.incidents.runtime import (
-        IncidentMiddleware,
-        IncidentOffloadingMiddleware,
-        load_incident_session,
-    )
+    from agent.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
 
-    incident_session = await load_incident_session(config)
-    if incident_session is not None:
-        cfg.source = configurable["source"] = "incidents_agent"
+    incident_session: IncidentSession | None = None
+    if cfg.source == "incidents_agent":
+        incident_session = await load_incident_session(config)
         cfg.slack_thread = incident_session.slack_thread
-        configurable["slack_thread"] = cfg.slack_thread.dump() if cfg.slack_thread else None
+        configurable["slack_thread"] = cfg.slack_thread.dump()
     profile_login = resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
@@ -1288,12 +1287,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 workspace_skills=workspace_skills,
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
-                offloading=(
-                    IncidentOffloadingMiddleware(subagent_model, agent_backend, incident_session)
-                    if incident_session is not None
-                    else ConversationOffloadingMiddleware(subagent_model, agent_backend)
-                ),
-                incident_middleware=IncidentMiddleware(incident_session, finalize=False)
+                offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
+                incident_middleware=IncidentMiddleware(incident_session)
                 if incident_session is not None
                 else None,
             ),
@@ -1304,9 +1299,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
-                IncidentOffloadingMiddleware(main_model, agent_backend, incident_session)
-                if incident_session is not None
-                else ConversationOffloadingMiddleware(
+                ConversationOffloadingMiddleware(
                     main_model, agent_backend, manual=cfg.offload_conversation is True
                 ),
                 PrepareAgentRunMiddleware(
@@ -1331,7 +1324,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(
-                    run_limit=incident_session.saved.policy.max_model_calls
+                    run_limit=incident_session.policy.max_model_calls
                     if incident_session is not None
                     else MODEL_CALL_RECURSION_LIMIT,
                     exit_behavior="end",
@@ -1356,16 +1349,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                 WorkflowPushGuardMiddleware(),
                 refresh_github_proxy_before_model,
-                *(
-                    []
-                    if stop_summary_mode or incident_session is not None
-                    else [check_message_queue_before_model]
-                ),
-                *(
-                    []
-                    if incident_session is not None
-                    else [TimeoutWrapupMiddleware(), notify_step_limit_reached]
-                ),
+                *([] if stop_summary_mode else [check_message_queue_before_model]),
+                TimeoutWrapupMiddleware(),
+                notify_step_limit_reached,
                 record_run_usage,
                 *model_selection_middleware,
                 *fallback_middleware,

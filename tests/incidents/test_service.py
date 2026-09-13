@@ -1,260 +1,80 @@
+"""Incident settings, dashboard projections, and responder commands."""
+
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
-from agent.incidents import service
-from agent.incidents.models import Incident, IncidentPolicy
+from agent.incidents import channels, service, turns
+from agent.incidents.models import Incident, IncidentPolicy, IncidentReport, IncidentReportRecord
+
+CHANNEL = {
+    "id": "C1",
+    "name": "inc-api",
+    "is_channel": True,
+    "is_member": True,
+    "is_private": False,
+    "is_ext_shared": False,
+    "is_pending_ext_shared": False,
+}
 
 
 @pytest.fixture
 async def configured(fake_store, monkeypatch):
     await service.POLICIES.put(
         "default",
-        IncidentPolicy(
-            enabled=True,
-            workspace_id="T1",
-            slack_app_id="A1",
-            enabled_at=100,
-        ),
+        IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1", enabled_at=100),
     )
-    monkeypatch.setattr(service, "schedule_wake", AsyncMock())
+    monkeypatch.setattr(service, "get_slack_channel_info", AsyncMock(return_value=dict(CHANNEL)))
+    monkeypatch.setattr(turns, "has_active_run", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        service, "get_langsmith_trace_url", AsyncMock(return_value="https://smith/t")
+    )
     return fake_store
 
 
-@pytest.fixture
-def readable_channel(monkeypatch):
-    info = {
-        "id": "C1",
-        "name": "inc-api",
-        "is_channel": True,
-        "is_member": True,
-        "is_private": False,
-        "is_ext_shared": False,
-        "is_pending_ext_shared": False,
-    }
-    monkeypatch.setattr(service.slack, "channel_info", AsyncMock(return_value=info))
-    return info
-
-
-def event(kind="channel_created", channel=None, event_id="E1"):
-    return {
-        "type": "event_callback",
-        "team_id": "T1",
-        "api_app_id": "A1",
-        "event_id": event_id,
-        "event_time": 200,
-        "event": {"type": kind, "channel": channel or {"id": "C1", "name": "inc-api"}},
-    }
-
-
-async def test_creation_is_durable_before_dispatch_and_duplicate_is_not_reapplied(configured):
-    assert await service.accept_slack_event(event()) == {"status": "accepted"}
-    assert len(await service.RECEIPTS.search_all()) == 1
-    assert await service.accept_slack_event(event()) == {"status": "duplicate"}
-    assert len(await service.RECEIPTS.search_all()) == 1
-
-
-async def test_workspace_binding_and_old_event_are_not_enrollment(configured):
-    wrong = event()
-    wrong["team_id"] = "T2"
-    with pytest.raises(HTTPException) as error:
-        await service.accept_slack_event(wrong)
-    assert error.value.status_code == 401
-    old = event()
-    old["event_time"] = 50
-    assert await service.accept_slack_event(old) == {"status": "ignored"}
-    assert not await service.RECEIPTS.search_all()
-
-
-async def test_unregistered_messages_do_not_enroll_but_known_channels_never_fall_through(
-    configured,
-):
-    assert await service.accept_slack_event(event("message", "C1")) is None
-    await service.INVESTIGATIONS.put(
-        service.incident_id("T1", "C1"),
-        Incident(
-            id=service.incident_id("T1", "C1"),
-            workspace_id="T1",
-            channel_id="C1",
-            thread_id="thread",
+def _auth(monkeypatch, team="T1", scopes=None):
+    monkeypatch.setattr(
+        service,
+        "_auth_test",
+        AsyncMock(
+            return_value=(
+                {"team_id": team},
+                list(service.REQUIRED_SLACK_SCOPES) if scopes is None else scopes,
+            )
         ),
     )
-    policy = await service.POLICIES.get("default")
-    policy.enabled = False
-    await service.POLICIES.put("default", policy)
-    assert await service.accept_slack_event(event("message", "C1")) is not None
+    return service._auth_test
 
 
-async def test_receipt_storage_failure_is_retryable_not_acknowledged(configured, monkeypatch):
-    monkeypatch.setattr(service.RECEIPTS, "put", AsyncMock(side_effect=RuntimeError("offline")))
-    with pytest.raises(RuntimeError, match="offline"):
-        await service.accept_slack_event(event())
-
-
-async def test_dispatch_failure_preserves_accepted_receipt_for_recovery(configured, monkeypatch):
-    monkeypatch.setattr(service, "schedule_wake", AsyncMock(side_effect=RuntimeError("offline")))
-    assert await service.accept_slack_event(event()) == {"status": "accepted"}
-    assert len(await service.RECEIPTS.search_all()) == 1
-
-
-async def test_changed_body_under_same_event_id_is_rejected(configured):
-    await service.accept_slack_event(event())
-    with pytest.raises(HTTPException) as error:
-        await service.accept_slack_event(event(channel={"id": "C2", "name": "inc-other"}))
-    assert error.value.status_code == 409
-
-
-async def test_messages_after_accepted_creation_route_before_registration(configured):
-    await service.accept_slack_event(event())
-    assert await service.accept_slack_event(event("message", "C1", "E2")) == {"status": "accepted"}
-    assert len(await service.RECEIPTS.search_all()) == 2
-
-
-async def test_native_stop_routes_only_to_the_matching_incident_session(configured):
+async def _record(status="watching", **fields) -> Incident:
     record = Incident(
-        id=service.incident_id("T1", "C1"),
+        id=service.incident_id("T1", fields.pop("channel_id", "C1")),
         workspace_id="T1",
-        channel_id="C1",
-        thread_id="worker",
-        anchor_ts="100.1",
-        slack_session_thread_ts="200.1",
+        channel_id=fields.pop("channel", "C1"),
+        channel_name="inc-api",
+        thread_id="thread-1",
+        status=status,
+        **fields,
     )
-    await service.INVESTIGATIONS.put(record.id, record)
-    payload = event("agent_session_stopped", "C1")
-    payload["event"].update(thread_ts="unrelated", user="U1")
-    assert await service.accept_slack_event(payload) is None
-    payload["event"]["thread_ts"] = "200.1"
-    assert await service.accept_slack_event(payload) == {"status": "accepted"}
-    assert await service.accept_slack_event(payload) == {"status": "duplicate"}
-    receipt = (await service.RECEIPTS.search_all())[0]
-    assert receipt.kind == "agent_session_stopped" and receipt.payload["thread_ts"] == "200.1"
-
-
-async def test_invalid_policy_is_a_client_error(configured):
-    with pytest.raises(HTTPException) as error:
-        await service.update_settings({"channel_prefix": "*"}, 0, {"id": "github:admin"})
-    assert error.value.status_code == 422
-
-
-async def test_slack_receipts_bound_and_redact_persisted_context(configured):
-    await service.accept_slack_event(event())
-    message = event("message", "C1", "E2")
-    message["event"]["text"] = "password=not-a-real-password"
-    await service.accept_slack_event(message)
-    receipts = await service.RECEIPTS.search_all()
-    assert "not-a-real-password" not in str([r.payload for r in receipts])
-    message["event_id"] = "oversized"
-    message["event"]["text"] = "x" * (256 * 1024)
-    with pytest.raises(HTTPException) as error:
-        await service.accept_slack_event(message)
-    assert error.value.status_code == 413
-
-
-async def test_admin_sees_redacted_setup_failure_but_responder_cannot(configured, monkeypatch):
-    record = Incident(
-        id="failed",
-        workspace_id="T1",
-        channel_id="C1",
-        thread_id="thread",
-        status="needs_attention",
-        reason="slack_unavailable",
-        channel_name="sensitive-title",
-        title="sensitive-title",
-    )
-    await service.INVESTIGATIONS.put(record.id, record)
-    monkeypatch.setattr(
-        service.slack, "channel_info", AsyncMock(side_effect=RuntimeError("offline"))
-    )
-    assert (await service.list_incidents())["items"] == []
-    items = (await service.list_incidents(include_setup=True))["items"]
-    assert items[0]["title"] == "Channel setup needs attention"
-    detail = await service.get_incident(record.id, include_setup=True)
-    assert detail["report"] is None
-    assert detail["activity"] == []
-    assert detail["allowed_actions"] == []
-
-
-@pytest.mark.parametrize(
-    ("view", "expected"),
-    [
-        ("active", ["pending", "investigating", "watching", "needs_attention"]),
-        ("inactive", ["paused", "completed"]),
-        ("all", ["pending", "investigating", "watching", "needs_attention", "paused", "completed"]),
-    ],
-)
-async def test_activity_filters_paginate_matching_incidents(
-    configured, readable_channel, view, expected
-):
-    for index, status in enumerate(
-        ["pending", "investigating", "watching", "needs_attention", "paused", "completed"]
-    ):
-        record = Incident(
-            id=status,
-            workspace_id="T1",
-            channel_id="C1",
-            thread_id=f"thread-{status}",
-            channel_name="inc-api",
-            status=status,
-            joined=True,
-            updated_at=f"2026-09-12T12:{59 - index}:00+00:00",
-        )
-        await service.INVESTIGATIONS.put(record.id, record)
-    items = []
-    cursor = None
-    while True:
-        page = await service.list_incidents(view=view, q="api", limit=2, cursor=cursor)
-        items.extend(item["id"] for item in page["items"])
-        cursor = page["next_cursor"]
-        if cursor is None:
-            break
-    assert items == expected
-
-
-async def test_command_retries_remain_idempotent_after_state_change(configured, readable_channel):
-    import time
-
-    record = Incident(
-        id="command",
-        workspace_id="T1",
-        channel_id="C1",
-        thread_id="thread",
-        status="watching",
-        can_read=True,
-        last_verified_at=time.time(),
-    )
-    await service.INVESTIGATIONS.put(record.id, record)
-    actor = {"id": "github:responder"}
-    await service.submit_command(record.id, "pause", None, "request", actor)
-    record.status = "paused"
-    await service.INVESTIGATIONS.put(record.id, record)
-    assert (await service.submit_command(record.id, "pause", None, "request", actor))[
-        "status"
-    ] == "duplicate"
-
-
-def _auth(team_id="T1"):
-    return AsyncMock(
-        return_value={"team_id": team_id, "granted_scopes": sorted(service.REQUIRED_SLACK_SCOPES)}
-    )
+    await service.INCIDENTS.put(record.id, record)
+    return record
 
 
 async def test_enabling_binds_identity_from_installation_and_env(fake_store, monkeypatch):
-    monkeypatch.setattr(service, "schedule_wake", AsyncMock())
-    monkeypatch.setattr(service, "ensure_recovery", AsyncMock())
-    monkeypatch.setattr(service.slack, "request", _auth("T9"))
+    _auth(monkeypatch, "T9")
     monkeypatch.setenv("SLACK_APP_ID", "A9")
     result = await service.update_settings(
         {"enabled": True, "workspace_id": "TX", "slack_app_id": "AX"}, 0, {"id": "github:admin"}
     )
-    assert result["status"] == "accepted"
-    policy = (await service.RECEIPTS.search_all())[0].payload["policy"]
-    assert (policy["workspace_id"], policy["slack_app_id"]) == ("T9", "A9")
+    policy = await service.get_policy()
+    assert result == {"command_id": "settings:1", "status": "applied"}
+    assert (policy.workspace_id, policy.slack_app_id, policy.version) == ("T9", "A9", 1)
+    assert policy.enabled_at > 0
 
 
 async def test_enabling_requires_slack_app_id(fake_store, monkeypatch):
-    monkeypatch.setattr(service, "schedule_wake", AsyncMock())
-    monkeypatch.setattr(service.slack, "request", _auth())
+    _auth(monkeypatch)
     monkeypatch.delenv("SLACK_APP_ID", raising=False)
     with pytest.raises(HTTPException) as error:
         await service.update_settings({"enabled": True}, 0, {"id": "github:admin"})
@@ -263,97 +83,173 @@ async def test_enabling_requires_slack_app_id(fake_store, monkeypatch):
 
 
 async def test_identity_cannot_change_with_registered_incidents(configured, monkeypatch):
-    monkeypatch.setattr(service, "ensure_recovery", AsyncMock())
-    await service.INVESTIGATIONS.put(
-        service.incident_id("T1", "C1"),
-        Incident(
-            id=service.incident_id("T1", "C1"),
-            workspace_id="T1",
-            channel_id="C1",
-            thread_id="thread",
-        ),
-    )
-    monkeypatch.setattr(service.slack, "request", _auth("T1"))
+    await _record()
+    _auth(monkeypatch, "T1")
     monkeypatch.setenv("SLACK_APP_ID", "A2")
     with pytest.raises(HTTPException) as error:
         await service.update_settings({"enabled": True}, 0, {"id": "github:admin"})
     assert error.value.status_code == 409
     monkeypatch.setenv("SLACK_APP_ID", "A1")
-    result = await service.update_settings({"enabled": True}, 0, {"id": "github:admin"})
-    assert result["status"] == "accepted"
+    assert (await service.update_settings({"enabled": True}, 0, {"id": "github:admin"}))[
+        "status"
+    ] == "applied"
 
 
 async def test_disabling_preserves_binding_without_slack_call(configured, monkeypatch):
-    request = AsyncMock()
-    monkeypatch.setattr(service.slack, "request", request)
+    auth = _auth(monkeypatch)
     await service.update_settings(
         {"enabled": False, "workspace_id": "", "slack_app_id": ""}, 0, {"id": "github:admin"}
     )
-    policy = (await service.RECEIPTS.search_all())[0].payload["policy"]
-    assert (policy["workspace_id"], policy["slack_app_id"]) == ("T1", "A1")
-    request.assert_not_awaited()
+    policy = await service.get_policy()
+    assert (policy.workspace_id, policy.slack_app_id, policy.enabled) == ("T1", "A1", False)
+    auth.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("body", "version", "status"),
+    [
+        ({"enabled": False}, 3, 409),
+        ({"channel_prefix": "*"}, 0, 422),
+        ({"model": "nope:x"}, 0, 422),
+    ],
+)
+async def test_invalid_settings_are_client_errors(configured, monkeypatch, body, version, status):
+    _auth(monkeypatch)
+    with pytest.raises(HTTPException) as error:
+        await service.update_settings(body, version, {"id": "github:admin"})
+    assert error.value.status_code == status
 
 
 async def test_settings_report_server_owned_identity(configured, monkeypatch):
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setenv("SLACK_APP_ID", "A1")
-    monkeypatch.setattr(service.slack, "request", _auth("T1"))
-    connection = (await service.get_settings())["connection"]
+    _auth(monkeypatch, "T1")
+    settings = await service.get_settings()
+    connection = settings["connection"]
     assert (connection["workspace_id"], connection["slack_app_id"]) == ("T1", "A1")
     assert connection["required_scopes_present"] is True
     assert connection["error"] is None
+    assert settings["last_operation"]["command_id"] == "settings:0"
     monkeypatch.delenv("SLACK_APP_ID")
     connection = (await service.get_settings())["connection"]
     assert "SLACK_APP_ID" in connection["error"]
     assert connection["slack_app_id"] == "A1"
 
 
-async def test_detail_carries_the_langsmith_thread_link(configured, monkeypatch, readable_channel):
-    import time
-
-    record = Incident(
-        id="traced",
-        workspace_id="T1",
-        channel_id="C1",
-        thread_id="thread-1",
-        status="watching",
-        can_read=True,
-        last_verified_at=time.time(),
+async def test_list_filters_by_activity_and_hides_unreadable_channels(configured, monkeypatch):
+    watching = await _record()
+    paused = await _record(status="paused", channel_id="C2", channel="C2")
+    failed = await _record(
+        status="needs_attention", channel_id="C3", channel="C3", reason="setup_failed"
     )
-    await service.INVESTIGATIONS.put(record.id, record)
-    trace = AsyncMock(return_value="https://smith.langchain.com/o/t/projects/p/p1/t/thread-1")
-    monkeypatch.setattr(service, "get_langsmith_trace_url", trace)
+    await service.REPORTS.put(
+        watching.id,
+        IncidentReportRecord(
+            incident_id=watching.id, report=IncidentReport(summary="Latest"), digest="d"
+        ),
+    )
+
+    def info(channel_id: str, *, use_cache: bool = True):
+        return None if channel_id == "C3" else {**CHANNEL, "id": channel_id}
+
+    service.get_slack_channel_info.side_effect = info
+
+    active = await service.list_incidents(view="active")
+    inactive = await service.list_incidents(view="inactive")
+    everything = await service.list_incidents(view="all", include_setup=True)
+
+    assert [item["id"] for item in active["items"]] == [watching.id]
+    assert active["items"][0]["latest_finding"] == "Latest"
+    assert [item["id"] for item in inactive["items"]] == [paused.id]
+    assert {item["id"] for item in everything["items"]} == {watching.id, paused.id, failed.id}
+    assert next(item for item in everything["items"] if item["id"] == failed.id)[
+        "title"
+    ].startswith("Channel setup")
+    assert (await service.list_incidents(q="payments"))["items"] == []
+
+
+async def test_detail_derives_investigating_from_live_runs(configured):
+    record = await _record()
     detail = await service.get_incident(record.id)
-    assert detail["trace_url"] == "https://smith.langchain.com/o/t/projects/p/p1/t/thread-1"
-    trace.assert_awaited_once_with("thread-1")
+    assert detail["incident"]["status"] == "watching"
+    assert detail["allowed_actions"] == ["ask", "investigate_again", "pause", "complete"]
+    assert detail["trace_url"] == "https://smith/t"
+
+    turns.has_active_run.return_value = True
+    assert (await service.get_incident(record.id))["incident"]["status"] == "investigating"
+
+    record.status = "completed"
+    await service.INCIDENTS.put(record.id, record)
+    assert (await service.get_incident(record.id))["allowed_actions"] == ["ask", "reopen"]
 
 
-@pytest.mark.parametrize("change", ["membership", "excluded"])
-async def test_recently_readable_incident_is_denied_immediately_after_revocation(
-    configured, readable_channel, change
-):
-    import time
-
-    record = Incident(
-        id="revoked",
-        workspace_id="T1",
-        channel_id="C1",
-        thread_id="worker",
-        can_read=True,
-        last_verified_at=time.time(),
-        joined=True,
+async def test_detail_merges_control_and_finding_activity(configured):
+    record = await _record()
+    service.note(record, "control", "Incident paused.")
+    await service.INCIDENTS.put(record.id, record)
+    latest = IncidentReportRecord(
+        incident_id=record.id, report=IncidentReport(summary="Found it"), digest="d"
     )
-    await service.INVESTIGATIONS.put(record.id, record)
-    policy = await service.get_policy()
-    assert await service.readable(record, policy)
-    if change == "membership":
-        readable_channel["is_member"] = False
-    else:
-        policy.excluded_channel_ids = ["C1"]
-        await service.POLICIES.put("default", policy)
+    service.note(latest, "findings", "Found it")
+    await service.REPORTS.put(record.id, latest)
 
-    assert not await service.readable(record, policy)
-    assert (await service.list_incidents())["items"] == []
-    with pytest.raises(HTTPException) as exc:
+    detail = await service.get_incident(record.id)
+
+    assert {item["type"] for item in detail["activity"]} == {"control", "findings"}
+    assert detail["report"]["summary"] == "Found it"
+
+
+async def test_revoked_channel_access_hides_the_incident(configured):
+    record = await _record()
+    service.get_slack_channel_info.return_value = {**CHANNEL, "is_member": False}
+    with pytest.raises(HTTPException) as error:
         await service.get_incident(record.id)
-    assert exc.value.status_code == 404
+    assert error.value.status_code == 404
+    service.get_slack_channel_info.return_value = None
+    with pytest.raises(HTTPException) as error:
+        await service.get_incident(record.id)
+    assert error.value.status_code == 503
+
+
+async def test_questions_dispatch_explicit_turns_with_server_identity(configured, monkeypatch):
+    record = await _record()
+    dispatch = AsyncMock(return_value={"run_id": "r1"})
+    monkeypatch.setattr(turns, "dispatch_turn", dispatch)
+
+    result = await service.submit_command(
+        record.id,
+        "ask",
+        "What changed?",
+        "r1",
+        {"id": "github:sre", "github_login": "sre", "email": "sre@x"},
+    )
+
+    assert result == {"command_id": "r1", "status": "accepted"}
+    kwargs = dispatch.await_args.kwargs
+    assert kwargs["request"] == "What changed?"
+    assert (
+        kwargs["requester"]["id"] == "github:sre" and kwargs["requester"]["github_login"] == "sre"
+    )
+    await service.submit_command(record.id, "investigate_again", None, "r2", {"id": "github:sre"})
+    assert dispatch.await_args.kwargs == {} or "request" not in dispatch.await_args.kwargs
+
+
+@pytest.mark.parametrize(
+    ("action", "text", "status"), [("ask", "", 422), ("resume", None, 409), ("dance", None, 409)]
+)
+async def test_unavailable_commands_are_rejected(configured, action, text, status):
+    record = await _record()
+    with pytest.raises(HTTPException) as error:
+        await service.submit_command(record.id, action, text, "r1", {"id": "github:sre"})
+    assert error.value.status_code == status
+
+
+async def test_controls_route_through_the_channel_handler(configured, monkeypatch):
+    record = await _record()
+    control = AsyncMock(return_value=record)
+    monkeypatch.setattr(channels, "apply_control", control)
+
+    await service.submit_command(record.id, "pause", None, "r1", {"id": "github:sre"})
+
+    control.assert_awaited_once()
+    assert control.await_args.args[1:] == ("pause", {"id": "github:sre"})

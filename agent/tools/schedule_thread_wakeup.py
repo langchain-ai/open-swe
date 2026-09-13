@@ -262,20 +262,6 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
     if not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}
 
-    if cfg.source == "incidents_agent":
-        from uuid import uuid4
-
-        from agent.incidents.followups import enqueue_followup
-
-        return await enqueue_followup(
-            thread_id,
-            str(uuid4()),
-            prompt.strip()
-            if isinstance(prompt, str) and prompt.strip()
-            else _DEFAULT_WAKEUP_PROMPT,
-            delay=delay_seconds,
-        )
-
     client = get_client(url=langgraph_url())
     fire_time = _ceil_to_next_minute(datetime.now(UTC) + timedelta(seconds=delay_seconds))
     wakeup_prompt = (

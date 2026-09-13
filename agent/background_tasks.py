@@ -157,23 +157,18 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
             continue
         message = _notification(task)
         try:
-            if metadata.get("source") == "incidents_agent":
-                from agent.incidents.followups import enqueue_followup
-
-                await enqueue_followup(thread_id, f"background:{task_id}", message)
-            else:
-                configurable = _dispatch_config(metadata, thread_id)
-                configurable["background_task_completion"] = True
-                await dispatch_agent_run(
-                    thread_id,
-                    message,
-                    configurable,
-                    source=str(configurable.get("source") or "dashboard"),
-                    context=_BACKGROUND_TASK_CONTEXT,
-                    systems=[_BACKGROUND_TASK_SENDER],
-                    metadata={},
-                    multitask_strategy="enqueue",
-                )
+            configurable = _dispatch_config(metadata, thread_id)
+            configurable["background_task_completion"] = True
+            await dispatch_agent_run(
+                thread_id,
+                message,
+                configurable,
+                source=str(configurable.get("source") or "dashboard"),
+                context=_BACKGROUND_TASK_CONTEXT,
+                systems=[_BACKGROUND_TASK_SENDER],
+                metadata={},
+                multitask_strategy="enqueue",
+            )
             await _mark_delivered(backend, task_id)
             task["notification"] = "done"
             delivered += 1

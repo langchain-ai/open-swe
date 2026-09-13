@@ -1,6 +1,5 @@
 """Latest agent postmortem summaries, ready to read and copy elsewhere."""
 
-import re
 from typing import Any
 
 from fastapi import HTTPException
@@ -15,13 +14,12 @@ SUMMARIES = ["incidents", "summaries"]
 
 
 async def require_access(incident_id: str) -> Incident:
-    record = await service.INVESTIGATIONS.get(incident_id)
+    record = await service.INCIDENTS.get(incident_id)
     policy = await service.get_policy()
     history = await HISTORY.get(incident_id)
     if (
         not record
         or record.workspace_id != policy.workspace_id
-        or record.reason == "code_channel"
         or record.channel_id in policy.excluded_channel_ids
         or (
             history
@@ -69,17 +67,6 @@ async def _saved_markdown(record: Incident) -> str | None:
 async def document_context(incident_id: str) -> dict[str, Any]:
     record = await require_access(incident_id)
     markdown = await _saved_markdown(record)
-    if markdown:
-        live_urls = (
-            {message.source_url for message in record.messages if not message.deleted}
-            if not record.expired
-            else set()
-        )
-        markdown = re.sub(
-            r"https://(?:[a-zA-Z0-9-]+\.)?slack\.com/archives/[^\s<>)]*",
-            lambda match: match[0] if match[0] in live_urls else "[evidence unavailable]",
-            markdown,
-        )
     return {
         "incident_id": incident_id,
         "postmortem": {"markdown": markdown} if markdown is not None else None,

@@ -1,23 +1,32 @@
-"""Incident runs retain the system-thread runtime and add incident context."""
+"""Incident runs keep the system-thread runtime and add incident context and tools."""
 
-import json
-from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.agents.middleware.types import ModelRequest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
 from agent.dashboard.workspace_mcps import workspace_mcp_source
-from agent.incidents import runtime
-from agent.incidents.models import IncidentPolicy
+from agent.incidents import runtime, service, turns
+from agent.incidents.models import Incident, IncidentPolicy
 from tests.agent.test_agent_assembly_context import (
     _capture_create_deep_agent_kwargs,
 )
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
+
+CHANNEL = {
+    "id": "C1",
+    "name": "inc-test",
+    "is_channel": True,
+    "is_private": False,
+    "is_ext_shared": False,
+    "is_pending_ext_shared": False,
+    "is_member": True,
+}
 
 
 class ScriptedModel(BaseChatModel):
@@ -39,6 +48,18 @@ class ScriptedModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=self.responses.pop(0))])
 
 
+def _incident_config(**extra: Any) -> dict[str, Any]:
+    return {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "thread-ctx",
+            "source": "incidents_agent",
+            "incident_id": "incident",
+            **extra,
+        }
+    }
+
+
 @pytest.mark.parametrize("explicit", [False, True])
 async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     fake_store, monkeypatch, saved_thread_scope, explicit
@@ -49,18 +70,11 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
 
     saved_thread_scope.update(source="incidents_agent", owner_type="system", visibility="public")
     session = runtime.IncidentSession(
-        runtime.IncidentPass(
-            id="pass",
-            incident_id="incident",
-            thread_id="thread-ctx",
-            policy=IncidentPolicy(enabled=True),
-            explicit=explicit,
-            question="Open a fix PR" if explicit else None,
-        )
+        Incident(id="incident", workspace_id="T1", channel_id="C1", thread_id="thread-ctx"),
+        IncidentPolicy(enabled=True, workspace_id="T1"),
+        explicit_request="Open a fix PR" if explicit else None,
+        reply_thread_ts="1.0",
     )
-    from agent.source_context import SlackThreadRef
-
-    session.slack_thread = SlackThreadRef(channel_id="C1", thread_ts="1.0")
     session.check = AsyncMock()
     monkeypatch.setattr(runtime, "load_incident_session", AsyncMock(return_value=session))
 
@@ -70,19 +84,11 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     remote = StructuredTool.from_function(
         coroutine=update_incident, name="incident_update", description="Update incident status"
     )
-    config = {
-        "configurable": {
-            "__is_for_execution__": True,
-            "thread_id": "thread-ctx",
-            "source": "incidents_agent",
-            "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
-        }
-    }
     with (
         patch("agent.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps,
         patch("agent.server._notion_tools_for", AsyncMock(return_value=[])) as notion,
     ):
-        result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(config))
+        result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(_incident_config()))
     mcps.assert_awaited_once_with(workspace_mcp_source)
     notion.assert_awaited_once_with(None)
     assert isinstance(result["backend"].default, SandboxBackendProxy)
@@ -92,6 +98,8 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         "http_request",
         "background_execute",
         "slack_thread_reply",
+        "record_incident_report",
+        "search_incidents",
     } <= names
     assert not {"save_user_instructions", "save_user_skill", "read_user_settings"} & names
     assert result["skills"] == ["/organization-skills/", "/bundled-skills/"]
@@ -105,157 +113,91 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
     assert remote.name in dynamic.tools[0].description
     subagent = result["subagents"][0]
-    assert "open_pull_request" in {_registered_tool_name(tool) for tool in subagent["tools"]}
+    subagent_names = {_registered_tool_name(tool) for tool in subagent["tools"]}
+    assert "open_pull_request" in subagent_names
+    assert not runtime.INCIDENT_TOOL_NAMES & subagent_names
     guard = next(
         item for item in subagent["middleware"] if isinstance(item, runtime.IncidentMiddleware)
     )
-    await guard.aafter_agent({"messages": [AIMessage(content="Subagent findings")]}, None)
     session.check.side_effect = PermissionError("revoked")
     handler = AsyncMock()
     with pytest.raises(PermissionError, match="revoked"):
-        await guard.awrap_tool_call(SimpleNamespace(tool_call={"name": "execute"}), handler)
+        await guard.awrap_model_call(
+            ModelRequest(model=MagicMock(), messages=[], tools=[], state={"messages": []}), handler
+        )
     handler.assert_not_awaited()
 
 
-async def test_desktop_source_cannot_bypass_saved_incident_scope(saved_thread_scope):
-    saved_thread_scope.update(source="incidents_agent", owner_type="system", visibility="public")
-    with pytest.raises(PermissionError, match="Incident"):
-        await _capture_create_deep_agent_kwargs(
-            {
-                "configurable": {
-                    "__is_for_execution__": True,
-                    "thread_id": "thread-ctx",
-                    "source": "desktop",
-                    "local_project_path": "/tmp",
-                }
-            }
-        )
-
-
-async def test_incident_compaction_rechecks_access_before_model(monkeypatch):
-    from deepagents.backends.state import StateBackend
-
-    from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
-
-    summarize = AsyncMock(return_value="summary")
-    monkeypatch.setattr(ConversationOffloadingMiddleware, "_acreate_summary", summarize)
-    session = SimpleNamespace(check=AsyncMock(side_effect=PermissionError("revoked")))
-    middleware = runtime.IncidentOffloadingMiddleware(
-        ScriptedModel(responses=[]), StateBackend(), session
-    )
-    with pytest.raises(PermissionError, match="revoked"):
-        await middleware._acreate_summary([AIMessage(content="Protected context")])
-    summarize.assert_not_awaited()
+async def test_forged_incident_source_on_a_normal_thread_is_refused(saved_thread_scope):
+    saved_thread_scope.update(source="slack", visibility="public")
+    with pytest.raises(PermissionError, match="not an incident"):
+        await _capture_create_deep_agent_kwargs(_incident_config())
 
 
 @pytest.mark.parametrize("requested_action", [False, True])
-async def test_main_agent_executes_and_persists_incident_report(
+async def test_main_agent_records_the_incident_report_through_the_tool(
     fake_store, monkeypatch, saved_thread_scope, requested_action
 ):
     from deepagents import create_deep_agent
-    from langchain_core.messages import AIMessage, HumanMessage
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.store.memory import InMemoryStore
 
-    from agent.incidents import service, slack
-    from agent.incidents.models import Incident, IncidentMessage
-
-    policy = IncidentPolicy(enabled=True, workspace_id="T1")
-    await service.POLICIES.put("default", policy)
-    saved = runtime.IncidentPass(
-        id="pass",
-        incident_id="incident",
-        thread_id="thread-ctx",
-        policy=policy,
-        messages=[IncidentMessage(id="m1", ts="1.0", text="Errors reported")],
-        explicit=requested_action,
-        question="Open a PR for the confirmed fix" if requested_action else None,
-    )
-    await runtime.PASSES.put(saved.id, saved)
-    await service.INVESTIGATIONS.put(
+    await service.POLICIES.put("default", IncidentPolicy(enabled=True, workspace_id="T1"))
+    await service.INCIDENTS.put(
         "incident",
-        Incident(
-            id="incident",
-            workspace_id="T1",
-            channel_id="C1",
-            thread_id="worker",
-            agent_thread_id=saved.thread_id,
-            active_pass_id=saved.id,
-        ),
+        Incident(id="incident", workspace_id="T1", channel_id="C1", thread_id="thread-ctx"),
     )
     saved_thread_scope.update(
         source="incidents_agent", owner_type="system", visibility="public", incident_id="incident"
     )
-    monkeypatch.setattr(
-        slack,
-        "channel_info",
-        AsyncMock(
-            return_value={
-                "id": "C1",
-                "name": "inc-test",
-                "is_channel": True,
-                "is_private": False,
-                "is_ext_shared": False,
-                "is_pending_ext_shared": False,
-                "is_member": True,
-            }
-        ),
+    monkeypatch.setattr(service, "get_slack_channel_info", AsyncMock(return_value=dict(CHANNEL)))
+    posted = AsyncMock(return_value=("9.0", None))
+    monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", posted)
+    config = _incident_config(
+        **({"incident_request": "Open a PR for the confirmed fix"} if requested_action else {})
     )
-    config = {
-        "configurable": {
-            "__is_for_execution__": True,
-            "thread_id": saved.thread_id,
-            "source": "incidents_agent",
-            "incident_pass_id": saved.id,
-        }
-    }
     kwargs = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(config))
     kwargs.pop("make_model_calls")
-    model = ScriptedModel(
-        responses=[
-            AIMessage(
-                content='{"summary":[{"text":"Errors reported","evidence_ids":["slack:m1"]}]}'
-            )
-        ]
-    )
+    context = turns.context_block("C1", {"ts": "1.0", "user": "U1", "text": "Errors reported"})
     performed = AsyncMock(return_value={"url": "https://github.com/acme/api/pull/42"})
+
+    def report_call(evidence_id: str, text: str) -> AIMessage:
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "report-call",
+                    "name": "record_incident_report",
+                    "args": {"summary": [{"text": text, "evidence_ids": [evidence_id]}]},
+                }
+            ],
+        )
+
+    class TurnModel(ScriptedModel):
+        async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+            tool_results = [m for m in messages if isinstance(m, ToolMessage)]
+            if any(m.tool_call_id == "report-call" for m in tool_results):
+                reply = AIMessage(content="Recorded.")
+            elif requested_action and not tool_results:
+                reply = AIMessage(
+                    content="",
+                    tool_calls=[{"id": "pr-call", "name": "open_pull_request", "args": {}}],
+                )
+            elif requested_action:
+                observation = next(m for m in tool_results if m.tool_call_id == "pr-call")
+                evidence_id = (
+                    observation.text.rsplit("Incident evidence: ", 1)[1].strip().split("\n", 1)[0]
+                )
+                reply = report_call(evidence_id, "Opened the fix PR")
+            else:
+                reply = report_call("slack:1.0", "Errors reported")
+            return ChatResult(generations=[ChatGeneration(message=reply)])
+
     if requested_action:
 
         async def open_pull_request() -> dict:
             """Open the requested test PR through a simulated external API."""
             return await performed()
-
-        class ActionModel(ScriptedModel):
-            async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
-                observation = next(
-                    (
-                        m
-                        for m in reversed(messages)
-                        if isinstance(m, ToolMessage) and m.tool_call_id == "pr-call"
-                    ),
-                    None,
-                )
-                if observation is None:
-                    reply = AIMessage(
-                        content="",
-                        tool_calls=[{"id": "pr-call", "name": "open_pull_request", "args": {}}],
-                    )
-                else:
-                    evidence_id = (
-                        observation.text.rsplit("Incident evidence: ", 1)[1]
-                        .strip()
-                        .split("\n", 1)[0]
-                    )
-                    reply = AIMessage(
-                        content=json.dumps(
-                            {
-                                "summary": [
-                                    {"text": "Opened the fix PR", "evidence_ids": [evidence_id]}
-                                ]
-                            }
-                        )
-                    )
-                return ChatResult(generations=[ChatGeneration(message=reply)])
 
         kwargs["tools"] = [
             tool
@@ -263,7 +205,7 @@ async def test_main_agent_executes_and_persists_incident_report(
             if getattr(tool, "__name__", getattr(tool, "name", "")) != "open_pull_request"
         ]
         kwargs["tools"].append(StructuredTool.from_function(coroutine=open_pull_request))
-        model = ActionModel(responses=[])
+    model = TurnModel(responses=[])
     kwargs["model"] = model
     for subagent in kwargs["subagents"]:
         subagent["model"] = ScriptedModel(responses=[])
@@ -279,19 +221,22 @@ async def test_main_agent_executes_and_persists_incident_report(
             }
         ),
     ):
-        result = await agent.ainvoke(
-            {"messages": [HumanMessage(content="Analyze current incident")]}, config
-        )
-    report = (await runtime.PASSES.get(saved.id)).report
-    assert report is not None
+        result = await agent.ainvoke({"messages": [HumanMessage(content=context["text"])]}, config)
+
+    latest = await service.REPORTS.get("incident")
+    assert latest is not None
     if requested_action:
         performed.assert_awaited_once()
-        assert "Opened the fix PR" in report.summary
-        assert any(item.url == "https://github.com/acme/api/pull/42" for item in report.evidence)
+        assert "Opened the fix PR" in latest.report.summary
+        assert any(
+            item.url == "https://github.com/acme/api/pull/42" for item in latest.report.evidence
+        )
     else:
         performed.assert_not_awaited()
-        assert report.summary == "Errors reported [slack:m1]"
+        assert latest.report.summary == "Errors reported [slack:1.0]"
+    posted.assert_awaited_once()
+    assert posted.await_args.args[:2] == ("C1", "0")
     assert result["messages"][-1].type == "ai"
-    assert "execute" in model.bound_names
-    assert "task" in model.bound_names
-    assert "search_incidents" in model.bound_names
+    assert {"execute", "task", "record_incident_report", "search_incidents"} <= set(
+        model.bound_names
+    )

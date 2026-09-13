@@ -69,9 +69,6 @@ export interface IncidentPolicy {
   excluded_channel_ids: string[]
   model: string | null
   max_model_calls: number
-  max_pass_seconds: number
-  idle_timeout_seconds: number
-  max_watch_seconds: number
   version: number
   enabled_at: number
 }

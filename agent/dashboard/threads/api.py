@@ -388,11 +388,7 @@ async def admin_cancel_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
 
-    if thread_source(thread_metadata(thread)) in {
-        "incidents",
-        "incidents_coordinator",
-        "incidents_agent",
-    }:
+    if thread_source(thread_metadata(thread)) == "incidents_agent":
         raise HTTPException(404, "thread not found")
 
     if thread_metadata(thread).get("visibility", "public") != "public":

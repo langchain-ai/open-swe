@@ -232,7 +232,7 @@ def test_service_errors_remain_actionable_http_errors(client, service, status) -
     assert response.headers["Retry-After"] == "60"
 
 
-@pytest.mark.parametrize("source", ["incidents", "incidents_coordinator", "incidents_agent"])
+@pytest.mark.parametrize("source", ["incidents_agent"])
 @pytest.mark.parametrize(
     ("method", "path", "body"),
     [
@@ -280,7 +280,7 @@ def test_generic_thread_routes_reject_incidents_even_for_admin_owners(
     threads.update.assert_not_awaited()
 
 
-@pytest.mark.parametrize("source", ["incidents", "incidents_coordinator", "incidents_agent"])
+@pytest.mark.parametrize("source", ["incidents_agent"])
 async def test_thread_stream_preflight_rejects_incidents_before_opening_stream(
     monkeypatch, source
 ) -> None:
@@ -297,7 +297,7 @@ async def test_thread_stream_preflight_rejects_incidents_before_opening_stream(
     threads.join_stream.assert_not_awaited()
 
 
-@pytest.mark.parametrize("source", ["incidents", "incidents_coordinator", "incidents_agent"])
+@pytest.mark.parametrize("source", ["incidents_agent"])
 @pytest.mark.parametrize("include_all", [False, True])
 async def test_generic_thread_lists_exclude_incidents_for_owners_and_admins(
     monkeypatch, source, include_all
@@ -324,7 +324,7 @@ async def test_generic_thread_lists_exclude_incidents_for_owners_and_admins(
     assert projects == []
 
 
-@pytest.mark.parametrize("source", ["incidents", "incidents_coordinator", "incidents_agent"])
+@pytest.mark.parametrize("source", ["incidents_agent"])
 async def test_admin_cancel_cannot_mutate_an_incidents_thread(monkeypatch, source) -> None:
     threads = SimpleNamespace(
         get=AsyncMock(return_value={"thread_id": "i1", "metadata": {"source": source}}),
@@ -340,14 +340,15 @@ async def test_admin_cancel_cannot_mutate_an_incidents_thread(monkeypatch, sourc
     threads.update.assert_not_awaited()
 
 
-@pytest.mark.parametrize("source", ["incidents", "incidents_coordinator", "incidents_agent"])
 @pytest.mark.parametrize("status", ["success", "error"])
-async def test_incidents_completion_never_sends_generic_slack_output(
-    monkeypatch, source, status
+async def test_incidents_completion_is_delegated_without_generic_slack_output(
+    monkeypatch, status
 ) -> None:
+    from agent.incidents import turns
+
     metadata = {
-        "source": source,
-        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.456"}},
+        "source": "incidents_agent",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "0"}},
     }
     threads = SimpleNamespace(
         get=AsyncMock(return_value={"thread_id": "i1", "metadata": metadata}),
@@ -356,8 +357,10 @@ async def test_incidents_completion_never_sends_generic_slack_output(
     monkeypatch.setattr(completion, "langgraph_client", lambda: SimpleNamespace(threads=threads))
     post = AsyncMock(return_value=True)
     costs = AsyncMock(return_value=True)
+    settle = AsyncMock(return_value={"status": "ok", "reason": "incident turn complete"})
     monkeypatch.setattr(completion, "post_slack_thread_reply", post)
     monkeypatch.setattr(completion, "schedule_session_cost_refresh", costs)
+    monkeypatch.setattr(turns, "handle_run_completion", settle)
 
     result = await completion.handle_run_completion(
         {
@@ -368,7 +371,8 @@ async def test_incidents_completion_never_sends_generic_slack_output(
         }
     )
 
-    assert result["status"] == "ignored"
+    assert result == {"status": "ok", "reason": "incident turn complete"}
+    settle.assert_awaited_once_with("i1", "r1", status)
     post.assert_not_awaited()
     costs.assert_not_awaited()
     threads.update.assert_not_awaited()

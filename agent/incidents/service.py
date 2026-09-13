@@ -1,207 +1,30 @@
-"""Durable receipt acceptance and authenticated dashboard operations."""
+"""Incident policy, records, dashboard projections, and responder commands."""
 
 import hashlib
 import json
 import logging
 import time
 from typing import Any
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import NAMESPACE_URL, uuid5
 
-import httpx
 from fastapi import HTTPException
 from pydantic import ValidationError
 
 from agent.config import ENV
-from agent.dispatch import create_durable_run
-from agent.incidents import slack
-from agent.incidents.models import (
-    CoordinatorState,
-    Incident,
-    IncidentPolicy,
-    Publication,
-    Receipt,
-)
-from agent.store import TypedStore, now_iso, store_client
+from agent.incidents.evidence_tools import redact
+from agent.incidents.models import Activity, Incident, IncidentPolicy, IncidentReportRecord
+from agent.input_messages import PersonIdentity
+from agent.slack.client import get_slack_channel_info
+from agent.slack.http import slack_client
+from agent.store import TypedStore, now_iso
 from agent.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
 POLICIES = TypedStore(["incidents", "policies"], IncidentPolicy)
-INVESTIGATIONS = TypedStore(["incidents", "incidents"], Incident)
-RECEIPTS = TypedStore(["incidents", "receipts"], Receipt)
-PUBLICATIONS = TypedStore(["incidents", "publications"], Publication)
-COORDINATORS = TypedStore(["incidents", "coordinators"], CoordinatorState)
-
-
-def incident_id(workspace_id: str, channel_id: str) -> str:
-    return str(uuid5(NAMESPACE_URL, f"open-swe:incidents:{workspace_id}:{channel_id}"))
-
-
-def fingerprint(value: Any) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
-
-
-def redact_context(value: Any) -> Any:
-    from agent.incidents.evidence_tools import redact
-
-    if isinstance(value, str):
-        return redact(value, 8000)
-    if isinstance(value, list):
-        return [redact_context(item) for item in value]
-    if isinstance(value, dict):
-        return {key: redact_context(item) for key, item in value.items()}
-    return value
-
-
-def receipt_payload(event: dict[str, Any]) -> dict[str, Any]:
-    if len(json.dumps(event).encode()) > 256 * 1024:
-        raise HTTPException(413, "Incident event exceeds 256 KiB")
-    fields = {
-        "type",
-        "subtype",
-        "channel",
-        "event_ts",
-        "ts",
-        "thread_ts",
-        "user",
-        "bot_id",
-        "app_id",
-        "bot_profile",
-        "metadata",
-        "text",
-        "attachments",
-        "blocks",
-        "message",
-        "deleted_ts",
-    }
-    return redact_context({key: value for key, value in event.items() if key in fields})
-
-
-async def get_policy() -> IncidentPolicy:
-    return await POLICIES.get("default") or IncidentPolicy()
-
-
-async def schedule_wake(seconds: float = 0) -> None:
-    thread_id = incident_id("coordinator", "default")
-    await store_client().threads.create(
-        thread_id=thread_id,
-        if_exists="do_nothing",
-        metadata={"source": "incidents_coordinator"},
-    )
-    await create_durable_run(
-        thread_id,
-        "scheduler",
-        input={"task": "incidents_coordinator"},
-        source="incidents_coordinator",
-        metadata={"source": "incidents_coordinator"},
-        multitask_strategy="enqueue",
-        after_seconds=max(0, seconds),
-    )
-
-
-async def wake() -> None:
-    try:
-        await schedule_wake()
-    except Exception:
-        # The durable inbox remains available to the recovery tick.
-        logger.exception("Incident dispatch deferred to recovery")
-
-
-async def accept_slack_event(payload: dict[str, Any]) -> dict[str, str] | None:
-    event = payload.get("event") or {}
-    kind = event.get("type")
-    if kind not in {
-        "channel_created",
-        "channel_rename",
-        "channel_archive",
-        "message",
-        "app_mention",
-        "agent_session_stopped",
-    }:
-        return None
-    policy = await get_policy()
-    channel = event.get("channel")
-    channel_id = channel.get("id", "") if isinstance(channel, dict) else channel
-    if not isinstance(channel_id, str) or not channel_id:
-        return None
-    record = await INVESTIGATIONS.get(incident_id(policy.workspace_id, channel_id))
-    if record and record.reason == "code_channel":
-        return None
-    if kind == "agent_session_stopped" and (
-        record is None
-        or not event.get("thread_ts")
-        or event["thread_ts"] not in {record.anchor_ts, record.slack_session_thread_ts}
-    ):
-        return None
-    enrollment = kind in {"channel_created", "channel_rename"}
-    awaiting_registration = False
-    if not record and policy.enabled and not enrollment:
-        awaiting_registration = any(
-            receipt.kind in {"channel_created", "channel_rename"}
-            and receipt.workspace_id == policy.workspace_id
-            and receipt.source_time >= policy.enabled_at
-            for receipt in await RECEIPTS.search_all(filter={"channel_id": channel_id})
-        )
-    if not record and not awaiting_registration and not (policy.enabled and enrollment):
-        return None
-    if (
-        payload.get("team_id") != policy.workspace_id
-        or payload.get("api_app_id") != policy.slack_app_id
-    ):
-        raise HTTPException(401, "Slack workspace or app does not match Incidents policy")
-    if record and (record.expired or not policy.enabled):
-        return {"status": "ignored"}
-    try:
-        source_time = float(payload.get("event_time") or event.get("event_ts") or 0)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(400, "Invalid event timestamp") from exc
-    if not record and source_time < policy.enabled_at:
-        return {"status": "ignored"}
-    if (
-        not record
-        and isinstance(channel, dict)
-        and not str(channel.get("name", "")).startswith(policy.channel_prefix)
-    ):
-        return {"status": "ignored"}
-    event_id = payload.get("event_id")
-    if not isinstance(event_id, str) or not event_id:
-        raise HTTPException(400, "Slack event ID is required")
-    normalized = receipt_payload(event)
-    body_hash = fingerprint(event)
-    receipt_id = fingerprint([policy.workspace_id, "slack", event_id])
-    existing = await RECEIPTS.get(receipt_id)
-    if existing:
-        if existing.content_hash != body_hash:
-            raise HTTPException(409, "Event ID was reused with different content")
-        return {"status": "duplicate"}
-    await RECEIPTS.put(
-        receipt_id,
-        Receipt(
-            id=receipt_id,
-            workspace_id=policy.workspace_id,
-            channel_id=channel_id,
-            kind=str(kind),
-            payload=normalized,
-            source_time=source_time,
-            received_at=time.time(),
-            content_hash=body_hash,
-        ),
-    )
-    await wake()
-    return {"status": "accepted"}
-
-
-async def ensure_recovery() -> None:
-    client = store_client()
-    existing = await client.crons.search(metadata={"source": "incidents_recovery"}, limit=1)
-    if not existing:
-        await client.crons.create(
-            "scheduler",
-            schedule="* * * * *",
-            input={"task": "incidents"},
-            metadata={"source": "incidents_recovery"},
-        )
-
-
+INCIDENTS = TypedStore(["incidents", "incidents"], Incident)
+REPORTS = TypedStore(["incidents", "reports"], IncidentReportRecord)
+ACTIVE_STATUSES = frozenset({"watching", "needs_attention"})
+_VIEWS = {"active": ACTIVE_STATUSES, "inactive": frozenset({"paused", "completed"})}
 REQUIRED_SLACK_SCOPES = frozenset(
     {
         "channels:read",
@@ -215,9 +38,98 @@ REQUIRED_SLACK_SCOPES = frozenset(
 )
 
 
+def incident_id(workspace_id: str, channel_id: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"open-swe:incidents:{workspace_id}:{channel_id}"))
+
+
+def fingerprint(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def redact_context(value: Any) -> Any:
+    if isinstance(value, str):
+        return redact(value, 8000)
+    if isinstance(value, list):
+        return [redact_context(item) for item in value]
+    if isinstance(value, dict):
+        return {key: redact_context(item) for key, item in value.items()}
+    return value
+
+
+def note(target: Incident | IncidentReportRecord, kind: str, text: str) -> None:
+    if not target.activity or target.activity[-1].summary != text:
+        target.activity.append(Activity(type=kind, summary=text))
+        target.activity = target.activity[-100:]
+
+
+async def save(record: Incident) -> None:
+    from agent.incidents import documents
+
+    record.updated_at = now_iso()
+    await INCIDENTS.put(record.id, record)
+    await documents.preserve_metadata(record)
+
+
+async def get_policy() -> IncidentPolicy:
+    return await POLICIES.get("default") or IncidentPolicy()
+
+
+def channel_allowed(
+    channel: dict[str, Any], policy: IncidentPolicy, *, for_read: bool = False
+) -> bool:
+    public_internal = (
+        channel.get("is_channel") is True
+        and channel.get("is_private") is False
+        and channel.get("is_im") is not True
+        and channel.get("is_mpim") is not True
+        and channel.get("is_ext_shared") is False
+        and channel.get("is_pending_ext_shared") is False
+    )
+    if not public_internal:
+        return False
+    if for_read:
+        return channel.get("is_member") is True
+    return (
+        str(channel.get("name", "")).startswith(policy.channel_prefix)
+        and channel.get("id") not in policy.excluded_channel_ids
+        and channel.get("is_archived") is not True
+    )
+
+
+async def readable(
+    record: Incident, policy: IncidentPolicy, *, raise_on_unavailable: bool = False
+) -> bool:
+    """Whether responders may read this incident right now: the bot must still be a member."""
+    if (
+        record.workspace_id != policy.workspace_id
+        or record.channel_id in policy.excluded_channel_ids
+    ):
+        return False
+    info = await get_slack_channel_info(record.channel_id, use_cache=False)
+    if info is None:
+        if raise_on_unavailable:
+            raise HTTPException(
+                503, "Slack access verification is temporarily unavailable. Try again."
+            )
+        return False
+    return channel_allowed(info, policy, for_read=True)
+
+
+async def _auth_test() -> tuple[dict[str, Any], list[str] | None]:
+    async with slack_client(token=ENV.SLACK_BOT_TOKEN.get()) as client:
+        response = await client.auth_test()
+    data = response.data if isinstance(response.data, dict) else {}
+    header = response.headers.get("x-oauth-scopes") if response.headers else None
+    scopes = [scope.strip() for scope in header.split(",")] if isinstance(header, str) else None
+    return data, scopes
+
+
+def _last_operation(policy: IncidentPolicy) -> dict[str, Any]:
+    return {"command_id": f"settings:{policy.version}", "status": "applied", "error": None}
+
+
 async def get_settings() -> dict[str, Any]:
     policy = await get_policy()
-    state = await COORDINATORS.get("default") or CoordinatorState()
     app_id = ENV.SLACK_APP_ID.get()
     connection: dict[str, Any] = {
         "slack_configured": bool(ENV.SLACK_BOT_TOKEN.get()),
@@ -229,7 +141,7 @@ async def get_settings() -> dict[str, Any]:
     }
     if connection["slack_configured"]:
         try:
-            auth = await slack.request("auth.test")
+            auth, scopes = await _auth_test()
             team_id = str(auth.get("team_id") or "")
             if team_id:
                 connection["workspace_id"] = team_id
@@ -237,10 +149,8 @@ async def get_settings() -> dict[str, Any]:
                 connection["error"] = "Slack installation belongs to a different workspace."
             else:
                 connection["verified_at"] = now_iso()
-            if "granted_scopes" in auth:
-                connection["required_scopes_present"] = REQUIRED_SLACK_SCOPES.issubset(
-                    auth["granted_scopes"]
-                )
+            if scopes is not None:
+                connection["required_scopes_present"] = REQUIRED_SLACK_SCOPES.issubset(scopes)
                 if not connection["required_scopes_present"]:
                     connection["error"] = "Slack installation is missing required Incidents scopes."
         except Exception:
@@ -256,7 +166,7 @@ async def get_settings() -> dict[str, Any]:
     return {
         "policy": policy.model_dump(),
         "connection": connection,
-        "last_operation": state.last_operation,
+        "last_operation": _last_operation(policy),
     }
 
 
@@ -290,7 +200,7 @@ async def update_settings(
                 422, "Set SLACK_APP_ID to the installed Slack app ID before enabling Incidents"
             )
         try:
-            auth = await slack.request("auth.test")
+            auth, _ = await _auth_test()
         except Exception as exc:
             raise HTTPException(
                 422, "Slack verification failed; check installation and permissions"
@@ -300,33 +210,23 @@ async def update_settings(
             raise HTTPException(422, "Slack installation did not report a workspace")
         bound = (current.workspace_id, current.slack_app_id)
         identity = (workspace_id, app_id)
-        if bound != identity and any(bound) and await INVESTIGATIONS.search(limit=1):
+        if bound != identity and any(bound) and await INCIDENTS.search(limit=1):
             raise HTTPException(
                 409, "Slack workspace or app cannot change with registered incidents"
             )
         candidate.workspace_id, candidate.slack_app_id = identity
-        await ensure_recovery()
     candidate.version = current.version + 1
     candidate.enabled_at = (
         time.time() if candidate.enabled and not current.enabled else current.enabled_at
     )
-    receipt_id = str(uuid4())
-    await RECEIPTS.put(
-        receipt_id,
-        Receipt(
-            id=receipt_id,
-            workspace_id=candidate.workspace_id,
-            kind="settings",
-            payload={"policy": candidate.model_dump(), "expected_version": expected_version},
-            actor=actor,
-            received_at=time.time(),
-        ),
+    await POLICIES.put("default", candidate)
+    logger.info(
+        "Incident settings updated", extra={"actor": actor.get("id"), "version": candidate.version}
     )
-    await wake()
-    return {"command_id": receipt_id, "status": "accepted"}
+    return {"command_id": f"settings:{candidate.version}", "status": "applied"}
 
 
-def summary(record: Incident) -> dict[str, Any]:
+def summary(record: Incident, latest: IncidentReportRecord | None) -> dict[str, Any]:
     return {
         "id": record.id,
         "channel_id": record.channel_id,
@@ -335,38 +235,25 @@ def summary(record: Incident) -> dict[str, Any]:
         "is_archived": record.is_archived,
         "status": record.status,
         "reason": record.reason,
-        "latest_finding": record.report.summary if record.report else "",
-        "updated_at": record.updated_at,
+        "latest_finding": latest.report.summary if latest else "",
+        "updated_at": max(record.updated_at, latest.updated_at) if latest else record.updated_at,
         "slack_url": f"https://slack.com/archives/{record.channel_id}",
     }
 
 
-async def readable(
-    record: Incident, policy: IncidentPolicy, *, raise_on_unavailable: bool = False
-) -> bool:
-    if record.reason == "code_channel" or record.channel_id in policy.excluded_channel_ids:
-        return False
-    try:
-        info = await slack.channel_info(record.channel_id)
-    except Exception as exc:
-        unavailable = True
-        if isinstance(exc, slack.SlackError):
-            unavailable = str(exc) in {
-                "rate_limited",
-                "ratelimited",
-                "internal_error",
-                "fatal_error",
-                "request_timeout",
-                "service_unavailable",
-            }
-        elif isinstance(exc, httpx.HTTPStatusError):
-            unavailable = exc.response.status_code == 429 or exc.response.status_code >= 500
-        if raise_on_unavailable and unavailable:
-            raise HTTPException(
-                503, "Slack access verification is temporarily unavailable. Try again."
-            ) from exc
-        return False
-    return slack.channel_allowed(info, policy, for_read=True)
+def setup_summary(record: Incident) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "channel_id": record.channel_id,
+        "channel_name": "",
+        "title": "Channel setup needs attention",
+        "is_archived": False,
+        "status": record.status,
+        "reason": record.reason,
+        "latest_finding": "",
+        "updated_at": record.updated_at,
+        "slack_url": "",
+    }
 
 
 async def list_incidents(
@@ -378,22 +265,19 @@ async def list_incidents(
     include_setup: bool = False,
 ) -> dict[str, Any]:
     policy = await get_policy()
-    records = sorted(await INVESTIGATIONS.search_all(), key=lambda r: r.updated_at, reverse=True)
+    records = sorted(await INCIDENTS.search_all(), key=lambda r: r.updated_at, reverse=True)
     items = []
     for record in records:
         if record.workspace_id != policy.workspace_id:
             continue
-        can_read = await readable(record, policy)
-        if not can_read and not (include_setup and not record.joined):
+        if view and view != "all" and record.status not in _VIEWS.get(view, {view}):
             continue
-        item = summary(record) if can_read else setup_summary(record)
-        if view and view != "all":
-            statuses = {
-                "active": {"pending", "watching", "investigating", "needs_attention"},
-                "inactive": {"paused", "completed"},
-            }[view]
-            if record.status not in statuses:
-                continue
+        if await readable(record, policy):
+            item = summary(record, await REPORTS.get(record.id))
+        elif include_setup and record.reason == "setup_failed":
+            item = setup_summary(record)
+        else:
+            continue
         if q and q.lower() not in f"{item['title']} {item['channel_name']}".lower():
             continue
         items.append(item)
@@ -410,101 +294,92 @@ async def list_incidents(
     }
 
 
-def setup_summary(record: Incident) -> dict[str, Any]:
-    return {
-        "id": record.id,
-        "channel_id": record.channel_id,
-        "channel_name": "",
-        "title": "Channel setup needs attention"
-        if record.status != "pending"
-        else "Joining channel",
-        "is_archived": False,
-        "status": record.status,
-        "reason": record.reason,
-        "latest_finding": "",
-        "updated_at": record.updated_at,
-        "slack_url": "",
-    }
-
-
 async def get_incident(id: str, *, include_setup: bool = False) -> dict[str, Any]:
-    record = await INVESTIGATIONS.get(id)
+    from agent.incidents import turns
+
+    record = await INCIDENTS.get(id)
     policy = await get_policy()
     if not record or record.workspace_id != policy.workspace_id:
         raise HTTPException(404, "Incident not found")
-    if not await readable(record, policy, raise_on_unavailable=record.joined or not include_setup):
-        if include_setup and not record.joined:
+    setup_failed = record.reason == "setup_failed"
+    if not await readable(
+        record, policy, raise_on_unavailable=not (include_setup and setup_failed)
+    ):
+        if include_setup and setup_failed:
             return {
                 "incident": setup_summary(record),
                 "report": None,
                 "coverage": {
                     "gaps": [
-                        "Channel setup has not established readable public-channel membership. Check Slack grants and configuration."
+                        "Channel setup did not complete. Check Slack grants and configuration."
                     ]
                 },
-                "activity": [],
+                "activity": [item.model_dump() for item in reversed(record.activity)],
                 "allowed_actions": [],
                 "trace_url": None,
                 "next_cursor": None,
             }
         raise HTTPException(404, "Incident not found")
-    actions: list[str] = []
-    if not record.expired:
-        actions.extend(["ask", "investigate_again"])
+    latest = await REPORTS.get(id)
+    status: str = record.status
+    if record.status in ACTIVE_STATUSES and await turns.has_active_run(record.thread_id):
+        status = "investigating"
+    actions = ["ask"]
+    if record.status != "completed":
+        actions.append("investigate_again")
     if record.status == "completed":
-        if not record.is_archived and not record.expired:
+        if not record.is_archived:
             actions.append("reopen")
     elif record.status == "paused":
         actions.extend(["resume", "complete"])
     else:
         actions.extend(["pause", "complete"])
+    activity = sorted(
+        [*record.activity, *(latest.activity if latest else [])],
+        key=lambda item: item.at,
+        reverse=True,
+    )[:100]
     return {
-        "incident": summary(record),
-        "report": record.report.model_dump() if record.report else None,
-        "coverage": {"gaps": record.gaps},
-        "activity": [item.model_dump() for item in reversed(record.activity[-100:])],
+        "incident": {**summary(record, latest), "status": status},
+        "report": latest.report.model_dump() if latest else None,
+        "coverage": {"gaps": latest.report.gaps if latest else []},
+        "activity": [item.model_dump() for item in activity],
         "allowed_actions": actions,
-        "trace_url": await get_langsmith_trace_url(record.agent_thread_id or record.thread_id)
-        if not record.expired
-        else None,
+        "trace_url": await get_langsmith_trace_url(record.thread_id) if record.thread_id else None,
         "next_cursor": None,
     }
+
+
+def requester_identity(actor: dict[str, Any]) -> PersonIdentity:
+    login = str(actor.get("github_login") or actor.get("id") or "responder").replace(" ", "-")
+    person: PersonIdentity = {"id": f"github:{login}", "platform": "github", "github_login": login}
+    person["display_name"] = login
+    email = actor.get("email")
+    if isinstance(email, str) and email:
+        person["email"] = email
+    return person
 
 
 async def submit_command(
     id: str, action: str, text: str | None, request_id: str, actor: dict[str, Any]
 ) -> dict[str, str]:
+    from agent.incidents import channels, turns
+
     detail = await get_incident(id)
-    if action == "ask" and (not text or not text.strip() or len(text) > 8000):
-        raise HTTPException(422, "A question of 1–8000 characters is required")
-    record = await INVESTIGATIONS.get(id)
-    assert record is not None
-    receipt_id = fingerprint([id, actor.get("id") or actor.get("github_login"), request_id])
-    payload = {"action": action, "text": text or ""}
-    existing = await RECEIPTS.get(receipt_id)
-    if existing:
-        if existing.content_hash != fingerprint(payload):
-            raise HTTPException(409, "Request ID was reused with different content")
-        return {"command_id": receipt_id, "status": "duplicate"}
     if action not in detail["allowed_actions"]:
         raise HTTPException(409, "Action is not available in this incident state")
-    await RECEIPTS.put(
-        receipt_id,
-        Receipt(
-            id=receipt_id,
-            workspace_id=record.workspace_id,
-            channel_id=record.channel_id,
-            kind="command",
-            payload=redact_context(payload),
-            actor=actor,
-            received_at=time.time(),
-            content_hash=fingerprint(payload),
-        ),
-    )
-    await wake()
-    return {"command_id": receipt_id, "status": "accepted"}
-
-
-async def recover() -> dict[str, str]:
-    await schedule_wake()
-    return {"status": "accepted"}
+    if action == "ask" and (not text or not text.strip() or len(text) > 8000):
+        raise HTTPException(422, "A question of 1–8000 characters is required")
+    record = await INCIDENTS.get(id)
+    assert record is not None
+    policy = await get_policy()
+    if action == "ask":
+        assert text is not None
+        await turns.dispatch_turn(
+            record, policy, request=text.strip(), requester=requester_identity(actor)
+        )
+    elif action == "investigate_again":
+        await turns.dispatch_turn(record, policy)
+    else:
+        await channels.apply_control(record, action, actor)
+    return {"command_id": request_id, "status": "accepted"}

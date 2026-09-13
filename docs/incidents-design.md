@@ -1,45 +1,53 @@
 # Incidents architecture
 
-Incidents builds on the investigation workflow from PR #2497 and the system-owned thread support in PR #2647. It uses the main `agent` graph for reasoning and keeps durable channel scheduling outside the conversation.
+Incidents runs each enrolled Slack channel as one ordinary system-owned Open SWE thread, driven by the same webhook path that serves code channels. There is no incident-specific worker, queue, or scheduler.
 
-## Main agent and scheduling
+## Flow
 
-Slack events and dashboard commands enter a durable receipt inbox. The existing `scheduler` graph runs incident admission and channel-worker jobs. Admission allows one channel worker per workspace; the worker handles debounce, control commands, retries, documents, and deduplicated Slack publications. Incidents adds no graph entrypoints.
+```text
+Slack event ──► /webhooks/slack ──► agent.incidents.channels.handle_slack_event
+                                     │  channel not enrolled and not an enrollment ──► regular Slack path
+                                     ├─ channel_created / channel_rename with the prefix ──► enroll
+                                     ├─ channel_archive / agent_session_stopped ──► complete / pause
+                                     ├─ mention by an authorized responder ──► control, or explicit turn (interrupt)
+                                     └─ any other message ──► queued as thread context
+                                                               + one automatic turn 15 s later (enqueue)
 
-Each incident has a separate system-owned, public conversation thread running `agent`. Saved thread metadata and a stored pass binding attach incident context and verify access. Caller-supplied source flags cannot grant or bypass that scope. Each pass carries its question, evidence, policy, scope, run identity, and final report. An uncertain dispatch is recovered using the pass ID in run metadata.
+main `agent` graph on the incident thread
+  IncidentMiddleware  — incident instructions, watching/paused check, evidence from context and tools
+  record_incident_report — validates citations, stores the report, updates the postmortem, posts when changed
+  search_incidents / read_incident — retained history
 
-The main factory uses the normal system-thread runtime: persistent sandbox, code and PR tools, workspace MCP discovery, browser integration, organization skills, subagents, model selection, and conversation compaction. Repository access uses those existing tools; incident-specific tools only add related-incident lookup. The normal prepare-run, GitHub proxy refresh, PR creation, and workspace authorization paths remain active. PRs use the GitHub App identity; personal integrations and credentials remain unavailable.
+run-completion webhook ──► agent.incidents.turns.handle_run_completion
+```
 
-Incident instructions are appended to the normal system prompt. Automatic passes investigate and propose mitigation; external actions follow only the current explicit, authorized responder request saved in the pass. A question does not authorize unrelated remediation, and ordinary Slack messages or retrieved material are evidence rather than action instructions. This is agent behavior guidance, not a separate read-only execution sandbox. Configured workspace permissions and the normal tool guards still apply.
+One LangGraph run per turn. Nothing waits on another process.
 
-Parent and subagent execution recheck incident access. Subagents inherit the current request and incident instructions but do not finalize another incident report. Ordinary tool results retain their normal content and state updates, with evidence IDs attached so actions, returned PR links, and integration observations can be cited. Failed tool results produce coverage gaps. Workspace MCP changes invalidate retained context regardless of which integration supplied it.
+## Identity and mapping
 
-Background-command completions and scheduled wakeups enter the incident receipt queue. Due wakeups are admitted by the coordinator's recovery tick, with the normal debounce and pause rules. Followups supply investigation context and do not renew earlier action authorization. Pending followups are bound to their conversation and access scope; accepted followup context is removed when the conversation resets.
+An enrolled channel maps to one agent thread at the Slack location `(channel_id, "0")`, the session timestamp code channels use. Thread metadata carries `source: incidents_agent`, `owner_type: system`, `visibility: public`, `incident_id`, and the Slack location. Runs on the thread carry `configurable.source = "incidents_agent"` and no personal identity; `agent.incidents.runtime.load_incident_session` re-verifies the saved binding before assembling the agent and refuses forged sources. Background-task completions and scheduled wakeups return to the thread as normal turns. Generic dashboard thread routes hide these threads; the Incidents dashboard is the review surface.
 
-Slack tools receive the destination from the verified incident record. The worker owns automatic report publication and debounce; the agent is instructed not to duplicate those updates with direct Slack calls. Extra communications require a responder request.
+## Context and debounce
 
-Conversations persist across normal passes. Changed or deleted Slack context, changed workspace MCP permissions, and revoked related-incident access create a fresh conversation checkpoint, including fresh offloaded files. Previous findings are omitted from the reset input. Historical pass records allow cleanup to remove every conversation generation.
+Every channel message, including bot alerts, is queued for the thread as a context block with a citable `slack:<ts>` header, its permalink, and redacted text; the standard queue middleware drains it before the next model call. A plain message schedules one automatic turn with `after_seconds=15` unless a run is already pending or running, so a burst becomes one turn. Mentions by responders in `OBSERVABILITY_AUTHORIZED_EMAILS` or `CONFIGURED_ADMINS` are either a control word (`pause`, `resume`, `complete`, `reopen`) or a question, which dispatches an explicit turn with `multitask_strategy="interrupt"` and answers in the mention's thread when it has one. Paused and completed channels still accumulate context but schedule nothing; a resume with waiting context schedules a turn.
 
-Controls and access are rechecked before model calls, tool execution, report finalization, and publication. A pause stops automatic analysis but permits explicit questions. Generic dashboard thread listings, detail routes, and cancellation routes do not expose these conversations; use Incidents.
+## Records
 
-## Incident trackers
+| Namespace | Writer | Content |
+|---|---|---|
+| `incidents/policies` | admin API | enablement, prefix, exclusions, model, model-call limit |
+| `incidents/incidents` | webhook handler, incidents API, completion hook | identity, thread id, status, reason, activity |
+| `incidents/reports` | `record_incident_report` | latest report, digest, run id, findings activity |
+| `incidents/summaries`, `incidents/history` | the report tool and the handler through `documents.py` | postmortem Markdown and curated metadata |
 
-Incidents has no incident-tracker adapter. When a workspace MCP connection such as incident.io is configured and enabled, the main agent receives its tools like any other integration and may use them only for the current authorized responder request. Enabling, disabling, or changing a connection changes the evidence scope and resets the conversation.
+Each record has one writer class so concurrent turns and controls cannot lose updates. The dashboard merges the two activity lists and reports `investigating` while the thread has a pending or running run.
 
-## Documents and communications
+## Reports and Slack updates
 
-Open SWE stores one Markdown postmortem summary per incident in the existing LangGraph Store. After each investigation, the agent replaces that value with its latest findings, impact, suggested next steps, and source links. The dashboard renders it and offers **Copy incident** so responders can edit or publish the text elsewhere. There is no document editor, save queue, concurrency protocol, or revision-history UI.
+The agent finishes each turn by calling `record_incident_report`. Claims without evidence ids from this turn's context blocks or tool results are dropped and noted as a gap. The tool stores the report, rewrites the postmortem summary, and posts a compact channel update only when the report digest changed or the turn answered a question; a repeated call in the same run does not post again. Pause and complete cancel the thread's pending and running runs and post a notice; complete includes the latest summary.
 
-Previously stored postmortems remain readable until the next agent update. Status-page publishing is not implemented.
+## Failure handling
 
-## History and retention
+A run that ends in error or timeout marks the incident `needs_attention`, records an activity entry, and posts one notice per run. A successful run with context still queued schedules another automatic turn so late alerts are not stranded. Slack retries are deduplicated with the shared event claims; a failed dispatch relies on Slack's redelivery and LangGraph's durable runs.
 
-Curated metadata and postmortem summaries live outside the expiring operational record. The dashboard searches retained local history and links to readable incidents. The main agent can search and read related incidents as historical context, with dependency access checked again before later use. Historical causes do not establish the current cause.
-
-Raw messages and all conversation checkpoints expire after 30 days from enrollment. Curated history has no automatic expiry and remains subject to current workspace and channel access. Expired or unavailable evidence references are marked unavailable. The channel registration remains so cleanup does not trigger automatic re-enrollment.
-
-## Validation and deployment
-
-Targeted tests exercise durable retries, main-agent assembly/execution, citation validation, scope revocation, summary persistence, retention, dashboard authorization, and UI operations. Test fixtures simulate external services; live Slack delivery requires a configured installation.
-
-See [installation](INSTALLATION.md#incidents) and [local development](DEVELOPMENT.md) for setup. The deployment must protect direct LangGraph thread and Store APIs independently of dashboard access checks.
+See [installation](INSTALLATION.md#incidents) and [local development](DEVELOPMENT.md) for setup.

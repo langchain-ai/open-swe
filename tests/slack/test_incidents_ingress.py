@@ -4,14 +4,13 @@ import hashlib
 import hmac
 import json
 import time
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from agent import incidents, scheduler
+from agent.incidents import channels
 from agent.slack import routes
 from agent.webhooks import common
 
@@ -19,13 +18,10 @@ _SIGNING_SECRET = "incidents-test-signing-secret"
 
 
 @pytest.fixture
-def service(monkeypatch):
-    service = SimpleNamespace(
-        accept_slack_event=AsyncMock(return_value={"status": "accepted"}),
-        recover=AsyncMock(return_value={"status": "recovered"}),
-    )
-    monkeypatch.setattr(incidents, "service", service, raising=False)
-    return service
+def handler(monkeypatch):
+    handle = AsyncMock(return_value={"status": "accepted"})
+    monkeypatch.setattr(channels, "handle_slack_event", handle)
+    return handle
 
 
 @pytest.fixture
@@ -72,11 +68,10 @@ def _post(client, payload, *, timestamp=None, signature=None):
         {"type": "channel_rename", "channel": {"id": "C1", "name": "inc-payments"}},
         {"type": "channel_archive", "channel": "C1"},
         {"type": "message", "channel": "C1", "subtype": "bot_message", "text": "Incident"},
-        {"type": "message", "channel": "C1", "subtype": "message_deleted"},
         {"type": "app_mention", "channel": "C1", "text": "Incidents again"},
     ],
 )
-def test_signed_incidents_event_precedes_coding_filters(client, service, monkeypatch, event):
+def test_signed_incidents_event_precedes_coding_filters(client, handler, monkeypatch, event):
     context = AsyncMock(side_effect=AssertionError("coding channel lookup must not run"))
     claim = AsyncMock(side_effect=AssertionError("generic fail-open claim must not run"))
     monkeypatch.setattr(common, "resolve_slack_channel_context", context)
@@ -86,16 +81,17 @@ def test_signed_incidents_event_precedes_coding_filters(client, service, monkeyp
 
     assert response.status_code == 200
     assert response.json() == {"status": "accepted"}
-    service.accept_slack_event.assert_awaited_once_with(_payload(event))
+    handler.assert_awaited_once()
+    assert handler.await_args.args[0] == _payload(event)
     context.assert_not_awaited()
     claim.assert_not_awaited()
 
 
 @pytest.mark.parametrize("status", ["ignored", "duplicate"])
-def test_registered_channel_stays_isolated_when_service_declines_work(
-    client, service, monkeypatch, status
+def test_registered_channel_stays_isolated_when_handler_declines_work(
+    client, handler, monkeypatch, status
 ):
-    service.accept_slack_event.return_value = {"status": status}
+    handler.return_value = {"status": status}
     monkeypatch.setattr(
         common,
         "resolve_slack_channel_context",
@@ -109,7 +105,7 @@ def test_registered_channel_stays_isolated_when_service_declines_work(
 
 
 @pytest.mark.parametrize("failure", ["invalid_signature", "expired_timestamp"])
-def test_invalid_slack_auth_cannot_accept_incidents_receipts(client, service, failure):
+def test_invalid_slack_auth_never_reaches_incidents(client, handler, failure):
     response = _post(
         client,
         _payload({"type": "channel_created", "channel": {"id": "C1", "name": "inc-errors"}}),
@@ -118,11 +114,11 @@ def test_invalid_slack_auth_cannot_accept_incidents_receipts(client, service, fa
     )
 
     assert response.status_code == 401
-    service.accept_slack_event.assert_not_awaited()
+    handler.assert_not_awaited()
 
 
-def test_acceptance_failure_is_retryable_and_does_not_fall_through(client, service, monkeypatch):
-    service.accept_slack_event.side_effect = HTTPException(503, "durable inbox unavailable")
+def test_handler_errors_do_not_fall_through_to_coding(client, handler, monkeypatch):
+    handler.side_effect = HTTPException(401, "wrong installation")
     monkeypatch.setattr(
         common,
         "resolve_slack_channel_context",
@@ -131,11 +127,11 @@ def test_acceptance_failure_is_retryable_and_does_not_fall_through(client, servi
 
     response = _post(client, _payload({"type": "channel_created", "channel": {"id": "C1"}}))
 
-    assert response.status_code == 503
+    assert response.status_code == 401
 
 
-def test_unregistered_event_falls_through_to_ordinary_slack(client, service, monkeypatch):
-    service.accept_slack_event.return_value = None
+def test_unregistered_event_falls_through_to_ordinary_slack(client, handler, monkeypatch):
+    handler.return_value = None
     context = AsyncMock(return_value={"is_ext_shared": True})
     monkeypatch.setattr(common, "resolve_slack_channel_context", context)
 
@@ -146,32 +142,23 @@ def test_unregistered_event_falls_through_to_ordinary_slack(client, service, mon
     context.assert_awaited_once_with("ordinary", use_cache=False)
 
 
-async def test_incidents_scheduler_tick_recovers_instead_of_starting_coding_run(
-    service, monkeypatch
-):
-    launch = AsyncMock(side_effect=AssertionError("coding schedule must not launch"))
-    monkeypatch.setattr(scheduler, "launch_scheduled_agent_run", launch)
-
-    result = await scheduler._launch(
-        scheduler.SchedulerState(task="incidents", schedule_id="unrelated"), {}
-    )
-
-    assert result == {"result": {"status": "recovered"}}
-    service.recover.assert_awaited_once_with()
-    launch.assert_not_awaited()
-
-
-def test_signed_channel_creation_persists_one_receipt_before_acknowledgment(
-    client, fake_store, monkeypatch
-) -> None:
-    from agent.incidents import service
-
+def test_signed_channel_creation_enrolls_once_and_dedupes_retries(client, fake_store, monkeypatch):
     fake_store.seed(
         ("incidents", "policies"),
         "default",
         {"enabled": True, "workspace_id": "T1", "slack_app_id": "A1", "channel_prefix": "inc-"},
     )
-    monkeypatch.setattr(service, "wake", AsyncMock())
+    claimed: set[str] = set()
+
+    async def claim(event_id: str, channel_id: str = "", event_ts: str = "") -> bool:
+        if event_id in claimed:
+            return False
+        claimed.add(event_id)
+        return True
+
+    monkeypatch.setattr(channels, "claim_slack_event", claim)
+    enroll = AsyncMock()
+    monkeypatch.setattr(channels, "enroll_channel", enroll)
     monkeypatch.setattr(
         common,
         "resolve_slack_channel_context",
@@ -185,32 +172,27 @@ def test_signed_channel_creation_persists_one_receipt_before_acknowledgment(
     assert first.status_code == 200
     assert first.json() == {"status": "accepted"}
     assert second.json() == {"status": "duplicate"}
-    receipts = list(fake_store.values(("incidents", "receipts")).values())
-    assert len(receipts) == 1
-    assert receipts[0]["channel_id"] == "C1"
-    assert receipts[0]["kind"] == "channel_created"
-    assert receipts[0]["payload"] == payload["event"]
+    enroll.assert_awaited_once()
+    assert enroll.await_args.args[:2] == ("C1", "inc-errors")
 
 
 @pytest.mark.parametrize("field", ["team_id", "api_app_id"])
-def test_signed_wrong_installation_cannot_persist_receipts(client, fake_store, monkeypatch, field):
+def test_signed_wrong_installation_cannot_enroll(client, fake_store, monkeypatch, field):
     fake_store.seed(
         ("incidents", "policies"),
         "default",
         {"enabled": True, "workspace_id": "T1", "slack_app_id": "A1"},
     )
-    monkeypatch.setattr(
-        common,
-        "resolve_slack_channel_context",
-        AsyncMock(side_effect=AssertionError("external lookup")),
-    )
+    enroll = AsyncMock()
+    monkeypatch.setattr(channels, "enroll_channel", enroll)
+    monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
     payload = _payload({"type": "channel_created", "channel": {"id": "C1", "name": "inc-errors"}})
     payload[field] = "wrong-installation"
 
     response = _post(client, payload)
 
     assert response.status_code == 401
-    assert fake_store.values(("incidents", "receipts")) == {}
+    enroll.assert_not_awaited()
 
 
 def test_disabled_registered_channel_still_cannot_launch_coding(client, fake_store, monkeypatch):
@@ -227,6 +209,7 @@ def test_disabled_registered_channel_still_cannot_launch_coding(client, fake_sto
         incident_id,
         {"id": incident_id, "workspace_id": "T1", "channel_id": "C1", "thread_id": "i1"},
     )
+    monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(
         common,
         "resolve_slack_channel_context",
@@ -239,4 +222,3 @@ def test_disabled_registered_channel_still_cannot_launch_coding(client, fake_sto
 
     assert response.status_code == 200
     assert response.json() == {"status": "ignored"}
-    assert fake_store.values(("incidents", "receipts")) == {}

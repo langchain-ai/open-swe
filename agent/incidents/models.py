@@ -1,7 +1,7 @@
-"""Validated records shared by incident workers, tools, and dashboard."""
+"""Validated records shared by incident channels, agent tools, and the dashboard."""
 
 import re
-from typing import Any, Literal
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -17,9 +17,6 @@ class IncidentPolicy(BaseModel):
     excluded_channel_ids: list[str] = Field(default_factory=list)
     model: str | None = None
     max_model_calls: int = Field(default=20, ge=1, le=20)
-    max_pass_seconds: int = Field(default=300, ge=10, le=300)
-    idle_timeout_seconds: int = Field(default=7200, ge=60, le=86400)
-    max_watch_seconds: int = Field(default=86400, ge=60, le=86400)
     version: int = 0
     enabled_at: float = 0
 
@@ -30,21 +27,6 @@ class IncidentPolicy(BaseModel):
         if not re.fullmatch(r"[a-z0-9_-]{1,60}", value):
             raise ValueError("Use a nonempty Slack channel prefix, such as inc-")
         return value
-
-
-class IncidentMessage(BaseModel):
-    id: str = ""
-    ts: str = ""
-    thread_ts: str = ""
-    user: str = ""
-    text: str = ""
-    bot_id: str = ""
-    app_id: str = ""
-    event_type: str = ""
-    subtype: str = ""
-    deleted: bool = False
-    edited_at: str = ""
-    source_url: str = ""
 
 
 class Evidence(BaseModel):
@@ -83,94 +65,34 @@ class Activity(BaseModel):
     summary: str
 
 
-class PendingRequest(BaseModel):
-    id: str
-    text: str = ""
-    thread_ts: str | None = None
-
-
-class PendingPublication(BaseModel):
-    reason: str
-    text: str
-    blocks: list[dict[str, Any]] = Field(default_factory=list)
-    thread_ts: str | None = None
-    key: str
-    policy_version: int
+IncidentStatus = Literal["watching", "paused", "needs_attention", "completed"]
 
 
 class Incident(BaseModel):
+    """One enrolled Slack channel and its system-owned agent thread."""
+
     id: str
     workspace_id: str
     channel_id: str
     channel_name: str = ""
     title: str = ""
-    thread_id: str
-    agent_thread_id: str = ""
-    evidence_scope: str = ""
-    active_pass_id: str | None = None
-    reset_conversation: bool = False
+    thread_id: str = ""
     anchor_ts: str | None = None
-    slack_session_thread_ts: str | None = None
-    status: Literal[
-        "pending", "investigating", "watching", "paused", "needs_attention", "completed"
-    ] = "pending"
+    status: IncidentStatus = "watching"
     reason: str = ""
     is_archived: bool = False
-    can_read: bool = False
-    joined: bool = False
-    bootstrap_complete: bool = False
-    expired: bool = False
-    last_verified_at: float = 0
+    last_failure_run_id: str = ""
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
-    watch_started_at: float = 0
-    last_source_activity_at: float = 0
-    last_published_at: float = 0
-    last_published_digest: str = ""
-    last_context_hash: str = ""
-    pending_since: float = 0
-    pending_message_at: float = 0
-    retry_after: float = 0
-    setup_attempts: int = 0
-    report: IncidentReport | None = None
-    messages: list[IncidentMessage] = Field(default_factory=list)
     activity: list[Activity] = Field(default_factory=list)
-    gaps: list[str] = Field(default_factory=list)
-    processed_receipts: list[str] = Field(default_factory=list)
-    pending_requests: list[PendingRequest] = Field(default_factory=list)
-    pending_publications: list[PendingPublication] = Field(default_factory=list)
-    pass_return_status: Literal["watching", "paused", "completed"] | None = None
-    pass_return_reason: str = ""
-    last_control_at: float = 0
-    last_control_priority: int = 0
 
 
-class Receipt(BaseModel):
-    id: str
-    workspace_id: str
-    channel_id: str = ""
-    kind: str
-    payload: dict[str, Any] = Field(default_factory=dict)
-    actor: dict[str, Any] = Field(default_factory=dict)
-    received_at: float
-    available_at: float = 0
-    source_time: float = 0
-    content_hash: str = ""
+class IncidentReportRecord(BaseModel):
+    """The latest report the agent recorded; written only by the report tool."""
 
-
-class Publication(BaseModel):
-    id: str
     incident_id: str
-    text: str
-    blocks: list[dict[str, Any]] = Field(default_factory=list)
-    thread_ts: str | None = None
-    reason: str
-    status: Literal["pending", "sending", "sent", "unknown", "failed"] = "pending"
-    slack_message_ts: str | None = None
-    created_at: float
-
-
-class CoordinatorState(BaseModel):
-    active_thread_id: str | None = None
-    active_since: float = 0
-    last_operation: dict[str, Any] | None = None
+    report: IncidentReport
+    digest: str
+    run_id: str = ""
+    updated_at: str = Field(default_factory=now_iso)
+    activity: list[Activity] = Field(default_factory=list)

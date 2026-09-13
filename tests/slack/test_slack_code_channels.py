@@ -197,7 +197,7 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     slack_events.reset_slack_event_claims()
-    monkeypatch.setattr("agent.incidents.service.accept_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
         return {"is_ext_shared": False, "is_pending_ext_shared": False}

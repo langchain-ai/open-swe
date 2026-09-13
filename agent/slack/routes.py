@@ -279,9 +279,9 @@ async def slack_webhook(
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
 
-    from agent.incidents import service as incidents
+    from agent.incidents import channels as incidents
 
-    incident_response = await incidents.accept_slack_event(payload)
+    incident_response = await incidents.handle_slack_event(payload, background_tasks)
     if incident_response is not None:
         return cast(WebhookResponse | DuplicateIncidentResponse, incident_response)
 

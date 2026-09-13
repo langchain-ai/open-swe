@@ -38,7 +38,7 @@ def _request(event: dict[str, Any]) -> Request:
 
 @pytest.fixture
 def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    monkeypatch.setattr("agent.incidents.service.accept_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
     calls: dict[str, Any] = {
         "verify_slack_signature": lambda **_: True,
         "resolve_slack_channel_context": AsyncMock(
