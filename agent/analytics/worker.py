@@ -1,10 +1,11 @@
-"""Coordinate analytics delivery and retention."""
+"""Coordinate analytics delivery, summaries, and retention."""
 
 import asyncio
 import logging
 
 from agent.analytics.outbox import deliver_batch
 from agent.analytics.retention import enforce_retention
+from agent.analytics.summaries import recompute_dirty_partitions
 from agent.database.analytics import configured
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ async def run_worker() -> None:
     while not _STOP.is_set():
         try:
             delivered = await deliver_batch()
+            await recompute_dirty_partitions(limit=20)
             await enforce_retention()
         except Exception:  # noqa: BLE001
             delivered = 0
