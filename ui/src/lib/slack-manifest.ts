@@ -88,7 +88,12 @@ export function slackAppManifest(
       event_subscriptions: {
         request_url: `${backendUrl}/webhooks/slack`,
         bot_events: codeChannelsEnabled
-          ? [...BASE_BOT_EVENTS, "agent_session_stopped", "code_channel_action", "message.groups"]
+          ? [
+              ...BASE_BOT_EVENTS,
+              "agent_session_stopped",
+              "code_channel_action",
+              "message.groups",
+            ]
           : BASE_BOT_EVENTS,
       },
       interactivity: {
