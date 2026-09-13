@@ -150,6 +150,18 @@ async def test_enrollment_binds_thread_queues_history_and_starts_one_turn(config
     configured.joined.assert_awaited_once()
 
 
+async def test_empty_new_channel_enrolls_without_a_first_turn(configured):
+    channels.fetch_slack_thread_messages.return_value = []
+    response, _ = await handle(
+        {"type": "channel_created", "channel": {"id": "C1", "name": "inc-api"}}
+    )
+    assert response == {"status": "accepted"}
+    record = await service.INCIDENTS.get(service.incident_id("T1", "C1"))
+    assert record is not None and record.status == "watching"
+    turns.queue_context.assert_not_awaited()
+    turns.schedule_automatic_turn.assert_not_awaited()
+
+
 async def test_ineligible_channel_records_a_setup_failure(configured):
     channels.get_slack_channel_info.return_value = {**CHANNEL, "is_private": True}
     await handle({"type": "channel_created", "channel": {"id": "C1", "name": "inc-api"}})

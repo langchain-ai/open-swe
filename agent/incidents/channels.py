@@ -163,10 +163,13 @@ async def enroll_channel(
         service.note(record, "enrolled", f"Following #{record.channel_name}.")
         await service.save(record)
         history = await fetch_slack_thread_messages(channel_id, turns.SESSION_TS)
+        queued = 0
         for message in history[-HISTORY_LIMIT:]:
             if _is_context(message, policy):
-                await turns.queue_context(record, message)
-        await turns.schedule_automatic_turn(record, policy)
+                queued += int(await turns.queue_context(record, message))
+        # A brand-new channel has nothing to analyze yet; the first alert starts the first turn.
+        if queued:
+            await turns.schedule_automatic_turn(record, policy)
     except Exception:
         logger.exception("Incident enrollment failed", extra={"incident_id": incident_id})
         record.status, record.reason = "needs_attention", "setup_failed"
