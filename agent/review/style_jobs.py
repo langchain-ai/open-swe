@@ -1,7 +1,6 @@
 """Kick off and sync per-repo review style analysis runs."""
 
 import logging
-import uuid
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -9,6 +8,7 @@ from langgraph_sdk import get_client
 from agent.config import ENV
 from agent.dispatch import create_durable_run
 from agent.input_messages import RunInput, build_run_input
+from agent.invocation import new_invocation_id, with_invocation_id
 from agent.review.style_collector import (
     collect_review_samples,
     format_samples_for_analyzer,
@@ -148,7 +148,7 @@ async def start_bootstrap_analysis(
                 files=build_skill_files(),
             ),
             source="review-style-bootstrap",
-            config={"configurable": {**configurable, "prepare_run_id": str(uuid.uuid4())}},
+            config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             client=client,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
@@ -177,7 +177,7 @@ async def start_continual_run(
             _ASSISTANT_ID,
             input=build_continual_run_input(full_name),
             source="review-style-continual",
-            config={"configurable": {**configurable, "prepare_run_id": str(uuid.uuid4())}},
+            config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             client=client,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)

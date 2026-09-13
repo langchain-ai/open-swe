@@ -229,6 +229,48 @@ test.describe("transcript rendering", () => {
     ).toHaveCount(1);
   });
 
+  test("keeps a web model override on the next Slack turn", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    const threadId = threadIdFromUrl(page);
+    await waitForThreadIdle(page, threadId);
+    await waitForThreadNotBusy(page, threadId);
+
+    await page.getByRole("button", { name: /GPT-5\.6 Sol/ }).click();
+    await page.getByText("GPT-5.6 Sol", { exact: true }).last().hover();
+    await page.getByRole("option", { name: /Opus 5/ }).click();
+    await typeIntoComposer(page, "Use Opus for this thread");
+    await waitForThreadIdle(page, threadId);
+    await waitForThreadNotBusy(page, threadId);
+
+    const slackState = (await (
+      await page.request.get("/control/state")
+    ).json()) as { thread_ts: string };
+    const response = await page.request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> continue with the selected model",
+        mention_bot: true,
+        thread_ts: slackState.thread_ts,
+      },
+    });
+    expect(response.ok()).toBeTruthy();
+
+    await expect
+      .poll(async () => {
+        const runs = (await (
+          await page.request.get(`/threads/${threadId}/runs`)
+        ).json()) as Array<{
+          kwargs?: {
+            config?: { configurable?: { agent_model_id?: string } };
+          };
+        }>;
+        return runs[0]?.kwargs?.config?.configurable?.agent_model_id;
+      })
+      .toBe("anthropic:claude-opus-5");
+  });
+
   test("renders structured input envelopes safely and keeps legacy messages", async ({
     page,
   }) => {
@@ -277,6 +319,12 @@ test.describe("transcript rendering", () => {
               id: "legacy-e2e",
               content: "Legacy stays visible",
             },
+            {
+              type: "ai",
+              id: "live-compaction-summary",
+              content: "SESSION INTENT: internal context must stay hidden",
+              additional_kwargs: { lc_source: "summarization" },
+            },
             ...messages,
           ],
         };
@@ -295,6 +343,9 @@ test.describe("transcript rendering", () => {
     await systemChip.click();
     await expect(page.getByText("Automation checks CI")).toBeVisible();
     await expect(page.getByText("Legacy stays visible")).toBeVisible();
+    await expect(
+      page.getByText("SESSION INTENT: internal context must stay hidden"),
+    ).toHaveCount(0);
     await expect(page.getByText("github:alice", { exact: false })).toHaveCount(
       0,
     );

@@ -86,10 +86,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   } = useModelOptions()
   const [sessionSelection, setSessionSelection] = useState<{
     sessionId: string
-    selection: ModelSelection | null
-  }>({ sessionId, selection: null })
+    selection: ModelSelection | null | undefined
+  }>({ sessionId, selection: undefined })
   const selection =
-    sessionSelection.sessionId === sessionId ? sessionSelection.selection : null
+    sessionSelection.sessionId === sessionId
+      ? sessionSelection.selection
+      : undefined
   const setSelection = (next: ModelSelection | null) =>
     setSessionSelection({ sessionId, selection: next })
   const threadModelId = thread?.modelId
@@ -103,7 +105,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       ? { modelId: threadModelId, effort: threadEffort }
       : null
   }, [models, threadEffort, threadModelId])
-  const activeSelection = selection ?? threadSelection ?? defaultSelection
+  const activeSelection =
+    selection === undefined ? (threadSelection ?? defaultSelection) : selection
   const initialPromptRef = useRef<string | null>(null)
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const streamRef = useRef(stream)

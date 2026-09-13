@@ -35,7 +35,7 @@ async def test_refresh_writes_run_cost(monkeypatch: pytest.MonkeyPatch) -> None:
         AsyncMock(return_value=LangSmithThreadCost(1.25, now, now)),
     )
     record = AsyncMock()
-    monkeypatch.setattr(agent_cost, "record_agent_run_cost", record)
+    monkeypatch.setattr(agent_cost, "record_agent_invocation_cost", record)
 
     result = await agent_cost.run_agent_cost_refresh(_state(0), client=_Client())
 
@@ -43,7 +43,7 @@ async def test_refresh_writes_run_cost(monkeypatch: pytest.MonkeyPatch) -> None:
     agent_cost.get_langsmith_thread_cost.assert_awaited_once_with(
         "thread-1", "run-1", run_only=True
     )
-    record.assert_awaited_once_with(run_id="run-1", cost_usd=1.25)
+    record.assert_awaited_once_with(invocation_id="run-1", cost_usd=1.25)
 
 
 @pytest.mark.asyncio
@@ -56,7 +56,7 @@ async def test_refresh_noops_when_cost_is_unavailable(
         AsyncMock(side_effect=LangSmithCostUnavailable("not configured")),
     )
     record = AsyncMock()
-    monkeypatch.setattr(agent_cost, "record_agent_run_cost", record)
+    monkeypatch.setattr(agent_cost, "record_agent_invocation_cost", record)
 
     with caplog.at_level(logging.INFO, logger=agent_cost.__name__):
         result = await agent_cost.run_agent_cost_refresh(_state(0), client=_Client())

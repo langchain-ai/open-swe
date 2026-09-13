@@ -9,11 +9,14 @@ from agent.thread_feedback import mark_answered_question
 
 
 async def mark_question_answered() -> dict[str, Any]:
-    """Mark that you have completely answered an information-only request.
+    """Mark that you are ready to deliver a complete answer to an information-only request.
 
-    Call after answering a question in the web UI when no clarification or further
-    work is needed. Do not use for coding tasks, plans, approval requests, blockers,
-    or partial answers. Coding tasks request feedback after their PR merges.
+    You MUST call this once before the final answer in the web UI when no
+    clarification or further work is needed, then deliver the answer normally.
+    This includes short questions, explanations, recommendations, and naming
+    suggestions, even if no other tools were needed. Do not use for coding tasks,
+    plans, approval requests, blockers, or partial answers. Coding tasks request
+    feedback after their PR merges.
     For Slack answers, use slack_thread_reply with should_ask_for_feedback=True.
     Feedback is offered only if this run succeeds and the user does not continue
     the conversation for five minutes. This does not send a message or end the run.

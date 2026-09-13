@@ -10,7 +10,7 @@ from langgraph_sdk import get_client
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
 from agent.github.thread_token import get_github_token
-from agent.linear.client import comment_on_linear_issue
+from agent.linear.notifications import post_linear_notification
 from agent.run_config import RunConfig
 from agent.slack.client import (
     LANGGRAPH_URL,
@@ -85,10 +85,6 @@ async def _get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     return channel_id, thread_ts
 
 
-def _get_linear_issue_id(cfg: RunConfig) -> str | None:
-    return cfg.linear_issue.id or None if cfg.linear_issue else None
-
-
 def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
     if not cfg.repo:
         return None
@@ -136,10 +132,8 @@ async def post_sandbox_unreachable_notification(
         logger.info("Sent sandbox unreachable notification to Slack thread %s", thread_ts)
         return
 
-    linear_issue_id = _get_linear_issue_id(cfg)
-    if linear_issue_id is not None:
-        await comment_on_linear_issue(linear_issue_id, message)
-        logger.info("Sent sandbox unreachable notification to Linear issue %s", linear_issue_id)
+    if cfg.linear_issue and cfg.linear_issue.id:
+        await post_linear_notification(cfg.linear_issue.id, message)
         return
 
     github_target = _get_github_target(cfg)

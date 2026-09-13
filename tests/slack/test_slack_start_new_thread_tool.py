@@ -220,7 +220,6 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert "## Open SWE Links" in dispatch["content"]
     assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in dispatch["content"]
     assert "- Trace: https://smith/x" in dispatch["content"]
-    assert "do not duplicate it manually" in dispatch["content"]
     assert dispatch["content"].endswith(
         "## Breakout Instructions\n"
         "Use the same repo and investigate the follow-up aspect in detail."

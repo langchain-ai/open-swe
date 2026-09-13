@@ -69,6 +69,23 @@ export function useSubmitAgentMessage(threadId: string) {
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
+      if (vars.content.trim() === "/offload") {
+        if (stream.isLoading) {
+          throw new Error(
+            "Wait for the current run to finish before offloading."
+          )
+        }
+        if (vars.images?.length) {
+          throw new Error("Offloading does not accept attachments.")
+        }
+        void stream
+          .submit(
+            {},
+            { config: { configurable: { offload_conversation: true } } }
+          )
+          .catch(() => setAgentThreadStatus(queryClient, threadId, "error"))
+        return
+      }
       const createdAt = Date.now()
       const id = vars.client_message_id ?? crypto.randomUUID()
       const queuedMessage = {
