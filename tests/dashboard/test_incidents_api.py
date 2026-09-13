@@ -143,7 +143,7 @@ def test_list_rejects_invalid_filters(client, query) -> None:
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize("view", ["paused", "active", "inactive", "all"])
+@pytest.mark.parametrize("view", ["active", "inactive", "all"])
 def test_authorized_list_and_detail_use_incidents_projections(client, service, view) -> None:
     _login(client)
 

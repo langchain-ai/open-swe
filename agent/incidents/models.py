@@ -16,7 +16,6 @@ class IncidentPolicy(BaseModel):
     channel_prefix: str = "inc-"
     excluded_channel_ids: list[str] = Field(default_factory=list)
     model: str | None = None
-    provider_connection_name: str | None = None
     max_model_calls: int = Field(default=20, ge=1, le=20)
     max_pass_seconds: int = Field(default=300, ge=10, le=300)
     idle_timeout_seconds: int = Field(default=7200, ge=60, le=86400)
@@ -107,7 +106,6 @@ class Incident(BaseModel):
     title: str = ""
     thread_id: str
     agent_thread_id: str = ""
-    provider_scope: str = ""
     evidence_scope: str = ""
     active_pass_id: str | None = None
     reset_conversation: bool = False

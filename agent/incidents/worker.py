@@ -8,7 +8,7 @@ import time
 from typing import Any, Literal
 
 from agent.config import ENV
-from agent.incidents import documents, providers, service, slack
+from agent.incidents import documents, service, slack
 from agent.incidents.access import is_observability_authorized
 from agent.incidents.engine import incidents as run_engine
 from agent.incidents.models import (
@@ -429,10 +429,6 @@ async def _consume_receipts(record: Incident, policy: IncidentPolicy, info: dict
                 )
             record.processed_receipts.append(receipt.id)
             continue
-        if await providers.process_provider_receipt(record, receipt):
-            record.processed_receipts.append(receipt.id)
-            await save(record)
-            continue
         if receipt.kind in {"message", "app_mention"}:
             data = receipt.payload
             normalized = slack.message(record.channel_id, data.get("message", data))
@@ -568,13 +564,8 @@ async def _process_channel(incident_id: str) -> dict[str, Any]:
         return {"status": "ignored"}
     _restore_watch_state(record)
     policy = await service.get_policy()
-    if record.expired or not policy.enabled:
-        for receipt in await channel_receipts(record):
-            if await providers.process_provider_receipt(record, receipt):
-                record.processed_receipts.append(receipt.id)
-        await save(record)
-        if record.expired:
-            return {"status": "completed"}
+    if record.expired:
+        return {"status": "completed"}
     if not policy.enabled:
         _restrict(record, "disabled")
         await save(record)
@@ -721,7 +712,6 @@ async def _process_channel(incident_id: str) -> dict[str, Any]:
         await before_tool_call()
         await _session_status(record, "processing")
         had_report = record.report is not None
-        await providers.refresh_provider(record)
         report = await asyncio.wait_for(
             run_engine(
                 record.messages,
@@ -738,7 +728,6 @@ async def _process_channel(incident_id: str) -> dict[str, Any]:
         current_record = await service.INVESTIGATIONS.get(record.id)
         if current_record:
             record.agent_thread_id = current_record.agent_thread_id
-            record.provider_scope = current_record.provider_scope
             record.evidence_scope = current_record.evidence_scope
             record.messages = current_record.messages
         await documents.update_from_report(record, report)
@@ -772,7 +761,6 @@ async def _process_channel(incident_id: str) -> dict[str, Any]:
         current_record = await service.INVESTIGATIONS.get(record.id)
         if current_record:
             record.agent_thread_id = current_record.agent_thread_id
-            record.provider_scope = current_record.provider_scope
             record.evidence_scope = current_record.evidence_scope
             record.messages = current_record.messages
             record.active_pass_id = current_record.active_pass_id

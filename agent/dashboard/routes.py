@@ -248,7 +248,6 @@ from agent.dashboard.workspace_mcps import (
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
 from agent.incidents.document_api import router as incident_documents_router
-from agent.incidents.provider_api import router as incident_providers_router
 from agent.mcp import (
     MCPConnection,
     MCPConnectionPublic,
@@ -306,7 +305,6 @@ router = APIRouter(
 router.include_router(feedback_router)
 router.include_router(incidents_router)
 router.include_router(incident_documents_router, prefix="/incidents/documents")
-router.include_router(incident_providers_router, prefix="/incidents/providers")
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
@@ -870,13 +868,6 @@ async def notion_desktop_exchange(
     return {"connected": True}
 
 
-def _slack_redirect_uri() -> str:
-    return (
-        ENV.SLACK_OAUTH_REDIRECT_URI.optional()
-        or f"{_slack_base_url()}/dashboard/api/slack/callback"
-    )
-
-
 @router.get("/slack/login")
 async def slack_login(
     desktop_handoff: str | None = None,
@@ -886,7 +877,7 @@ async def slack_login(
     """Start the Sign in with Slack flow to link the current GitHub account."""
     if not slack_oauth_configured():
         raise HTTPException(500, "Slack OAuth is not configured")
-    redirect_uri = _slack_redirect_uri()
+    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
     nonce = new_state_nonce()
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
@@ -956,7 +947,7 @@ async def slack_callback(
 
 async def _verified_slack_identity(code: str) -> tuple[str, str]:
     """Resolve an authorization code to a Slack member id and verified email."""
-    redirect_uri = _slack_redirect_uri()
+    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
     identity = await fetch_slack_identity(await exchange_slack_code(code, redirect_uri))
     verify_team(identity)
     if not identity.email or not identity.email_verified:

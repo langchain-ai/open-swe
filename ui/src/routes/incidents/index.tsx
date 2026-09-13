@@ -6,9 +6,6 @@ export const Route = createFileRoute("/incidents/")({
   validateSearch: (
     search: Record<string, unknown>
   ): { view?: IncidentView } => {
-    if (search.view === "paused" || search.view === "completed")
-      return { view: "inactive" }
-    if (search.view === "needs_attention") return { view: "active" }
     return {
       view: ["active", "inactive", "all", "history"].includes(
         String(search.view)

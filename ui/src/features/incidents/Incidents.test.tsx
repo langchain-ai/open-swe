@@ -93,8 +93,6 @@ function stubFetch(
         Response.json({
           incident_id: "incident-1",
           postmortem: null,
-          status_page_draft: null,
-          operations: [],
         })
       )
     return handler(input, init)

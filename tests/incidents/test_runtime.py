@@ -13,9 +13,8 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.dashboard import workspace_mcps
-from agent.incidents import documents, providers, runtime, service
+from agent.incidents import documents, runtime, service
 from agent.incidents.models import Incident, IncidentMessage, IncidentPolicy, IncidentReport
-from agent.incidents.provider_models import ProviderBinding, ProviderSnapshot
 from agent.mcp import MCPConnectionUpdate
 
 
@@ -168,50 +167,6 @@ async def test_revocation_latches_even_when_later_check_succeeds():
     handler.assert_not_awaited()
 
 
-@pytest.mark.parametrize("stop", ["timeout", "cancelled", "membership"])
-async def test_completed_tool_outcome_survives_stop_and_is_available_to_retry(
-    live_pass, monkeypatch, stop
-):
-    session = await runtime.load_incident_session(live_pass.config)
-    middleware = runtime.IncidentMiddleware(session)
-
-    async def perform(request):
-        if stop == "timeout":
-            monkeypatch.setattr(session, "check", AsyncMock(side_effect=TimeoutError("budget")))
-        elif stop == "cancelled":
-            live_pass.saved.cancelled = True
-            await runtime.PASSES.put(live_pass.saved.id, live_pass.saved)
-        else:
-            live_pass.info["is_member"] = False
-        return ToolMessage(
-            content='{"url":"https://github.com/acme/api/pull/42"}',
-            tool_call_id="pr-call",
-        )
-
-    request = SimpleNamespace(
-        tool_call={"id": "pr-call", "name": "open_pull_request", "args": {"title": "Fix"}}
-    )
-    with pytest.raises((PermissionError, TimeoutError)):
-        await middleware.awrap_tool_call(request, perform)
-    outcomes = await runtime.TOOL_OUTCOMES.search(filter={"thread_id": session.saved.thread_id})
-    assert len(outcomes) == 1
-    assert "https://github.com/acme/api/pull/42" in outcomes[0].result
-    assert (await runtime.PASSES.get(session.saved.id)).report is None
-
-    live_pass.info["is_member"] = True
-    retry = live_pass.saved.model_copy(update={"id": "retry", "cancelled": False})
-    await runtime.PASSES.put(retry.id, retry)
-    live_pass.record.active_pass_id = retry.id
-    await service.INVESTIGATIONS.put(live_pass.record.id, live_pass.record)
-    live_pass.config["configurable"]["incident_pass_id"] = retry.id
-    retried = await runtime.load_incident_session(live_pass.config)
-    handler = AsyncMock()
-    await runtime.IncidentMiddleware(retried).awrap_model_call(
-        ModelRequest(model=MagicMock(), messages=[], tools=[], state={"messages": []}), handler
-    )
-    assert outcomes[0].result in handler.call_args.args[0].system_message.text
-
-
 @pytest.fixture
 async def live_pass(incident_scope, monkeypatch):
     record, metadata = incident_scope
@@ -303,60 +258,6 @@ async def test_valid_binding_cannot_borrow_personal_execution_identity(live_pass
     config = {"configurable": {**live_pass.config["configurable"], **identity}}
     with pytest.raises(PermissionError, match="personal"):
         await runtime.load_incident_session(config)
-
-
-async def test_provider_revision_change_revokes_loaded_analysis(live_pass, monkeypatch):
-    await workspace_mcps.save_workspace_mcp(
-        "incident",
-        MCPConnectionUpdate(
-            name="incident", url="https://mcp.incident.io/mcp", allowed_tools=["incident_show"]
-        ),
-    )
-    await providers.BINDINGS.put(
-        live_pass.record.id,
-        ProviderBinding(
-            incident_id=live_pass.record.id,
-            workspace_id="T1",
-            channel_id="C1",
-            connection_name="incident",
-            external_id="INC1",
-            snapshot=ProviderSnapshot(external_id="INC1", slack_channel_id="C1"),
-        ),
-    )
-
-    async def read_provider(incident_id: str):
-        return [], {
-            "structured_content": {"incident": {"id": incident_id, "slack_channel_id": "C1"}}
-        }
-
-    remote = StructuredTool.from_function(
-        coroutine=read_provider,
-        name="incident_show",
-        description="Read provider incident",
-        args_schema={
-            "type": "object",
-            "properties": {"incident_id": {"type": "string"}},
-            "required": ["incident_id"],
-        },
-        metadata={"mcp_tool_name": "incident_show"},
-        response_format="content_and_artifact",
-    )
-    monkeypatch.setattr(providers, "load_mcp_tools", AsyncMock(return_value=[remote]))
-    await providers.refresh_provider(live_pass.record)
-    assert (await providers.BINDINGS.get(live_pass.record.id)).error is None
-    live_pass.saved.provider_scope = await providers.analysis_scope(live_pass.record)
-    live_pass.saved.evidence_scope = await runtime.evidence_scope()
-    await runtime.PASSES.put(live_pass.saved.id, live_pass.saved)
-    session = await runtime.load_incident_session(live_pass.config)
-
-    await workspace_mcps.save_workspace_mcp(
-        "incident",
-        MCPConnectionUpdate(
-            name="incident", url="https://mcp.incident.io/mcp", allowed_tools=["incident_show"]
-        ),
-    )
-    with pytest.raises(PermissionError):
-        await session.check()
 
 
 @pytest.mark.parametrize("change", ["revision", "disabled", "tool_removed"])

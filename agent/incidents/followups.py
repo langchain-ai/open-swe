@@ -27,7 +27,6 @@ async def enqueue_followup(
         and item.id not in record.processed_receipts
         and item.payload.get("thread_id") == thread_id
         and item.payload.get("policy_version") == policy.version
-        and item.payload.get("provider_scope") == record.provider_scope
         and item.payload.get("evidence_scope") == record.evidence_scope
     ]
     if delay and len(pending) >= 10:
@@ -46,7 +45,6 @@ async def enqueue_followup(
             payload={
                 "thread_id": thread_id,
                 "policy_version": policy.version,
-                "provider_scope": record.provider_scope,
                 "evidence_scope": record.evidence_scope,
                 "text": service.redact_context(text)[:8000],
             },
@@ -62,14 +60,11 @@ async def enqueue_followup(
 
 
 async def followup_current(receipt: Receipt, record: Incident, policy: IncidentPolicy) -> bool:
-    from agent.incidents.providers import analysis_scope
     from agent.incidents.runtime import evidence_scope
 
     return (
         receipt.payload.get("thread_id") == record.agent_thread_id
         and receipt.payload.get("policy_version") == policy.version
-        and receipt.payload.get("provider_scope") == record.provider_scope
         and receipt.payload.get("evidence_scope") == record.evidence_scope
-        and record.provider_scope == await analysis_scope(record)
         and record.evidence_scope == await evidence_scope()
     )

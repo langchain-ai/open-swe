@@ -98,27 +98,6 @@ async def test_reports_replace_one_summary_and_keep_other_incidents(record):
     assert "[1]: <https://slack.com/archives/C1/p1>" in latest["markdown"]
 
 
-async def test_legacy_postmortem_remains_readable_until_next_agent_report(record):
-    from agent.incidents import documents
-    from agent.incidents.document_models import DocumentRevision
-
-    legacy = DocumentRevision(
-        incident_id=record.id,
-        kind="postmortem",
-        revision=1,
-        expected_revision=0,
-        markdown="Legacy postmortem",
-        operation_id="old",
-        author="responder",
-        source="responder",
-    )
-    await documents.LEGACY_REVISIONS.put(f"{record.id}:postmortem:1", legacy)
-    assert (await current(record))["markdown"] == legacy.markdown
-    await documents.update_from_report(record, report("New agent summary"))
-    assert "New agent summary" in (await current(record))["markdown"]
-    assert len(await documents.LEGACY_REVISIONS.search_all()) == 1
-
-
 async def test_curated_history_survives_expiry_but_evidence_and_revoked_channel_do_not(
     record, monkeypatch
 ):

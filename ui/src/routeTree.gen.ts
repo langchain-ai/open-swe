@@ -30,7 +30,6 @@ import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instruc
 import { Route as AgentsSandboxRouteImport } from './routes/agents_.sandbox'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
 import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
-import { Route as IncidentsSettingsRouteImport } from './routes/incidents/settings'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
 import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
@@ -147,11 +146,6 @@ const IncidentsIncidentIdRoute = IncidentsIncidentIdRouteImport.update({
   path: '/$incidentId',
   getParentRoute: () => IncidentsRoute,
 } as any)
-const IncidentsSettingsRoute = IncidentsSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => IncidentsRoute,
-} as any)
 const ReviewStylesRoute = ReviewStylesRouteImport.update({
   id: '/review_/styles',
   path: '/review/styles',
@@ -225,7 +219,6 @@ export interface FileRoutesByFullPath {
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
-  '/incidents/settings': typeof IncidentsSettingsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
   '/incidents/': typeof IncidentsIndexRoute
@@ -257,7 +250,6 @@ export interface FileRoutesByTo {
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
-  '/incidents/settings': typeof IncidentsSettingsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents': typeof AgentsIndexRoute
   '/incidents': typeof IncidentsIndexRoute
@@ -292,7 +284,6 @@ export interface FileRoutesById {
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/sandbox': typeof AgentsSandboxRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
-  '/incidents/settings': typeof IncidentsSettingsRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
   '/incidents/': typeof IncidentsIndexRoute
@@ -328,7 +319,6 @@ export interface FileRouteTypes {
     | '/agents/instructions'
     | '/agents/sandbox'
     | '/incidents/$incidentId'
-    | '/incidents/settings'
     | '/review/styles'
     | '/agents/'
     | '/incidents/'
@@ -360,7 +350,6 @@ export interface FileRouteTypes {
     | '/agents/instructions'
     | '/agents/sandbox'
     | '/incidents/$incidentId'
-    | '/incidents/settings'
     | '/review/styles'
     | '/agents'
     | '/incidents'
@@ -394,7 +383,6 @@ export interface FileRouteTypes {
     | '/agents_/instructions'
     | '/agents_/sandbox'
     | '/incidents/$incidentId'
-    | '/incidents/settings'
     | '/review_/styles'
     | '/agents/'
     | '/incidents/'
@@ -579,13 +567,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IncidentsIncidentIdRouteImport
       parentRoute: typeof IncidentsRoute
     }
-    '/incidents/settings': {
-      id: '/incidents/settings'
-      path: '/settings'
-      fullPath: '/incidents/settings'
-      preLoaderRoute: typeof IncidentsSettingsRouteImport
-      parentRoute: typeof IncidentsRoute
-    }
     '/review_/styles': {
       id: '/review_/styles'
       path: '/review/styles'
@@ -692,13 +673,11 @@ const AgentsRouteWithChildren =
 
 interface IncidentsRouteChildren {
   IncidentsIncidentIdRoute: typeof IncidentsIncidentIdRoute
-  IncidentsSettingsRoute: typeof IncidentsSettingsRoute
   IncidentsIndexRoute: typeof IncidentsIndexRoute
 }
 
 const IncidentsRouteChildren: IncidentsRouteChildren = {
   IncidentsIncidentIdRoute: IncidentsIncidentIdRoute,
-  IncidentsSettingsRoute: IncidentsSettingsRoute,
   IncidentsIndexRoute: IncidentsIndexRoute,
 }
 

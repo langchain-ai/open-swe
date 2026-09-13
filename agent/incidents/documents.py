@@ -6,11 +6,10 @@ from typing import Any
 from fastapi import HTTPException
 
 from agent.incidents import service
-from agent.incidents.document_models import DocumentKind, DocumentRevision, IncidentHistory
+from agent.incidents.document_models import IncidentHistory
 from agent.incidents.models import Incident, IncidentReport
 from agent.store import TypedStore, get_value, now_iso, put_value
 
-LEGACY_REVISIONS = TypedStore(["incidents", "document_revisions"], DocumentRevision)
 HISTORY = TypedStore(["incidents", "history"], IncidentHistory)
 SUMMARIES = ["incidents", "summaries"]
 
@@ -53,38 +52,6 @@ async def preserve_metadata(record: Incident) -> None:
     )
 
 
-async def _legacy_revisions(incident_id: str, kind: DocumentKind) -> list[DocumentRevision]:
-    return sorted(
-        await LEGACY_REVISIONS.search_all(filter={"incident_id": incident_id, "kind": kind}),
-        key=lambda revision: revision.revision,
-        reverse=True,
-    )
-
-
-def _revision_view(revision: DocumentRevision, record: Incident) -> dict[str, Any]:
-    result = revision.model_dump()
-    live_urls = (
-        {message.source_url for message in record.messages if not message.deleted}
-        if not record.expired
-        else set()
-    )
-    references = []
-    for reference in revision.evidence:
-        available = bool(reference.url and reference.url in live_urls)
-        references.append(
-            {
-                "id": reference.id,
-                "source": reference.source,
-                "url": reference.url if available else "",
-                "available": available,
-            }
-        )
-        if reference.url and not available:
-            result["markdown"] = result["markdown"].replace(reference.url, "[evidence unavailable]")
-    result["evidence"] = references
-    return result
-
-
 def _linked_markdown(markdown: str, evidence: list[dict[str, Any]]) -> str:
     sources = []
     for index, item in enumerate(evidence, 1):
@@ -96,13 +63,7 @@ def _linked_markdown(markdown: str, evidence: list[dict[str, Any]]) -> str:
 
 async def _saved_markdown(record: Incident) -> str | None:
     summary = await get_value(SUMMARIES, record.id)
-    markdown = summary["markdown"] if summary else None
-    if markdown is None:
-        legacy = await _legacy_revisions(record.id, "postmortem")
-        if legacy:
-            view = _revision_view(legacy[0], record)
-            markdown = _linked_markdown(view["markdown"], view["evidence"])
-    return markdown
+    return summary["markdown"] if summary else None
 
 
 async def document_context(incident_id: str) -> dict[str, Any]:

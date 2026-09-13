@@ -48,22 +48,6 @@ For a first-time setup, the free ngrok plan gives you a static domain:
 
 Preserve the existing webhook traffic policy. For local Slack OAuth, also preserve the callback relay: requests to `/dashboard/api/slack/callback` on the ngrok domain must redirect to `http://localhost:2024/dashboard/api/slack/callback` with the complete query string intact. The stock webhooks-only policy blocks this path, so reuse the local policy containing that redirect when Slack OAuth is configured. The callback is a redirect to localhost; dashboard pages and API routes must remain inaccessible through the tunnel.
 
-**Linking your Slack account locally.** Slack requires an HTTPS OAuth callback.
-Register `https://<name>.ngrok-free.dev/dashboard/api/slack/callback` under your
-Slack app's **OAuth & Permissions → Redirect URLs**, then set
-`SLACK_OAUTH_REDIRECT_URI` to that exact URL in the backend environment and restart.
-Run this tunnel command in place of `make tunnel`:
-
-```bash
-ngrok http 2024 --url https://<name>.ngrok-free.dev --traffic-policy-file examples/ngrok/webhooks-and-slack-oauth.yml
-```
-
-This policy redirects only the Slack callback back to `http://localhost:2024`,
-preserving the authorization query so the app can validate your local session
-and OAuth nonce. Keep opening the dashboard on `http://localhost:2024` in the
-same browser; leave `DASHBOARD_API_BASE_URL` local. The callback does not forward
-through to the backend, and the raw LangGraph APIs remain blocked.
-
 ## 4. Create a Slack app for your machine
 
 Slack delivers events to one URL per app, so a local backend needs its own Slack app rather than the one a shared deployment uses. Follow [Create the Slack app](INSTALLATION.md#5-create-the-slack-app) in the installation guide with your ngrok domain from step 3, `<name>.ngrok-free.dev`, as `<your-url>` (the manifest supplies the `https://`), and give it a name that says it is yours, for example `open-swe-<you>`; the bot's handle follows from it. Copy the four values it lists into `.env` in the next step.

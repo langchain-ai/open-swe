@@ -63,7 +63,6 @@ export interface IncidentDetailPayload {
 
 export interface IncidentPolicy {
   enabled: boolean
-  provider_connection_name?: string | null
   workspace_id: string
   slack_app_id: string
   channel_prefix: string

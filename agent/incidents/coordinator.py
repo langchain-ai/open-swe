@@ -22,7 +22,7 @@ async def cleanup(records: list[Incident]) -> list[Incident]:
             and datetime.fromisoformat(record.created_at).timestamp() <= now - 30 * 86400
         ):
             await documents.preserve_metadata(record)
-            from agent.incidents.runtime import PASSES, TOOL_OUTCOMES
+            from agent.incidents.runtime import PASSES
 
             passes = await PASSES.search_all(filter={"incident_id": record.id})
             conversations = {saved.thread_id for saved in passes}
@@ -36,8 +36,6 @@ async def cleanup(records: list[Incident]) -> list[Incident]:
                         raise
             for saved_pass in passes:
                 await PASSES.delete(saved_pass.id)
-            for outcome in await TOOL_OUTCOMES.search_all(filter={"incident_id": record.id}):
-                await TOOL_OUTCOMES.delete(outcome.id)
             record = Incident(
                 id=record.id,
                 workspace_id=record.workspace_id,
@@ -63,7 +61,7 @@ async def cleanup(records: list[Incident]) -> list[Incident]:
     by_channel = {(r.workspace_id, r.channel_id): r for r in records}
     for receipt in await service.RECEIPTS.search_all():
         record = by_channel.get((receipt.workspace_id, receipt.channel_id))
-        if (record and record.expired and receipt.kind not in {"provider_command"}) or (
+        if (record and record.expired) or (
             receipt.received_at < now - 7 * 86400
             and (not record or receipt.id in record.processed_receipts)
         ):
@@ -173,9 +171,6 @@ async def coordinate() -> dict[str, Any]:
     for record in await cleanup(records):
         pending_receipts = await channel_receipts(record)
         if record.expired:
-            if any(r.kind in {"provider_command"} for r in pending_receipts):
-                chosen = record
-                break
             continue
         stopped = record.status in {"paused", "completed"}
         pending_work = bool(

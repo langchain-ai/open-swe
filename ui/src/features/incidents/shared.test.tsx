@@ -2,7 +2,6 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, expect, it } from "vitest"
 import { CitedText, sourceLabel, slackMessageTime } from "./shared"
-import { citationMarkdown } from "./citations"
 
 afterEach(cleanup)
 
@@ -51,20 +50,5 @@ it("presents stored Slack labels without raw author IDs or Unix timestamps", () 
   ).toBe(1789256856)
   expect(sourceLabel("Database latency unchanged", "inc-api")).toBe(
     "Database latency unchanged"
-  )
-})
-
-it("formats document citations as numbered links without changing headings or unsafe sources", () => {
-  const evidence = [
-    { id: "slack:1", url: "https://slack.com/archives/C1/p1789256856755619" },
-    { id: "slack:2", url: "javascript:alert(1)" },
-  ]
-  expect(
-    citationMarkdown(
-      "## Findings\n\nRecovered [slack:1, slack:2]. [unknown]",
-      evidence
-    )
-  ).toBe(
-    "## Findings\n\nRecovered [1](<https://slack.com/archives/C1/p1789256856755619>) [2]. [unknown]"
   )
 })

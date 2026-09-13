@@ -97,8 +97,6 @@ async def test_failed_admission_is_recoverable_after_active_marker(runtime):
 
 
 async def test_expiry_removes_content_and_checkpoints_without_reenrollment(runtime):
-    from agent.incidents.runtime import TOOL_OUTCOMES, ToolOutcome
-
     old = (datetime.now(UTC) - timedelta(days=31)).isoformat()
     id = service.incident_id("T1", "C1")
     await service.INVESTIGATIONS.put(
@@ -125,18 +123,6 @@ async def test_expiry_removes_content_and_checkpoints_without_reenrollment(runti
             received_at=time.time() - 8 * 86400,
         ),
     )
-    await TOOL_OUTCOMES.put(
-        "outcome",
-        ToolOutcome(
-            id="outcome",
-            incident_id=id,
-            thread_id="conversation",
-            pass_id="pass",
-            name="execute",
-            arguments="{}",
-            result="confidential result",
-        ),
-    )
     assert await coordinator.coordinate() == {"status": "idle"}
     record = await service.INVESTIGATIONS.get(id)
     assert record.expired
@@ -144,7 +130,6 @@ async def test_expiry_removes_content_and_checkpoints_without_reenrollment(runti
     assert record.channel_name == "inc-api"
     runtime.threads.delete.assert_awaited_once_with(id)
     assert not await service.RECEIPTS.get("old")
-    assert not await TOOL_OUTCOMES.get("outcome")
     assert await service.accept_slack_event(
         {
             "team_id": "T1",

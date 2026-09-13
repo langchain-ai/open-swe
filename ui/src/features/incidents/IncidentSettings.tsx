@@ -149,8 +149,6 @@ function PolicyForm({
       channel_prefix: String(form.get("channel_prefix") ?? "").trim(),
       excluded_channel_ids: list(form, "excluded_channel_ids"),
       model: String(form.get("model") ?? "").trim() || null,
-      provider_connection_name:
-        String(form.get("provider_connection_name") ?? "").trim() || null,
       max_model_calls: Number(form.get("max_model_calls")),
       max_pass_seconds: Number(form.get("max_pass_seconds")),
       idle_timeout_seconds: Number(form.get("idle_timeout_seconds")),
@@ -198,16 +196,6 @@ function PolicyForm({
               placeholder="C0123456789"
             />
           </div>
-        </SettingsPanel>
-
-        <SettingsPanel>
-          <Field
-            name="provider_connection_name"
-            label="Default provider connection"
-            value={initial.provider_connection_name ?? ""}
-            placeholder="incident-io"
-            description="Name of an existing incident.io connection in workspace MCP settings. Use Ask Open SWE to request provider context or actions."
-          />
         </SettingsPanel>
         <details>
           <summary className="cursor-pointer px-4 py-3 text-xs font-medium">

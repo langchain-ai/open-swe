@@ -19,18 +19,3 @@ export function citationIndices(part: string, evidence: Source[]) {
     .map((id) => evidence.findIndex((item) => item.id === id.trim()))
   return indices.every((index) => index >= 0) ? [...new Set(indices)] : []
 }
-
-export function citationMarkdown(text: string, evidence: Source[]) {
-  return text.replace(/\[[^\]\n]+\]/g, (part) => {
-    const indices = citationIndices(part, evidence)
-    if (!indices.length) return part
-    return indices
-      .map((index) => {
-        const url = evidence[index]?.url
-        return url && /^https?:\/\//i.test(url)
-          ? `[${index + 1}](<${url.replace(/[\s<>]/g, encodeURIComponent)}>)`
-          : `[${index + 1}]`
-      })
-      .join(" ")
-  })
-}

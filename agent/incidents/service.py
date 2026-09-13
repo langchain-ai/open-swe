@@ -278,10 +278,6 @@ async def update_settings(
     # SLACK_APP_ID. Client-supplied values are ignored.
     candidate.workspace_id = current.workspace_id
     candidate.slack_app_id = current.slack_app_id
-    if candidate.provider_connection_name:
-        from agent.incidents.providers import validate_provider_connection
-
-        await validate_provider_connection(candidate.provider_connection_name)
     if candidate.model:
         from agent.dashboard.options import SUPPORTED_MODEL_IDS
 
@@ -395,7 +391,7 @@ async def list_incidents(
             statuses = {
                 "active": {"pending", "watching", "investigating", "needs_attention"},
                 "inactive": {"paused", "completed"},
-            }.get(view, {view})
+            }[view]
             if record.status not in statuses:
                 continue
         if q and q.lower() not in f"{item['title']} {item['channel_name']}".lower():
@@ -452,7 +448,7 @@ async def get_incident(id: str, *, include_setup: bool = False) -> dict[str, Any
                 "next_cursor": None,
             }
         raise HTTPException(404, "Incident not found")
-    actions = ["attach_provider", "update_provider"]
+    actions: list[str] = []
     if not record.expired:
         actions.extend(["ask", "investigate_again"])
     if record.status == "completed":
