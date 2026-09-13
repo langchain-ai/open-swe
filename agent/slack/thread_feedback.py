@@ -14,11 +14,11 @@ from agent.slack.client import (
     get_slack_channel_context,
     lookup_slack_run_message_mapping,
     open_slack_modal,
-    post_slack_ephemeral_message,
     respond_to_slack_interaction,
     slack_channel_allows_operations,
     slack_thread_mutation_lock,
 )
+from agent.slack.dm import post_slack_dm
 from agent.slack.responses import FeedbackResponse
 from agent.source_context import SourceContext
 from agent.store import TypedStore
@@ -193,14 +193,12 @@ async def post_slack_feedback_prompt(
 
                 if not await feedback_event_is_ready(thread_id, expected_event_id):
                     return
-            posted = await post_slack_ephemeral_message(
-                channel_id,
+            posted_ts = await post_slack_dm(
                 record.user_id,
                 "How did Open SWE do on this thread? Choose Good or Bad.",
-                thread_ts=record.thread_ts if record.thread_ts != "0" else None,
                 blocks=feedback_blocks(run_id, thread_id),
             )
-            if posted:
+            if posted_ts:
                 record.prompted = True
                 await store.put(run_id, record)
     except Exception:
@@ -300,12 +298,10 @@ async def _acknowledge(record: ThreadFeedback, *, response_url: str) -> None:
                 return
             async with asyncio.timeout(8):
                 if not current.acknowledged:
-                    # Ephemeral response_url updates can also appear at the channel root.
-                    posted = await post_slack_ephemeral_message(
-                        current.channel_id,
+                    # DM so the confirmation is actually seen, unlike an ephemeral reply.
+                    posted = await post_slack_dm(
                         current.user_id,
                         "✅ Feedback completed. Thanks!",
-                        thread_ts=current.thread_ts if current.thread_ts != "0" else None,
                     )
                     if not posted:
                         return

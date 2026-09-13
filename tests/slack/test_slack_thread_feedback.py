@@ -69,7 +69,7 @@ def context(monkeypatch: pytest.MonkeyPatch, fake_store: Any) -> dict[str, Any]:
         "get_slack_channel_context",
         AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
-    monkeypatch.setattr(feedback, "post_slack_ephemeral_message", AsyncMock(return_value=True))
+    monkeypatch.setattr(feedback, "post_slack_dm", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "respond_to_slack_interaction", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "open_slack_modal", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "create_langsmith_thread_feedback", AsyncMock(return_value=True))
@@ -181,7 +181,7 @@ async def test_empty_optional_comment_preserves_bad_rating(context: Any, fake_st
     saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
     assert saved["choice"] == "bad" and saved["completed"] and saved["comment"] == ""
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 0.0
-    feedback.post_slack_ephemeral_message.assert_awaited_once()
+    feedback.post_slack_dm.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -218,8 +218,8 @@ async def test_prompt_uses_exact_run_mapping_and_deduplicates(
     monkeypatch.setattr(feedback, "lookup_slack_run_message_mapping", lookup)
     for _ in range(2):
         await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
-    feedback.post_slack_ephemeral_message.assert_awaited_once()
-    call = feedback.post_slack_ephemeral_message.await_args
+    feedback.post_slack_dm.assert_awaited_once()
+    call = feedback.post_slack_dm.await_args
     blocks = call.kwargs["blocks"]
     assert not any(block["type"] == "input" for block in blocks)
     controls = next(block["elements"][0] for block in blocks if block["type"] == "context_actions")
@@ -265,7 +265,7 @@ async def test_success_completion_only_prompts_for_answered_question(
         {"thread_id": "thread-1", "run_id": "run-1", "status": "success"}
     )
     assert schedule.await_count == int(should_ask_for_feedback)
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    feedback.post_slack_dm.assert_not_awaited()
     if should_ask_for_feedback:
         assert schedule.await_args.kwargs["answer_run_id"] == "run-1"
         assert schedule.await_args.kwargs["slack_run_id"] == "run-1"
@@ -330,14 +330,14 @@ async def test_dismiss_removes_prompt_without_saving_feedback(
             _RESPONSE_URL, {"delete_original": True}
         )
     feedback.create_langsmith_thread_feedback.assert_not_awaited()
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    feedback.post_slack_dm.assert_not_awaited()
     saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
     assert all(saved[key] == value for key, value in context.items())
     assert saved.get("dismissed", False) is not other_user
     assert saved.get("rating") is None
     assert not saved.get("comment")
     await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    feedback.post_slack_dm.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -355,11 +355,9 @@ async def test_prompt_cleanup_failure_preserves_saved_feedback_and_confirmation(
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["rating"] == 5
     feedback.create_langsmith_thread_feedback.assert_awaited_once()
     if missing_url:
-        feedback.post_slack_ephemeral_message.assert_not_awaited()
+        feedback.post_slack_dm.assert_not_awaited()
     else:
-        feedback.post_slack_ephemeral_message.assert_awaited_once_with(
-            "C1", "U1", "✅ Feedback completed. Thanks!", thread_ts="1.0"
-        )
+        feedback.post_slack_dm.assert_awaited_once_with("U1", "✅ Feedback completed. Thanks!")
 
 
 @pytest.mark.asyncio
@@ -370,7 +368,7 @@ async def test_dismiss_failure_keeps_feedback_submittable(context: Any, fake_sto
     await tasks()
     saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
     assert not saved.get("dismissed")
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    feedback.post_slack_dm.assert_not_awaited()
     feedback.create_langsmith_thread_feedback.assert_not_awaited()
     await _submit_rating()
     saved = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
@@ -452,14 +450,14 @@ async def test_dismiss_during_failed_submission_update_prevents_later_acknowledg
         await asyncio.gather(rating_task, dismiss_task)
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["dismissed"] is True
     response_mock.reset_mock()
-    feedback.post_slack_ephemeral_message.assert_awaited_once()
-    feedback.post_slack_ephemeral_message.reset_mock()
+    feedback.post_slack_dm.assert_awaited_once()
+    feedback.post_slack_dm.reset_mock()
     await feedback._acknowledge(
         feedback.ThreadFeedback(**context, rating=5, completed=True),
         response_url=_RESPONSE_URL,
     )
     response_mock.assert_not_awaited()
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    feedback.post_slack_dm.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -513,7 +511,7 @@ async def test_failed_prompt_can_be_retried(
 ) -> None:
     fake_store.seed(("slack_thread_feedback", "C1"), "run-1", {**context, "prompted": False})
     post = AsyncMock(side_effect=[False, True])
-    monkeypatch.setattr(feedback, "post_slack_ephemeral_message", post)
+    monkeypatch.setattr(feedback, "post_slack_dm", post)
     await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
     assert not fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["prompted"]
     await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
@@ -527,7 +525,7 @@ async def test_prompt_exception_leaves_feedback_unsent(
     fake_store.seed(("slack_thread_feedback", "C1"), "run-1", {**context, "prompted": False})
     monkeypatch.setattr(
         feedback,
-        "post_slack_ephemeral_message",
+        "post_slack_dm",
         AsyncMock(side_effect=RuntimeError("Slack unavailable")),
     )
 
@@ -576,7 +574,7 @@ async def test_scheduled_prompt_rechecks_readiness_after_channel_lookup(
     await feedback.post_slack_feedback_prompt(
         "thread-1", "run-1", "C1", expected_event_id="answer:run-1"
     )
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    feedback.post_slack_dm.assert_not_awaited()
     assert not fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["prompted"]
 
 
@@ -598,7 +596,7 @@ async def test_missing_exact_response_does_not_prompt(
         feedback, "lookup_slack_run_message_mapping", AsyncMock(return_value=mapping)
     )
     await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    feedback.post_slack_dm.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -664,7 +662,7 @@ async def test_concurrent_completion_callbacks_post_one_prompt(
         return True
 
     post_mock = AsyncMock(side_effect=post)
-    monkeypatch.setattr(feedback, "post_slack_ephemeral_message", post_mock)
+    monkeypatch.setattr(feedback, "post_slack_dm", post_mock)
     await asyncio.gather(
         feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1"),
         feedback.post_slack_feedback_prompt("thread-1", second_run, "C1"),
@@ -718,7 +716,7 @@ async def test_prompt_deduplicates_existing_records_by_requester_and_slack_threa
         current["agent_thread_id"], current["run_id"], current["channel_id"]
     )
 
-    assert feedback.post_slack_ephemeral_message.await_count == int(should_prompt)
+    assert feedback.post_slack_dm.await_count == int(should_prompt)
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == previous
     assert ("run-2" in fake_store.values(("slack_thread_feedback", current["channel_id"]))) == (
         should_prompt
@@ -748,8 +746,8 @@ async def test_followup_prompts_only_thread_initiator(
         "thread-1", "run-1", "C1", require_answer=not merged_pr
     )
 
-    feedback.post_slack_ephemeral_message.assert_awaited_once()
-    assert feedback.post_slack_ephemeral_message.await_args.args[:2] == ("C1", "U1")
+    feedback.post_slack_dm.assert_awaited_once()
+    assert feedback.post_slack_dm.await_args.args[:1] == ("U1",)
     record = fake_store.values(("slack_thread_feedback", "C1"))["run-1"]
     assert record["user_id"] == "U1"
     other_user_rating = _rating()
@@ -778,7 +776,7 @@ async def test_prompt_requires_known_initiator_at_same_slack_location(
         "metadata": {"source_context": {"slack_thread": origin}}
     }
     await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    feedback.post_slack_dm.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -788,7 +786,7 @@ async def test_old_unsent_prompt_for_other_user_is_not_reassigned(
     previous = {**context, "user_id": "U2", "prompted": False, "rating": 4}
     fake_store.seed(("slack_thread_feedback", "C1"), "run-1", previous)
     await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
+    feedback.post_slack_dm.assert_not_awaited()
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"] == previous
 
 
@@ -806,7 +804,7 @@ async def test_submission_during_prompt_delivery_is_preserved(
             await finish_post.wait()
         return True
 
-    monkeypatch.setattr(feedback, "post_slack_ephemeral_message", AsyncMock(side_effect=post))
+    monkeypatch.setattr(feedback, "post_slack_dm", AsyncMock(side_effect=post))
     async with asyncio.timeout(2):
         prompt_task = asyncio.create_task(
             feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
@@ -853,11 +851,9 @@ async def test_native_rating_saves_immediately_and_only_bad_opens_comment(
     feedback.respond_to_slack_interaction.assert_awaited_once_with(
         _RESPONSE_URL, {"delete_original": True}
     )
-    feedback.post_slack_ephemeral_message.assert_awaited_once()
-    confirmation = feedback.post_slack_ephemeral_message.await_args
-    assert confirmation.args[:2] == ("C1", "U1")
-    assert "completed" in confirmation.args[2].lower()
-    assert confirmation.kwargs["thread_ts"] == (None if thread_ts == "0" else "1.0")
+    feedback.post_slack_dm.assert_awaited_once()
+    confirmation = feedback.post_slack_dm.await_args
+    assert confirmation.args[:2] == ("U1", "✅ Feedback completed. Thanks!")
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["acknowledged"]
 
 
@@ -868,7 +864,7 @@ async def test_native_bad_comment_updates_rating_without_overwriting_first_comme
     rating = _action("open_swe_feedback", json.dumps({"run_id": "run-1", "choice": "bad"}))
     await routes.slack_interactivity(_request(rating), tasks)
     await tasks()
-    feedback.post_slack_ephemeral_message.assert_awaited_once()
+    feedback.post_slack_dm.assert_awaited_once()
     feedback.respond_to_slack_interaction.reset_mock()
     payload = _submission("  The tests still fail.  ")
     payload["view"]["private_metadata"] = feedback.open_slack_modal.await_args.args[1][
@@ -885,7 +881,7 @@ async def test_native_bad_comment_updates_rating_without_overwriting_first_comme
     feedback.respond_to_slack_interaction.assert_awaited_once_with(
         _RESPONSE_URL, {"delete_original": True}
     )
-    feedback.post_slack_ephemeral_message.assert_awaited_once()
+    feedback.post_slack_dm.assert_awaited_once()
     assert (
         feedback.create_langsmith_thread_feedback.await_args.kwargs["comment"]
         == "The tests still fail."
@@ -936,7 +932,7 @@ async def test_native_rating_retry_removes_controls_without_reopening_modal(cont
         for call in feedback.respond_to_slack_interaction.await_args_list
     )
     feedback.open_slack_modal.assert_awaited_once()
-    feedback.post_slack_ephemeral_message.assert_awaited_once()
+    feedback.post_slack_dm.assert_awaited_once()
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["choice"] == "bad"
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == 0.0
 
@@ -945,7 +941,7 @@ async def test_native_rating_retry_removes_controls_without_reopening_modal(cont
 async def test_confirmation_failure_can_retry_without_repeating_success(
     context, fake_store, failure
 ):
-    feedback.post_slack_ephemeral_message.side_effect = [failure, True]
+    feedback.post_slack_dm.side_effect = [failure, True]
     payload = _action("open_swe_feedback", json.dumps({"run_id": "run-1", "choice": "good"}))
     for deletions, expected_acknowledged in enumerate((False, True, True)):
         tasks = BackgroundTasks()
@@ -955,12 +951,10 @@ async def test_confirmation_failure_can_retry_without_repeating_success(
         assert saved["completed"] and saved["rating"] == 5
         assert saved.get("acknowledged", False) is expected_acknowledged
         assert feedback.respond_to_slack_interaction.await_count == deletions
-    assert feedback.post_slack_ephemeral_message.await_count == 2
+    assert feedback.post_slack_dm.await_count == 2
 
 
-@pytest.mark.parametrize(
-    "slow_call", ["post_slack_ephemeral_message", "create_langsmith_thread_feedback"]
-)
+@pytest.mark.parametrize("slow_call", ["post_slack_dm", "create_langsmith_thread_feedback"])
 async def test_comment_saved_during_slow_confirmation_or_export_is_preserved(
     context: Any, fake_store: Any, slow_call: str
 ) -> None:
@@ -993,4 +987,4 @@ async def test_comment_saved_during_slow_confirmation_or_export_is_preserved(
     )
     exported = feedback.create_langsmith_thread_feedback.await_args.kwargs
     assert exported["score"] == 0.0 and exported["comment"] == "Missing tests"
-    feedback.post_slack_ephemeral_message.assert_awaited_once()
+    feedback.post_slack_dm.assert_awaited_once()
