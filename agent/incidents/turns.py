@@ -4,6 +4,8 @@ import json
 import logging
 from typing import Any, Literal
 
+import httpx
+
 from agent.dashboard.options import normalize_model_choice
 from agent.dispatch import create_durable_run
 from agent.incidents import service
@@ -207,6 +209,7 @@ async def dispatch_turn(
     requester: PersonIdentity | None = None,
     reply_thread_ts: str = "",
     after_seconds: float | None = None,
+    multitask_strategy: str | None = None,
 ) -> dict[str, Any]:
     """Start one main-agent run on the incident thread.
 
@@ -229,7 +232,7 @@ async def dispatch_turn(
             "incident_id": record.id,
             "incident_turn": "explicit" if explicit else "automatic",
         },
-        multitask_strategy="interrupt" if explicit else "enqueue",
+        multitask_strategy=multitask_strategy or ("interrupt" if explicit else "enqueue"),
         after_seconds=after_seconds,
     )
     return dict(run)
@@ -241,7 +244,16 @@ async def schedule_automatic_turn(record: Incident, policy: IncidentPolicy) -> b
         return False
     if await has_active_run(record.thread_id):
         return False
-    await dispatch_turn(record, policy, after_seconds=AUTOMATIC_DELAY_SECONDS)
+    # "reject" makes the platform refuse a second run while one is pending or running,
+    # so two events racing past the check above still produce a single turn.
+    try:
+        await dispatch_turn(
+            record, policy, after_seconds=AUTOMATIC_DELAY_SECONDS, multitask_strategy="reject"
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 409:
+            return False
+        raise
     return True
 
 

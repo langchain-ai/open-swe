@@ -261,6 +261,8 @@ async def handle_slack_event(
         return {"status": "accepted"}
     if kind in {"channel_created", "channel_rename"}:
         return {"status": "ignored"}
+    if record.channel_id in policy.excluded_channel_ids:
+        return {"status": "ignored"}
     if kind == "channel_archive":
         record.is_archived = True
         if record.status != "completed":

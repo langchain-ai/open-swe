@@ -122,6 +122,8 @@ class IncidentSession:
             raise PermissionError("Incident binding is missing")
         if not policy.enabled:
             raise PermissionError("Incidents is disabled")
+        if record.channel_id in policy.excluded_channel_ids:
+            raise PermissionError("Incident channel is excluded")
         if self.explicit_request is None and record.status in {"paused", "completed"}:
             raise PermissionError("Incident is not watching")
         self.record = record
@@ -134,35 +136,31 @@ class IncidentSession:
         digest = service.fingerprint(report_message(report, report.summary, None)[0])
         previous = await service.REPORTS.get(record.id)
         run_id = _current_run_id()
-        posted_already = (
-            previous is not None
-            and previous.digest == digest
-            and bool(run_id)
-            and previous.run_id == run_id
-        )
-        changed = previous is None or previous.digest != digest
+        # The postmortem update runs first: if it fails, nothing is recorded and the agent
+        # sees the error instead of a report that was never fully written.
+        await documents.update_from_report(record, report)
         latest = IncidentReportRecord(
             incident_id=record.id,
             report=report,
             digest=digest,
             run_id=run_id,
+            posted_digest=previous.posted_digest if previous else "",
+            posted_run_id=previous.posted_run_id if previous else "",
             updated_at=now_iso(),
             activity=previous.activity if previous else [],
         )
         service.note(latest, "findings", report.summary)
         await service.REPORTS.put(record.id, latest)
-        await documents.update_from_report(record, report)
+        explicit = self.explicit_request is not None
+        delivered = latest.posted_digest == digest
+        delivered_this_run = delivered and bool(run_id) and latest.posted_run_id == run_id
         posted = False
-        if (
-            (changed or self.explicit_request is not None)
-            and not posted_already
-            and not record.is_archived
-        ):
+        if (not delivered or (explicit and not delivered_this_run)) and not record.is_archived:
             text, blocks = report_message(
                 report,
                 report.summary,
                 dashboard_incident_url(record.id),
-                reason="answer" if self.explicit_request is not None else "findings",
+                reason="answer" if explicit else "findings",
             )
             ts, error = await post_slack_thread_reply_with_ts(
                 record.channel_id,
@@ -173,7 +171,11 @@ class IncidentSession:
                 unfurl_media=False,
             )
             posted = ts is not None
-            if error:
+            if posted:
+                # Only a confirmed delivery suppresses the next post of the same digest.
+                latest.posted_digest, latest.posted_run_id = digest, run_id
+                await service.REPORTS.put(record.id, latest)
+            elif error:
                 logger.warning(
                     "Incident report not delivered to Slack",
                     extra={"incident_id": record.id, "slack_error": error},

@@ -136,3 +136,17 @@ async def test_history_cannot_follow_rebound_incident_into_a_different_workspace
     with pytest.raises(HTTPException) as error:
         await current(record)
     assert error.value.status_code == 404
+
+
+async def test_history_pages_use_stable_cursors(record):
+    await documents.update_from_report(record, report())
+    second = record.model_copy(update={"id": "incident-2", "channel_id": "C2", "title": "Other"})
+    await service.INCIDENTS.put(second.id, second)
+    await documents.update_from_report(second, report("Other incident"))
+
+    page_one = await documents.search_history(limit=1)
+    page_two = await documents.search_history(limit=1, cursor=page_one["next_cursor"])
+
+    assert "|" in page_one["next_cursor"]
+    assert {page_one["items"][0]["id"], page_two["items"][0]["id"]} == {record.id, second.id}
+    assert page_two["next_cursor"] is None

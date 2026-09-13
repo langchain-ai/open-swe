@@ -364,6 +364,19 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     }
 )
 
+# Automatic incident turns are triggered by whatever lands in a public channel, so the
+# prompt cannot be the only boundary: they get the plan-mode research toolset and no
+# Slack posting, PR, HTTP, or delegation tools. record_incident_report posts for them.
+# An authorized responder's explicit request restores the normal toolset.
+INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = PLAN_MODE_EXCLUDED_TOOLS | frozenset(
+    {
+        "manage_code_channel",
+        "slack_add_reaction",
+        "slack_attach_html",
+        "slack_thread_reply",
+    }
+)
+
 
 def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     """Provider guards for subagent model calls.
@@ -1183,8 +1196,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    incident_automatic = incident_session is not None and incident_session.explicit_request is None
     if incident_session is not None:
         static_tools.extend(incident_session.tools)
+    if incident_automatic:
+        static_tools = [
+            tool
+            for tool in static_tools
+            if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+        ]
     static_tools = apply_tool_descriptions(static_tools)
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
@@ -1334,6 +1354,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     excluded=(
                         STOP_SUMMARY_EXCLUDED_TOOLS
                         if stop_summary_mode
+                        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+                        if incident_automatic
                         else DEEP_AGENT_EXCLUDED_TOOLS
                     )
                 ),

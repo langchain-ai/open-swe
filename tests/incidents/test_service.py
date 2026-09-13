@@ -178,6 +178,14 @@ async def test_detail_derives_investigating_from_live_runs(configured):
     turns.has_active_run.return_value = True
     assert (await service.get_incident(record.id))["incident"]["status"] == "investigating"
 
+    record.status = "paused"
+    await service.INCIDENTS.put(record.id, record)
+    assert (await service.get_incident(record.id))["allowed_actions"] == [
+        "ask",
+        "resume",
+        "complete",
+    ]
+
     record.status = "completed"
     await service.INCIDENTS.put(record.id, record)
     assert (await service.get_incident(record.id))["allowed_actions"] == ["ask", "reopen"]
@@ -253,3 +261,50 @@ async def test_controls_route_through_the_channel_handler(configured, monkeypatc
 
     control.assert_awaited_once()
     assert control.await_args.args[1:] == ("pause", {"id": "github:sre"})
+
+
+async def test_cursor_pages_do_not_repeat_when_an_incident_moves_forward(configured):
+    first = await _record(channel_id="C1", channel="C1")
+    second = await _record(channel_id="C2", channel="C2")
+    third = await _record(channel_id="C3", channel="C3")
+    for index, record in enumerate((first, second, third)):
+        record.updated_at = f"2026-09-13T10:0{3 - index}:00+00:00"
+        await service.INCIDENTS.put(record.id, record)
+
+    page_one = await service.list_incidents(limit=1)
+    assert [item["id"] for item in page_one["items"]] == [first.id]
+    assert page_one["next_cursor"] == f"{first.updated_at}|{first.id}"
+
+    third.updated_at = "2026-09-13T11:00:00+00:00"
+    await service.INCIDENTS.put(third.id, third)
+    page_two = await service.list_incidents(limit=1, cursor=page_one["next_cursor"])
+
+    assert [item["id"] for item in page_two["items"]] == [second.id]
+    assert page_two["next_cursor"] is None
+    with pytest.raises(HTTPException) as error:
+        await service.list_incidents(cursor="5")
+    assert error.value.status_code == 422
+
+
+async def test_retried_commands_are_not_repeated(configured, monkeypatch):
+    record = await _record()
+    dispatch = AsyncMock(return_value={"run_id": "r1"})
+    monkeypatch.setattr(turns, "dispatch_turn", dispatch)
+    actor = {"id": "github:sre", "github_login": "sre"}
+
+    first = await service.submit_command(record.id, "ask", "What changed?", "r1", actor)
+    again = await service.submit_command(record.id, "ask", "What changed?", "r1", actor)
+
+    assert (first["status"], again["status"]) == ("accepted", "duplicate")
+    dispatch.assert_awaited_once()
+    with pytest.raises(HTTPException) as error:
+        await service.submit_command(record.id, "ask", "Something else", "r1", actor)
+    assert error.value.status_code == 409
+
+    dispatch.side_effect = RuntimeError("platform down")
+    with pytest.raises(RuntimeError):
+        await service.submit_command(record.id, "ask", "Retry me", "r2", actor)
+    dispatch.side_effect = None
+    assert (await service.submit_command(record.id, "ask", "Retry me", "r2", actor))["status"] == (
+        "accepted"
+    )

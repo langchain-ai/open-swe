@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from agent.incidents import service, turns
@@ -87,7 +88,7 @@ async def test_schedule_creates_one_debounced_system_turn(record, policy, platfo
     args, kwargs = turns.create_durable_run.await_args
     assert args == ("thread-1", "agent")
     assert kwargs["after_seconds"] == turns.AUTOMATIC_DELAY_SECONDS
-    assert kwargs["multitask_strategy"] == "enqueue"
+    assert kwargs["multitask_strategy"] == "reject"
     configurable = kwargs["config"]["configurable"]
     assert configurable["source"] == "incidents_agent"
     assert configurable["incident_id"] == "i1"
@@ -170,3 +171,17 @@ async def test_cancel_interrupts_pending_and_running_runs(record, platform):
     )
     assert await turns.has_active_run("thread-1") is True
     assert await turns.queued_context_count("thread-1") == 0
+
+
+async def test_platform_rejection_means_a_turn_is_already_scheduled(record, policy, platform):
+    request = httpx.Request("POST", "http://localhost:2024/runs")
+    turns.create_durable_run.side_effect = httpx.HTTPStatusError(
+        "conflict", request=request, response=httpx.Response(409, request=request)
+    )
+    assert await turns.schedule_automatic_turn(record, policy) is False
+
+    turns.create_durable_run.side_effect = httpx.HTTPStatusError(
+        "boom", request=request, response=httpx.Response(500, request=request)
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        await turns.schedule_automatic_turn(record, policy)

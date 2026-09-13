@@ -228,3 +228,43 @@ async def test_history_tools_read_other_incidents_as_cited_context(incident):
     assert [item["id"] for item in found["items"]] == ["older"]
     assert read["evidence_id"].startswith("incident:")
     assert "Disk filled up" in read["observation"]
+
+
+async def test_excluded_channels_stop_the_session(incident):
+    session = await runtime.load_incident_session(config())
+    await service.POLICIES.put(
+        "default",
+        IncidentPolicy(enabled=True, workspace_id="T1", excluded_channel_ids=["C1"]),
+    )
+    with pytest.raises(PermissionError, match="excluded"):
+        await session.check()
+
+
+async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
+    session = await runtime.load_incident_session(config())
+    await runtime.IncidentMiddleware(session).awrap_model_call(
+        request(context_message("1.0")), AsyncMock()
+    )
+    draft = {"summary": [{"text": "Errors reported", "evidence_ids": ["slack:1.0"]}]}
+    runtime.post_slack_thread_reply_with_ts.return_value = (None, "channel_not_found")
+
+    first = await session._record_incident_report(**draft)
+    runtime.post_slack_thread_reply_with_ts.return_value = ("8.0", None)
+    second = await session._record_incident_report(**draft)
+    third = await session._record_incident_report(**draft)
+
+    assert (first["posted"], second["posted"], third["posted"]) == (False, True, False)
+    assert runtime.post_slack_thread_reply_with_ts.await_count == 2
+    latest = await service.REPORTS.get("incident")
+    assert latest.posted_digest == latest.digest
+
+
+async def test_postmortem_failure_records_nothing(incident, monkeypatch):
+    session = await runtime.load_incident_session(config())
+    monkeypatch.setattr(
+        documents, "update_from_report", AsyncMock(side_effect=RuntimeError("store"))
+    )
+    with pytest.raises(RuntimeError, match="store"):
+        await session._record_incident_report(summary=[])
+    assert await service.REPORTS.get("incident") is None
+    runtime.post_slack_thread_reply_with_ts.assert_not_awaited()

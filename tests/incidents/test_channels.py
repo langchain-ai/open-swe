@@ -356,3 +356,28 @@ async def test_disabled_policy_ignores_enrolled_channel_traffic(enrolled):
     )
     assert response == {"status": "ignored"}
     turns.queue_context.assert_not_awaited()
+
+
+async def test_excluded_channels_are_ignored_after_enrollment(enrolled):
+    await service.POLICIES.put(
+        "default",
+        IncidentPolicy(
+            enabled=True, workspace_id="T1", slack_app_id="A1", excluded_channel_ids=["C1"]
+        ),
+    )
+    response, _ = await handle(
+        {"type": "message", "channel": "C1", "user": "U1", "text": "x", "ts": "9.0"}
+    )
+    mention, _ = await handle(
+        {
+            "type": "app_mention",
+            "channel": "C1",
+            "user": "U1",
+            "text": "<@UBOT> status?",
+            "ts": "9.1",
+        },
+        event_id="E2",
+    )
+    assert response == mention == {"status": "ignored"}
+    turns.queue_context.assert_not_awaited()
+    turns.dispatch_turn.assert_not_awaited()

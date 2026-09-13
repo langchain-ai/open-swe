@@ -12,7 +12,13 @@ from pydantic import ValidationError
 
 from agent.config import ENV
 from agent.incidents.evidence_tools import redact
-from agent.incidents.models import Activity, Incident, IncidentPolicy, IncidentReportRecord
+from agent.incidents.models import (
+    Activity,
+    CommandReceipt,
+    Incident,
+    IncidentPolicy,
+    IncidentReportRecord,
+)
 from agent.input_messages import PersonIdentity
 from agent.slack.client import get_slack_channel_info
 from agent.slack.http import slack_client
@@ -23,6 +29,7 @@ logger = logging.getLogger(__name__)
 POLICIES = TypedStore(["incidents", "policies"], IncidentPolicy)
 INCIDENTS = TypedStore(["incidents", "incidents"], Incident)
 REPORTS = TypedStore(["incidents", "reports"], IncidentReportRecord)
+COMMANDS = TypedStore(["incidents", "commands"], CommandReceipt)
 ACTIVE_STATUSES = frozenset({"watching", "needs_attention"})
 _VIEWS = {"active": ACTIVE_STATUSES, "inactive": frozenset({"paused", "completed"})}
 REQUIRED_SLACK_SCOPES = frozenset(
@@ -54,6 +61,41 @@ def redact_context(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: redact_context(item) for key, item in value.items()}
     return value
+
+
+def sort_newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order by updated_at descending with the id as a stable tie-breaker."""
+    return sorted(items, key=lambda item: (item["updated_at"], item["id"]), reverse=True)
+
+
+def _precedes(item: dict[str, Any], updated_at: str, item_id: str) -> bool:
+    return (item["updated_at"], item["id"]) > (updated_at, item_id)
+
+
+def paginate(items: list[dict[str, Any]], cursor: str | None, limit: int) -> dict[str, Any]:
+    """Keyset pagination over `sort_newest_first` output.
+
+    The cursor names the last row of the previous page, so a row that moves to the
+    front between requests is neither repeated nor skipped on the next page.
+    """
+    limit = max(1, min(limit, 100))
+    start = 0
+    if cursor:
+        updated_at, separator, item_id = cursor.partition("|")
+        if not separator or not updated_at or not item_id:
+            raise HTTPException(422, "Invalid cursor")
+        start = sum(1 for item in items if _precedes(item, updated_at, item_id))
+        if start < len(items) and (items[start]["updated_at"], items[start]["id"]) == (
+            updated_at,
+            item_id,
+        ):
+            start += 1
+    page = items[start : start + limit]
+    more = len(items) > start + limit
+    return {
+        "items": page,
+        "next_cursor": f"{page[-1]['updated_at']}|{page[-1]['id']}" if more and page else None,
+    }
 
 
 def note(target: Incident | IncidentReportRecord, kind: str, text: str) -> None:
@@ -265,7 +307,7 @@ async def list_incidents(
     include_setup: bool = False,
 ) -> dict[str, Any]:
     policy = await get_policy()
-    records = sorted(await INCIDENTS.search_all(), key=lambda r: r.updated_at, reverse=True)
+    records = await INCIDENTS.search_all()
     items = []
     for record in records:
         if record.workspace_id != policy.workspace_id:
@@ -281,17 +323,7 @@ async def list_incidents(
         if q and q.lower() not in f"{item['title']} {item['channel_name']}".lower():
             continue
         items.append(item)
-    try:
-        offset = int(cursor or 0)
-        if offset < 0:
-            raise ValueError
-    except ValueError as exc:
-        raise HTTPException(422, "Invalid cursor") from exc
-    limit = max(1, min(limit, 100))
-    return {
-        "items": items[offset : offset + limit],
-        "next_cursor": str(offset + limit) if len(items) > offset + limit else None,
-    }
+    return paginate(sort_newest_first(items), cursor, limit)
 
 
 async def get_incident(id: str, *, include_setup: bool = False) -> dict[str, Any]:
@@ -325,7 +357,8 @@ async def get_incident(id: str, *, include_setup: bool = False) -> dict[str, Any
     if record.status in ACTIVE_STATUSES and await turns.has_active_run(record.thread_id):
         status = "investigating"
     actions = ["ask"]
-    if record.status != "completed":
+    if record.status in ACTIVE_STATUSES:
+        # An automatic turn on a paused incident would be refused by the session check.
         actions.append("investigate_again")
     if record.status == "completed":
         if not record.is_archived:
@@ -366,6 +399,13 @@ async def submit_command(
     from agent.incidents import channels, turns
 
     detail = await get_incident(id)
+    content_hash = fingerprint([action, text or ""])
+    claim_id = fingerprint([id, actor.get("id") or actor.get("github_login"), request_id])
+    existing = await COMMANDS.get(claim_id)
+    if existing is not None:
+        if existing.content_hash != content_hash:
+            raise HTTPException(409, "Request ID was reused with different content")
+        return {"command_id": request_id, "status": "duplicate"}
     if action not in detail["allowed_actions"]:
         raise HTTPException(409, "Action is not available in this incident state")
     if action == "ask" and (not text or not text.strip() or len(text) > 8000):
@@ -373,13 +413,22 @@ async def submit_command(
     record = await INCIDENTS.get(id)
     assert record is not None
     policy = await get_policy()
-    if action == "ask":
-        assert text is not None
-        await turns.dispatch_turn(
-            record, policy, request=text.strip(), requester=requester_identity(actor)
-        )
-    elif action == "investigate_again":
-        await turns.dispatch_turn(record, policy)
-    else:
-        await channels.apply_control(record, action, actor)
+    # Claim the request before acting so a retried HTTP request cannot repeat the action.
+    await COMMANDS.put(
+        claim_id,
+        CommandReceipt(id=claim_id, incident_id=id, action=action, content_hash=content_hash),
+    )
+    try:
+        if action == "ask":
+            assert text is not None
+            await turns.dispatch_turn(
+                record, policy, request=text.strip(), requester=requester_identity(actor)
+            )
+        elif action == "investigate_again":
+            await turns.dispatch_turn(record, policy)
+        else:
+            await channels.apply_control(record, action, actor)
+    except Exception:
+        await COMMANDS.delete(claim_id)
+        raise
     return {"command_id": request_id, "status": "accepted"}

@@ -106,16 +106,8 @@ async def update_from_report(record: Incident, report: IncidentReport) -> None:
 async def search_history(
     q: str | None = None, *, limit: int = 25, cursor: str | None = None
 ) -> dict[str, Any]:
-    try:
-        offset = int(cursor or "0")
-        if offset < 0:
-            raise ValueError
-    except ValueError as exc:
-        raise HTTPException(422, "Invalid cursor") from exc
     items = []
-    for history in sorted(
-        await HISTORY.search_all(), key=lambda item: item.updated_at, reverse=True
-    ):
+    for history in await HISTORY.search_all():
         try:
             record = await require_access(history.id)
         except HTTPException:
@@ -130,8 +122,4 @@ async def search_history(
         item = history.model_dump(exclude={"workspace_id", "channel_id"})
         item["status"] = record.status
         items.append(item)
-    limit = max(1, min(limit, 100))
-    return {
-        "items": items[offset : offset + limit],
-        "next_cursor": str(offset + limit) if len(items) > offset + limit else None,
-    }
+    return service.paginate(service.sort_newest_first(items), cursor, limit)

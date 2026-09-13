@@ -93,14 +93,19 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     notion.assert_awaited_once_with(None)
     assert isinstance(result["backend"].default, SandboxBackendProxy)
     names = {_registered_tool_name(tool) for tool in result["tools"]}
-    assert {
-        "open_pull_request",
-        "http_request",
-        "background_execute",
-        "slack_thread_reply",
-        "record_incident_report",
-        "search_incidents",
-    } <= names
+    write_tools = {"open_pull_request", "http_request", "background_execute", "slack_thread_reply"}
+    assert {"record_incident_report", "search_incidents"} <= names
+    if explicit:
+        assert write_tools <= names
+    else:
+        assert not write_tools & names
+        from agent.middleware.exclude_tools import ExcludeToolsMiddleware
+        from agent.server import INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+
+        excluded = next(
+            item for item in result["middleware"] if isinstance(item, ExcludeToolsMiddleware)
+        )._excluded
+        assert INCIDENT_AUTOMATIC_EXCLUDED_TOOLS <= excluded
     assert not {"save_user_instructions", "save_user_skill", "read_user_settings"} & names
     assert result["skills"] == ["/organization-skills/", "/bundled-skills/"]
     middleware = result["middleware"]
@@ -114,7 +119,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     assert remote.name in dynamic.tools[0].description
     subagent = result["subagents"][0]
     subagent_names = {_registered_tool_name(tool) for tool in subagent["tools"]}
-    assert "open_pull_request" in subagent_names
+    assert ("open_pull_request" in subagent_names) is explicit
     assert not runtime.INCIDENT_TOOL_NAMES & subagent_names
     guard = next(
         item for item in subagent["middleware"] if isinstance(item, runtime.IncidentMiddleware)
@@ -237,6 +242,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     posted.assert_awaited_once()
     assert posted.await_args.args[:2] == ("C1", "0")
     assert result["messages"][-1].type == "ai"
-    assert {"execute", "task", "record_incident_report", "search_incidents"} <= set(
-        model.bound_names
-    )
+    bound = set(model.bound_names)
+    assert {"execute", "record_incident_report", "search_incidents"} <= bound
+    assert ("task" in bound) is requested_action
+    assert ("open_pull_request" in bound) is requested_action

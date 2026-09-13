@@ -94,5 +94,17 @@ class IncidentReportRecord(BaseModel):
     report: IncidentReport
     digest: str
     run_id: str = ""
+    posted_digest: str = ""
+    posted_run_id: str = ""
     updated_at: str = Field(default_factory=now_iso)
     activity: list[Activity] = Field(default_factory=list)
+
+
+class CommandReceipt(BaseModel):
+    """A responder command claimed before its side effects, so retries cannot repeat it."""
+
+    id: str
+    incident_id: str
+    action: str
+    content_hash: str
+    created_at: str = Field(default_factory=now_iso)
