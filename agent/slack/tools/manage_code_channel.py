@@ -306,7 +306,14 @@ async def _create(
     new_slack = {
         **{
             key: active.get(key, "")
-            for key in ("triggering_user_id", "triggering_user_name", "triggering_user_email")
+            for key in (
+                "triggering_user_id",
+                "triggering_user_name",
+                "triggering_user_email",
+                "team_id",
+                "triggering_bot_id",
+                "triggering_bot_app_id",
+            )
         },
         "channel_id": channel_id,
         "thread_ts": CODE_CHANNEL_SESSION_TS,

@@ -89,6 +89,21 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     return client.store
 
 
+@pytest.fixture
+def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
+    bot = {
+        "team_id": "T123",
+        "bot_id": "B123",
+        "user_id": "U123",
+        "app_id": "A123",
+        "name": "Release bot",
+        "created_by": "alice",
+        "created_at": "2026-09-09",
+    }
+    fake_store.seed(["allowed_slack_bots"], "T123:B123", bot)
+    return bot
+
+
 @pytest.fixture(autouse=True)
 def _default_github_login_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "test-user,trusted-user,reviewer")
@@ -123,3 +138,15 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
         return True
 
     monkeypatch.setattr(webhook_common, "is_review_repo_enabled", _enabled)
+
+
+@pytest.fixture
+def slack_api(monkeypatch: pytest.MonkeyPatch):
+    from agent.slack import client, code_channels, http
+    from tests.support.slack_api import slack_api_server
+
+    with slack_api_server() as api:
+        monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url)
+        monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "test-slack-token")
+        monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
+        yield api
