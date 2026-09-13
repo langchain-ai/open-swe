@@ -10,10 +10,8 @@ import {
   useRemoteThreadListRuntime,
 } from "@assistant-ui/react"
 import { useStreamRuntime } from "@assistant-ui/react-langchain"
-import { STREAM_CONTROLLER } from "@langchain/react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { agentsApi } from "@/features/agents/lib/api"
-import type { AgentThread } from "@/features/agents/lib/types"
 import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
 import { useSession } from "@/lib/session"
 import {
@@ -21,17 +19,12 @@ import {
   threadKey,
   threadQuery,
 } from "./threadListAdapter"
-import { useServerQueue } from "./serverQueue"
 import { toolkit } from "./Message"
 
-export interface ProductState {
-  thread?: AgentThread
-  error?: string
-  queueErrors: Record<string, string | undefined>
-}
-
-export function useProductState() {
-  return useAuiState((state) => state.thread.extras) as ProductState
+export function useThreadMetadata() {
+  const id = useAuiState((state) => state.threadListItem.externalId)
+  // The thread runtime owns fetching; views observe its cache.
+  return useQuery({ ...threadQuery(id ?? ""), enabled: false })
 }
 
 function RuntimeReady({ children }: { children: ReactNode }) {
@@ -43,7 +36,6 @@ function useOpenSweThreadRuntime() {
   const aui = useAui()
   const id = useAuiState((state) => state.threadListItem.externalId)
   const [exists, setExists] = useState(Boolean(id))
-  const [requestError, setRequestError] = useState<string>()
   const session = useSession()
   const queries = useQueryClient()
   const metadata = useQuery({
@@ -56,7 +48,6 @@ function useOpenSweThreadRuntime() {
     () => createDashboardClient(agentsApi.langGraphApiUrl),
     []
   )
-  const { createQueueAdapter, queueErrors } = useServerQueue(id, metadata.data)
   const attachments = useMemo(() => {
     const adapter = new SimpleImageAttachmentAdapter()
     adapter.accept = "image/png,image/jpeg,image/gif,image/webp"
@@ -75,16 +66,8 @@ function useOpenSweThreadRuntime() {
     autoCancelPendingToolCalls: false,
     isDisabled: !canPost || (exists && !metadata.data),
     adapters: { attachments },
-    createQueueAdapter,
-    extras: {
-      thread: metadata.data,
-      queueErrors,
-      error:
-        requestError ?? (metadata.error ? metadata.error.message : undefined),
-    } satisfies ProductState,
     onCreated: () => {
       setExists(true)
-      setRequestError(undefined)
       const remoteId = aui.threadListItem().getState().externalId
       if (remoteId)
         void queries.invalidateQueries({ queryKey: threadKey(remoteId) })
@@ -95,21 +78,6 @@ function useOpenSweThreadRuntime() {
       if (remoteId)
         void queries.invalidateQueries({ queryKey: threadKey(remoteId) })
       void aui.threads().reload()
-    },
-    onCancel: async (stream) => {
-      const remoteId = aui.threadListItem().getState().externalId
-      if (!remoteId) return
-      try {
-        const thread = await agentsApi.cancelThread(remoteId)
-        queries.setQueryData(threadKey(remoteId), thread)
-        await stream.disconnect()
-        await stream[STREAM_CONTROLLER].hydrate(remoteId)
-      } catch (error) {
-        setRequestError(
-          error instanceof Error ? error.message : "Could not stop this run."
-        )
-        throw error
-      }
     },
   })
 }

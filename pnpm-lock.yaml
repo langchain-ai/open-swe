@@ -22,9 +22,6 @@ overrides:
   postcss: 8.5.26
   undici: 7.29.0
 
-patchedDependencies:
-  '@assistant-ui/react-langchain@0.0.30': 15c58e7bb3912b32379f9464356f2863ecc33c24bb8a63337d1442581131a7f0
-
 importers:
 
   .:
@@ -83,7 +80,7 @@ importers:
         version: 0.15.19(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
       '@assistant-ui/react-langchain':
         specifier: 0.0.30
-        version: 0.0.30(patch_hash=15c58e7bb3912b32379f9464356f2863ecc33c24bb8a63337d1442581131a7f0)(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.0.35(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
+        version: 0.0.30(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.0.35(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
       '@base-ui/react':
         specifier: ^1.7.0
         version: 1.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -6892,7 +6889,7 @@ snapshots:
       - ioredis
       - redis
 
-  '@assistant-ui/react-langchain@0.0.30(patch_hash=15c58e7bb3912b32379f9464356f2863ecc33c24bb8a63337d1442581131a7f0)(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.0.35(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
+  '@assistant-ui/react-langchain@0.0.30(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.0.35(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
     dependencies:
       '@assistant-ui/core': 0.3.18(@assistant-ui/store@0.3.13(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.2.0)(react@19.2.8)
       '@assistant-ui/store': 0.3.13(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)

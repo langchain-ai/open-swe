@@ -166,19 +166,13 @@ describe("native transcript", () => {
     }
   })
 
-  it("renders both LangChain image encodings on reload", () => {
+  it("renders native image attachments on reload", () => {
     render(
       <Transcript
         messages={[
           new HumanMessage({
             id: "images",
             content: [
-              {
-                type: "image",
-                base64: "aGVsbG8=",
-                mime_type: "image/png",
-                file_name: "capture.png",
-              },
               {
                 type: "image_url",
                 image_url: { url: "data:image/jpeg;base64,aGVsbG8=" },
@@ -190,9 +184,6 @@ describe("native transcript", () => {
     )
     expect(
       screen.getAllByRole("img").map((element) => element.getAttribute("src"))
-    ).toEqual([
-      "data:image/png;base64,aGVsbG8=",
-      "data:image/jpeg;base64,aGVsbG8=",
-    ])
+    ).toEqual(["data:image/jpeg;base64,aGVsbG8="])
   })
 })

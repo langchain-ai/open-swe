@@ -1,11 +1,5 @@
 import { useState } from "react"
-import {
-  ComposerPrimitive,
-  QueueItemPrimitive,
-  ThreadPrimitive,
-  useAui,
-  useAuiState,
-} from "@assistant-ui/react"
+import { ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react"
 import { useLangChainError } from "@assistant-ui/react-langchain"
 import { ArrowDown } from "lucide-react"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
@@ -18,18 +12,17 @@ import { agentsApi } from "@/features/agents/lib/api"
 import { useSession } from "@/lib/session"
 import { AssistantMessage } from "./Message"
 import { Composer } from "./Composer"
-import { useProductState } from "./AssistantProvider"
+import { useThreadMetadata } from "./AssistantProvider"
 
 export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
   const aui = useAui()
-  const { thread, error: requestError, queueErrors } = useProductState()
+  const { data: thread, error: requestError } = useThreadMetadata()
   const running = useAuiState((state) => state.thread.isRunning)
   const loading = useAuiState((state) => state.thread.isLoading)
   const empty = useAuiState((state) => state.thread.messages.length === 0)
-  const queued = useAuiState((state) => state.composer.queue.length > 0)
   const streamError = useLangChainError()
   const error =
-    requestError ??
+    requestError?.message ??
     (streamError instanceof Error
       ? streamError.message
       : streamError
@@ -96,31 +89,6 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
                 thread.planStatus === "shared") && (
                 <InlinePlanArtifact threadId={thread.id} />
               )}
-            <ComposerPrimitive.Queue>
-              {({ queueItem }) => (
-                <div className="my-3 ml-auto max-w-[85%] rounded-2xl border border-dashed border-border p-3 text-sm">
-                  <p className="mb-1 text-xs text-muted-foreground">
-                    {queueErrors[queueItem.id]
-                      ? "Could not send"
-                      : "Queued next"}
-                  </p>
-                  <QueueItemPrimitive.Text />
-                  {queueErrors[queueItem.id] && (
-                    <>
-                      <p role="alert" className="text-destructive">
-                        {queueErrors[queueItem.id]}
-                      </p>
-                      <QueueItemPrimitive.Steer className="mr-3 underline">
-                        Retry message
-                      </QueueItemPrimitive.Steer>
-                      <QueueItemPrimitive.Remove className="underline">
-                        Discard
-                      </QueueItemPrimitive.Remove>
-                    </>
-                  )}
-                </div>
-              )}
-            </ComposerPrimitive.Queue>
           </div>
         </ThreadPrimitive.Viewport>
         <div className="relative mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
@@ -137,7 +105,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
           )}
           {thread && (
             <>
-              {!running && !queued && (
+              {!running && (
                 <ThreadFeedbackCard
                   threadId={thread.id}
                   login={session.data?.login ?? null}

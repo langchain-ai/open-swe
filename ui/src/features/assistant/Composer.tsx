@@ -11,7 +11,7 @@ import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { useEnvironmentOptions } from "@/features/agents/lib/queries"
 import { useProfile, useRepos } from "@/lib/profile"
-import { useProductState } from "./AssistantProvider"
+import { useThreadMetadata } from "./AssistantProvider"
 
 function Attachment() {
   const attachment = useAuiState((state) => state.attachment)
@@ -47,13 +47,12 @@ function Attachment() {
 export function Composer({ initialRepo }: { initialRepo?: string | null }) {
   const aui = useAui()
   const running = useAuiState((state) => state.thread.isRunning)
-  const empty = useAuiState((state) => state.composer.isEmpty)
   const disabled = useAuiState((state) => state.thread.isDisabled)
   const hasAttachments = useAuiState(
     (state) => state.composer.attachments.length > 0
   )
   const config = useAuiState((state) => state.composer.runConfig.custom)
-  const { thread } = useProductState()
+  const { data: thread } = useThreadMetadata()
   const { models, defaultSelection } = useModelOptions()
   const profile = useProfile()
   const repos = useRepos()
@@ -112,7 +111,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             disabled
               ? "Sending is unavailable in this thread"
               : running
-                ? "Send a follow up…"
+                ? "Draft your next message…"
                 : "Send a message…"
           }
           rows={2}
@@ -193,7 +192,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             </>
           )}
           <div className="ml-auto">
-            {running && empty ? (
+            {running ? (
               <ComposerPrimitive.Cancel
                 aria-label="Stop run"
                 className="rounded-full bg-primary p-2.5 text-primary-foreground disabled:opacity-40"
@@ -202,7 +201,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
               </ComposerPrimitive.Cancel>
             ) : (
               <ComposerPrimitive.Send
-                aria-label={running ? "Send follow up" : "Send message"}
+                aria-label="Send message"
                 className="rounded-full bg-primary p-2.5 text-primary-foreground disabled:opacity-30"
               >
                 <ArrowUp className="size-4" />

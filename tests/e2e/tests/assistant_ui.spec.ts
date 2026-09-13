@@ -211,42 +211,80 @@ test("keeps separate drafts while a background thread completes", async ({
   await waitForThreadIdle(page, second);
 });
 
-test("queues a follow-up and answers it after stopping the active run", async ({
+test("keeps a draft while running and sends it after native cancellation", async ({
   page,
 }) => {
-  const id = await startSlackThread(
-    page,
+  await page.goto("/agents");
+  await composer(page).fill(
     "E2E_BUSY_HOLD:30 add a greet() helper and open a PR",
   );
-  await page.goto(`/agents/${id}`);
+  const started = page.waitForResponse(
+    (response) =>
+      /\/threads\/[^/]+\/commands$/.test(new URL(response.url()).pathname) &&
+      response.request().method() === "POST",
+  );
+  await composer(page).press("Enter");
+  expect((await started).ok()).toBeTruthy();
+  await expect(page).toHaveURL(/\/assistant\/[0-9a-f-]{36}$/);
+  const id = new URL(page.url()).pathname.split("/").at(-1)!;
   await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+  await expect(composer(page)).toBeEnabled();
   await expect
     .poll(async () => {
       const response = await page.request.get(
         `/dashboard/api/threads/${id}/state`,
       );
       expect(response.ok()).toBeTruthy();
-      const state = await response.json();
-      return state.values.messages.some(
-        (message: { type: string; name?: string }) =>
-          message.type === "tool" && message.name === "slack_thread_reply",
+      const state = (await response.json()) as {
+        values: { messages?: { type: string; name?: string }[] };
+      };
+      return (
+        state.values.messages?.some(
+          (message) =>
+            message.type === "tool" && message.name === "slack_thread_reply",
+        ) ?? false
       );
     })
     .toBe(true);
+
+  const submissions: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new RegExp(`/threads/${id}/(messages|commands)$`).test(
+        new URL(request.url()).pathname,
+      )
+    ) {
+      submissions.push(request.url());
+    }
+  });
   const followUp = "Please continue after stopping the current run.";
+  const draft = `${followUp}\n`;
   await composer(page).fill(followUp);
-  await page.getByRole("button", { name: "Send follow up" }).click();
-  await expect(
-    conversation(page).getByText("Queued next", { exact: true }),
-  ).toBeVisible();
+  await composer(page).press("Enter");
+  await expect(composer(page)).toHaveValue(draft);
+  await expect(page.getByRole("button", { name: "Send message" })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+
+  const cancelled = page.waitForResponse(
+    (response) =>
+      new RegExp(`/threads/${id}/runs/[^/]+/cancel$`).test(
+        new URL(response.url()).pathname,
+      ) && response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Stop run" }).click();
-  await expect(
-    conversation(page).getByText("Queued next", { exact: true }),
-  ).toHaveCount(0);
+  expect((await cancelled).ok()).toBeTruthy();
+  await waitForThreadIdle(page, id);
+  await waitForThreadNotBusy(page, id);
+  await expect(composer(page)).toHaveValue(draft);
+  expect(submissions).toEqual([]);
+  await page.getByRole("button", { name: "Send message" }).click();
+  await waitForStateToContain(page, id, followUp);
   await expect(
     conversation(page).getByText(/anything else you'd like changed/),
   ).toBeVisible();
-  await waitForStateToContain(page, id, followUp);
   await waitForThreadIdle(page, id);
 });
 
@@ -282,49 +320,4 @@ test("standard mode still sends, and the setting applies to the same existing th
       exact: true,
     }),
   ).toBeVisible();
-});
-
-test("retries a failed queued message without replacing a newer draft", async ({
-  page,
-}) => {
-  const id = await startSlackThread(
-    page,
-    "E2E_BUSY_HOLD:20 add a greet() helper and open a PR",
-  );
-  await page.goto(`/agents/${id}`);
-  await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
-  const messagePath = `**/dashboard/api/threads/${id}/messages`;
-  await page.route(messagePath, (route) =>
-    route.fulfill({
-      status: 503,
-      contentType: "application/json",
-      body: JSON.stringify({ detail: "Queue temporarily unavailable" }),
-    }),
-  );
-  const prompt = "Retry this follow-up once the queue recovers.";
-  await composer(page).fill(prompt);
-  await page.getByRole("button", { name: "Send follow up" }).click();
-  await expect(
-    page.getByRole("button", { name: "Retry message" }),
-  ).toBeVisible();
-  await composer(page).fill("Keep this newer draft.");
-  await page.unroute(messagePath);
-  const accepted = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname ===
-        `/dashboard/api/threads/${id}/messages` &&
-      response.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "Retry message" }).click();
-  expect((await accepted).ok()).toBeTruthy();
-  await expect(page.getByRole("button", { name: "Retry message" })).toHaveCount(
-    0,
-  );
-  await expect(composer(page)).toHaveValue("Keep this newer draft.");
-  await waitForStateToContain(page, id, prompt);
-  await waitForThreadIdle(page, id);
-  await expect(composer(page)).toHaveValue("Keep this newer draft.");
-  await expect(
-    conversation(page).getByText(prompt, { exact: true }),
-  ).toHaveCount(1);
 });
