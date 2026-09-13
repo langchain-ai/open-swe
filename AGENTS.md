@@ -31,6 +31,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 ## Conventions
 
 - Use async-only implementations. Add a sync method only when an interface requires it, and then raise `NotImplementedError`.
+- Use strong types everywhere, in both Python and TypeScript. Prefer precise types, type aliases, TypedDicts/dataclasses/Pydantic models (Python) or interfaces/`satisfies` (TypeScript), and Literal/enum types over loose ones. Never use `Any` (Python) or `any` (TypeScript) — strongly discouraged even when it would be convenient; if a value's shape is dynamic, type it with a union, a generic, a protocol, or `object`/`unknown` plus narrowing instead. Widening a parameter or return type to `Any`/`any` is not acceptable to silence a type error. Expanding the scope of a PR to add or fix types is worth it.
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - Keep comments minimal and only explain non-obvious reasons.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
