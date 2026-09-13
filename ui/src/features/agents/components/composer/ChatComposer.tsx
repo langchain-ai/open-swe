@@ -1,12 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ImagePlus,
-  LoaderCircle,
   Map as MapIcon,
-  Mic,
   Plus,
   ServerCog as ServerCogIcon,
-  Square,
   X,
 } from "lucide-react"
 
@@ -51,14 +48,12 @@ import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { useRegisterAppCommands } from "@/lib/appCommands"
-import { transcribeAudio } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
 
 const MAX_IMAGE_COUNT = 5
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MAX_AUDIO_BYTES = 10 * 1024 * 1024
 const MAX_MENTION_SUGGESTIONS = 8
 const SUPPORTED_IMAGE_TYPES = new Set([
   "image/png",
@@ -282,10 +277,7 @@ export const ChatComposer = memo(function ChatComposer({
   )
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [extrasMenuOpen, setExtrasMenuOpen] = useState(false)
-  const [dictationState, setDictationState] = useState<
-    "idle" | "recording" | "transcribing"
-  >("idle")
-  const [dictationError, setDictationError] = useState<string | null>(null)
+  const [composerError, setComposerError] = useState<string | null>(null)
   const composerShortcuts = useMemo(
     () => [
       {
@@ -329,10 +321,6 @@ export const ChatComposer = memo(function ChatComposer({
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Array<Blob>>([])
-  const mountedRef = useRef(true)
-  const requestingMicrophoneRef = useRef(false)
 
   useEffect(() => {
     if (autoFocus) editorRef.current?.focus()
@@ -342,14 +330,6 @@ export const ChatComposer = memo(function ChatComposer({
   // click, or two rapid Enters) before React re-renders. Scoped to the send
   // request only — never the run lifecycle.
   const submittingRef = useRef(false)
-
-  useEffect(
-    () => () => {
-      mountedRef.current = false
-      recorderRef.current?.stream.getTracks().forEach((track) => track.stop())
-    },
-    []
-  )
 
   const trigger = useMemo(
     () => detectComposerTrigger(value, cursor),
@@ -400,78 +380,6 @@ export const ChatComposer = memo(function ChatComposer({
     setActiveItemId(null)
   }, [])
 
-  const handleDictation = useCallback(async () => {
-    if (dictationState === "recording") {
-      recorderRef.current?.stop()
-      return
-    }
-    if (dictationState !== "idle" || requestingMicrophoneRef.current) return
-    requestingMicrophoneRef.current = true
-    setDictationError(null)
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      if (!mountedRef.current) {
-        stream.getTracks().forEach((track) => track.stop())
-        return
-      }
-      const mimeType = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/mp4",
-      ].find((type) => MediaRecorder.isTypeSupported(type))
-      if (!mimeType) {
-        stream.getTracks().forEach((track) => track.stop())
-        throw new Error("Audio recording is not supported")
-      }
-      const recorder = new MediaRecorder(stream, { mimeType })
-      recorderRef.current = recorder
-      audioChunksRef.current = []
-      recorder.ondataavailable = (event) => {
-        if (event.data.size) audioChunksRef.current.push(event.data)
-      }
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop())
-        if (!mountedRef.current) return
-        setDictationState("transcribing")
-        try {
-          const audio = new Blob(audioChunksRef.current, {
-            type: recorder.mimeType,
-          })
-          if (!audio.size) throw new Error("No audio was recorded")
-          if (audio.size > MAX_AUDIO_BYTES)
-            throw new Error("Recording is too long")
-          const transcript = await transcribeAudio(audio)
-          const snapshot = editorRef.current?.readSnapshot() ?? {
-            value,
-            cursor: value.length,
-          }
-          const separator =
-            snapshot.value && !/\s$/.test(snapshot.value) ? " " : ""
-          const next = `${snapshot.value}${separator}${transcript}`
-          applyPrompt(next, next.length)
-          queueMicrotask(() => editorRef.current?.focusAtEnd())
-        } catch (error) {
-          setDictationError(
-            error instanceof Error
-              ? error.message
-              : "Voice transcription failed"
-          )
-        } finally {
-          recorderRef.current = null
-          setDictationState("idle")
-        }
-      }
-      recorder.start()
-      setDictationState("recording")
-    } catch (error) {
-      setDictationError(
-        error instanceof Error ? error.message : "Microphone access failed"
-      )
-    } finally {
-      requestingMicrophoneRef.current = false
-    }
-  }, [applyPrompt, dictationState, value])
-
   const handleSubmit = useCallback(async () => {
     if (submittingRef.current || disabled) return
     // The editor is the source of truth for what is on screen; a keystroke that
@@ -481,7 +389,7 @@ export const ChatComposer = memo(function ChatComposer({
     if (trimmed.length === 0 && pendingImages.length === 0) return
 
     if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
-      setDictationError(
+      setComposerError(
         pendingImages.length
           ? "Offloading does not accept attachments."
           : "Offloading requires an idle, existing conversation."
@@ -494,7 +402,7 @@ export const ChatComposer = memo(function ChatComposer({
     setIsSubmitting(true)
     applyPrompt("", 0)
     setPendingImages([])
-    setDictationError(null)
+    setComposerError(null)
     try {
       await onSubmit?.(trimmed, images)
     } catch {
@@ -716,9 +624,9 @@ export const ChatComposer = memo(function ChatComposer({
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
-      {dictationError && (
+      {composerError && (
         <div className="mb-2 px-1 text-xs text-destructive" role="alert">
-          {dictationError}
+          {composerError}
         </div>
       )}
 
@@ -972,45 +880,6 @@ export const ChatComposer = memo(function ChatComposer({
               contextWindow={contextUsage?.contextWindow}
               usedTokens={contextUsage?.usedTokens}
             />
-
-            {typeof navigator !== "undefined" &&
-              "mediaDevices" in navigator &&
-              typeof MediaRecorder !== "undefined" && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <ComposerControl
-                        aria-label={
-                          dictationState === "recording"
-                            ? "Stop dictation"
-                            : "Start dictation"
-                        }
-                        aria-pressed={dictationState === "recording"}
-                        className={cn(
-                          "size-7 px-0",
-                          dictationState === "recording" && "text-destructive"
-                        )}
-                        disabled={disabled || dictationState === "transcribing"}
-                        onClick={() => void handleDictation()}
-                        type="button"
-                      />
-                    }
-                  >
-                    {dictationState === "transcribing" ? (
-                      <LoaderCircle className="size-4 animate-spin" />
-                    ) : dictationState === "recording" ? (
-                      <Square className="size-3 fill-current" />
-                    ) : (
-                      <Mic className="size-4" />
-                    )}
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">
-                    {dictationState === "recording"
-                      ? "Stop dictation"
-                      : "Dictate message"}
-                  </TooltipPopup>
-                </Tooltip>
-              )}
           </div>
 
           <ComposerPrimaryActions
