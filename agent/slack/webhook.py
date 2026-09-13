@@ -306,7 +306,7 @@ def _sanitize_slack_filename(name: Any, url: str) -> str:
 
 
 async def _download_slack_files_to_sandbox(
-    entries: list[dict[str, Any]], thread_id: str
+    entries: list[dict[str, Any]], thread_id: str, *, environment_slug: str | None = None
 ) -> list[tuple[str, str]]:
     """Download Slack files and stage them in the thread's sandbox.
 
@@ -318,7 +318,7 @@ async def _download_slack_files_to_sandbox(
     try:
         from agent.sandboxes.lifecycle import ensure_sandbox_for_thread
 
-        backend = await ensure_sandbox_for_thread(thread_id)
+        backend = await ensure_sandbox_for_thread(thread_id, environment_slug=environment_slug)
     except Exception:
         common.logger.warning(
             "Could not reach sandbox for thread %s; skipping Slack file attachments",
@@ -859,11 +859,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         source_messages, user_names_by_id
     )
 
-    staged_files = await _download_slack_files_to_sandbox(
-        _slack_file_entries(source_messages), thread_id
-    )
-    staged_files_section = _slack_files_section(staged_files) if staged_files else ""
-
     slack_thread_section = _format_slack_thread_section(
         channel_id, thread_ts, context_source, channel_context
     )
@@ -881,7 +876,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         f"{slack_thread_section}\n\n"
         f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
-        + (f"\n\n{staged_files_section}" if staged_files_section else "")
         + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
     )
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
@@ -1054,6 +1048,15 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     ):
         common.logger.info("Queued Slack message edit for thread %s", thread_id)
         return
+
+    if persisted:
+        staged_files = await _download_slack_files_to_sandbox(
+            _slack_file_entries(source_messages),
+            thread_id,
+            environment_slug=thread_environment,
+        )
+        if staged_files:
+            operational_context += f"\n\n{_slack_files_section(staged_files)}"
 
     explicitly_tagged = _interrupts_active_run(
         text,

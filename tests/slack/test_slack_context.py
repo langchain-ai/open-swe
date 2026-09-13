@@ -1064,6 +1064,159 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
 
 
+@pytest.fixture
+def slack_file_mention(monkeypatch, fake_store):
+    from agent.sandboxes import lifecycle, state
+
+    captured: dict[str, Any] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    class Threads:
+        metadata: dict[str, Any] | None = None
+
+        async def get(self, thread_id: str) -> dict[str, Any]:
+            if self.metadata is None:
+                raise _FakeNotFoundError()
+            return {"thread_id": thread_id, "metadata": dict(self.metadata)}
+
+        async def create(self, *, thread_id: str, metadata: dict, **kwargs) -> None:
+            if self.metadata is None:
+                self.metadata = dict(metadata)
+
+        async def update(self, *, thread_id: str, metadata: dict) -> None:
+            if self.metadata is None:
+                raise _FakeNotFoundError()
+            self.metadata.update(metadata)
+
+    class Sandbox:
+        id = "sandbox-for-slack-files"
+
+        def __init__(self, environment_slug: str | None) -> None:
+            self.environment_slug = environment_slug
+            self.files: dict[str, bytes] = {}
+
+        async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[dict]:
+            self.files.update(files)
+            return [{"error": None} for _ in files]
+
+    provisioned: list[Sandbox] = []
+
+    async def provision(_token, *, environment_slug=None, **kwargs):
+        sandbox = Sandbox(environment_slug)
+        provisioned.append(sandbox)
+        return sandbox
+
+    client = slack_webhooks.get_langgraph_client()
+    client.threads = Threads()
+    client.store = fake_store
+    backends = {}
+    monkeypatch.setattr(lifecycle, "client", client)
+    monkeypatch.setattr(state, "get_client", lambda: client)
+    monkeypatch.setattr(lifecycle, "SANDBOX_BACKENDS", backends)
+    monkeypatch.setattr(state, "SANDBOX_BACKENDS", backends)
+    monkeypatch.setattr(lifecycle, "_create_sandbox_with_proxy", provision)
+    monkeypatch.setattr(lifecycle, "get_recorded_proxy_base_config", lambda _: None)
+    monkeypatch.setattr(webhook_common, "get_slack_permalink", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_utils, "download_slack_file", AsyncMock(return_value=(b"zip", None)))
+    fake_store.seed(["environments"], "staging", {"slug": "staging", "name": "Staging"})
+    request = SlackRequest(
+        channel_id="C123",
+        thread_ts="1700000000.000100",
+        event_ts="1700000000.000100",
+        thread_id="mapped-thread",
+        user_id="U123",
+        text="<@UBOT> analyze this zip",
+        bot_user_id="UBOT",
+    )
+    monkeypatch.setattr(
+        webhook_common,
+        "fetch_slack_thread_messages",
+        AsyncMock(
+            return_value=[
+                {
+                    "ts": request.event_ts,
+                    "text": request.text,
+                    "user": request.user_id,
+                    "files": [
+                        {
+                            "name": "bundle.zip",
+                            "mimetype": "application/zip",
+                            "url_private": "https://files.slack.com/bundle.zip",
+                        }
+                    ],
+                }
+            ]
+        ),
+    )
+    return request, client.threads, provisioned, captured
+
+
+@pytest.mark.parametrize("private", [False, True])
+@pytest.mark.parametrize(
+    ("existing", "tag", "environment"),
+    [(False, "", None), (False, "env:staging", "staging"), (True, "", "staging")],
+)
+async def test_slack_files_reach_bound_sandbox_with_thread_environment(
+    slack_file_mention, private, existing, tag, environment
+):
+    request, threads, provisioned, captured = slack_file_mention
+    if private:
+        request = request.model_copy(update={"channel_context": {"is_im": True}})
+    if existing:
+        threads.metadata = {
+            "visibility": "private" if private else "public",
+            "owner_login": "mason-gh",
+            "environment": "staging",
+            "created_at_ms": 1,
+        }
+    if tag:
+        request = request.model_copy(update={"text": f"{request.text} {tag}"})
+
+    await slack_webhooks._process_slack_mention_impl(request, None)
+
+    assert threads.metadata["sandbox_id"] == "sandbox-for-slack-files"
+    assert threads.metadata["visibility"] == ("private" if private else "public")
+    assert threads.metadata["owner_login"] == "mason-gh"
+    assert len(provisioned) == 1
+    assert provisioned[0].environment_slug == environment
+    assert provisioned[0].files == {"/workspace/.open-swe/slack-files/bundle.zip": b"zip"}
+    run = captured["run_create"]["kwargs"]
+    assert run["config"]["configurable"].get("environment") == environment
+    assert "/workspace/.open-swe/slack-files/bundle.zip" in str(run["input"]["messages"])
+
+
+@pytest.mark.parametrize("failure", ["account", "public-persistence", "private-persistence"])
+async def test_slack_file_provisioning_requires_account_and_persisted_thread(
+    monkeypatch, slack_file_mention, failure
+):
+    request, threads, provisioned, captured = slack_file_mention
+    if failure == "account":
+        monkeypatch.setattr(webhook_common, "get_valid_access_token", AsyncMock(return_value=None))
+        monkeypatch.setattr(
+            webhook_common, "has_access_token_record", AsyncMock(return_value=False)
+        )
+    else:
+        monkeypatch.setattr(
+            threads, "create", AsyncMock(side_effect=RuntimeError("store unavailable"))
+        )
+
+    if failure == "private-persistence":
+        request = request.model_copy(update={"channel_context": {"is_im": True}})
+        with pytest.raises(RuntimeError, match="authorization metadata"):
+            await slack_webhooks._process_slack_mention_impl(request, None)
+    else:
+        await slack_webhooks._process_slack_mention_impl(request, None)
+
+    assert provisioned == []
+    assert threads.metadata is None
+    if failure == "public-persistence":
+        assert "/workspace/.open-swe/slack-files/" not in str(
+            captured["run_create"]["kwargs"]["input"]
+        )
+    else:
+        assert "run_create" not in captured
+
+
 @pytest.mark.parametrize("private", [False, True])
 def test_process_slack_mention_runs_without_a_repository(
     monkeypatch: pytest.MonkeyPatch,
