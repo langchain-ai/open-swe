@@ -12,6 +12,9 @@ access and web storage do not.
 
 Args:
     plan_file_path: Path to the HTML artifact in the sandbox.
+    title: Optional thread title, 3-8 words in sentence case naming the durable
+        subject and desired outcome. Pass it the first time you publish a plan in a
+        thread that still shows its placeholder title.
 
 Returns:
     ``{success: True, path}`` on success, or ``{success: False, error}``.

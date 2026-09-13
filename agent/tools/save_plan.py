@@ -15,6 +15,7 @@ from agent.dashboard.plan_store import (
 )
 from agent.run_config import RunConfig
 from agent.sandboxes.state import get_sandbox_backend
+from agent.thread_title import name_thread
 from agent.utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ _MAX_PLAN_LINES = 20_000
 
 async def save_plan(
     plan_file_path: str,
+    title: str | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `save_plan` tool."""
@@ -52,6 +54,8 @@ async def save_plan(
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to save plan: {exc}"}
+    if isinstance(title, str) and title.strip():
+        await name_thread(thread_id=str(thread_id), title=title, cfg=cfg)
     return {"success": True, "path": path}
 
 

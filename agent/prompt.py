@@ -192,6 +192,7 @@ def construct_system_prompt(
     default_repo: dict[str, str] | None = None,
     plan_mode: bool = False,
     plan_url: str | None = None,
+    pre_routed_mode: bool = False,
     repo_custom_instructions: str | None = None,
     environment_name: str | None = None,
     environment_instructions: str | None = None,
@@ -243,6 +244,9 @@ def construct_system_prompt(
             )
             if plan_mode
             else ""
+        ),
+        pre_routed_mode_section=(
+            load_prompt("system/pre-routed-mode.md") if pre_routed_mode else ""
         ),
         self_awareness_section=load_prompt("system/self-awareness.md"),
         default_prompt_section=default_prompt_section,

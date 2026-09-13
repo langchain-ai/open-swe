@@ -65,12 +65,37 @@ async def _git(cwd: str, *args: str) -> str | None:
     return stdout.decode().strip() if process.returncode == 0 else None
 
 
+async def _temporary_branch(worktree_path: str) -> str | None:
+    current = await _git(worktree_path, "symbolic-ref", "--quiet", "--short", "HEAD")
+    return current if current and is_temporary_branch(current) else None
+
+
+async def _rename_branch(worktree_path: str, current: str, name: str) -> str | None:
+    target = build_branch_name(name)
+    if not target or target == current:
+        return None
+    for candidate in (target, *(f"{target}-{suffix}" for suffix in range(2, 10))):
+        if await _git(worktree_path, "branch", "-m", "--", current, candidate) is not None:
+            return candidate
+    return None
+
+
+async def rename_temporary_branch_to(*, worktree_path: str, name: str) -> str | None:
+    """Rename a placeholder worktree branch to a slug of ``name``."""
+    if not is_desktop_worktree(worktree_path):
+        return None
+    current = await _temporary_branch(worktree_path)
+    if current is None:
+        return None
+    return await _rename_branch(worktree_path, current, name)
+
+
 async def rename_temporary_worktree_branch(
     *, worktree_path: str, request: str, model: BaseChatModel
 ) -> str | None:
     """Rename a placeholder worktree branch to one that describes the request."""
-    current = await _git(worktree_path, "symbolic-ref", "--quiet", "--short", "HEAD")
-    if not current or not is_temporary_branch(current):
+    current = await _temporary_branch(worktree_path)
+    if current is None:
         return None
 
     structured = model.with_structured_output(_BranchName)
@@ -86,13 +111,7 @@ async def rename_temporary_worktree_branch(
         )
     if not isinstance(result, _BranchName):
         return None
-    target = build_branch_name(result.branch)
-    if not target or target == current:
-        return None
-    for candidate in (target, *(f"{target}-{suffix}" for suffix in range(2, 10))):
-        if await _git(worktree_path, "branch", "-m", "--", current, candidate) is not None:
-            return candidate
-    return None
+    return await _rename_branch(worktree_path, current, result.branch)
 
 
 def schedule_worktree_branch_rename(

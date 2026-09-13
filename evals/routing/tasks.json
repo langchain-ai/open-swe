@@ -1,0 +1,386 @@
+[
+  {
+    "id": "fast-typo-docs",
+    "accepted": [
+      "fast"
+    ],
+    "smoke": false,
+    "prompt": "In AGENTS.md, under the Project heading only, write 'sandbox environment' wherever it currently says 'sandbox'. Open a PR.",
+    "rationale": "One named file, one named section, a literal substitution."
+  },
+  {
+    "id": "fast-bump-desktop-version",
+    "accepted": [
+      "fast"
+    ],
+    "smoke": false,
+    "prompt": "Bump the desktop app to the next patch version and open a PR whose title is the new version.",
+    "rationale": "One version field; finding it is a single search."
+  },
+  {
+    "id": "fast-editorconfig",
+    "accepted": [
+      "fast"
+    ],
+    "smoke": true,
+    "prompt": "Add a .editorconfig at the repo root: 2-space indentation for TypeScript and JSON, 4-space for Python, LF line endings.",
+    "rationale": "A new standalone file whose contents are fully specified."
+  },
+  {
+    "id": "fast-agents-md-bullet",
+    "accepted": [
+      "fast"
+    ],
+    "smoke": false,
+    "prompt": "Add a rule to AGENTS.md, in whatever section covers conventions, saying unit tests never make network calls. Open a PR.",
+    "rationale": "One named file, one sentence to add."
+  },
+  {
+    "id": "fast-run-lint",
+    "accepted": [
+      "fast",
+      "none"
+    ],
+    "smoke": false,
+    "prompt": "Does the linter pass right now? Don't change anything, just tell me.",
+    "rationale": "Run a command and report. No judgement required."
+  },
+  {
+    "id": "fast-list-workflows",
+    "accepted": [
+      "fast",
+      "none"
+    ],
+    "smoke": false,
+    "prompt": "What CI workflows does this repo have, and what triggers each one?",
+    "rationale": "Read a directory of config files and summarize."
+  },
+  {
+    "id": "fast-find-prompt-text",
+    "accepted": [
+      "fast",
+      "none"
+    ],
+    "smoke": false,
+    "prompt": "Something tells the agent 'Plan mode is active'. Where does that string live? Give me the path and line.",
+    "rationale": "One search over the repo."
+  },
+  {
+    "id": "fast-gitignore-logs",
+    "accepted": [
+      "fast"
+    ],
+    "smoke": false,
+    "prompt": "Is the logs directory gitignored? Add it if not and open a PR, otherwise just say so.",
+    "rationale": "Check one file, possibly add one line."
+  },
+  {
+    "id": "fast-rename-constant-single-file",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "In the reviewer eval runner, rename the constant that holds the default LangSmith project so it says EVAL instead of LANGSMITH, and update its uses in that same file. Run the linter and open a PR.",
+    "rationale": "Localized rename; the only ambiguity is finding the file."
+  },
+  {
+    "id": "fast-count-tools",
+    "accepted": [
+      "fast",
+      "none"
+    ],
+    "smoke": false,
+    "prompt": "How many tools does the agent register, and what are they called? List them alphabetically.",
+    "rationale": "Read one registry module and list it."
+  },
+  {
+    "id": "fast-recent-commits",
+    "accepted": [
+      "fast",
+      "none"
+    ],
+    "smoke": true,
+    "prompt": "Give me the last 20 commit subjects on main as a bullet list.",
+    "rationale": "One git command."
+  },
+  {
+    "id": "fast-readme-pnpm",
+    "accepted": [
+      "fast"
+    ],
+    "smoke": false,
+    "prompt": "Our install docs don't mention that the JavaScript workspaces need pnpm. Say so in the installation guide and open a PR.",
+    "rationale": "One documentation edit; the workspaces are listed in one config file."
+  },
+  {
+    "id": "balanced-save-plan-paths",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": true,
+    "prompt": "Saving a plan only works if the file sits directly in the plans directory. I want to keep plans in subfolders too. Make that work and cover both layouts with tests.",
+    "rationale": "One tool's path handling plus its tests. The constraint has to be found first."
+  },
+  {
+    "id": "balanced-eval-dry-run",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "I want to check the reviewer eval's resolved configuration without it touching LangSmith or starting any runs. Add a way to do that, with a test.",
+    "rationale": "A flag through existing config resolution, plus a test."
+  },
+  {
+    "id": "balanced-title-limit-env",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "Thread titles get truncated at a fixed length. Make that limit configurable through the environment, keep today's value as the default, and extend the existing tests.",
+    "rationale": "One constant, one code path, existing tests to update."
+  },
+  {
+    "id": "balanced-dev-mock-anthropic",
+    "accepted": [
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "Our local mock-harness script only works with an OpenAI key. I want to run it against Anthropic too. Make it support both and document how.",
+    "rationale": "Requires understanding how the harness picks a model, then a scripted change and docs."
+  },
+  {
+    "id": "balanced-structured-logging",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "Our logging convention says the message is static and values go in the structured fields. The module that renames desktop worktree branches doesn't follow it. Fix it, and make sure no field name collides with the ones logging reserves.",
+    "rationale": "A few call sites in one module against a written convention."
+  },
+  {
+    "id": "balanced-plan-mode-dict-tool-test",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "The middleware that hides tools during plan mode has no tests for the case where a tool arrives as a plain dict rather than an object, or has no name at all. Add them.",
+    "rationale": "Test-only work, but the middleware's contract has to be read first."
+  },
+  {
+    "id": "balanced-oeps-endpoint",
+    "accepted": [
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "We keep enhancement proposals as markdown files in the repo. Add a dashboard API endpoint that lists them with their number, title and status. Include tests.",
+    "rationale": "New endpoint plus header parsing, following existing route patterns."
+  },
+  {
+    "id": "balanced-render-prompt-error",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "When a prompt template is missing a placeholder we get a bare KeyError that doesn't say which placeholder or which file. Make the error useful and update the test that covers it.",
+    "rationale": "One function, one semantic change, one test contract."
+  },
+  {
+    "id": "balanced-e2e-web-search-script",
+    "accepted": [
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "Our browser E2E suite never exercises web search. Script that scenario in the fake model and add a Playwright spec asserting the result renders in the transcript.",
+    "rationale": "Multi-file work across the fake model and the E2E specs."
+  },
+  {
+    "id": "balanced-make-e2e-one",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "Running one browser E2E spec locally with the same setup CI uses is fiddly. Add a make target that does it and document it.",
+    "rationale": "Requires reading the CI job to mirror its environment, but the change is small."
+  },
+  {
+    "id": "balanced-admin-routing-validation",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "On the admin settings page, warn inline when all three model tiers are set to the same model. Add a component test.",
+    "rationale": "One UI component plus a test."
+  },
+  {
+    "id": "balanced-dedupe-plan-tools",
+    "accepted": [
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "The tools that enter and leave plan mode each resolve the thread and its plan status in slightly different ways. Pull the shared logic into one place without changing behavior. Existing tests must pass.",
+    "rationale": "Behavior-preserving refactor across two modules with a test net."
+  },
+  {
+    "id": "balanced-stale-threads-script",
+    "accepted": [
+      "fast",
+      "balanced"
+    ],
+    "smoke": false,
+    "prompt": "Write a script that lists threads whose most recent run failed more than N days ago, as CSV with the thread id, title and when it failed.",
+    "rationale": "Standalone script against an API the repo already uses."
+  },
+  {
+    "id": "balanced-github-token-retry",
+    "accepted": [
+      "balanced"
+    ],
+    "smoke": true,
+    "prompt": "GitHub token refreshes fail outright when GitHub returns a 5xx. Retry those with backoff, leave client errors alone, and test both the retry and the give-up path.",
+    "rationale": "Reliability fix with clear acceptance criteria and a narrow blast radius."
+  },
+  {
+    "id": "performance-tenant-rate-limiting",
+    "accepted": [
+      "performance"
+    ],
+    "smoke": false,
+    "prompt": "One organization can start unlimited runs and starve everyone else. Design and build per-organization rate limiting that holds across every way a run can start, and decide what happens when the thing tracking the budget is unavailable.",
+    "rationale": "Cross-component design with a consequential failure mode to decide."
+  },
+  {
+    "id": "performance-sandbox-race",
+    "accepted": [
+      "balanced",
+      "performance"
+    ],
+    "smoke": false,
+    "prompt": "If two runs start on the same thread within about a second, we sometimes end up with two sandboxes. Find out why and fix it without putting a global lock in the path.",
+    "rationale": "Root-cause work on a concurrency bug under an explicit design constraint."
+  },
+  {
+    "id": "performance-planner-executor-split",
+    "accepted": [
+      "performance"
+    ],
+    "smoke": true,
+    "prompt": "I want planning and execution to be separate graphs rather than one agent doing both. Work out how, and do it without breaking the transcripts or checkpoints of threads that already exist.",
+    "rationale": "Architecture change with a hard backward-compatibility constraint."
+  },
+  {
+    "id": "performance-metadata-migration",
+    "accepted": [
+      "performance"
+    ],
+    "smoke": false,
+    "prompt": "Per-thread agent settings live in thread metadata and should live in the store instead. Move them, backfill what exists, keep both readable during the rollout, and tell me how to roll back.",
+    "rationale": "Data migration with rollout and rollback judgement."
+  },
+  {
+    "id": "performance-slack-wrong-thread",
+    "accepted": [
+      "balanced",
+      "performance"
+    ],
+    "smoke": false,
+    "prompt": "Slack replies occasionally land in the wrong thread when a conversation is promoted to its own channel while a run is still going. Track down the real cause and fix it.",
+    "rationale": "Concurrency bug spanning Slack handling and thread bookkeeping."
+  },
+  {
+    "id": "performance-incremental-review",
+    "accepted": [
+      "balanced",
+      "performance"
+    ],
+    "smoke": false,
+    "prompt": "Re-reviewing a pull request reviews the whole thing again. Make it review only what changed since the last review, and reconcile the comments already posted, resolving the ones that no longer apply.",
+    "rationale": "Semantic reconciliation with user-visible output at stake."
+  },
+  {
+    "id": "performance-repo-authorization",
+    "accepted": [
+      "performance"
+    ],
+    "smoke": false,
+    "prompt": "Admins need to restrict which repositories each user can target, and it has to hold everywhere a run can be started or a repo can be touched, not just in the UI.",
+    "rationale": "Security boundary spanning several entry points."
+  },
+  {
+    "id": "performance-offloading-redesign",
+    "accepted": [
+      "performance"
+    ],
+    "smoke": false,
+    "prompt": "When we summarize a long conversation to free up context, the summary loses track of which tool produced what, and it invalidates the prompt cache. Redesign it so both hold, and update how the transcript shows it.",
+    "rationale": "Architectural tradeoffs across middleware and UI."
+  },
+  {
+    "id": "performance-multi-repo-runs",
+    "accepted": [
+      "balanced",
+      "performance"
+    ],
+    "smoke": false,
+    "prompt": "A single thread should be able to open pull requests in two repositories, cross-linked, and clean up after itself if the second one fails to open.",
+    "rationale": "Multi-repository work with partial-failure handling."
+  },
+  {
+    "id": "performance-sandbox-path-audit",
+    "accepted": [
+      "balanced",
+      "performance"
+    ],
+    "smoke": false,
+    "prompt": "I want to know whether the sandbox file API can be tricked into reading or writing outside the sandbox. Find the ways it can, prove each with a test, and fix them.",
+    "rationale": "Security work with no upfront specification of what will be found."
+  },
+  {
+    "id": "none-hello",
+    "accepted": [
+      "none",
+      "fast"
+    ],
+    "smoke": true,
+    "prompt": "hello! just checking you're online",
+    "rationale": "No work requested."
+  },
+  {
+    "id": "none-thanks",
+    "accepted": [
+      "none",
+      "fast"
+    ],
+    "smoke": false,
+    "prompt": "Thanks, that was helpful. Nothing else for now.",
+    "rationale": "Conversation close."
+  },
+  {
+    "id": "none-what-is-open-swe",
+    "accepted": [
+      "none",
+      "fast"
+    ],
+    "smoke": false,
+    "prompt": "In two sentences, what is this agent for?",
+    "rationale": "Answerable from the system prompt alone."
+  },
+  {
+    "id": "none-which-model",
+    "accepted": [
+      "none",
+      "fast"
+    ],
+    "smoke": false,
+    "prompt": "Which model are you running on right now?",
+    "rationale": "Question about the session, not the codebase."
+  }
+]
