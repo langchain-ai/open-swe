@@ -5,6 +5,11 @@ export type AgentStream = UseStreamReturn & { isOffloading?: boolean }
 
 export type AgentThreadTransport = "cloud" | "local"
 
+/** Liveness of an instance's event stream. */
+export type StreamConnection =
+  | { status: "live" }
+  | { status: "reconnecting"; attempt: number; retryAt: number }
+
 export interface StreamPoolEntry {
   /** Stable identity for the mounted `useStream` instance. */
   id: string
@@ -14,6 +19,7 @@ export interface StreamPoolEntry {
   /** Created without a thread; its first accepted run is the thread's creation. */
   awaitingCreation: boolean
   lastActiveAt: number
+  connection: StreamConnection
 }
 
 export interface StreamBinding {
@@ -23,6 +29,21 @@ export interface StreamBinding {
 
 export const IDLE_STREAM_TTL_MS = 60_000
 export const MAX_IDLE_STREAMS = 8
+
+/** 1s doubling to a 5min ceiling spends this budget over roughly 23 minutes. */
+export const MAX_RECONNECT_ATTEMPTS = 12
+
+const RECONNECT_BASE_DELAY_MS = 1_000
+const RECONNECT_MAX_DELAY_MS = 300_000
+
+export function reconnectDelayMs(attempt: number): number {
+  return Math.min(
+    RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1),
+    RECONNECT_MAX_DELAY_MS
+  )
+}
+
+const LIVE: StreamConnection = { status: "live" }
 
 export interface StreamPoolState {
   entries: Array<StreamPoolEntry>
@@ -39,6 +60,10 @@ export interface StreamPoolState {
   rekey(id: string, threadId: string): void
   /** The server accepted a run on this instance. */
   runAccepted(id: string): void
+  /** The transport is about to retry; `attempt` is 1-based. */
+  streamReconnecting(id: string, attempt: number, retryAt: number): void
+  /** An event stream opened or its run ended, so it is no longer reconnecting. */
+  streamLive(id: string): void
   consumeCreatedThread(): void
   /** Drop idle instances past the TTL or cap; active and running ones stay. */
   sweep(now: number): void
@@ -92,6 +117,7 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
       threadId,
       awaitingCreation: threadId === null,
       lastActiveAt: now,
+      connection: LIVE,
     }
     set((state) => ({
       activeId: entry.id,
@@ -142,6 +168,31 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
     })
   },
 
+  streamReconnecting(id, attempt, retryAt) {
+    set((state) => ({
+      entries: state.entries.map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              connection: { status: "reconnecting", attempt, retryAt },
+            }
+          : entry
+      ),
+    }))
+  },
+
+  streamLive(id) {
+    set((state) => {
+      const entry = state.entries.find((candidate) => candidate.id === id)
+      if (!entry || entry.connection.status === "live") return state
+      return {
+        entries: state.entries.map((candidate) =>
+          candidate.id === id ? { ...candidate, connection: LIVE } : candidate
+        ),
+      }
+    })
+  },
+
   consumeCreatedThread() {
     set({ createdThreadId: null })
   },
@@ -183,6 +234,24 @@ export function selectStreamFor(
   transport: AgentThreadTransport,
   threadId: string | null
 ): AgentStream | undefined {
+  const entry = selectEntryFor(state, transport, threadId)
+  return entry ? state.handles[entry.id] : undefined
+}
+
+/** The connection of the instance `selectStreamFor` would return. */
+export function selectConnectionFor(
+  state: StreamPoolState,
+  transport: AgentThreadTransport,
+  threadId: string | null
+): StreamConnection {
+  return selectEntryFor(state, transport, threadId)?.connection ?? LIVE
+}
+
+function selectEntryFor(
+  state: StreamPoolState,
+  transport: AgentThreadTransport,
+  threadId: string | null
+): StreamPoolEntry | undefined {
   const retained =
     threadId === null
       ? undefined
@@ -195,6 +264,5 @@ export function selectStreamFor(
     state.binding.threadId === threadId
       ? state.entries.find((entry) => entry.id === state.activeId)
       : undefined
-  const entry = retained ?? bound
-  return entry ? state.handles[entry.id] : undefined
+  return retained ?? bound
 }

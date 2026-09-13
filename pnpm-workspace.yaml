@@ -10,6 +10,10 @@ allowBuilds:
   node-pty: true
   unrs-resolver: true
 
+minimumReleaseAgeExclude:
+  - '@langchain/langgraph-sdk@1.11.0'
+  - '@langchain/react@1.1.0'
+
 overrides:
   '@hono/node-server': 2.1.1
   '@pierre/trees>@pierre/theming': 1.0.1
