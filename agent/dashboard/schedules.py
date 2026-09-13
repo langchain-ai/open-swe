@@ -12,14 +12,18 @@ from pydantic import BaseModel, Field, field_validator
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import gate_fable_model, normalize_model_choice
 from agent.dashboard.profiles import get_profile, get_valid_access_token
-from agent.dashboard.repo_access import repo_config_for_user, require_repo_access_for_user
+from agent.dashboard.repo_access import (
+    repo_config_for_user,
+    repo_config_for_workspace,
+    require_repo_access_for_workspace,
+)
 from agent.dashboard.team_settings import get_team_fable_enabled
 from agent.dashboard.threads.access import agent_version_metadata, resolve_run_email
-from agent.dashboard.user_mappings import slack_id_for_login
 from agent.dispatch import create_durable_run
 from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import render_prompt
+from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
@@ -27,8 +31,8 @@ from agent.slack.client import (
 )
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
+from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
-from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +281,9 @@ async def _create_cron(record: dict[str, Any]) -> str:
         metadata={
             "kind": "agent_schedule",
             "schedule_id": record["id"],
-            "github_login": record.get("created_by"),
+            "created_by": record.get("created_by"),
+            "owner_type": "system",
+            "visibility": "public",
             **agent_version_metadata(),
         },
     )
@@ -302,13 +308,20 @@ async def create_agent_schedule(
     *,
     email: str | None = None,
     allow_admin_thread: bool = False,
+    use_workspace_credentials: bool = False,
 ) -> dict[str, Any]:
     if body.admin_thread and not allow_admin_thread:
         raise HTTPException(403, "admin only")
-    await _ensure_dashboard_github_token(login)
-    profile = await get_profile(login) or {}
+    if use_workspace_credentials:
+        profile: dict[str, Any] = {}
+        repo = await repo_config_for_workspace(body.repo)
+        run_email = email
+    else:
+        await _ensure_dashboard_github_token(login)
+        profile = await get_profile(login) or {}
+        repo = await repo_config_for_user(login, body.repo)
+        run_email = await resolve_run_email(login, profile) or email
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
-    repo = await repo_config_for_user(login, body.repo)
     schedule_id = str(uuid.uuid4())
     now = now_iso()
     record: dict[str, Any] = {
@@ -334,7 +347,7 @@ async def create_agent_schedule(
         "scope": "workspace",
         "created_by": login,
         "updated_by": login,
-        "user_email": (await resolve_run_email(login, profile) or email or "").strip().lower(),
+        "user_email": (run_email or "").strip().lower(),
         "created_at": now,
         "updated_at": now,
     }
@@ -356,6 +369,7 @@ async def update_agent_schedule(
     *,
     email: str | None = None,
     allow_admin_thread: bool = False,
+    use_workspace_credentials: bool = False,
 ) -> dict[str, Any]:
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_exists(existing)
@@ -375,7 +389,11 @@ async def update_agent_schedule(
     if body.name is not None:
         patch["name"] = body.name.strip() or _derive_name(patch.get("prompt", existing["prompt"]))
     if body.repo is not None:
-        patch["repo"] = await repo_config_for_user(existing["created_by"], body.repo)
+        patch["repo"] = (
+            await repo_config_for_workspace(body.repo)
+            if use_workspace_credentials
+            else await repo_config_for_user(existing["created_by"], body.repo)
+        )
     if body.model_id is not None or body.effort is not None:
         model, effort = normalize_model_choice(body.model_id, body.effort)
         if model and effort:
@@ -455,6 +473,33 @@ def _admin_thread_enabled(record: dict[str, Any]) -> bool:
     )
 
 
+async def authorized_admin_schedule(cfg: RunConfig) -> dict[str, Any] | None:
+    """Verify a system admin grant against its saved invocation and current schedule."""
+    if (
+        cfg.source != "schedule"
+        or cfg.admin_thread is not True
+        or not cfg.thread_id
+        or not cfg.invocation_id
+        or cfg.github_login
+        or cfg.user_email
+    ):
+        return None
+    metadata = thread_metadata(await langgraph_client().threads.get(cfg.thread_id))
+    if metadata.get("owner_type") != "system" or metadata.get("visibility") != "public":
+        return None
+    grant = metadata.get("system_authorization")
+    if (
+        not isinstance(grant, dict)
+        or grant.get("invocation_id") != cfg.invocation_id
+        or not isinstance(schedule_id := grant.get("schedule_id"), str)
+        or not schedule_id
+        or schedule_id != cfg.schedule_id
+    ):
+        return None
+    record = await get_agent_schedule(schedule_id)
+    return record if record and _admin_thread_enabled(record) else None
+
+
 def _agent_run_metadata(
     record: dict[str, Any],
     thread_id: str,
@@ -473,11 +518,11 @@ def _agent_run_metadata(
         "trigger_kind": "schedule_test" if test_run else "schedule",
         "schedule_id": record["id"],
         "automation_scope": "workspace",
+        "owner_type": "system",
+        "visibility": "public",
         "schedule_name": record.get("name"),
         "schedule_test": test_run,
-        "github_login": record.get("created_by"),
-        PARTICIPANT_LOGINS_KEY: merge_participants(None, record.get("created_by")),
-        "triggering_user_email": record.get("user_email"),
+        "created_by": record.get("created_by"),
         "title": f"{title_prefix}: {record.get('name') or 'Agent'}",
         "base_branch": record.get("base_branch") or "main",
         "branch_prefix": record.get("branch_prefix"),
@@ -508,8 +553,6 @@ async def _agent_run_config(
         {
             "thread_id": thread_id,
             "source": "schedule",
-            "github_login": record.get("created_by"),
-            "user_email": record.get("user_email"),
             "schedule_id": record["id"],
             "schedule_test": test_run,
         },
@@ -553,23 +596,9 @@ async def _launch_agent_schedule_record(
 
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     full_name = _repo_full_name(repo)
-    login = record.get("created_by")
     if full_name:
-        if not (isinstance(login, str) and login):
-            await _put_run_state(
-                record,
-                {
-                    "last_error": "schedule owner unavailable",
-                    "last_error_at": now_iso(),
-                },
-            )
-            return {
-                "status": "unauthorized",
-                "schedule_id": schedule_id,
-                "error": "schedule owner unavailable",
-            }
         try:
-            await require_repo_access_for_user(login, full_name)
+            await require_repo_access_for_workspace(full_name)
         except HTTPException as exc:
             await _put_run_state(
                 record,
@@ -611,15 +640,13 @@ async def _launch_agent_schedule_record(
             "channel_id": slack_channel_id,
             "thread_ts": message_ts,
             "triggering_event_ts": message_ts,
-            "triggering_user_id": await slack_id_for_login(
-                record.get("created_by") if isinstance(record.get("created_by"), str) else None
-            )
-            or "",
-            "triggering_user_email": record.get("user_email") or "",
         }
         await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
 
     admin_thread = _admin_thread_enabled(record)
+    run_config = await _agent_run_config(
+        record, thread_id, slack_thread, test_run=test_run, admin_thread=admin_thread
+    )
     metadata = _agent_run_metadata(
         record,
         thread_id,
@@ -627,6 +654,11 @@ async def _launch_agent_schedule_record(
         test_run=test_run,
         admin_thread=admin_thread,
     )
+    if admin_thread:
+        metadata["system_authorization"] = {
+            "schedule_id": schedule_id,
+            "invocation_id": run_config["configurable"]["invocation_id"],
+        }
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     input_context: InputMessageContext = {
@@ -656,13 +688,7 @@ async def _launch_agent_schedule_record(
             ),
         ),
         source="schedule",
-        config=await _agent_run_config(
-            record,
-            thread_id,
-            slack_thread,
-            test_run=test_run,
-            admin_thread=admin_thread,
-        ),
+        config=run_config,
         client=client,
         stream_resumable=True,
     )

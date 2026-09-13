@@ -14,6 +14,7 @@ from langgraph_sdk.client import LangGraphClient
 from agent.slack.client import (
     SlackStreamError,
     append_slack_stream,
+    set_slack_thread_status,
     start_slack_stream,
     stop_slack_stream,
     store_slack_run_mapping,
@@ -26,6 +27,8 @@ StepStatus = Literal["in_progress", "complete", "error"]
 _FLUSH_INTERVAL_SECONDS = 1.0
 _DEFAULT_RETRY_SECONDS = 30.0
 _MAX_RETRY_SECONDS = 300.0
+_THINKING_STATUS = "Thinking..."
+_STATUS_REFRESH_SECONDS = 90.0
 
 
 @dataclass
@@ -298,3 +301,44 @@ async def stream_slack_thinking_steps(
             await asyncio.shield(stream.stop(status))
         except Exception:
             logger.warning("Slack Thinking Steps cleanup failed for run %s", run_id, exc_info=True)
+
+
+async def show_slack_thinking_status(
+    *, client: LangGraphClient, thread_id: str, run_id: str, channel_id: str, thread_ts: str
+) -> None:
+    """Keep Slack's animated "Thinking..." thread status alive until the run ends."""
+    if not await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS):
+        return
+
+    async def refresh() -> None:
+        while True:
+            await asyncio.sleep(_STATUS_REFRESH_SECONDS)
+            await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS)
+
+    refresher = asyncio.create_task(refresh())
+    try:
+        async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
+            async for event in thread_stream.subscribe(["lifecycle"]):
+                lifecycle = root_lifecycle(event)
+                if (
+                    lifecycle is not None
+                    and lifecycle[0] == run_id
+                    and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS
+                ):
+                    break
+    except Exception:
+        logger.warning("Slack thinking status observer failed for run %s", run_id, exc_info=True)
+    finally:
+        refresher.cancel()
+        if not await asyncio.shield(_thread_has_active_runs(client, thread_id)):
+            await asyncio.shield(set_slack_thread_status(channel_id, thread_ts, ""))
+
+
+async def _thread_has_active_runs(client: LangGraphClient, thread_id: str) -> bool:
+    try:
+        for status in ("pending", "running"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                return True
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not list runs for thread %s", thread_id, exc_info=True)
+    return False

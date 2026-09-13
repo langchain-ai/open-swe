@@ -473,6 +473,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     fetch_messages = AsyncMock(return_value=[{"ts": "1.0", "user": "U1", "text": "old text"}])
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     store_mapping = AsyncMock()
+    monkeypatch.setattr(slack_webhook.common, "authorize_github_thread", AsyncMock(return_value={}))
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(slack_webhook.common, "refresh_user_mapping_cache", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value=None))
@@ -496,6 +497,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     )
     monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock())
+    monkeypatch.setattr(slack_webhook, "queue_message_for_thread", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
     thinking = AsyncMock()
     monkeypatch.setattr(slack_webhook, "stream_slack_thinking_steps", thinking)
@@ -554,11 +556,14 @@ def test_tagged_prompt_keeps_the_mention_wording() -> None:
 async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(slack_webhook.common, "authorize_github_thread", AsyncMock(return_value={}))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: _FakeClient())
     monkeypatch.setattr(slack_webhook.common, "refresh_user_mapping_cache", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_webhook.common, "fetch_slack_thread_messages", AsyncMock([]))
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=[])
+    )
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_names", AsyncMock(return_value={}))
     monkeypatch.setattr(
         slack_webhook.common, "resolve_slack_links_in_context", AsyncMock(return_value=("", []))

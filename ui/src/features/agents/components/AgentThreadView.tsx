@@ -113,7 +113,17 @@ export function AgentThreadView({
     return { modelId: thread.model, effort: thread.effort }
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
-  const activeSelection = selection ?? threadSelection ?? defaultSelection
+  const [autoSelected, setAutoSelected] = useState(false)
+  const activeSelection = autoSelected
+    ? null
+    : (selection ??
+      (thread.modelSelection === "auto"
+        ? null
+        : (threadSelection ?? defaultSelection)))
+  const handleSelectionChange = (next: ModelSelection | null) => {
+    setAutoSelected(next === null)
+    setSelection(next)
+  }
   const [planMode, setPlanMode] = useState<boolean | null>(null)
   const [planFeedbackPending, setPlanFeedbackPending] =
     useState(autoFocusComposer)
@@ -380,7 +390,7 @@ export function AgentThreadView({
                 onSubmit={submitMessage}
                 models={models}
                 selection={activeSelection}
-                onSelectionChange={setSelection}
+                onSelectionChange={handleSelectionChange}
                 planMode={activePlanMode}
                 onPlanModeChange={setPlanMode}
                 mentionPaths={mentionPaths}

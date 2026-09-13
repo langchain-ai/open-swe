@@ -32,6 +32,7 @@ _MIDDLEWARE_MODULES = {
     "ToolErrorMiddleware": ".tool_error_handler",
     "ValidateImageReadsMiddleware": ".validate_image_reads",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
+    "WorkspaceSkillsMiddleware": ".workspace_skills",
 }
 
 __all__ = [
@@ -57,6 +58,7 @@ __all__ = [
     "TimeoutWrapupMiddleware",
     "ValidateImageReadsMiddleware",
     "WorkflowPushGuardMiddleware",
+    "WorkspaceSkillsMiddleware",
     "check_message_queue_before_model",
     "notify_step_limit_reached",
     "record_run_usage",
@@ -93,6 +95,7 @@ if TYPE_CHECKING:
     from agent.middleware.tool_error_handler import ToolErrorMiddleware
     from agent.middleware.validate_image_reads import ValidateImageReadsMiddleware
     from agent.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
+    from agent.middleware.workspace_skills import WorkspaceSkillsMiddleware
 
 
 def _load_export(name: str) -> Any:
