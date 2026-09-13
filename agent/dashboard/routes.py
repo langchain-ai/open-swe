@@ -160,12 +160,10 @@ from agent.dashboard.skills import (
 )
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
-    TranscriptionSettingsUpdate,
     get_team_default_model,
     get_team_default_subagent_model,
     get_team_fable_enabled,
     get_team_settings,
-    update_team_transcription_model,
     upsert_team_settings,
 )
 from agent.dashboard.threads.api import (
@@ -237,7 +235,6 @@ from agent.dashboard.user_preferences import (
     get_user_preferences,
     set_user_preferences,
 )
-from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
     MCPRoute,
     delete_workspace_mcp,
@@ -1014,14 +1011,6 @@ async def api_get_team_settings(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_team_settings()
-
-
-@router.put("/team-settings/transcription")
-async def api_put_transcription_settings(
-    update: TranscriptionSettingsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await update_team_transcription_model(update.transcription_model)
 
 
 @router.put("/team-settings")
@@ -2532,13 +2521,6 @@ async def api_get_thread_pr_diff(
         session["sub"],
         email=session.get("email"),
     )
-
-
-@router.post("/voice/transcriptions")
-async def create_voice_transcription(
-    request: Request, session: dict[str, Any] = _SESSION_DEP
-) -> dict[str, str]:
-    return {"text": await transcribe_audio(request)}
 
 
 @router.post("/threads/{thread_id}/messages")
