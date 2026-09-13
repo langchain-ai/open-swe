@@ -77,6 +77,8 @@ from agent.dashboard.team_settings import (
     get_team_model_routing_enabled,
 )
 from agent.dashboard.user_mappings import email_for_login
+from agent.dashboard.user_mcps import user_mcp_source
+from agent.dashboard.workspace_mcps import workspace_mcp_source
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
@@ -88,6 +90,7 @@ from agent.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
+from agent.mcp import load_mcp_tools
 from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -147,8 +150,6 @@ from agent.sandboxes.state import (
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
-from agent.tool_loaders.stagehand_browser import load_browser_tools
-from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
 from agent.tools import (
     approve_plan,
     background_execute,
@@ -336,10 +337,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
-        "browser_act",
-        "browser_extract",
-        "browser_navigate",
-        "browser_observe",
         "create_sandbox_service_url",
         "http_request",
         "manage_baby_sit",
@@ -518,6 +515,14 @@ async def _notion_tools_for(profile_login: str | None) -> list[Any]:
     )
 
 
+async def _mcp_tools_for(credential_login: str | None) -> list[Any]:
+    """Load workspace MCPs with private-owner personal overrides."""
+    sources = [workspace_mcp_source]
+    if credential_login:
+        sources.append(user_mcp_source(credential_login))
+    return await load_mcp_tools(*sources)
+
+
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
     async with aphase(thread_id, name):
         return await loader()
@@ -659,7 +664,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     @staticmethod
-    def _sender_context_messages(state: PrepareRunState, sender_context: str) -> list[Any]:
+    def _sender_context_messages(
+        state: PrepareRunState, sender_context: str, *, sender_id: str | None = None
+    ) -> list[Any]:
         """Sender context as its own message, appended after the run's input.
 
         Splicing it into the triggering message rewrote history: that message is
@@ -672,15 +679,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
         ):
             return []
-        sender_id = next(
-            (
-                sender_id
-                for candidate in reversed(state.get("messages") or [])
-                if isinstance(candidate, HumanMessage)
-                and (sender_id := message_sender_id(candidate.content, kind="human")) is not None
-            ),
-            None,
-        )
+        if sender_id is None:
+            sender_id = next(
+                (
+                    candidate_id
+                    for candidate in reversed(state.get("messages") or [])
+                    if isinstance(candidate, HumanMessage)
+                    and (candidate_id := message_sender_id(candidate.content, kind="human"))
+                    is not None
+                ),
+                None,
+            )
         if sender_id is None:
             return []
         identity: SystemIdentity = {
@@ -777,7 +786,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
                 participant_identities=participant_identities,
             )
-        sender_messages = self._sender_context_messages(state, sender_context)
+        bot_id = (
+            cfg.slack_thread.triggering_bot_id
+            if self._source == "slack" and cfg.slack_thread
+            else ""
+        )
+        sender_messages = self._sender_context_messages(
+            state, sender_context, sender_id=f"system:slack-bot-{bot_id}" if bot_id else None
+        )
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
@@ -848,7 +864,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ).with_config(bindable_config(config))
 
     profile_login = resolve_github_login(as_json_object(config))
-    credential_login = None if is_desktop_run(cfg) else await private_credential_login(config)
+    credential_login = None
+    credential_scope_known = False
+    if not is_desktop_run(cfg):
+        try:
+            credential_login = await private_credential_login(config)
+            credential_scope_known = True
+        except Exception:
+            logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
@@ -1071,14 +1094,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
-    workspace_mcp_tools: list[Any] = []
+    mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if not stop_summary_mode and not local_run:
-        workspace_mcp_tools, notion_tools = await asyncio.gather(
+    if not stop_summary_mode and not local_run and credential_scope_known:
+        mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
-                "factory.workspace_mcp_tools",
-                load_workspace_mcp_tools,
+                "factory.mcp_tools",
+                lambda: _mcp_tools_for(credential_login),
             ),
             _phase_result(
                 thread_id,
@@ -1154,13 +1177,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
-        "Workspace MCPs": workspace_mcp_tools,
+        "MCPs": mcp_tools,
         "Notion": notion_tools,
     }
-    if not stop_summary_mode and not local_run:
-        browser_tools = load_browser_tools()
-        if browser_tools:
-            integration_tool_groups["Browser"] = browser_tools
     if integration_tool_groups:
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
@@ -1308,8 +1327,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *model_selection_middleware,
                 *fallback_middleware,
                 PlanModeMiddleware(
-                    excluded=PLAN_MODE_EXCLUDED_TOOLS
-                    | frozenset(tool.name for tool in workspace_mcp_tools),
+                    excluded=PLAN_MODE_EXCLUDED_TOOLS | frozenset(tool.name for tool in mcp_tools),
                     initial=plan_mode,
                 ),
                 SanitizeFireworksMessagesMiddleware(),
