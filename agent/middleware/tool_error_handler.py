@@ -9,7 +9,7 @@ is notified and the error propagates.
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, TypedDict, cast
 
 from langchain.agents.middleware.types import (
     AgentState,
@@ -35,6 +35,13 @@ from agent.sandboxes.retry import is_transient_sandbox_error
 logger = logging.getLogger(__name__)
 
 SANDBOX_TRANSIENT = "sandbox_transient"
+_IDENTICAL_FAILURES_KEY = "_tool_error_identical_failures"
+_IDENTICAL_FAILURE_LIMIT = 3
+
+
+class _FailureRecord(TypedDict):
+    count: int
+    error: str
 
 
 def _get_name(candidate: object) -> str | None:
@@ -153,6 +160,68 @@ def _generic_error_tool_message(e: Exception, request: ToolCallRequest) -> ToolM
     )
 
 
+def _failure_key(request: ToolCallRequest) -> str | None:
+    tool_name = _extract_tool_name(request)
+    if tool_name is None or not isinstance(request.tool_call, dict):
+        return None
+    return json.dumps(
+        [tool_name, request.tool_call.get("args", {})],
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _failure_records(request: ToolCallRequest) -> dict[str, _FailureRecord] | None:
+    if not isinstance(request.state, dict):
+        return None
+    records = request.state.get(_IDENTICAL_FAILURES_KEY)
+    if not isinstance(records, dict):
+        records = {}
+        request.state[_IDENTICAL_FAILURES_KEY] = records
+    return cast(dict[str, _FailureRecord], records)
+
+
+def _error_text(result: ToolMessage) -> str:
+    if isinstance(result.content, str):
+        return result.content
+    return json.dumps(result.content, sort_keys=True, default=str)
+
+
+def _record_tool_result(request: ToolCallRequest, result: ToolMessage) -> None:
+    key = _failure_key(request)
+    records = _failure_records(request)
+    if key is None or records is None:
+        return
+    if result.status != "error":
+        records.pop(key, None)
+        return
+    error = _error_text(result)
+    previous = records.get(key)
+    records[key] = {
+        "count": previous["count"] + 1 if previous and previous["error"] == error else 1,
+        "error": error,
+    }
+
+
+def _identical_failure_message(request: ToolCallRequest) -> ToolMessage | None:
+    key = _failure_key(request)
+    records = _failure_records(request)
+    if key is None or records is None:
+        return None
+    record = records.get(key)
+    if record is None or record["count"] < _IDENTICAL_FAILURE_LIMIT:
+        return None
+    return ToolMessage(
+        content=(
+            "This exact tool call has failed repeatedly and cannot succeed as written. "
+            "Change the arguments, use a different tool, or report the blocker to the user."
+        ),
+        tool_call_id=_get_tool_call_id(request),
+        status="error",
+    )
+
+
 class ToolErrorMiddleware(OpenSWEMiddleware):
     """Normalize tool execution errors into predictable payloads.
 
@@ -172,8 +241,13 @@ class ToolErrorMiddleware(OpenSWEMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        if blocked := _identical_failure_message(request):
+            return blocked
         try:
-            return await handler(request)
+            result = await handler(request)
+            if isinstance(result, ToolMessage):
+                _record_tool_result(request, result)
+            return result
         except Exception as e:
             # The command never started, so nothing is known to be wrong with the
             # sandbox: ending the run here would turn a gateway blip into an
@@ -185,7 +259,9 @@ class ToolErrorMiddleware(OpenSWEMiddleware):
                 return _transient_sandbox_tool_message(e, request)
             if not _is_sandbox_unreachable(e):
                 logger.exception("Error during tool call handling; request=%r", request)
-                return _generic_error_tool_message(e, request)
+                result = _generic_error_tool_message(e, request)
+                _record_tool_result(request, result)
+                return result
             logger.exception("Sandbox error during tool call handling; request=%r", request)
             thread_id = _get_thread_id(request)
             config = _get_run_config(request)

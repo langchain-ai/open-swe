@@ -5,7 +5,20 @@ integer field in read_file (e.g. offset='1, 80'), causing a Pydantic
 ValidationError and an unnecessary retry.
 """
 
-from agent.middleware.sanitize_tool_inputs import _coerce_int, _sanitize_read_file_args
+from importlib import import_module
+from unittest.mock import MagicMock
+
+import pytest
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
+
+from agent.middleware.sanitize_tool_inputs import (
+    SanitizeToolInputsMiddleware,
+    _coerce_int,
+    _sanitize_read_file_args,
+)
+
+_MCPTool = import_module("agent.mcp.runtime")._MCPTool
 
 
 class TestCoerceInt:
@@ -72,3 +85,29 @@ class TestSanitizeReadFileArgs:
         args = {"file_path": "foo.ts", "offset": "1, 80"}
         _ = _sanitize_read_file_args(args)
         assert args["offset"] == "1, 80"
+
+
+@pytest.mark.asyncio
+async def test_sanitizes_linear_mcp_arguments_before_dispatch() -> None:
+    args = {
+        "issueId": "ENT-1642",
+        "body": "comment",
+        "statusUpdateType": "project",
+        "statusUpdateId": "",
+        "projectId": "",
+    }
+    request = ToolCallRequest(
+        tool_call={"name": "mcp_linear_save_comment", "args": args, "id": "call-1"},
+        tool=object.__new__(_MCPTool),
+        state={},
+        runtime=MagicMock(),
+    )
+    received: list[dict[str, object]] = []
+
+    async def handler(dispatched: ToolCallRequest) -> ToolMessage:
+        received.append(dispatched.tool_call["args"])
+        return ToolMessage(content="ok", tool_call_id="call-1")
+
+    await SanitizeToolInputsMiddleware().awrap_tool_call(request, handler)
+
+    assert received == [{"issueId": "ENT-1642", "body": "comment"}]

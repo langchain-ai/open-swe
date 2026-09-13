@@ -1,10 +1,4 @@
-"""Sanitize tool input middleware.
-
-Coerces malformed integer fields in read_file calls before they reach Pydantic
-validation.  The LLM occasionally generates strings like ``'1, 80'`` or
-``'170, "limit": 60'`` for integer parameters; we extract the leading digit
-sequence so the call succeeds instead of burning an LLM turn on a retry.
-"""
+"""Sanitize malformed tool input before validation or remote dispatch."""
 
 import logging
 import re
@@ -52,8 +46,34 @@ def _sanitize_read_file_args(args: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
+def _remove_empty_mcp_values(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _remove_empty_mcp_values(item)
+            for key, item in value.items()
+            if not (isinstance(item, str) and not item.strip())
+        }
+    if isinstance(value, list):
+        return [_remove_empty_mcp_values(item) for item in value]
+    return value
+
+
+def _sanitize_mcp_args(args: dict[str, Any]) -> dict[str, Any]:
+    """Remove empty MCP arguments and invalid Linear status metadata."""
+    sanitized = cast(dict[str, Any], _remove_empty_mcp_values(args))
+    status_update_id = sanitized.get("statusUpdateId")
+    if not isinstance(status_update_id, str) or not status_update_id.strip():
+        sanitized.pop("statusUpdateType", None)
+    return sanitized
+
+
+def _is_mcp_tool(tool: object) -> bool:
+    tool_type = type(tool)
+    return tool_type.__module__ == "agent.mcp.runtime" and tool_type.__name__ == "_MCPTool"
+
+
 class SanitizeToolInputsMiddleware(OpenSWEMiddleware):
-    """Intercept read_file calls and coerce malformed integer parameters.
+    """Sanitize malformed read_file and MCP tool parameters.
 
     When the LLM produces a string value for an integer field (e.g.
     ``offset='1, 80'``), this middleware extracts the leading integer so that
@@ -65,12 +85,17 @@ class SanitizeToolInputsMiddleware(OpenSWEMiddleware):
 
     def _sanitize_request(self, request: ToolCallRequest) -> ToolCallRequest:
         tool_call = request.tool_call
-        if not isinstance(tool_call, dict) or tool_call.get("name") != "read_file":
+        if not isinstance(tool_call, dict):
             return request
         args = tool_call.get("args", {})
         if not isinstance(args, dict):
             return request
-        sanitized_args = _sanitize_read_file_args(args)
+        if tool_call.get("name") == "read_file":
+            sanitized_args = _sanitize_read_file_args(args)
+        elif _is_mcp_tool(request.tool):
+            sanitized_args = _sanitize_mcp_args(args)
+        else:
+            return request
         if sanitized_args is args:
             return request
         new_tool_call = cast(ToolCall, {**tool_call, "args": sanitized_args})
