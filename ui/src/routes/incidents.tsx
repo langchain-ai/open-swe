@@ -1,9 +1,10 @@
-import { Outlet, createFileRoute } from "@tanstack/react-router"
+import { Outlet, createFileRoute, useRouterState } from "@tanstack/react-router"
 import { useEffect } from "react"
 
-import { IncidentsShell } from "@/features/incidents/IncidentsShell"
+import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { ErrorState, LoadingState } from "@/features/incidents/shared"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { rememberAppLocation } from "@/lib/appLocation"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/incidents")({
@@ -12,6 +13,10 @@ export const Route = createFileRoute("/incidents")({
 
 function IncidentsLayout() {
   const session = useSession()
+  const href = useRouterState({ select: (state) => state.location.href })
+  useEffect(() => {
+    rememberAppLocation(href)
+  }, [href])
   useEffect(() => {
     document.documentElement.dataset["agentsTheme"] = "true"
     return () => {
@@ -30,8 +35,10 @@ function IncidentsLayout() {
     )
   if (!session.data) return <RequireLogin />
   return (
-    <IncidentsShell user={session.data}>
-      <Outlet />
-    </IncidentsShell>
+    <AgentsShell user={session.data}>
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <Outlet />
+      </div>
+    </AgentsShell>
   )
 }

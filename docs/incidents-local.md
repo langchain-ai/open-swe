@@ -34,7 +34,7 @@ Provider lifecycle changes require an explicit responder action. Pausing or comp
 
 ## Documents and history
 
-The main list has **Active**, **Inactive**, and **All** filters beside search. Active includes investigations needing attention; Inactive includes paused and completed agent activity. These filters do not change the provider's incident status. App navigation stays in the sidebar, and **Incident history** opens retained summaries and postmortems.
+The main list has **Active**, **Inactive**, and **All** filters beside search. Active includes investigations needing attention; Inactive includes paused and completed agent activity. These filters do not change the provider's incident status. Incidents uses the same Open SWE sidebar as Reviews, including projects, recent threads, search, and settings. **Incident history** opens retained summaries and postmortems.
 
 The detail page opens on **Overview**, with the latest finding, evidence-backed suggested next steps, sources, and provider context. **Postmortem** contains the editable incident document, a **Copy incident** action, and revision history; **Timeline** shows chronological agent activity. Switching tabs preserves unsaved document edits. Temporary Slack verification failures preserve drafts; revoked channel access hides incident content.
 
