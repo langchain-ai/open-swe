@@ -1117,7 +1117,7 @@ def slack_file_mention(monkeypatch, fake_store):
     monkeypatch.setattr(lifecycle, "_create_sandbox_with_proxy", provision)
     monkeypatch.setattr(lifecycle, "get_recorded_proxy_base_config", lambda _: None)
     monkeypatch.setattr(webhook_common, "get_slack_permalink", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_utils, "download_slack_file", AsyncMock(return_value=(b"zip", None)))
+    monkeypatch.setattr(slack_utils, "download_slack_file", AsyncMock(return_value=b"zip"))
     fake_store.seed(["environments"], "staging", {"slug": "staging", "name": "Staging"})
     request = SlackRequest(
         channel_id="C123",

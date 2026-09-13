@@ -350,11 +350,10 @@ async def _download_slack_files_to_sandbox(
     staged: list[StagedSlackFile] = []
     used_names: set[str] = set()
     for entry in entries:
-        content, error = await slack_utils.download_slack_file(entry.url)
-        if content is None:
-            common.logger.info(
-                "Slack file download skipped", extra={"slack_error": error or "unknown"}
-            )
+        try:
+            content = await slack_utils.download_slack_file(entry.url)
+        except slack_utils.SlackFileDownloadError as error:
+            common.logger.info("Slack file download skipped", extra={"slack_error": error.code})
             continue
         filename = _sanitize_slack_filename(entry.name, entry.url)
         base = filename

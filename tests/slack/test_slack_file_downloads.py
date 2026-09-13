@@ -110,7 +110,7 @@ async def test_download_slack_files_stages_into_sandbox(monkeypatch: pytest.Monk
         "agent.sandboxes.lifecycle.ensure_sandbox_for_thread", AsyncMock(return_value=backend)
     )
     monkeypatch.setattr(
-        slack_webhook.slack_utils, "download_slack_file", AsyncMock(return_value=(b"zip", None))
+        slack_webhook.slack_utils, "download_slack_file", AsyncMock(return_value=b"zip")
     )
 
     staged = await slack_webhook._download_slack_files_to_sandbox(
@@ -135,7 +135,12 @@ async def test_download_slack_files_skips_failed_download(monkeypatch: pytest.Mo
     monkeypatch.setattr(
         slack_webhook.slack_utils,
         "download_slack_file",
-        AsyncMock(side_effect=[(None, "file_too_large"), (b"ok", None)]),
+        AsyncMock(
+            side_effect=[
+                slack_client.SlackFileDownloadError("file_too_large"),
+                b"ok",
+            ]
+        ),
     )
 
     staged = await slack_webhook._download_slack_files_to_sandbox(
@@ -179,7 +184,7 @@ async def test_download_slack_file_skips_redirect_body_and_drops_token(download_
         ]
     )
 
-    assert await slack_client.download_slack_file("https://files.slack.com/a.zip") == (b"zip", None)
+    assert await slack_client.download_slack_file("https://files.slack.com/a.zip") == b"zip"
     assert redirect.read_count == 0
     assert redirect.closed and payload.closed
     assert requests[0].headers["Authorization"] == "Bearer test-slack-token"
@@ -201,10 +206,8 @@ async def test_download_slack_file_stops_reading_oversize_payload(
     stream = DownloadStream([b"ab", b"cd", b"must not be read"])
     headers = {"Content-Length": content_length} if content_length is not None else {}
     responses.append(httpx2.Response(200, headers=headers, stream=stream))
-    assert await slack_client.download_slack_file("https://files.slack.com/a/x.zip") == (
-        None,
-        "file_too_large",
-    )
+    with pytest.raises(slack_client.SlackFileDownloadError, match="file_too_large"):
+        await slack_client.download_slack_file("https://files.slack.com/a/x.zip")
     assert stream.read_count == 2
     assert stream.closed
 
@@ -217,10 +220,8 @@ async def test_download_slack_file_rejects_large_content_length_without_reading(
     stream = DownloadStream([b"oversized"])
     responses.append(httpx2.Response(200, headers={"Content-Length": "9"}, stream=stream))
 
-    assert await slack_client.download_slack_file("https://files.slack.com/a.zip") == (
-        None,
-        "file_too_large",
-    )
+    with pytest.raises(slack_client.SlackFileDownloadError, match="file_too_large"):
+        await slack_client.download_slack_file("https://files.slack.com/a.zip")
     assert stream.read_count == 0
     assert stream.closed
 
@@ -232,10 +233,7 @@ async def test_download_slack_file_accepts_payload_up_to_limit(download_http, pa
     stream = DownloadStream([payload[:1], payload[1:]])
     responses.append(httpx2.Response(200, stream=stream))
 
-    assert await slack_client.download_slack_file("https://files.slack.com/a.zip") == (
-        payload,
-        None,
-    )
+    assert await slack_client.download_slack_file("https://files.slack.com/a.zip") == payload
     assert stream.closed
 
 
@@ -250,10 +248,8 @@ async def test_download_slack_file_closes_interrupted_stream(download_http, fail
         with pytest.raises(asyncio.CancelledError):
             await slack_client.download_slack_file("https://files.slack.com/a.zip")
     else:
-        assert await slack_client.download_slack_file("https://files.slack.com/a.zip") == (
-            None,
-            "download_failed",
-        )
+        with pytest.raises(slack_client.SlackFileDownloadError, match="download_failed"):
+            await slack_client.download_slack_file("https://files.slack.com/a.zip")
     assert stream.closed
 
 
@@ -273,10 +269,8 @@ async def test_download_slack_file_closes_redirect_before_blocking_private_host(
         lambda url: (False, "private host", None, None) if "127.0.0.1" in url else resolve(url),
     )
 
-    assert await slack_client.download_slack_file("https://files.slack.com/a.zip") == (
-        None,
-        "unsafe_download_url",
-    )
+    with pytest.raises(slack_client.SlackFileDownloadError, match="unsafe_download_url"):
+        await slack_client.download_slack_file("https://files.slack.com/a.zip")
     assert len(requests) == 1
     assert stream.read_count == 0
     assert stream.closed
@@ -286,10 +280,10 @@ async def test_download_slack_file_closes_redirect_before_blocking_private_host(
 async def test_download_slack_files_uploads_before_downloading_next_file(
     monkeypatch, tmp_path
 ) -> None:
-    async def download(url: str) -> tuple[bytes, None]:
+    async def download(url: str) -> bytes:
         if url.endswith("second.zip"):
             assert (tmp_path / "bundle.zip").read_bytes() == b"zip"
-        return b"zip", None
+        return b"zip"
 
     async def upload(files: list[tuple[str, bytes]]) -> list[dict[str, None]]:
         for path, content in files:
@@ -324,7 +318,5 @@ async def test_download_slack_file_requires_a_bot_token(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(slack_client, "SLACK_BOT_TOKEN", "")
 
-    assert await slack_client.download_slack_file("https://files.slack.com/a/x.zip") == (
-        None,
-        "missing_slack_bot_token",
-    )
+    with pytest.raises(slack_client.SlackFileDownloadError, match="missing_slack_bot_token"):
+        await slack_client.download_slack_file("https://files.slack.com/a/x.zip")
