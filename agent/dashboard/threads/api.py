@@ -1,5 +1,6 @@
 """Dashboard thread detail, messaging and lifecycle endpoints backed by LangGraph."""
 
+import asyncio
 import logging
 import posixpath
 import uuid
@@ -14,6 +15,7 @@ from agent.dashboard.threads.access import (
     _github_token_for_login,
     _readable_thread_metadata,
 )
+from agent.dashboard.threads.listing import list_unresolved_dashboard_threads
 from agent.dashboard.threads.runs import (
     _ASSISTANT_ID,
     ThreadMessageBody,
@@ -525,6 +527,28 @@ async def continue_thread_privately(
             finally:
                 raise HTTPException(502, "failed to copy the thread transcript") from exc
     return await _thread_summary(await client.threads.get(new_thread_id))
+
+
+async def resolve_all_dashboard_threads(login: str, *, email: str | None = None) -> int:
+    """Resolve every thread the caller has participated in."""
+    client = langgraph_client()
+    threads = await list_unresolved_dashboard_threads(login, email=email)
+    now_ms = _now_ms()
+
+    async def resolve(thread_id: str) -> None:
+        async with agent_thread_pr_state_lock(client, thread_id):
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={
+                    "resolved": True,
+                    "resolved_at_ms": now_ms,
+                    "auto_resolved_by_prs": False,
+                    "attention_reason": None,
+                },
+            )
+
+    await asyncio.gather(*(resolve(thread["thread_id"]) for thread in threads))
+    return len(threads)
 
 
 async def resolve_dashboard_thread(

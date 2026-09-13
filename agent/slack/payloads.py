@@ -51,6 +51,7 @@ class SlackMessage(SlackPayload):
     text: str | None = None
     subtype: str = ""
     bot_id: str = ""
+    app_id: str = ""
     attachments: list[JsonObject] = Field(default_factory=list)
 
     @property
@@ -75,6 +76,7 @@ class SlackEvent(SlackPayload):
     user_id: str = ""
     text: str | None = None
     bot_id: str = ""
+    app_id: str = ""
     attachments: list[JsonObject] = Field(default_factory=list)
     message: SlackMessage | None = None
     previous_message: SlackMessage | None = None
@@ -114,6 +116,7 @@ class SlackEventEnvelope(SlackPayload):
     type: str = ""
     event_id: str = ""
     team_id: str = ""
+    api_app_id: str = ""
     challenge: str = ""
     authorizations: list[SlackAuthorization] = Field(default_factory=list)
     authed_users: list[str] = Field(default_factory=list)

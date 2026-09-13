@@ -32,7 +32,7 @@ _VALIDATION_MESSAGES = {
 }
 
 
-class WorkspaceMCPRoute(APIRoute):
+class MCPRoute(APIRoute):
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         handler = super().get_route_handler()
 
