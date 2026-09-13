@@ -419,9 +419,3 @@ ENV.var(
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")
 ENV.var("DEBUG_TRACEMALLOC", "Start tracemalloc to attribute unclosed-session warnings.")
 ENV.var("DEBUG_TRACEMALLOC_FRAMES", "Frames tracemalloc records per allocation.", default="25")
-
-ENV.var(
-    "OBSERVABILITY_AUTHORIZED_EMAILS",
-    "Comma-separated responder emails allowed to access Incidents; admins always have access.",
-    default="",
-)

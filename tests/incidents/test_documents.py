@@ -106,7 +106,7 @@ async def test_store_outage_is_not_an_empty_summary(record, monkeypatch):
         await current(record)
 
 
-async def test_documents_api_is_read_only_and_checks_channel_access(record, monkeypatch):
+async def test_documents_api_is_read_only_and_checks_channel_access(record):
     from agent.dashboard import incidents_api
     from agent.incidents.document_api import router
 
@@ -114,14 +114,9 @@ async def test_documents_api_is_read_only_and_checks_channel_access(record, monk
     app = FastAPI()
     app.include_router(router, prefix="/documents")
     app.dependency_overrides[incidents_api.require_session] = lambda: {"sub": "test-user"}
-    monkeypatch.setattr(incidents_api, "is_observability_authorized", lambda *args, **kwargs: False)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        assert (await client.get(f"/documents/{record.id}")).status_code == 403
-        monkeypatch.setattr(
-            incidents_api, "is_observability_authorized", lambda *args, **kwargs: True
-        )
         assert (await client.get(f"/documents/{record.id}")).json()["postmortem"]["markdown"]
         assert (await client.put(f"/documents/{record.id}/postmortem", json={})).status_code == 404
         service.get_slack_channel_info.return_value = {**CHANNEL, "is_member": False}

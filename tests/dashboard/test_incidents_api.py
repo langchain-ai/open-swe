@@ -18,7 +18,6 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://testserver")
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "incidents-test-signing-secret-32-bytes")
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
-    monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "sre@example.com")
     app = FastAPI()
     app.include_router(routes.router)
     return TestClient(app)
@@ -66,16 +65,16 @@ def test_all_incidents_routes_require_a_session(client, method, path, body) -> N
 
 
 @pytest.mark.parametrize("path", ["/records", "/records/i1"])
-def test_content_requires_observability_access(client: TestClient, path: str) -> None:
+def test_any_signed_in_user_can_read_incidents(client: TestClient, service, path: str) -> None:
     _login(client, login="developer", email="developer@example.com")
 
     response = client.get(f"/dashboard/api/incidents{path}")
 
-    assert response.status_code == 403
+    assert response.status_code == 200
 
 
 @pytest.mark.parametrize("method", ["GET", "PATCH"])
-def test_observability_access_does_not_grant_settings_access(client, method) -> None:
+def test_non_admins_cannot_change_settings(client, method) -> None:
     _login(client)
 
     response = client.request(

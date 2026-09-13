@@ -30,7 +30,8 @@ async def configured(fake_store, monkeypatch):
     )
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "sre@example.com")
+    monkeypatch.setattr(channels, "login_for_slack_id", AsyncMock(return_value="sre"))
+    monkeypatch.setattr(channels, "post_account_link_prompt", AsyncMock())
     joined = AsyncMock()
 
     @asynccontextmanager
@@ -253,14 +254,21 @@ async def test_paused_channels_keep_context_without_scheduling(enrolled):
     turns.schedule_automatic_turn.assert_not_awaited()
 
 
-async def test_unauthorized_mentions_are_ignored(enrolled):
-    channels.get_slack_user_info.return_value = {"profile": {"email": "guest@example.com"}}
-    response, _ = await handle(
+async def test_anyone_in_the_channel_can_pause_but_questions_need_a_connected_account(enrolled):
+    channels.login_for_slack_id.return_value = None
+    paused, _ = await handle(
         {"type": "app_mention", "channel": "C1", "user": "U9", "text": "<@UBOT> pause", "ts": "3.0"}
     )
-    assert response == {"status": "ignored"}
+    asked, _ = await handle(
+        {"type": "app_mention", "channel": "C1", "user": "U9", "text": "<@UBOT> why?", "ts": "3.1"},
+        event_id="E2",
+    )
+
+    assert paused == asked == {"status": "accepted"}
+    assert (await service.INCIDENTS.get(enrolled.id)).status == "paused"
     turns.dispatch_turn.assert_not_awaited()
-    assert (await service.INCIDENTS.get(enrolled.id)).status == "watching"
+    channels.post_account_link_prompt.assert_awaited_once()
+    assert channels.post_account_link_prompt.await_args.args[:3] == ("C1", "3.1", "U9")
 
 
 async def test_questions_dispatch_an_explicit_turn_into_their_thread(enrolled):
@@ -340,7 +348,7 @@ async def test_archive_completes_quietly(enrolled):
     channels.post_slack_thread_reply_with_ts.assert_not_awaited()
 
 
-async def test_native_session_stop_pauses_for_authorized_responders(enrolled):
+async def test_native_session_stop_pauses_for_any_human(enrolled):
     response, _ = await handle({"type": "agent_session_stopped", "channel": "C1", "user": "U1"})
     assert response == {"status": "accepted"}
     assert (await service.INCIDENTS.get(enrolled.id)).status == "paused"
@@ -412,8 +420,10 @@ async def test_mention_start_follows_a_channel_without_the_prefix(configured):
     )
 
 
-async def test_mention_start_requires_a_responder_and_other_mentions_fall_through(configured):
-    channels.get_slack_user_info.return_value = {"profile": {"email": "guest@example.com"}}
+async def test_mention_start_requires_a_connected_account_and_other_mentions_fall_through(
+    configured,
+):
+    channels.login_for_slack_id.return_value = None
     response, _ = await handle(
         {
             "type": "app_mention",
@@ -425,7 +435,10 @@ async def test_mention_start_requires_a_responder_and_other_mentions_fall_throug
     )
     assert response == {"status": "accepted"}
     assert await service.INCIDENTS.get(service.incident_id("T1", "C7")) is None
-    assert "Only incident responders" in channels.post_slack_thread_reply_with_ts.await_args.args[2]
+    assert (
+        "Connect your Open SWE account"
+        in channels.post_slack_thread_reply_with_ts.await_args.args[2]
+    )
 
     ordinary, _ = await handle(
         {

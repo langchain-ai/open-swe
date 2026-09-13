@@ -7,8 +7,8 @@ from typing import Any
 from fastapi import BackgroundTasks, HTTPException
 
 from agent.config import ENV
+from agent.dashboard.user_mappings import login_for_slack_id
 from agent.incidents import service, turns
-from agent.incidents.access import is_observability_authorized
 from agent.incidents.models import Incident, IncidentPolicy
 from agent.incidents.presentation import report_message
 from agent.input_messages import PersonIdentity
@@ -25,7 +25,7 @@ from agent.slack.http import slack_client
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.store import store_client
 from agent.utils.dashboard_links import dashboard_incident_url
-from agent.webhooks.common import upsert_agent_thread_metadata
+from agent.webhooks.common import post_account_link_prompt, upsert_agent_thread_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +76,10 @@ def _own_message(message: dict[str, Any], policy: IncidentPolicy) -> bool:
     )
 
 
-async def authorized_slack_user(user_id: str) -> PersonIdentity | None:
-    """The responder identity for a Slack user allowed to control incidents, else None."""
+async def slack_person(user_id: str) -> PersonIdentity:
+    """Identity for any human in the channel. Turning an incident off needs nothing more."""
     user = await get_slack_user_info(user_id)
     profile = (user or {}).get("profile")
-    email = profile.get("email") if isinstance(profile, dict) else None
-    if not is_observability_authorized(email if isinstance(email, str) else None):
-        return None
     person: PersonIdentity = {"id": f"slack:{user_id}", "platform": "slack"}
     name = (
         (profile.get("display_name") or profile.get("real_name"))
@@ -91,9 +88,34 @@ async def authorized_slack_user(user_id: str) -> PersonIdentity | None:
     ) or (user or {}).get("real_name")
     if isinstance(name, str) and name:
         person["display_name"] = name
+    email = profile.get("email") if isinstance(profile, dict) else None
     if isinstance(email, str) and email:
         person["email"] = email
     return person
+
+
+async def linked_slack_user(user_id: str) -> PersonIdentity | None:
+    """The identity of a Slack user who connected an Open SWE account, else None.
+
+    Questions and manual starts unlock the agent's tools, so they need the same connected
+    account as mentioning Open SWE anywhere else.
+    """
+    login = await login_for_slack_id(user_id)
+    if not login:
+        return None
+    person = await slack_person(user_id)
+    person["github_login"] = login
+    return person
+
+
+async def control_by_slack_user(record: Incident, action: str, user_id: str) -> Incident:
+    return await apply_control(record, action, dict(await slack_person(user_id)))
+
+
+async def prompt_to_connect(channel_id: str, thread_ts: str, user_id: str, thread_id: str) -> None:
+    await post_account_link_prompt(
+        channel_id, thread_ts, user_id, None, reason="unlinked", agent_thread_id=thread_id
+    )
 
 
 def _introduction(record: Incident) -> str:
@@ -102,7 +124,8 @@ def _introduction(record: Incident) -> str:
     if link:
         text += f"; the full incident is at <{link}|Open incident>"
     return (
-        text + ". Mention me with a question. To turn it off, mention me with `pause` to stop "
+        text
+        + ". Mention me with a question. Anyone here can turn it off: mention me with `pause` to stop "
         "automatic analysis or `complete` to close the incident (or run `/openswe incidents stop`); "
         "`resume` turns it back on."
     )
@@ -213,9 +236,12 @@ async def start_incident(channel_id: str, user_id: str, background_tasks: Backgr
     policy = await service.get_policy()
     if not policy.enabled:
         return "Incidents is not enabled in this workspace."
-    actor = await authorized_slack_user(user_id)
+    actor = await linked_slack_user(user_id)
     if actor is None:
-        return "Only incident responders can start an incident."
+        return (
+            "Connect your Open SWE account in the dashboard (Sign in with Slack) to start an "
+            "incident. Anyone in the channel can pause or complete one."
+        )
     record = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
     if record is not None:
         if record.is_archived:
@@ -239,9 +265,7 @@ async def stop_incident(channel_id: str, user_id: str, background_tasks: Backgro
     record = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
     if record is None:
         return "Incidents is not following this channel."
-    actor = await authorized_slack_user(user_id)
-    if actor is None:
-        return "Only incident responders can stop an incident."
+    actor = await slack_person(user_id)
     if record.status == "completed":
         return "This incident is already complete."
     background_tasks.add_task(apply_control, record, "complete", dict(actor))
@@ -374,9 +398,8 @@ async def handle_slack_event(
         return {"status": "ignored"}
     if kind == "agent_session_stopped":
         user = event.get("user")
-        actor = await authorized_slack_user(user) if isinstance(user, str) and user else None
-        if actor is not None and record.status in {"watching", "needs_attention"}:
-            background_tasks.add_task(apply_control, record, "pause", dict(actor))
+        if isinstance(user, str) and user and record.status in {"watching", "needs_attention"}:
+            background_tasks.add_task(control_by_slack_user, record, "pause", user)
         return {"status": "accepted"}
     message = event.get("message") if event.get("subtype") == "message_changed" else event
     if not isinstance(message, dict):
@@ -386,16 +409,20 @@ async def handle_slack_event(
     user = message.get("user")
     mentioned = kind == "app_mention" or bool(bot_user and f"<@{bot_user}>" in text)
     if mentioned and isinstance(user, str) and user and not slack_message_bot_id(message):
-        actor = await authorized_slack_user(user)
-        if actor is None:
-            return {"status": "ignored"}
         action, question = parse_mention(text)
         if action in CONTROL_WORDS:
-            background_tasks.add_task(apply_control, record, action, dict(actor))
+            background_tasks.add_task(control_by_slack_user, record, action, user)
             return {"status": "accepted"}
         if action == "ask":
             ts = str(message.get("ts") or "")
             thread_ts = str(message.get("thread_ts") or "")
+            actor = await linked_slack_user(user)
+            if actor is None:
+                # A question unlocks the agent's tools, so it needs a connected account.
+                background_tasks.add_task(
+                    prompt_to_connect, record.channel_id, ts, user, record.thread_id
+                )
+                return {"status": "accepted"}
             background_tasks.add_task(
                 turns.dispatch_turn,
                 record,

@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.oauth import require_session
-from agent.incidents.access import is_observability_authorized
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -36,8 +35,7 @@ class IncidentSettingsBody(BaseModel):
 async def _responder(
     session: Annotated[dict[str, Any], Depends(require_session)],
 ) -> dict[str, Any]:
-    if not is_observability_authorized(session.get("email"), login=session.get("sub")):
-        raise HTTPException(403, "observability access required")
+    """Any signed-in dashboard user may read incidents; settings stay admin-only."""
     return session
 
 
