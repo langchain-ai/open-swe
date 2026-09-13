@@ -2,13 +2,12 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import database, emitter, identity, ingestion
+from agent.analytics import emitter, identity, ingestion
 from agent.analytics.events import (
     EventName,
     FeedbackSubmittedPayload,
@@ -21,6 +20,7 @@ from agent.analytics.events import (
     RunCostRecordedPayload,
     RunStartedPayload,
 )
+from agent.database import postgres
 from tests.analytics.helpers import DAY, event
 
 
@@ -261,14 +261,8 @@ async def test_pr_timestamp_migration_preserves_existing_reopen(analytics_db):
         )
     )
     async with transaction() as conn:
-        schema = await conn.scalar(text("SELECT current_schema()"))
         await conn.execute(text("ALTER TABLE pr_projection DROP COLUMN latest_transition_at"))
-        migration = (
-            Path(database.__file__).with_name("migrations") / "0002_pr_transition_timestamp.sql"
-        )
-        await database._run_script(
-            conn, migration.read_text().replace("open_swe_analytics", schema)
-        )
+        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0002")
     await ingestion.ingest(
         event(
             workspace,
@@ -610,13 +604,7 @@ async def test_feedback_migration_recovers_acknowledged_withdrawals(analytics_db
         # Recreate the old state: acknowledged withdrawals with no retained pending record.
         await conn.execute(text("UPDATE feedback_projection SET withdrawn_at = NULL"))
         await conn.execute(text("DROP TABLE feedback_withdrawal_projection"))
-        schema = await conn.scalar(text("SELECT current_schema()"))
-        migration = (
-            Path(database.__file__).with_name("migrations") / "0003_feedback_withdrawals.sql"
-        )
-        await database._run_script(
-            conn, migration.read_text().replace("open_swe_analytics", schema)
-        )
+        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0003")
     await ingestion.ingest(submissions[1])
     for item in withdrawals:
         assert not await ingestion.ingest(item)

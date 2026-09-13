@@ -4,8 +4,9 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.analytics import database, queries
+from agent.analytics import queries
 from agent.dashboard import routes
+from agent.database import analytics as database
 
 
 @pytest.mark.asyncio

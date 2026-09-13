@@ -11,7 +11,7 @@ the agent itself is stateless.
 import hashlib
 import logging
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -110,6 +110,7 @@ from agent.middleware import (
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
+    ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
@@ -120,6 +121,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.model_selection import ModelSelectionState
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
@@ -150,7 +152,6 @@ from agent.sandboxes.state import (
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
-from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
     approve_plan,
     background_execute,
@@ -338,10 +339,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
-        "browser_act",
-        "browser_extract",
-        "browser_navigate",
-        "browser_observe",
         "create_sandbox_service_url",
         "http_request",
         "manage_baby_sit",
@@ -635,6 +632,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         draft_prs: bool,
         plan_mode: bool,
         admin_environments: bool,
+        model_selection: ModelSelectionMiddleware | None = None,
+        routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
     ) -> None:
         self._thread_id = thread_id
@@ -652,6 +651,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
         self._admin_environments = admin_environments
+        self._model_selection = model_selection
+        self._routing_defaults = dict(routing_defaults or {})
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
@@ -668,7 +669,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     @staticmethod
-    def _sender_context_messages(state: PrepareRunState, sender_context: str) -> list[Any]:
+    def _sender_context_messages(
+        state: PrepareRunState, sender_context: str, *, sender_id: str | None = None
+    ) -> list[Any]:
         """Sender context as its own message, appended after the run's input.
 
         Splicing it into the triggering message rewrote history: that message is
@@ -681,15 +684,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
         ):
             return []
-        sender_id = next(
-            (
-                sender_id
-                for candidate in reversed(state.get("messages") or [])
-                if isinstance(candidate, HumanMessage)
-                and (sender_id := message_sender_id(candidate.content, kind="human")) is not None
-            ),
-            None,
-        )
+        if sender_id is None:
+            sender_id = next(
+                (
+                    candidate_id
+                    for candidate in reversed(state.get("messages") or [])
+                    if isinstance(candidate, HumanMessage)
+                    and (candidate_id := message_sender_id(candidate.content, kind="human"))
+                    is not None
+                ),
+                None,
+            )
         if sender_id is None:
             return []
         identity: SystemIdentity = {
@@ -776,17 +781,32 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 _resolve_user_custom_instructions(self._credential_login),
                 _thread_participant_identities(self._thread_id),
             )
+            attribution_model_id = self._model_id
+            attribution_effort = self._effort
+            attribution_route = None
+            if self._model_selection is not None:
+                attribution_route = await self._model_selection.select_route(
+                    cast(ModelSelectionState, state), plan_mode=self._plan_mode
+                )
+                attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
             sender_context = construct_sender_context(
                 triggering_user_identity,
                 user_custom_instructions=sender_instructions,
                 draft_prs=self._draft_prs,
                 thread_url=dashboard_thread_url(self._thread_id),
-                model_id=self._model_id,
-                reasoning_effort=self._effort,
+                model_id=attribution_model_id,
+                reasoning_effort=attribution_effort,
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
                 participant_identities=participant_identities,
             )
-        sender_messages = self._sender_context_messages(state, sender_context)
+        bot_id = (
+            cfg.slack_thread.triggering_bot_id
+            if self._source == "slack" and cfg.slack_thread
+            else ""
+        )
+        sender_messages = self._sender_context_messages(
+            state, sender_context, sender_id=f"system:slack-bot-{bot_id}" if bot_id else None
+        )
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
@@ -819,6 +839,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             **({"messages": sender_messages} if sender_messages else {}),
+            **(
+                {"model_route": attribution_route}
+                if attribution_route and not self._plan_mode
+                else {}
+            ),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),
@@ -1173,10 +1198,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "MCPs": mcp_tools,
         "Notion": notion_tools,
     }
-    if not stop_summary_mode and not local_run:
-        browser_tools = load_browser_tools()
-        if browser_tools:
-            integration_tool_groups["Browser"] = browser_tools
     if integration_tool_groups:
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
@@ -1212,7 +1233,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-    model_selection_middleware: list[Any] = []
+    model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
         routing_models = {
             route: _make_model_or_defer(
@@ -1226,11 +1247,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             )
             for route, (routed_model_id, effort) in routing_defaults.items()
         }
-        model_selection_middleware.append(
-            ModelSelectionMiddleware(
-                routing_models,
-                routing_models["fast"],
-            )
+        model_selection = ModelSelectionMiddleware(
+            routing_models,
+            routing_models["fast"],
         )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
@@ -1292,10 +1311,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
                     admin_environments=admin_thread,
+                    model_selection=model_selection,
+                    routing_defaults=routing_defaults,
                 ),
                 *([workspace_skills] if workspace_skills else []),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
+                ValidateImageReadsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(
@@ -1321,7 +1343,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 TimeoutWrapupMiddleware(),
                 notify_step_limit_reached,
                 record_run_usage,
-                *model_selection_middleware,
+                *([model_selection] if model_selection else []),
                 *fallback_middleware,
                 PlanModeMiddleware(
                     excluded=PLAN_MODE_EXCLUDED_TOOLS | frozenset(tool.name for tool in mcp_tools),

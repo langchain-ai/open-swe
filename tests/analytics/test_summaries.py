@@ -1,13 +1,12 @@
 """Daily summaries reconcile late events and retained projection history."""
 
 from datetime import timedelta
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import database, ingestion, summaries
+from agent.analytics import ingestion, summaries
 from agent.analytics.events import (
     EventName,
     FindingStatePayload,
@@ -17,6 +16,7 @@ from agent.analytics.events import (
     RunCostRecordedPayload,
     RunStartedPayload,
 )
+from agent.database import postgres
 from tests.analytics.helpers import DAY, event
 
 
@@ -195,14 +195,9 @@ async def test_additive_migration_preserves_expired_and_unsummarized_totals(
         assert not await ingestion.ingest(late)
     async with transaction() as conn:
         await conn.execute(text("DROP TABLE additive_event_projection"))
-        schema = await conn.scalar(text("SELECT current_schema()"))
-        script = (
-            (Path(database.__file__).with_name("migrations") / "0006_additive_event_projection.sql")
-            .read_text()
-            .replace("open_swe_analytics", schema)
-        )
-        await database._run_script(conn, script)
-        await database._run_script(conn, script)
+        migrations = postgres.load_migrations()
+        await conn.run_sync(postgres.execute_revision, migrations, "0006")
+        await conn.run_sync(postgres.execute_revision, migrations, "0006")
         rows = (
             await conn.execute(
                 text(

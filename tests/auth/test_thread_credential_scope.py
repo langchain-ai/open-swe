@@ -130,17 +130,23 @@ async def test_public_pr_does_not_fall_back_to_bot(monkeypatch, thread_metadata,
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("removed_bot", [False, True])
 async def test_system_pr_uses_bot_even_with_a_triggering_user(
-    monkeypatch, thread_metadata, credentials
+    monkeypatch, thread_metadata, credentials, fake_store, removed_bot
 ):
     opr = importlib.import_module("agent.tools.open_pull_request")
     thread_metadata.update(owner_type="system")
     thread_metadata.pop("owner_login")
+    if removed_bot:
+        thread_metadata["source_context"] = {
+            "slack_thread": {"team_id": "T123", "triggering_bot_id": "B123"}
+        }
     monkeypatch.setattr("agent.run_config.get_config", config)
     monkeypatch.setattr(
         opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
     )
     assert await opr._resolve_pr_author_token() == ("bot-token", "bot")
+    assert await auth.resolve_github_token(config(), "thread-1") == ("bot-token", None)
     credentials.assert_not_awaited()
 
 

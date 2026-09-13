@@ -9,7 +9,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from agent.analytics import database, directory, emitter
+from agent.analytics import directory, emitter
 from agent.analytics.capture import fail_soft
 from agent.analytics.events import (
     EventName,
@@ -20,6 +20,7 @@ from agent.analytics.events import (
     StrictPayload,
 )
 from agent.analytics.identity import opaque_id
+from agent.database import analytics as database
 from agent.review.findings import coerce_finding, is_surfaced
 from agent.utils.json_types import as_json_object
 from agent.utils.run_usage import RunUsageSummary

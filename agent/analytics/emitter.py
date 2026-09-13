@@ -7,7 +7,6 @@ from typing import Literal
 from uuid import UUID
 
 from agent.analytics.capture import fail_soft
-from agent.analytics.database import workspace_id
 from agent.analytics.directory import upsert_model, upsert_repository
 from agent.analytics.events import (
     EntryPoint,
@@ -35,6 +34,7 @@ from agent.analytics.events import (
 from agent.analytics.identity import opaque_id, opaque_person
 from agent.analytics.outbox import enqueue
 from agent.config import ENV
+from agent.database.analytics import workspace_id
 
 _ENTRY_POINTS = {
     "dashboard": EntryPoint.DASHBOARD,

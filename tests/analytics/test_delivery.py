@@ -7,7 +7,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from agent.analytics import database, identity, ingestion, outbox, retention
+from agent.analytics import identity, ingestion, outbox, retention
+from agent.database import analytics as database
 from tests.analytics.helpers import run_event
 
 

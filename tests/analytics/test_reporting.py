@@ -6,8 +6,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import database, outbox, queries
+from agent.analytics import outbox, queries
 from agent.analytics.events import EventName, PROpenedPayload, make_event
+from agent.database import analytics as database
 
 
 @pytest.fixture

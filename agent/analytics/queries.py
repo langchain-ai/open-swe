@@ -6,8 +6,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.analytics.database import connection, reporting_metadata, workspace_id
 from agent.config import ENV
+from agent.database.analytics import connection, reporting_metadata, workspace_id
 
 
 def period_start(period: str | None) -> datetime:
