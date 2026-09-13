@@ -71,16 +71,12 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             RouteDecision, method="json_schema"
         )
 
-    async def abefore_model(
-        self,
-        state: ModelSelectionState,
-        runtime: Runtime,
-    ) -> dict[str, Route]:
-        del runtime
+    async def select_route(self, state: ModelSelectionState) -> Route:
+        """Select the model route for a turn."""
         if model_route := state.get("model_route"):
-            return {"model_route": model_route}
+            return model_route
         if state.get("plan_mode"):
-            return {}
+            return "performance"
         messages = state.get("messages", [])
         approved_plan = next(
             (
@@ -101,7 +97,17 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
                 route = decision.model_route
         except Exception:  # noqa: BLE001
             logger.exception("Model routing classifier failed")
-        return {"model_route": route}
+        return route
+
+    async def abefore_model(
+        self,
+        state: ModelSelectionState,
+        runtime: Runtime,
+    ) -> dict[str, Route]:
+        del runtime
+        if state.get("plan_mode"):
+            return {}
+        return {"model_route": await self.select_route(state)}
 
     async def awrap_model_call(
         self,
