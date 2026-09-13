@@ -23,6 +23,8 @@ async def mark_question_answered() -> dict[str, Any]:
     """
     config = get_config()
     cfg = RunConfig.from_config(config)
+    if cfg.source != "dashboard":
+        return {"success": False, "error": "Only dashboard runs can mark answered questions"}
     run_id = str(config.get("run_id") or cfg.run_id or "")
     if not cfg.thread_id or not run_id:
         return {"success": False, "error": "No active thread and run"}
