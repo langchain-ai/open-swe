@@ -1,4 +1,5 @@
 import importlib
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -11,12 +12,15 @@ notification_tool = importlib.import_module("agent.tools.notify_automation_chann
 class _FakeStore:
     def __init__(self) -> None:
         self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
+        self.fail_put: Callable[[dict[str, Any]], bool] = lambda value: False
 
     async def get_item(self, namespace: list[str], key: str) -> dict[str, Any] | None:
         value = self.items.get((tuple(namespace), key))
         return {"value": value} if value is not None else None
 
     async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
+        if self.fail_put(value):
+            raise RuntimeError("store unavailable")
         self.items[(tuple(namespace), key)] = value
 
     async def delete_item(self, namespace: list[str], key: str) -> None:
@@ -283,3 +287,89 @@ async def test_notify_automation_channel_allows_retry_after_slack_failure(
     }
     assert second == {"success": True, "message_ts": "1786504009.596419"}
     assert responses == []
+
+
+async def test_notify_automation_channel_never_reposts_after_finalize_write_fails(
+    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    post_count = 0
+
+    async def fake_post(*args: Any, **kwargs: Any) -> tuple[str, None]:
+        nonlocal post_count
+        post_count += 1
+        return "1786504009.596419", None
+
+    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
+    fake_client.store.fail_put = lambda value: value["status"] == "delivered"
+
+    first = await notification_tool.notify_automation_channel("Opened a pull request")
+    second = await notification_tool.notify_automation_channel("Opened a pull request")
+
+    assert first == {"success": True, "message_ts": "1786504009.596419"}
+    assert second == {"success": True, "message_ts": "1786504009.596419"}
+    assert post_count == 1
+    stored = fake_client.store.items[(("automation_notifications",), "thread_1")]
+    assert stored["status"] == "posted"
+    assert stored["message_ts"] == "1786504009.596419"
+
+
+async def test_notify_automation_channel_never_reposts_when_post_state_is_unknown(
+    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    post_count = 0
+
+    async def fake_post(*args: Any, **kwargs: Any) -> tuple[str, None]:
+        nonlocal post_count
+        post_count += 1
+        return "1786504009.596419", None
+
+    async def fake_thread_post(*args: Any, **kwargs: Any) -> tuple[None, str]:
+        return None, "rate_limited"
+
+    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
+    monkeypatch.setattr(notification_tool, "post_slack_thread_reply_with_ts", fake_thread_post)
+    fake_client.store.fail_put = lambda value: value["status"] == "posted"
+
+    content = "First\nSecond\nThird\nFourth\nFifth"
+    first = await notification_tool.notify_automation_channel(content, summary="Summary")
+    second = await notification_tool.notify_automation_channel(content, summary="Summary")
+
+    assert first["success"] is False
+    assert first["message_ts"] == "1786504009.596419"
+    assert second["success"] is False
+    assert "not posting again" in second["error"]
+    assert post_count == 1
+
+
+async def test_notify_automation_channel_resumes_reply_after_finalize_write_fails(
+    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    post_count = 0
+    thread_posts: list[str] = []
+
+    async def fake_post(*args: Any, **kwargs: Any) -> tuple[str, None]:
+        nonlocal post_count
+        post_count += 1
+        return "1786504009.596419", None
+
+    async def fake_thread_post(
+        channel_id: str, thread_ts: str, text: str, **kwargs: Any
+    ) -> tuple[str, None]:
+        thread_posts.append(text)
+        return "1786504010.000001", None
+
+    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
+    monkeypatch.setattr(notification_tool, "post_slack_thread_reply_with_ts", fake_thread_post)
+    fake_client.store.fail_put = lambda value: value["status"] == "delivered"
+
+    content = "First\nSecond\nThird\nFourth\nFifth"
+    first = await notification_tool.notify_automation_channel(content, summary="Summary")
+    second = await notification_tool.notify_automation_channel(content, summary="Summary")
+
+    assert first == {"success": True, "message_ts": "1786504009.596419"}
+    assert second == {"success": True, "message_ts": "1786504009.596419"}
+    assert post_count == 1
+    assert len(thread_posts) == 2
