@@ -21,6 +21,7 @@ vi.mock("@/lib/api", () => ({
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
     fixPullRequest: vi.fn(),
+    mergePullRequest: vi.fn(),
   },
 }))
 const navigate = vi.hoisted(() => vi.fn())
@@ -125,6 +126,64 @@ afterEach(() => {
 })
 
 describe("My PRs", () => {
+  it("merges in the background and removes only confirmed merges", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { reviewDecision: "approved" }), pull(2)],
+    })
+    let finish!: (result: { merged: boolean }) => void
+    vi.mocked(api.mergePullRequest).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    mount()
+    await screen.findByText("Change 1")
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Merge method for PR #1" }),
+      { target: { value: "squash" } }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    const merging = await screen.findByRole("button", { name: "Merging…" })
+    expect((merging as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText("Change 1")).toBeTruthy()
+    expect(api.mergePullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
+      "squash"
+    )
+    finish({ merged: true })
+    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
+    expect(screen.getByText("Change 2")).toBeTruthy()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("keeps a rejected merge visible with a retry action", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { reviewDecision: "approved" })],
+    })
+    vi.mocked(api.mergePullRequest).mockRejectedValue(
+      new Error("Required checks have not passed")
+    )
+    mount()
+    await screen.findByText("Change 1")
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Merge method for PR #1" }),
+      { target: { value: "merge" } }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "Required checks have not passed"
+    )
+    expect(screen.getByText("Change 1")).toBeTruthy()
+    expect(
+      (screen.getByRole("button", { name: "Retry merge" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false)
+  })
+
   it("keeps titles and numbers plain and provides explicit destination links", async () => {
     mount()
     const title = await screen.findByText("Change 1")

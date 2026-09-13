@@ -5,11 +5,17 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { BugBeetleIcon, FlagIcon } from "@phosphor-icons/react"
+import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { MultiSelect } from "@/components/ui/multi-select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
+import {
+  api,
+  type OpenPullRequest,
+  type OpenPullRequestsPayload,
+  type ReviewSummary,
+} from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
 import { PullRequestLinks } from "./PullRequestLinks"
@@ -34,6 +40,66 @@ function overallStatus(pr: OpenPullRequest) {
   if (pr.reviewDecision === "changes_requested") return "Changes Requested"
   if (pr.reviewDecision === "approved") return "Approved"
   return "Reviewable"
+}
+
+function MergePullRequest({
+  pr,
+  onMerged,
+}: {
+  pr: OpenPullRequest
+  onMerged: () => void
+}) {
+  const [method, setMethod] = useState<"squash" | "merge" | "rebase" | "">("")
+  const merge = useMutation({
+    mutationFn: async () => {
+      if (!method) throw new Error("Choose a merge method.")
+      const result = await api.mergePullRequest(pr, method)
+      if (!result.merged) throw new Error("GitHub did not confirm the merge.")
+    },
+    onSuccess: onMerged,
+    retry: false,
+  })
+  return (
+    <div className="mt-2 space-y-1">
+      <select
+        className={control}
+        aria-label={`Merge method for PR #${pr.number}`}
+        value={method}
+        disabled={merge.isPending}
+        onChange={(event) => {
+          const value = event.target.value
+          if (
+            value === "squash" ||
+            value === "merge" ||
+            value === "rebase" ||
+            value === ""
+          )
+            setMethod(value)
+        }}
+      >
+        <option value="" disabled>
+          Merge method
+        </option>
+        <option value="squash">Squash merge</option>
+        <option value="merge">Merge commit</option>
+        <option value="rebase">Rebase merge</option>
+      </select>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!method || !pr.headSha || merge.isPending || merge.isSuccess}
+        aria-live="polite"
+        onClick={() => merge.mutate()}
+      >
+        {merge.isPending ? "Merging…" : merge.isError ? "Retry merge" : "Merge"}
+      </Button>
+      {merge.error && (
+        <p role="alert" className="text-destructive">
+          {merge.error.message}
+        </p>
+      )}
+    </div>
+  )
 }
 
 function FixPullRequest({ pr }: { pr: OpenPullRequest }) {
@@ -475,6 +541,36 @@ export function MyPullRequests({
                         {(pr.mergeable === false ||
                           pr.mergeState === "dirty" ||
                           pr.ci === "failing") && <FixPullRequest pr={pr} />}
+                        {overallStatus(pr) === "Approved" && (
+                          <MergePullRequest
+                            pr={pr}
+                            onMerged={() => {
+                              queryClient.setQueryData(
+                                ["my-pr-details", login, pr.repo, pr.number],
+                                null
+                              )
+                              queryClient.setQueriesData<OpenPullRequestsPayload>(
+                                { queryKey: ["my-pull-requests", login] },
+                                (data) =>
+                                  data
+                                    ? {
+                                        ...data,
+                                        pullRequests: data.pullRequests.filter(
+                                          (row) =>
+                                            row.repo !== pr.repo ||
+                                            row.number !== pr.number
+                                        ),
+                                      }
+                                    : data
+                              )
+                              if (visible.length === 1 && page > 0)
+                                onFiltersChange(
+                                  { page: page - 1 || undefined },
+                                  true
+                                )
+                            }}
+                          />
+                        )}
                       </td>
                       {!reviews.isError && (
                         <td className="min-w-36 px-4 py-4 text-muted-foreground">

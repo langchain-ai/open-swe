@@ -244,6 +244,7 @@ from agent.dashboard.workspace_mcps import (
     save_workspace_mcp,
 )
 from agent.github.http import github_client
+from agent.github.merge_pull_request import MergePullRequestRequest, merge_pull_request
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.pull_request_status import (
     list_open_pull_requests,
@@ -1570,6 +1571,20 @@ async def api_my_pull_request_details(
             client,
             {"repository_url": f"https://api.github.com/repos/{owner}/{repo}", "number": number},
         )
+
+
+@router.post("/my-pull-requests/{owner}/{repo}/{number}/merge")
+async def api_merge_my_pull_request(
+    owner: str,
+    repo: str,
+    number: int,
+    body: MergePullRequestRequest,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, bool]:
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await merge_pull_request(owner, repo, number, body, token)
 
 
 @router.get("/reviews")

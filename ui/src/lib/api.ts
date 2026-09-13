@@ -960,6 +960,17 @@ export const api = {
       `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/fix`,
       { method: "POST", body: JSON.stringify(pr) }
     ),
+  mergePullRequest: (
+    pr: OpenPullRequest,
+    method: "squash" | "merge" | "rebase"
+  ) =>
+    request<{ merged: boolean }>(
+      `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/merge`,
+      {
+        method: "POST",
+        body: JSON.stringify({ sha: pr.headSha, merge_method: method }),
+      }
+    ),
   reviewSummaries: (pullRequests: Array<{ repo: string; number: number }>) =>
     request<Record<string, ReviewSummary | null>>("/reviews/summaries", {
       method: "POST",
