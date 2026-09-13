@@ -275,8 +275,6 @@ The agent stores its latest postmortem summary as Markdown in the existing LangG
 
 Public status-page publishing and provider postmortem writes are unsupported. The status-page section is hidden pending workflow design. Authorized responders can ask the agent to edit code, open a PR as the GitHub App, or use configured integrations for a specified action. Automatic passes investigate and propose mitigation; alerts and ordinary channel messages do not authorize external changes. Personal integrations remain unavailable in these system-owned threads.
 
-See [Incidents locally](incidents-local.md) for local testing, runtime behavior, and retention limits.
-
 </details>
 
 <details id="linear">

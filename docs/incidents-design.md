@@ -52,4 +52,4 @@ Raw messages, recorded tool outcomes, and all conversation checkpoints expire af
 
 Targeted tests exercise durable retries, main-agent assembly/execution, citation validation, scope revocation, provider binding and reconciliation, summary persistence, retention, dashboard authorization, and UI operations. Test fixtures simulate external services; live incident.io compatibility and Slack delivery require a configured installation.
 
-See [installation](INSTALLATION.md#incidents) and [local development](incidents-local.md) for setup. The deployment must protect direct LangGraph thread and Store APIs independently of dashboard access checks.
+See [installation](INSTALLATION.md#incidents) and [local development](DEVELOPMENT.md) for setup. The deployment must protect direct LangGraph thread and Store APIs independently of dashboard access checks.
