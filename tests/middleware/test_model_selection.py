@@ -111,6 +111,19 @@ async def test_route_is_classified_from_approved_plan_after_plan_mode_exits() ->
 
 
 @pytest.mark.asyncio
+async def test_explicit_plan_mode_overrides_stale_state_without_caching() -> None:
+    middleware, _, classifier = _middleware()
+    state = {
+        "messages": [HumanMessage(content="Implement the approved plan")],
+        "plan_mode": True,
+    }
+
+    assert await middleware.select_route(cast(Any, state), plan_mode=False) == "fast"
+    assert await middleware.select_route(cast(Any, state), plan_mode=True) == "performance"
+    classifier.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_mid_run_plan_mode_temporarily_overrides_existing_route() -> None:
     middleware, models, classifier = _middleware()
     state = {
@@ -177,6 +190,45 @@ async def test_routed_model_event_omitted_without_a_known_model_id(
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
     assert events == []
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_streams_the_overriding_performance_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agent.middleware.model_selection.get_stream_writer",
+        lambda: events.append,
+    )
+    middleware, models, classifier = _middleware(
+        route_model_ids={
+            "fast": "openai:gpt-5.6-sol",
+            "performance": "anthropic:claude-opus-5",
+        }
+    )
+    entered_plan_mode = {
+        "messages": [HumanMessage(content="Plan the next change")],
+        "model_route": "fast",
+        "plan_mode": True,
+    }
+    started_in_plan_mode = {
+        "messages": [HumanMessage(content="Plan the next change")],
+        "plan_mode": True,
+    }
+
+    assert await middleware.abefore_model(cast(Any, entered_plan_mode), MagicMock()) == {}
+    assert await middleware.abefore_model(cast(Any, started_in_plan_mode), MagicMock()) == {}
+
+    performance = {
+        "type": "model_routed",
+        "route": "performance",
+        "model_id": "anthropic:claude-opus-5",
+    }
+    assert events == [performance, performance]
+    classifier.assert_not_awaited()
+    assert (await _invoke(middleware, entered_plan_mode)).model is models["performance"]
+    assert (await _invoke(middleware, started_in_plan_mode)).model is models["performance"]
 
 
 _HUMAN_ENVELOPE = (
