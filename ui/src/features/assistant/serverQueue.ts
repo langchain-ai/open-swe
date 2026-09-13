@@ -113,13 +113,30 @@ export function useServerQueue(
         entry,
       ])
       void (async () => {
-        if (
-          threadId &&
-          thread &&
-          queueRequest(message, id).content.trim() !== "/offload"
-        ) {
+        const request = queueRequest(message, id)
+        if (request.content.trim() === "/offload") {
+          if (!threadId || !thread)
+            throw new Error("Offloading requires an existing conversation.")
+          if (stream.isLoading || thread.status === "running")
+            throw new Error(
+              "Wait for the current run to finish before offloading."
+            )
+          if (
+            message.attachments?.length ||
+            message.content.some((part) => part.type !== "text")
+          )
+            throw new Error("Offloading does not accept attachments.")
+          remove(id)
+          await stream.submit(
+            {},
+            {
+              config: { configurable: { offload_conversation: true } },
+            }
+          )
+          return
+        }
+        if (threadId && thread) {
           try {
-            const request = queueRequest(message, id)
             const accepted = await agentsApi.queueMessage(threadId, request)
             await client.cancelQueries({ queryKey: threadKey(threadId) })
             // The acceptance response is a summary without the server queue.

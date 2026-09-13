@@ -145,6 +145,40 @@ test("creates a thread, sends a follow-up, and hydrates the experimental transcr
   await expect(replies).toHaveCount(previousReplies + 1);
 });
 
+test("preserves no-project selection despite a default repository", async ({
+  page,
+}) => {
+  await page.route("**/dashboard/api/profile", async (route) => {
+    const response = await route.fetch();
+    const profile = await response.json();
+    await route.fulfill({
+      response,
+      json: { ...profile, default_repo: "fakeorg/demo" },
+    });
+  });
+  await page.goto("/agents?noProject=true");
+  await expect(page).toHaveURL(/\/assistant\?noProject=true$/);
+  await expect(page.getByRole("combobox", { name: "Repository" })).toHaveValue(
+    "",
+  );
+  const submitted = page.waitForRequest(
+    (request) =>
+      /\/dashboard\/api\/threads\/[^/]+\/commands$/.test(
+        new URL(request.url()).pathname,
+      ) && request.method() === "POST",
+  );
+  await composer(page).fill("Please add a greet() helper and open a PR");
+  await composer(page).press("Enter");
+  const command = (await submitted).postDataJSON() as {
+    params: { config: { configurable: Record<string, unknown> } };
+  };
+  expect(command.params.config.configurable.repo_explicitly_none).toBe(true);
+  expect(command.params.config.configurable.repo).toBeUndefined();
+  await expect(page).toHaveURL(/\/assistant\/[0-9a-f-]{36}$/);
+  const id = new URL(page.url()).pathname.split("/").at(-1)!;
+  await waitForThreadIdle(page, id);
+});
+
 test("keeps separate drafts while a background thread completes", async ({
   page,
 }) => {

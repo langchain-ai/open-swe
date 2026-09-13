@@ -20,7 +20,7 @@ import { AssistantMessage } from "./Message"
 import { Composer } from "./Composer"
 import { useProductState } from "./AssistantProvider"
 
-export function Conversation({ initialRepo }: { initialRepo?: string }) {
+export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
   const aui = useAui()
   const { thread, error: requestError, queueErrors } = useProductState()
   const running = useAuiState((state) => state.thread.isRunning)

@@ -44,7 +44,7 @@ function Attachment() {
   )
 }
 
-export function Composer({ initialRepo }: { initialRepo?: string }) {
+export function Composer({ initialRepo }: { initialRepo?: string | null }) {
   const aui = useAui()
   const running = useAuiState((state) => state.thread.isRunning)
   const empty = useAuiState((state) => state.composer.isEmpty)
@@ -73,9 +73,11 @@ export function Composer({ initialRepo }: { initialRepo?: string }) {
               ? { modelId: thread.model, effort: thread.effort }
               : defaultSelection
         ),
-        ...((initialRepo ?? profile.data.default_repo)
-          ? { repo: initialRepo ?? profile.data.default_repo }
-          : {}),
+        ...(initialRepo === null
+          ? { repo_explicitly_none: true }
+          : (initialRepo ?? profile.data.default_repo)
+            ? { repo: initialRepo ?? profile.data.default_repo }
+            : {}),
         plan_mode: thread?.planMode ?? false,
       },
     })

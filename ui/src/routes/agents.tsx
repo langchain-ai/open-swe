@@ -107,7 +107,10 @@ function AgentsLayout() {
       return (
         <Navigate
           to="/assistant"
-          search={{ repo: homeMatch?.search.repo }}
+          search={{
+            repo: homeMatch?.search.repo,
+            noProject: homeMatch?.search.noProject,
+          }}
           replace
         />
       )

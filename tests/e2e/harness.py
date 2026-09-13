@@ -26,6 +26,7 @@ from urllib.parse import quote, urlencode
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import e2e_env  # noqa: E402
+
 import patches  # noqa: E402
 
 patches.apply()
