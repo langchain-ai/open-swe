@@ -379,6 +379,11 @@ async def _thread_summary(
             if metadata.get("model_selection") in {"auto", "explicit"}
             else None
         ),
+        "lastModelRoute": (
+            metadata.get("last_model_route")
+            if metadata.get("last_model_route") in {"fast", "balanced", "performance"}
+            else None
+        ),
         "adminThread": metadata.get("admin_thread") is True,
         "visibility": metadata.get("visibility", "public"),
         "ownerLogin": metadata.get("owner_login"),
