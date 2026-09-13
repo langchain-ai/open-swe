@@ -46,6 +46,24 @@ def dashboard_is_same_origin() -> bool:
     return frontend is not None and frontend == _origin(dashboard_api_base_url())
 
 
+def dashboard_proxies_requests() -> bool:
+    """True when a dashboard app fronts this backend and can proxy a request for it.
+
+    The dashboard is somewhere other than this backend's own origin, or this
+    backend fronts the dev server. Not :func:`dashboard_is_same_origin`, which
+    compares against ``DASHBOARD_API_BASE_URL``: a deployed dashboard app serves
+    ``/dashboard/api`` on its own origin, so both are one origin there too. A
+    bundled build is static files and every Platform deployment carries one, so
+    its presence says nothing about what serves the dashboard's users.
+    """
+    base_url = dashboard_base_url()
+    if not base_url:
+        return False
+    if ENV.DASHBOARD_DEV_SERVER_URL.optional():
+        return True
+    return _origin(base_url) != _origin(ENV.LANGGRAPH_URL.get())
+
+
 def dashboard_thread_url(thread_id: str) -> str | None:
     """Build the dashboard thread URL for a given thread id."""
     base_url = dashboard_base_url()

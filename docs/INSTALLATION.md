@@ -70,6 +70,7 @@ Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.
   - Issues: Read & write
   - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs and lets `/baby-sit` read third-party CI conclusions. Without it, check-run creation fails (logged, best-effort), reviews still work, and `/baby-sit` fails closed when it cannot read the complete check set.
   - Commit statuses: Read-only — required for `/baby-sit` to evaluate the complete PR status set, including integrations that report via legacy commit statuses.
+  - Code scanning alerts: Read-only — optional; lets Open SWE inspect code-scanning alerts directly so it can identify and patch reported vulnerabilities. Source-code changes still use the Contents permission above.
   - Actions: Read-only — optional for CI diagnostics and log access. Grant **Read & write** only to enable `/baby-sit` to rerun evidence-backed flaky GitHub Actions jobs; existing installations must approve the elevation, and the token could then also cancel or delete runs.
   - Workflows: Read & write — lets Open SWE push branches containing explicitly requested GitHub Actions workflow changes.
   - Metadata: Read-only
@@ -94,7 +95,7 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 | Provider | Variable | Notes |
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | Default model when it is the only key set |
-| OpenAI | `OPENAI_API_KEY` | Default model otherwise; also used for voice dictation in the dashboard. `OPENAI_BASE_URL` points at an OpenAI-compatible API |
+| OpenAI | `OPENAI_API_KEY` | Default model otherwise. `OPENAI_BASE_URL` points at an OpenAI-compatible API |
 | Google | `GOOGLE_API_KEY` | `google_genai:` models |
 | Fireworks | `FIREWORKS_API_KEY` | `fireworks:` models |
 | Groq | `GROQ_API_KEY` | `groq:` models |
@@ -102,7 +103,7 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 
 **LangSmith LLM Gateway.** Instead of per-provider keys, route every model call through the gateway with one LangSmith key that has the `gateway:invoke` permission, set as `LANGSMITH_GATEWAY_API_KEY`. Setting that key turns the gateway on; `LANGSMITH_GATEWAY_ENABLED=true|false` forces it either way (with `true` and no gateway key, `LANGSMITH_API_KEY` is used, which on LangGraph Platform may lack the permission). `LANGSMITH_GATEWAY_BASE_URL` points at a regional or self-hosted gateway. Admins can also toggle the gateway per team in the dashboard.
 
-**Which model runs.** The deployment default is `anthropic:claude-opus-5` when only an Anthropic key is configured and `openai:gpt-5.6-sol` otherwise, at `medium` reasoning effort; override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set a team default under **Admin → Team settings**, and each user can pick their own model and effort under **My settings**; the supported list lives in `agent/dashboard/options.py`. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
+**Which model runs.** The deployment default is `anthropic:claude-opus-5` when only an Anthropic key is configured and `openai:gpt-5.6-sol` otherwise, at `medium` reasoning effort; override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set a team default under **Admin → Global defaults**, and each user can pick their own model and effort under **My settings**; the supported list lives in `agent/dashboard/options.py`. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 **Other API keys.** `EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool. `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
 
@@ -144,6 +145,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
                 "channels:history",
                 "channels:read",
                 "chat:write",
+                "files:read",
                 "files:write",
                 "groups:history",
                 "groups:read",
@@ -192,6 +194,8 @@ SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 
 Both Slack URLs must point at the Open SWE deployment, and Block Kit buttons only work with Interactivity enabled and pointed at `/webhooks/slack/interactivity`. Slack messages are routed to the thread's repository, a `repo:owner/name` token in the message, or the team default repository. Open SWE refuses Slack Connect channels (`is_ext_shared`) and fails closed when it cannot verify a channel.
 
+`files:read` lets Open SWE download non-image files attached to a message (archives, logs, CSVs) and stage them in the thread's sandbox, where the agent reads them by path. Existing installations must add the scope in **OAuth & Permissions** and reinstall the app before attachments reach the agent; without it, uploads stay invisible and only the message text is used.
+
 Slack verifies the events Request URL the first time it can reach it; if the backend is not up yet when you create the app, use **Retry** under **Event Subscriptions** after step 7.
 
 ## 6. Set the environment variables
@@ -225,7 +229,7 @@ On LangGraph Platform, set them under the deployment's environment variables; sa
 
 ## 7. Verify it works
 
-**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Team settings, User mappings, Sandbox, Environments, …) appear. Set **Admin → Team settings → Default repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
+**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Global defaults, User mappings, Sandbox, Environments, …) appear. Set **Admin → Global defaults → Default Repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
 
 **Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Public runs use the workspace GitHub App for agent operations, and user-owned PRs are opened as the thread's initiating GitHub user. Link the Slack user to a GitHub login before starting the thread, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
 
@@ -312,7 +316,7 @@ Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `
 
 **User mapping.** Which GitHub users can trigger the agent is controlled by the user mapping (GitHub login ⇄ work email ⇄ optional Slack ID) in the LangGraph Store, managed under **Admin → User mappings**. Signing in to the dashboard records a mapping for that user. An unmapped person who tags Open SWE in Slack gets a run with the GitHub App's installation permissions and a "link your GitHub account" prompt; completing the allowlisted login records a `self` mapping.
 
-**Default repository.** Runs that name no repository use **Admin → Team settings → Default repository**, seeded from `DEFAULT_REPO_OWNER` / `DEFAULT_REPO_NAME` when set; `SLACK_REPO_OWNER` / `SLACK_REPO_NAME` are a Slack-only fallback.
+**Default repository.** Runs that name no repository use **Admin → Global defaults → Default Repository**, seeded from `DEFAULT_REPO_OWNER` / `DEFAULT_REPO_NAME` when set; `SLACK_REPO_OWNER` / `SLACK_REPO_NAME` are a Slack-only fallback.
 
 </details>
 

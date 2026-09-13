@@ -311,6 +311,10 @@ export const agentsApi = {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }),
+  resolveAllThreads: () =>
+    agentsRequest<{ resolved: number }>("/threads/resolve-all", {
+      method: "POST",
+    }),
   resolveThread: (threadId: string, resolved: boolean) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/resolve`,
