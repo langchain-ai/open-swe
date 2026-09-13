@@ -42,7 +42,7 @@ async def test_manual_offload_preserves_history_and_hides_summary_stream(tmp_pat
     assert event["cutoff_index"] == 2
     assert "private summary" in event["summary_message"].content
     assert "deployment decision" in (tmp_path / event["file_path"].lstrip("/")).read_text()
-    assert state.values["conversation_offloading"]["status"] == "completed"
+    assert statuses[-1]["trigger"] == "manual"
 
     chunks = [chunk async for chunk in graph.astream({}, config, stream_mode="custom")]
     assert chunks[-1]["status"] == "skipped"
@@ -124,9 +124,8 @@ async def test_automatic_completion_precedes_handler_and_suppresses_tokens(
     streamed = "".join(str(data[0].content) for mode, data in chunks if mode == "messages")
     assert ("PRIVATE SUMMARY" in streamed) is not suppress
     assert events == ["started", "completed"]
-    assert (await graph.aget_state(config)).values["conversation_offloading"][
-        "status"
-    ] == "completed"
+    statuses = [data for mode, data in chunks if mode == "custom"]
+    assert statuses[-1]["status"] == "completed"
 
 
 async def test_manual_before_model_runs_after_prepare(tmp_path, monkeypatch):
@@ -151,4 +150,4 @@ async def test_manual_before_model_runs_after_prepare(tmp_path, monkeypatch):
     graph = create_agent(model=model, middleware=[middleware, Prepare()])
     state = await graph.ainvoke({"messages": [HumanMessage(content="hello")]})
     assert state["run_prepared"] is True
-    assert state["conversation_offloading"]["status"] == "skipped"
+    assert state["messages"][-1].content

@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Any, NotRequired
+from typing import Annotated, Any, NotRequired
 
 from deepagents.middleware.summarization import (
     SummarizationMiddleware,
@@ -14,6 +14,7 @@ from langchain.agents.middleware.types import (
     ExtendedModelResponse,
     ModelRequest,
     ModelResponse,
+    PrivateStateAttr,
     hook_config,
 )
 from langchain_core.messages import AnyMessage
@@ -24,7 +25,10 @@ _manual = ContextVar("manual_offloading", default=False)
 
 
 class OffloadingState(SummarizationState):
-    conversation_offloading: NotRequired[dict[str, Any]]
+    # Private so parallel subagent results never write it back into the
+    # parent's single-writer channel (InvalidUpdateError) — consumers read it
+    # from the custom stream event instead.
+    conversation_offloading: Annotated[NotRequired[dict[str, Any]], PrivateStateAttr]
 
 
 class ConversationOffloadingMiddleware(SummarizationMiddleware):
