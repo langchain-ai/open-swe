@@ -326,7 +326,7 @@ async def _download_slack_files_to_sandbox(
             exc_info=True,
         )
         return []
-    downloads: list[tuple[str, bytes]] = []
+    staged: list[tuple[str, str]] = []
     used_names: set[str] = set()
     for entry in entries:
         url = str(entry.get("url_private"))
@@ -343,14 +343,14 @@ async def _download_slack_files_to_sandbox(
             filename = f"{base.rsplit('.', 1)[0] if '.' in base else base}-{suffix}"
             suffix += 1
         used_names.add(filename)
-        downloads.append((filename, content))
-    if not downloads:
-        return []
-    responses = await backend.aupload_files(
-        [(posixpath.join(_SLACK_FILE_DIR, name), content) for name, content in downloads]
-    )
-    staged: list[tuple[str, str]] = []
-    for (filename, _content), response in zip(downloads, responses, strict=False):
+        sandbox_path = posixpath.join(_SLACK_FILE_DIR, filename)
+        try:
+            responses = await backend.aupload_files([(sandbox_path, content)])
+        finally:
+            del content
+        if not responses:
+            continue
+        response = responses[0]
         error = (
             response.get("error")
             if isinstance(response, dict)
@@ -361,7 +361,7 @@ async def _download_slack_files_to_sandbox(
                 "Slack file staging failed", extra={"slack_error": str(error), "file": filename}
             )
             continue
-        staged.append((filename, posixpath.join(_SLACK_FILE_DIR, filename)))
+        staged.append((filename, sandbox_path))
     return staged
 
 
