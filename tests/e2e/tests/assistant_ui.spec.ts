@@ -1,9 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   SAME_USER,
-  dismissOnboardingIfShown,
   loginAs,
-  threadIdFromUrl,
   typeIntoComposer,
   waitForStateToContain,
   waitForThreadIdle,
@@ -50,10 +48,10 @@ async function startSlackThread(page: Page, prompt: string) {
 
 async function switchThread(page: Page, id: string) {
   await page
-    .locator(`[data-sidebar-frame] a[href="/agents/${id}"]`)
+    .locator(`[data-sidebar-frame] a[href="/assistant/${id}"]`)
     .first()
     .click();
-  await expect(page).toHaveURL(new RegExp(`/agents/${id}$`));
+  await expect(page).toHaveURL(new RegExp(`/assistant/${id}$`));
   await expect(composer(page)).toBeVisible();
 }
 
@@ -116,10 +114,10 @@ test("creates a thread, sends a follow-up, and hydrates the experimental transcr
   page,
 }) => {
   await page.goto("/agents");
-  await dismissOnboardingIfShown(page);
-  await typeIntoComposer(page, "Please add a greet() helper and open a PR");
-  await expect(page).toHaveURL(/\/agents\/[0-9a-f-]{36}$/);
-  const id = threadIdFromUrl(page);
+  await composer(page).fill("Please add a greet() helper and open a PR");
+  await composer(page).press("Enter");
+  await expect(page).toHaveURL(/\/assistant\/[0-9a-f-]{36}$/);
+  const id = new URL(page.url()).pathname.split("/").at(-1)!;
   await expect(conversation(page)).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Open fakeorg/demo pull request #1" }),
@@ -166,7 +164,7 @@ test("keeps separate drafts while a background thread completes", async ({
   await expect(composer(page)).toHaveValue("");
   await composer(page).fill("Draft for the second task");
   await waitForThreadIdle(page, first);
-  await expect(page).toHaveURL(new RegExp(`/agents/${second}$`));
+  await expect(page).toHaveURL(new RegExp(`/assistant/${second}$`));
   await expect(composer(page)).toHaveValue("Draft for the second task");
 
   await switchThread(page, first);
@@ -242,7 +240,7 @@ test("standard mode still sends, and the setting applies to the same existing th
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await page.getByRole("link", { name: "Back to app" }).click();
-  await expect(page).toHaveURL(new RegExp(`/agents/${id}$`));
+  await expect(page).toHaveURL(new RegExp(`/assistant/${id}$`));
   await expect(conversation(page)).toBeVisible();
   await expect(composer(page)).toBeVisible();
   await expect(
@@ -250,4 +248,49 @@ test("standard mode still sends, and the setting applies to the same existing th
       exact: true,
     }),
   ).toBeVisible();
+});
+
+test("retries a failed queued message without replacing a newer draft", async ({
+  page,
+}) => {
+  const id = await startSlackThread(
+    page,
+    "E2E_BUSY_HOLD:20 add a greet() helper and open a PR",
+  );
+  await page.goto(`/agents/${id}`);
+  await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+  const messagePath = `**/dashboard/api/threads/${id}/messages`;
+  await page.route(messagePath, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Queue temporarily unavailable" }),
+    }),
+  );
+  const prompt = "Retry this follow-up once the queue recovers.";
+  await composer(page).fill(prompt);
+  await page.getByRole("button", { name: "Send follow up" }).click();
+  await expect(
+    page.getByRole("button", { name: "Retry message" }),
+  ).toBeVisible();
+  await composer(page).fill("Keep this newer draft.");
+  await page.unroute(messagePath);
+  const accepted = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        `/dashboard/api/threads/${id}/messages` &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Retry message" }).click();
+  expect((await accepted).ok()).toBeTruthy();
+  await expect(page.getByRole("button", { name: "Retry message" })).toHaveCount(
+    0,
+  );
+  await expect(composer(page)).toHaveValue("Keep this newer draft.");
+  await waitForStateToContain(page, id, prompt);
+  await waitForThreadIdle(page, id);
+  await expect(composer(page)).toHaveValue("Keep this newer draft.");
+  await expect(
+    conversation(page).getByText(prompt, { exact: true }),
+  ).toHaveCount(1);
 });

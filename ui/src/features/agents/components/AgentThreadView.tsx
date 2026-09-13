@@ -1,4 +1,3 @@
-import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowUpRight,
@@ -15,9 +14,6 @@ import type {
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
-import { ExperimentalConversation } from "./ExperimentalConversation"
-import { useExperimentalAssistantUi } from "@/lib/profile"
-import { WorkflowApprovalCard } from "./WorkflowApprovalCard"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
@@ -40,9 +36,6 @@ import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
   useAgentSkills,
   useRenameAgentThread,
-  useCancelAgentThread,
-  agentThreadKeys,
-  invalidateAgentThreadLists,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
 import {
@@ -94,9 +87,6 @@ export function AgentThreadView({
   thread,
   autoFocusComposer = false,
 }: AgentThreadViewProps) {
-  const experimentalAssistantUi = useExperimentalAssistantUi()
-  const queryClient = useQueryClient()
-  const cancelThread = useCancelAgentThread(thread.id)
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentStream()
@@ -315,192 +305,112 @@ export function AgentThreadView({
             </Alert>
           </div>
         )}
-        {experimentalAssistantUi ? (
-          <PullRequestPreviewProvider
-            pullRequests={thread.pullRequests ?? []}
-            health={pullRequestHealth}
-            healthUnavailable={pullRequestStatus.isError}
-          >
-            <WorkflowApprovalCard
-              threadId={thread.id}
-              pollWhileActive={isStreaming}
-            />
-            <ExperimentalConversation
-              threadId={thread.id}
-              messages={visibleMessages}
-              queuedMessages={queuedMessages}
-              isStreaming={isStreaming}
-              isLoading={isHydrating}
-              hydrationFailed={hydrationFailed}
-              settingUpSandbox={settingUpSandbox}
-              showPlanArtifact={
-                thread.planStatus === "ready" || thread.planStatus === "shared"
-              }
-              onOpenFile={handleOpenFile}
-              footer={
-                <>
-                  {!isStreaming &&
-                    !sendMessage.isPending &&
-                    queuedMessages.length === 0 && (
-                      <ThreadFeedbackCard
-                        key={`${thread.id}:${session.data?.login ?? ""}`}
-                        threadId={thread.id}
-                        login={session.data?.login ?? null}
-                      />
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          {isHydrating ? (
+            <div className="flex flex-1 items-center justify-center px-6">
+              <img
+                src={`${import.meta.env.BASE_URL}logo-mark.png`}
+                alt="Loading conversation"
+                className="size-12 animate-pulse"
+              />
+            </div>
+          ) : (
+            <PullRequestPreviewProvider
+              pullRequests={thread.pullRequests ?? []}
+              health={pullRequestHealth}
+              healthUnavailable={pullRequestStatus.isError}
+            >
+              <Messages
+                messages={visibleMessages}
+                threadId={thread.id}
+                scrollKey={thread.id}
+                showPlanArtifact={
+                  thread.planStatus === "ready" ||
+                  thread.planStatus === "shared"
+                }
+                emptyState={
+                  <div className="flex min-h-60 items-center justify-center">
+                    {hydrationFailed ? (
+                      <Alert variant="error" className="max-w-3xl">
+                        <CircleAlertIcon />
+                        <AlertDescription>
+                          <span>
+                            This thread&apos;s messages could not be loaded.
+                            Reload to try again.
+                          </span>
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <p className="text-xs text-muted-foreground/70">
+                        This thread has no messages yet.
+                      </p>
                     )}
-                  <CodeChannelLink url={thread.codeChannelUrl} />
-                  <ThreadPullRequests
-                    pullRequests={thread.pullRequests ?? []}
-                    health={pullRequestHealth}
-                    healthUnavailable={pullRequestStatus.isError}
-                    onFix={fixPullRequest}
-                    fixDisabled={!canPost || sendMessage.isPending}
-                  />
-                </>
-              }
-              composer={{
-                placeholder: canPost
-                  ? "Send a message…"
-                  : "Only workspace admins can send messages in this thread",
-                autoFocus: autoFocusComposer,
-                disabled: !canPost,
-                onSubmit: submitMessage,
-                onStop: async () => {
-                  const cancelled = await cancelThread.mutateAsync()
-                  await stream.disconnect()
-                  if (cancelled.status !== "running") {
-                    queryClient.setQueryData(
-                      agentThreadKeys.detail(thread.id),
-                      (previous) =>
-                        previous
-                          ? { ...previous, status: "interrupted" as const }
-                          : previous
-                    )
-                    invalidateAgentThreadLists(queryClient)
-                  }
-                },
-                models,
-                selection: activeSelection,
-                onSelectionChange: handleSelectionChange,
-                planMode: activePlanMode,
-                onPlanModeChange: setPlanMode,
-                mentionPaths,
-                skills: skills.data,
-                contextUsage: {
-                  usedTokens,
-                  contextWindow: activeModel?.context_window ?? null,
-                },
-              }}
-            />
-          </PullRequestPreviewProvider>
-        ) : (
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            {isHydrating ? (
-              <div className="flex flex-1 items-center justify-center px-6">
-                <img
-                  src={`${import.meta.env.BASE_URL}logo-mark.png`}
-                  alt="Loading conversation"
-                  className="size-12 animate-pulse"
-                />
-              </div>
-            ) : (
-              <PullRequestPreviewProvider
+                  </div>
+                }
+                onOpenFile={handleOpenFile}
+                queuedMessages={queuedMessages}
+                isStreaming={isStreaming}
+                streamIsLoading={stream.isLoading}
+                scrollControlRef={scrollControlRef}
+                isThinking={isThinking}
+                isOffloading={stream.isOffloading}
+                settingUpSandbox={settingUpSandbox}
+                pollWorkflowApprovalsWhileActive={isStreaming}
+                contentWidthClass="max-w-3xl"
+                footer={
+                  !isStreaming &&
+                  !sendMessage.isPending &&
+                  queuedMessages.length === 0 && (
+                    <ThreadFeedbackCard
+                      key={`${thread.id}:${session.data?.login ?? ""}`}
+                      threadId={thread.id}
+                      login={session.data?.login ?? null}
+                    />
+                  )
+                }
+              />
+            </PullRequestPreviewProvider>
+          )}
+          {!isHydrating && (
+            <AgentComposerDock>
+              <CodeChannelLink url={thread.codeChannelUrl} />
+              <ThreadPullRequests
                 pullRequests={thread.pullRequests ?? []}
                 health={pullRequestHealth}
                 healthUnavailable={pullRequestStatus.isError}
-              >
-                <Messages
-                  messages={visibleMessages}
-                  threadId={thread.id}
-                  scrollKey={thread.id}
-                  showPlanArtifact={
-                    thread.planStatus === "ready" ||
-                    thread.planStatus === "shared"
-                  }
-                  emptyState={
-                    <div className="flex min-h-60 items-center justify-center">
-                      {hydrationFailed ? (
-                        <Alert variant="error" className="max-w-3xl">
-                          <CircleAlertIcon />
-                          <AlertDescription>
-                            <span>
-                              This thread&apos;s messages could not be loaded.
-                              Reload to try again.
-                            </span>
-                          </AlertDescription>
-                        </Alert>
-                      ) : (
-                        <p className="text-xs text-muted-foreground/70">
-                          This thread has no messages yet.
-                        </p>
-                      )}
-                    </div>
-                  }
-                  onOpenFile={handleOpenFile}
-                  queuedMessages={queuedMessages}
-                  isStreaming={isStreaming}
-                  streamIsLoading={stream.isLoading}
-                  scrollControlRef={scrollControlRef}
-                  isThinking={isThinking}
-                  isOffloading={stream.isOffloading}
-                  settingUpSandbox={settingUpSandbox}
-                  pollWorkflowApprovalsWhileActive={isStreaming}
-                  contentWidthClass="max-w-3xl"
-                  footer={
-                    !isStreaming &&
-                    !sendMessage.isPending &&
-                    queuedMessages.length === 0 && (
-                      <ThreadFeedbackCard
-                        key={`${thread.id}:${session.data?.login ?? ""}`}
-                        threadId={thread.id}
-                        login={session.data?.login ?? null}
-                      />
-                    )
-                  }
-                />
-              </PullRequestPreviewProvider>
-            )}
-            {!isHydrating && (
-              <AgentComposerDock>
-                <CodeChannelLink url={thread.codeChannelUrl} />
-                <ThreadPullRequests
-                  pullRequests={thread.pullRequests ?? []}
-                  health={pullRequestHealth}
-                  healthUnavailable={pullRequestStatus.isError}
-                  onFix={fixPullRequest}
-                  fixDisabled={!canPost || sendMessage.isPending}
-                />
-                <AgentPromptBar
-                  placeholder={
-                    canPost
-                      ? hasConversation
-                        ? "Add a follow up"
-                        : "Send the first message"
-                      : "Only workspace admins can send messages in this thread"
-                  }
-                  autoFocus={autoFocusComposer}
-                  canOffload={!isStreaming}
-                  compact
-                  disabled={!canPost}
-                  busy={isStreaming}
-                  activeRun={activeRun}
-                  onSubmit={submitMessage}
-                  models={models}
-                  selection={activeSelection}
-                  onSelectionChange={handleSelectionChange}
-                  planMode={activePlanMode}
-                  onPlanModeChange={setPlanMode}
-                  mentionPaths={mentionPaths}
-                  skills={skills.data}
-                  contextUsage={{
-                    usedTokens,
-                    contextWindow: activeModel?.context_window ?? null,
-                  }}
-                />
-              </AgentComposerDock>
-            )}
-          </div>
-        )}
+                onFix={fixPullRequest}
+                fixDisabled={!canPost || sendMessage.isPending}
+              />
+              <AgentPromptBar
+                placeholder={
+                  canPost
+                    ? hasConversation
+                      ? "Add a follow up"
+                      : "Send the first message"
+                    : "Only workspace admins can send messages in this thread"
+                }
+                autoFocus={autoFocusComposer}
+                canOffload={!isStreaming}
+                compact
+                disabled={!canPost}
+                busy={isStreaming}
+                activeRun={activeRun}
+                onSubmit={submitMessage}
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={handleSelectionChange}
+                planMode={activePlanMode}
+                onPlanModeChange={setPlanMode}
+                mentionPaths={mentionPaths}
+                skills={skills.data}
+                contextUsage={{
+                  usedTokens,
+                  contextWindow: activeModel?.context_window ?? null,
+                }}
+              />
+            </AgentComposerDock>
+          )}
+        </div>
       </div>
       <AgentGitPanel
         thread={thread}

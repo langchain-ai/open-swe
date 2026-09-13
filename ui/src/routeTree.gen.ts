@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AssistantRouteImport } from './routes/assistant'
 import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
 import { Route as EnvironmentsRouteImport } from './routes/environments'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
@@ -27,6 +28,8 @@ import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
 import { Route as AgentsEnvironmentsRouteImport } from './routes/agents_.environments'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
 import { Route as AgentsSandboxRouteImport } from './routes/agents_.sandbox'
+import { Route as AssistantIndexRouteImport } from './routes/assistant/index'
+import { Route as AssistantThreadIdRouteImport } from './routes/assistant/$threadId'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
 import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
@@ -51,6 +54,11 @@ const AdminRoute = AdminRouteImport.update({
 const AgentsRoute = AgentsRouteImport.update({
   id: '/agents',
   path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssistantRoute = AssistantRouteImport.update({
+  id: '/assistant',
+  path: '/assistant',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CloudAgentsRoute = CloudAgentsRouteImport.update({
@@ -128,6 +136,16 @@ const AgentsSandboxRoute = AgentsSandboxRouteImport.update({
   path: '/agents/sandbox',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AssistantIndexRoute = AssistantIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AssistantRoute,
+} as any)
+const AssistantThreadIdRoute = AssistantThreadIdRouteImport.update({
+  id: '/$threadId',
+  path: '/$threadId',
+  getParentRoute: () => AssistantRoute,
+} as any)
 const ReviewStylesRoute = ReviewStylesRouteImport.update({
   id: '/review_/styles',
   path: '/review/styles',
@@ -185,6 +203,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/agents': typeof AgentsRouteWithChildren
+  '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
   '/environments': typeof EnvironmentsRoute
   '/integrations': typeof IntegrationsRoute
@@ -199,8 +218,10 @@ export interface FileRoutesByFullPath {
   '/agents/environments': typeof AgentsEnvironmentsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
+  '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
+  '/assistant/': typeof AssistantIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -228,8 +249,10 @@ export interface FileRoutesByTo {
   '/agents/environments': typeof AgentsEnvironmentsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
+  '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/review/styles': typeof ReviewStylesRoute
   '/agents': typeof AgentsIndexRoute
+  '/assistant': typeof AssistantIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -245,6 +268,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/agents': typeof AgentsRouteWithChildren
+  '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
   '/environments': typeof EnvironmentsRoute
   '/integrations': typeof IntegrationsRoute
@@ -259,8 +283,10 @@ export interface FileRoutesById {
   '/agents_/environments': typeof AgentsEnvironmentsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/sandbox': typeof AgentsSandboxRoute
+  '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/agents/': typeof AgentsIndexRoute
+  '/assistant/': typeof AssistantIndexRoute
   '/agents/$threadId_/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
   '/agents/automations/new': typeof AgentsAutomationsNewRoute
@@ -277,6 +303,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/agents'
+    | '/assistant'
     | '/cloud-agents'
     | '/environments'
     | '/integrations'
@@ -291,8 +318,10 @@ export interface FileRouteTypes {
     | '/agents/environments'
     | '/agents/instructions'
     | '/agents/sandbox'
+    | '/assistant/$threadId'
     | '/review/styles'
     | '/agents/'
+    | '/assistant/'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -320,8 +349,10 @@ export interface FileRouteTypes {
     | '/agents/environments'
     | '/agents/instructions'
     | '/agents/sandbox'
+    | '/assistant/$threadId'
     | '/review/styles'
     | '/agents'
+    | '/assistant'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -336,6 +367,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/agents'
+    | '/assistant'
     | '/cloud-agents'
     | '/environments'
     | '/integrations'
@@ -350,8 +382,10 @@ export interface FileRouteTypes {
     | '/agents_/environments'
     | '/agents_/instructions'
     | '/agents_/sandbox'
+    | '/assistant/$threadId'
     | '/review_/styles'
     | '/agents/'
+    | '/assistant/'
     | '/agents/$threadId_/plan'
     | '/agents/automations/$scheduleId'
     | '/agents/automations/new'
@@ -367,6 +401,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AgentsRoute: typeof AgentsRouteWithChildren
+  AssistantRoute: typeof AssistantRouteWithChildren
   CloudAgentsRoute: typeof CloudAgentsRoute
   EnvironmentsRoute: typeof EnvironmentsRoute
   IntegrationsRoute: typeof IntegrationsRoute
@@ -404,6 +439,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents'
       preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assistant': {
+      id: '/assistant'
+      path: '/assistant'
+      fullPath: '/assistant'
+      preLoaderRoute: typeof AssistantRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cloud-agents': {
@@ -511,6 +553,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsSandboxRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/assistant/': {
+      id: '/assistant/'
+      path: '/'
+      fullPath: '/assistant/'
+      preLoaderRoute: typeof AssistantIndexRouteImport
+      parentRoute: typeof AssistantRoute
+    }
+    '/assistant/$threadId': {
+      id: '/assistant/$threadId'
+      path: '/$threadId'
+      fullPath: '/assistant/$threadId'
+      preLoaderRoute: typeof AssistantThreadIdRouteImport
+      parentRoute: typeof AssistantRoute
+    }
     '/review_/styles': {
       id: '/review_/styles'
       path: '/review/styles'
@@ -615,10 +671,25 @@ const AgentsRouteChildren: AgentsRouteChildren = {
 const AgentsRouteWithChildren =
   AgentsRoute._addFileChildren(AgentsRouteChildren)
 
+interface AssistantRouteChildren {
+  AssistantThreadIdRoute: typeof AssistantThreadIdRoute
+  AssistantIndexRoute: typeof AssistantIndexRoute
+}
+
+const AssistantRouteChildren: AssistantRouteChildren = {
+  AssistantThreadIdRoute: AssistantThreadIdRoute,
+  AssistantIndexRoute: AssistantIndexRoute,
+}
+
+const AssistantRouteWithChildren = AssistantRoute._addFileChildren(
+  AssistantRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AgentsRoute: AgentsRouteWithChildren,
+  AssistantRoute: AssistantRouteWithChildren,
   CloudAgentsRoute: CloudAgentsRoute,
   EnvironmentsRoute: EnvironmentsRoute,
   IntegrationsRoute: IntegrationsRoute,

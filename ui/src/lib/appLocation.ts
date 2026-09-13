@@ -3,7 +3,10 @@ const FALLBACK_LOCATION = "/agents"
 
 function isAppLocation(value: string): boolean {
   return (
-    value === FALLBACK_LOCATION || value.startsWith(`${FALLBACK_LOCATION}/`)
+    value === FALLBACK_LOCATION ||
+    value.startsWith(`${FALLBACK_LOCATION}/`) ||
+    value === "/assistant" ||
+    value.startsWith("/assistant/")
   )
 }
 
