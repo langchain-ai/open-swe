@@ -429,9 +429,7 @@ async def _consume_receipts(record: Incident, policy: IncidentPolicy, info: dict
                 )
             record.processed_receipts.append(receipt.id)
             continue
-        if await documents.process_document_receipt(
-            record, receipt
-        ) or await providers.process_provider_receipt(record, receipt):
+        if await providers.process_provider_receipt(record, receipt):
             record.processed_receipts.append(receipt.id)
             await save(record)
             continue
@@ -572,9 +570,7 @@ async def _process_channel(incident_id: str) -> dict[str, Any]:
     policy = await service.get_policy()
     if record.expired or not policy.enabled:
         for receipt in await channel_receipts(record):
-            if await documents.process_document_receipt(
-                record, receipt
-            ) or await providers.process_provider_receipt(record, receipt):
+            if await providers.process_provider_receipt(record, receipt):
                 record.processed_receipts.append(receipt.id)
         await save(record)
         if record.expired:
@@ -726,8 +722,6 @@ async def _process_channel(incident_id: str) -> dict[str, Any]:
         await _session_status(record, "processing")
         had_report = record.report is not None
         await providers.refresh_provider(record)
-        document = await documents.document_context(record.id)
-        expected_revision = (document.get("postmortem") or {}).get("revision", 0)
         report = await asyncio.wait_for(
             run_engine(
                 record.messages,
@@ -747,9 +741,7 @@ async def _process_channel(incident_id: str) -> dict[str, Any]:
             record.provider_scope = current_record.provider_scope
             record.evidence_scope = current_record.evidence_scope
             record.messages = current_record.messages
-        await documents.update_from_report(
-            record, report, expected_revision=expected_revision, run_id=report.id
-        )
+        await documents.update_from_report(record, report)
         record.active_pass_id = None
         record.reset_conversation = False
         record.report = report

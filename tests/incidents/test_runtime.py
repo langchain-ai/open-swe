@@ -500,8 +500,6 @@ async def test_reading_related_incident_tracks_access_dependency_for_later_outpu
     await documents.update_from_report(
         related,
         IncidentReport(summary="Previous incident involved connection saturation"),
-        expected_revision=0,
-        run_id="historical-pass",
     )
     session = await runtime.load_incident_session(live_pass.config)
     read = next(tool for tool in session.tools if tool.name == "read_incident")

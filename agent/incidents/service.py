@@ -452,7 +452,7 @@ async def get_incident(id: str, *, include_setup: bool = False) -> dict[str, Any
                 "next_cursor": None,
             }
         raise HTTPException(404, "Incident not found")
-    actions = ["edit_document", "attach_provider", "update_provider"]
+    actions = ["attach_provider", "update_provider"]
     if not record.expired:
         actions.extend(["ask", "investigate_again"])
     if record.status == "completed":

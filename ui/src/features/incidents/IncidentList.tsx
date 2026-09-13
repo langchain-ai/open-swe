@@ -43,9 +43,7 @@ export function IncidentList({
           is_archived: false,
           reason: null,
           slack_url: null,
-          latest_finding: item.postmortem_revision
-            ? `Postmortem · revision ${item.postmortem_revision}`
-            : "No postmortem yet.",
+          latest_finding: null,
         })),
       }
     },

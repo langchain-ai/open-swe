@@ -29,19 +29,6 @@ class DocumentRevision(BaseModel):
     evidence: list[DocumentReference] = Field(default_factory=list)
 
 
-class DocumentOperation(BaseModel):
-    id: str
-    incident_id: str
-    kind: DocumentKind
-    expected_revision: int
-    content_hash: str
-    status: Literal["pending", "applied", "conflict", "rejected"] = "pending"
-    revision: int | None = None
-    error: str | None = None
-    created_at: str = Field(default_factory=now_iso)
-    updated_at: str = Field(default_factory=now_iso)
-
-
 class IncidentHistory(BaseModel):
     id: str
     workspace_id: str

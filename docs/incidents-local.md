@@ -26,23 +26,23 @@ Provider lifecycle changes require an explicit responder action. Pausing or comp
 
 The main list has **Active**, **Inactive**, and **All** filters beside search. Active includes investigations needing attention; Inactive includes paused and completed agent activity. These filters do not change the provider's incident status. Incidents uses the same Open SWE sidebar as Reviews, including projects, recent threads, search, and settings. **Incident history** opens retained summaries and postmortems.
 
-The detail page opens on **Overview**, with the latest finding, evidence-backed suggested next steps, sources, and coverage. **Postmortem** contains the editable incident document, a **Copy incident** action, and revision history; **Timeline** shows chronological agent activity. Switching tabs preserves unsaved document edits. Temporary Slack verification failures preserve drafts; revoked channel access hides incident content.
+The detail page opens on **Overview**, with the latest finding, suggested next steps, sources, and coverage. **Postmortem** shows the latest agent summary and a **Copy incident** action; **Timeline** shows chronological agent activity.
 
 Slack updates show a concise finding, the first suggested next step when available, and links to sources and the investigation. Detailed impact, checks, hypotheses, and coverage gaps remain on the incident page. Recommendations are separate from completed actions.
 
-The postmortem starts with summary, impact, timeline, cause, mitigation, resolution, follow-ups, and evidence sections. Later reports append dated findings, preserving human edits. Each accepted change creates an immutable revision with author, time, source, and the expected prior revision. A conflicting save preserves the newer text and asks the responder to reload.
+The agent stores one Markdown summary per incident in the existing LangGraph Store and replaces it after each investigation. It includes findings, impact, next steps, and evidence links. Responders can paste it into their preferred document or incident tool for editing and publishing.
 
-**Copy incident** copies the visible postmortem as Markdown, including source links and any unsaved edits. The status-page section is hidden while its workflow is being designed. Provider postmortems remain separately attributed content; provider postmortem writes and status-page publishing remain unsupported by the provider adapter. An authorized responder can ask the agent to implement a fix, open a PR, or perform a specified action through its configured workspace tools. Ordinary channel messages steer investigation; they do not authorize external changes.
+**Copy incident** copies the visible postmortem as Markdown, including source links. The status-page section is hidden while its workflow is being designed. Provider postmortems remain separately attributed content; provider postmortem writes and status-page publishing remain unsupported by the provider adapter. An authorized responder can ask the agent to implement a fix, open a PR, or perform a specified action through its configured workspace tools. Ordinary channel messages steer investigation; they do not authorize external changes.
 
-Use **Incident history** to search retained incident metadata and postmortems. The agent can also search and read permitted historical incidents as context; a prior cause does not establish the current cause. Channel access is rechecked for history and revision reads. Expired or unavailable evidence is marked unavailable rather than restored from historical references.
+Use **Incident history** to search retained incident metadata and postmortems. The agent can also search and read permitted historical incidents as context; a prior cause does not establish the current cause. Channel access is rechecked for history and summary reads. Expired or unavailable evidence is marked unavailable rather than restored from historical references.
 
 ## Runtime and retention
 
-The existing `scheduler` graph runs channel-worker and admission jobs; analysis runs on `agent` in a persistent conversation. Incidents adds no graph entrypoints. Human document edits and provider commands enter the durable receipt queue and are applied by the channel worker.
+The existing `scheduler` graph runs channel-worker and admission jobs; analysis runs on `agent` in a persistent conversation. Incidents adds no graph entrypoints. Provider commands enter the durable receipt queue and are applied by the channel worker.
 
 Accepted events survive dispatch failures, and minute recovery retries pending work. One channel worker is admitted at a time per workspace. New messages are debounced; explicit questions steer a pass. Access and stop controls are checked at tool and publication boundaries. An event Slack never delivers cannot be recovered through the inbox.
 
-Raw incident messages and conversation checkpoints expire after 30 days from enrollment. Curated incident metadata, document revisions, and provider history remain separately stored without automatic expiry. Authorized responders can still edit retained postmortems and drafts. Receipt and publication cleanup removes old operational content while retaining the identities needed to avoid duplicate work. A channel registration remains to prevent automatic re-enrollment.
+Raw incident messages and conversation checkpoints expire after 30 days from enrollment. Curated incident metadata, postmortem summaries, and provider history remain separately stored without automatic expiry. Older stored postmortems remain readable until the next agent update. Receipt and publication cleanup removes old operational content while retaining the identities needed to avoid duplicate work. A channel registration remains to prevent automatic re-enrollment.
 
 An uncertain Slack send is recorded and is not sent again automatically; a responder must inspect the channel. This is separate from provider lifecycle reconciliation. Dashboard access checks do not protect direct LangGraph Store or thread APIs, which require the deployment's own access controls.
 
@@ -51,7 +51,6 @@ An uncertain Slack send is recorded and is not sent again automatically; a respo
 - Create a matching public channel and verify enrollment, membership, findings, and evidence links.
 - Ask while paused and confirm the answer preserves the paused state.
 - Ask Open SWE to read an incident.io incident through the configured MCP connection.
-- Edit a postmortem from two sessions and verify a stale revision produces a conflict.
 - Copy the incident from the Postmortem tab and verify the Markdown and source links paste correctly.
 
 These checks require your own installation; a synthetic pass does not establish live provider compatibility, delivery, or diagnostic quality.

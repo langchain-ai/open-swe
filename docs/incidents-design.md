@@ -38,20 +38,18 @@ The agent may also call configured incident.io MCP tools directly when a respond
 
 ## Documents and communications
 
-Open SWE owns the working postmortem and a separate status-page draft. The initial postmortem contains summary, impact, timeline, cause, mitigation, resolution, follow-ups, and evidence sections. Subsequent analysis appends dated findings, preserving responder edits. Unknown cause remains unknown.
+Open SWE stores one Markdown postmortem summary per incident in the existing LangGraph Store. After each investigation, the agent replaces that value with its latest findings, impact, suggested next steps, and source links. The dashboard renders it and offers **Copy incident** so responders can edit or publish the text elsewhere. There is no document editor, save queue, concurrency protocol, or revision-history UI.
 
-Every accepted document edit produces an immutable revision with author, source, run, timestamp, and expected prior revision. Human edits and agent updates pass through the channel worker. Conflicting saves preserve the newer text and expose the conflict; retries do not create duplicate revisions.
-
-The status-page section is hidden pending workflow design; existing draft revisions remain stored. Provider postmortems remain separately attributed context for the agent. The verified incident.io MCP contract does not provide explicit status-page publishing or postmortem-write tools, so those capabilities remain unsupported. No general-purpose management tool is used as a publishing fallback.
+Previously stored postmortems remain readable until the next agent update. Their stored revisions and hidden status-page drafts are left intact. Provider postmortem writes and status-page publishing remain unsupported by the provider adapter.
 
 ## History and retention
 
-Curated metadata, document revisions, and provider operation history live outside the expiring operational record. The dashboard searches retained local history, shows revisions, and links to readable incidents. Provider history and lifecycle actions are available through the agent’s configured MCP connection; there are no separate provider management screens. The main agent can search and read related incidents as historical context, with dependency access checked again before later use. Historical causes do not establish the current cause.
+Curated metadata, postmortem summaries, and provider operation history live outside the expiring operational record. The dashboard searches retained local history and links to readable incidents. Provider history and lifecycle actions are available through the agent’s configured MCP connection; there are no separate provider management screens. The main agent can search and read related incidents as historical context, with dependency access checked again before later use. Historical causes do not establish the current cause.
 
 Raw messages, recorded tool outcomes, and all conversation checkpoints expire after 30 days from enrollment. Curated history has no automatic expiry and remains subject to current workspace and channel access. Expired or unavailable evidence references are marked unavailable. The channel registration remains so cleanup does not trigger automatic re-enrollment.
 
 ## Validation and deployment
 
-Targeted tests exercise durable retries, main-agent assembly/execution, citation validation, scope revocation, provider binding and reconciliation, document conflicts, retention, dashboard authorization, and UI operations. Test fixtures simulate external services; live incident.io compatibility and Slack delivery require a configured installation.
+Targeted tests exercise durable retries, main-agent assembly/execution, citation validation, scope revocation, provider binding and reconciliation, summary persistence, retention, dashboard authorization, and UI operations. Test fixtures simulate external services; live incident.io compatibility and Slack delivery require a configured installation.
 
 See [installation](INSTALLATION.md#incidents) and [local development](incidents-local.md) for setup. The deployment must protect direct LangGraph thread and Store APIs independently of dashboard access checks.

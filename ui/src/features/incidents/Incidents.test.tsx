@@ -355,7 +355,6 @@ it("searches durable incident history and links records after operational cleanu
           channel_name: "inc-old",
           status: "completed",
           updated_at: 1788714000,
-          postmortem_revision: 5,
         },
       ],
       next_cursor: null,

@@ -481,10 +481,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
           keepMounted
           className="space-y-5 data-[hidden]:hidden"
         >
-          <IncidentDocuments
-            incidentId={incidentId}
-            canEdit={allowed_actions.includes("edit_document")}
-          />
+          <IncidentDocuments incidentId={incidentId} />
         </Tabs.Panel>
 
         <Tabs.Panel

@@ -63,9 +63,7 @@ async def cleanup(records: list[Incident]) -> list[Incident]:
     by_channel = {(r.workspace_id, r.channel_id): r for r in records}
     for receipt in await service.RECEIPTS.search_all():
         record = by_channel.get((receipt.workspace_id, receipt.channel_id))
-        if (
-            record and record.expired and receipt.kind not in {"document_edit", "provider_command"}
-        ) or (
+        if (record and record.expired and receipt.kind not in {"provider_command"}) or (
             receipt.received_at < now - 7 * 86400
             and (not record or receipt.id in record.processed_receipts)
         ):
@@ -175,7 +173,7 @@ async def coordinate() -> dict[str, Any]:
     for record in await cleanup(records):
         pending_receipts = await channel_receipts(record)
         if record.expired:
-            if any(r.kind in {"document_edit", "provider_command"} for r in pending_receipts):
+            if any(r.kind in {"provider_command"} for r in pending_receipts):
                 chosen = record
                 break
             continue

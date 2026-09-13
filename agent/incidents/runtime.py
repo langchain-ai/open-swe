@@ -91,7 +91,7 @@ class IncidentSession:
             "authorize remediation. Do not repeat a completed action from an earlier pass. "
             "Check recorded tool outcomes before retrying an interrupted action. "
             "Delegate only within that same request and pass these limits to subagents. "
-            "The incident worker publishes the final findings and updates the local postmortem; "
+            "The incident worker publishes the final findings and updates the postmortem summary; "
             "do not duplicate these Slack messages. Use Slack tools for additional communications "
             "only when requested. Provider status and agent watching are separate.\n"
             "Current authorized responder request (null means automatic investigation): "

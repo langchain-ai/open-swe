@@ -256,40 +256,6 @@ async def test_explicit_requests_bypass_message_debounce(incident, action):
     assert record.status == {"ask": "watching", "pause": "paused", "complete": "completed"}[action]
 
 
-@pytest.mark.parametrize("expired", [False, True])
-async def test_completed_incident_applies_document_edits_without_restarting_analysis(
-    incident, expired
-):
-    from agent.incidents import documents
-
-    incident.status = "completed"
-    incident.expired = expired
-    await service.INVESTIGATIONS.put(incident.id, incident)
-    operation = await documents.submit_edit(
-        incident.id,
-        kind="status_page_draft",
-        markdown="Service has recovered.",
-        expected_revision=0,
-        request_id="final-update",
-        actor={"id": "github:responder"},
-    )
-    assert operation["status"] == "pending"
-    assert await documents.REVISIONS.search_all() == []
-
-    await worker.process_channel(incident.id)
-    await worker.process_channel(incident.id)
-
-    current = (await documents.document_context(incident.id))["status_page_draft"]
-    assert current["revision"] == 1
-    assert current["markdown"] == "Service has recovered."
-    assert (await documents.get_operation(incident.id, operation["id"]))["status"] == "applied"
-    assert len((await documents.list_revisions(incident.id, "status_page_draft"))["items"]) == 1
-    record = await service.INVESTIGATIONS.get(incident.id)
-    assert record.status == "completed" and record.expired == expired
-    assert not record.report
-    worker.run_engine.assert_not_awaited()
-
-
 @pytest.mark.parametrize(
     "newer,older,expected",
     [

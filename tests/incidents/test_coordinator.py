@@ -156,7 +156,7 @@ async def test_expiry_removes_content_and_checkpoints_without_reenrollment(runti
     ) == {"status": "ignored"}
 
 
-async def test_expiry_retains_history_and_dispatches_queued_document_edit(runtime, monkeypatch):
+async def test_expiry_retains_postmortem_summary(runtime, monkeypatch):
     from agent.scheduler import get_scheduler
 
     scheduler = get_scheduler()
@@ -186,40 +186,18 @@ async def test_expiry_retains_history_and_dispatches_queued_document_edit(runtim
             }
         ),
     )
-    await documents.update_from_report(
-        record, IncidentReport(summary="Recovery confirmed"), expected_revision=0, run_id="initial"
-    )
-    operation = await documents.submit_edit(
-        record.id,
-        kind="postmortem",
-        markdown="# Human postmortem after recovery",
-        expected_revision=1,
-        request_id="late-edit",
-        actor={"id": "github:responder"},
-    )
-
-    coordinated = await scheduler.ainvoke({"task": "incidents_coordinator"})
-    assert coordinated["result"] == {"status": "dispatched", "incident_id": record.id}
-    dispatch = coordinator.create_durable_run.await_args
-    assert dispatch.args[1] == "scheduler"
+    await documents.update_from_report(record, IncidentReport(summary="Recovery confirmed"))
+    current = (await documents.document_context(record.id))["postmortem"]
+    await scheduler.ainvoke({"task": "incidents_coordinator"})
     expired = await service.INVESTIGATIONS.get(record.id)
-    assert expired.expired and expired.thread_id
-    assert await service.RECEIPTS.get(operation["id"])
-    assert (
-        "Recovery confirmed"
-        in (await documents.document_context(record.id))["postmortem"]["markdown"]
-    )
+    assert expired.expired
     assert (await documents.search_history(q="Checkout"))["items"][0]["id"] == record.id
-
-    processed = await scheduler.ainvoke(dispatch.kwargs["input"])
+    retained = (await documents.document_context(record.id))["postmortem"]
+    assert retained == current
+    assert "Recovery confirmed" in retained["markdown"]
+    processed = await scheduler.ainvoke({"task": "incidents_worker", "incident_id": record.id})
     assert processed["result"] == {"status": "completed"}
-    assert (await documents.get_operation(record.id, operation["id"]))["status"] == "applied"
-    assert (await documents.document_context(record.id))["postmortem"][
-        "markdown"
-    ] == "# Human postmortem after recovery"
-    assert len((await documents.list_revisions(record.id, "postmortem"))["items"]) == 2
     assert (await service.INVESTIGATIONS.get(record.id)).expired
-    assert await coordinator.coordinate() == {"status": "idle"}
 
 
 async def test_policy_change_does_not_admit_old_prefix_receipt(runtime):
