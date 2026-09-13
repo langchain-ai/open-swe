@@ -91,15 +91,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
-export async function transcribeAudio(audio: Blob): Promise<string> {
-  const response = await request<{ text: string }>("/voice/transcriptions", {
-    method: "POST",
-    body: audio,
-    headers: { "Content-Type": audio.type },
-  })
-  return response.text
-}
-
 export interface SessionUser {
   login: string
   email: string | null
@@ -107,6 +98,7 @@ export interface SessionUser {
   is_admin: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
+  slack_base_url?: string
 }
 
 export interface ModelOption {
@@ -158,6 +150,25 @@ export interface ProfileUpdate {
   review_draft_prs?: boolean | null
 }
 
+export interface SlackBotOption {
+  team_id: string
+  bot_id: string
+  user_id: string
+  name: string
+  image_url: string
+}
+
+export interface AllowedSlackBot {
+  team_id: string
+  bot_id: string
+  user_id: string
+  app_id: string
+  name: string
+  created_by: string
+  created_at: string
+  image_url: string
+}
+
 export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
@@ -166,7 +177,6 @@ export interface TeamSettings {
   model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
-  transcription_model?: string
   fable_enabled?: boolean
   org_guidelines?: string | null
   default_agent_model?: string | null
@@ -787,15 +797,22 @@ export const api = {
   listEnvironmentOptions: () =>
     request<EnvironmentOptionList>("/environments/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
+  listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
+  allowSlackBot: (body: { bot_id: string }) =>
+    request<AllowedSlackBot>("/slack/allowed-bots", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeAllowedSlackBot: (teamId: string, botId: string) =>
+    request<{ ok: boolean }>(
+      `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
+      { method: "DELETE" }
+    ),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {
       method: "PUT",
       body: JSON.stringify(body),
-    }),
-  saveTranscriptionModel: (transcription_model: string) =>
-    request<TeamSettings>("/team-settings/transcription", {
-      method: "PUT",
-      body: JSON.stringify({ transcription_model }),
     }),
   getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
   revealWorkspaceMCPHeaders: (name: string) =>

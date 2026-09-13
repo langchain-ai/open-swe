@@ -79,9 +79,6 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "artifactName": "Open-SWE-${version}-${arch}-mac.${ext}",
-      "extendInfo": {
-        "NSMicrophoneUsageDescription": "Open SWE uses the microphone for message dictation."
-      },
       "icon": "resources/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

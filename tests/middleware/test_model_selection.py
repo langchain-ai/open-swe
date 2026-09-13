@@ -108,6 +108,19 @@ async def test_route_is_classified_from_approved_plan_after_plan_mode_exits() ->
 
 
 @pytest.mark.asyncio
+async def test_explicit_plan_mode_overrides_stale_state_without_caching() -> None:
+    middleware, _, classifier = _middleware()
+    state = {
+        "messages": [HumanMessage(content="Implement the approved plan")],
+        "plan_mode": True,
+    }
+
+    assert await middleware.select_route(cast(Any, state), plan_mode=False) == "fast"
+    assert await middleware.select_route(cast(Any, state), plan_mode=True) == "performance"
+    classifier.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_mid_run_plan_mode_temporarily_overrides_existing_route() -> None:
     middleware, models, classifier = _middleware()
     state = {

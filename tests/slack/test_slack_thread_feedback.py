@@ -358,7 +358,7 @@ async def test_prompt_cleanup_failure_preserves_saved_feedback_and_confirmation(
         feedback.post_slack_ephemeral_message.assert_not_awaited()
     else:
         feedback.post_slack_ephemeral_message.assert_awaited_once_with(
-            "C1", "U1", "✅ Feedback completed. Thanks!", thread_ts="1.0"
+            "C1", "U1", "✅ Feedback submitted. Thanks!", thread_ts="1.0"
         )
 
 
@@ -856,7 +856,7 @@ async def test_native_rating_saves_immediately_and_only_bad_opens_comment(
     feedback.post_slack_ephemeral_message.assert_awaited_once()
     confirmation = feedback.post_slack_ephemeral_message.await_args
     assert confirmation.args[:2] == ("C1", "U1")
-    assert "completed" in confirmation.args[2].lower()
+    assert "submitted" in confirmation.args[2].lower()
     assert confirmation.kwargs["thread_ts"] == (None if thread_ts == "0" else "1.0")
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["acknowledged"]
 
