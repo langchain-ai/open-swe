@@ -93,7 +93,13 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     notion.assert_awaited_once_with(None)
     assert isinstance(result["backend"].default, SandboxBackendProxy)
     names = {_registered_tool_name(tool) for tool in result["tools"]}
-    write_tools = {"open_pull_request", "http_request", "background_execute", "slack_thread_reply"}
+    write_tools = {
+        "open_pull_request",
+        "http_request",
+        "background_execute",
+        "slack_thread_reply",
+        "manage_incident",
+    }
     assert {"record_incident_report", "search_incidents"} <= names
     if explicit:
         assert write_tools <= names
@@ -120,7 +126,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     subagent = result["subagents"][0]
     subagent_names = {_registered_tool_name(tool) for tool in subagent["tools"]}
     assert ("open_pull_request" in subagent_names) is explicit
-    assert not runtime.INCIDENT_TOOL_NAMES & subagent_names
+    assert not (runtime.INCIDENT_TOOL_NAMES | {"manage_incident"}) & subagent_names
     guard = next(
         item for item in subagent["middleware"] if isinstance(item, runtime.IncidentMiddleware)
     )

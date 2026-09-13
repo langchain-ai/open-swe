@@ -120,11 +120,16 @@ async def has_active_run(thread_id: str) -> bool:
     return bool(await _runs(thread_id, "pending") or await _runs(thread_id, "running"))
 
 
-async def cancel_active_runs(thread_id: str) -> None:
+async def cancel_active_runs(thread_id: str, *, keep_run_id: str = "") -> None:
+    """Interrupt pending and running runs, except the one carrying out the request."""
     if not thread_id:
         return
     runs = [*await _runs(thread_id, "pending"), *await _runs(thread_id, "running")]
-    run_ids = [str(run["run_id"]) for run in runs if run.get("run_id")]
+    run_ids = [
+        str(run["run_id"])
+        for run in runs
+        if run.get("run_id") and str(run["run_id"]) != keep_run_id
+    ]
     if run_ids:
         await store_client().runs.cancel_many(
             thread_id=thread_id, run_ids=run_ids, action="interrupt"

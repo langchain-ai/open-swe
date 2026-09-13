@@ -172,6 +172,7 @@ from agent.tools import (
     list_threads,
     manage_baby_sit,
     manage_code_channel,
+    manage_incident,
     manage_thread,
     mark_question_answered,
     notify_automation_channel,
@@ -363,11 +364,13 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 
 # Automatic incident turns are triggered by whatever lands in a public channel, so the
 # prompt cannot be the only boundary: they get the plan-mode research toolset and no
-# Slack posting, PR, HTTP, or delegation tools. record_incident_report posts for them.
+# Slack posting, PR, HTTP, delegation, or incident-control tools. record_incident_report
+# posts for them.
 # An authorized responder's explicit request restores the normal toolset.
 INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = PLAN_MODE_EXCLUDED_TOOLS | frozenset(
     {
         "manage_code_channel",
+        "manage_incident",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_thread_reply",
@@ -408,6 +411,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
     return name.startswith("slack_") or name in {
         "get_thread",
         "manage_code_channel",
+        "manage_incident",
         "list_threads",
         "manage_thread",
         "notify_automation_channel",
@@ -1155,6 +1159,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     slack_tools = [
         manage_code_channel,
+        manage_incident,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
@@ -1192,6 +1197,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         report_platform_issue,
         schedule_thread_wakeup,
         manage_code_channel,
+        manage_incident,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,

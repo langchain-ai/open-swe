@@ -30,9 +30,6 @@ from agent.webhooks.common import post_account_link_prompt, upsert_agent_thread_
 logger = logging.getLogger(__name__)
 
 CONTROL_WORDS = frozenset({"pause", "resume", "complete", "reopen"})
-START_PHRASES = frozenset(
-    {"incident", "incidents", "start incident", "incidents start", "incident start"}
-)
 HISTORY_LIMIT = 100
 _HANDLED_EVENTS = frozenset(
     {
@@ -92,8 +89,8 @@ async def slack_person(user_id: str) -> PersonIdentity:
 async def linked_slack_user(user_id: str) -> PersonIdentity | None:
     """The identity of a Slack user who connected an Open SWE account, else None.
 
-    Questions and manual starts unlock the agent's tools, so they need the same connected
-    account as mentioning Open SWE anywhere else.
+    A question unlocks the agent's tools, so it needs the same connected account as
+    mentioning Open SWE anywhere else.
     """
     login = await login_for_slack_id(user_id)
     if not login:
@@ -120,9 +117,10 @@ def _introduction(record: Incident) -> str:
         text += f"; the full incident is at <{link}|Open incident>"
     return (
         text
-        + ". Mention me with a question. Anyone here can turn it off: mention me with `pause` to "
-        "stop automatic analysis or `complete` to close the incident, or use the Incidents page in "
-        "the dashboard; `resume` turns it back on."
+        + ". Mention me with a question, or ask me to pause, resume, or complete this incident. "
+        "Anyone here can turn it off: mention me with `pause` to stop automatic analysis or "
+        "`complete` to close the incident. The Incidents page in the dashboard has the same "
+        "controls."
     )
 
 
@@ -220,46 +218,18 @@ def _is_context(message: dict[str, Any], policy: IncidentPolicy) -> bool:
     )
 
 
-async def _reply_in_thread(channel_id: str, thread_ts: str, text: str) -> None:
-    await post_slack_thread_reply_with_ts(
-        channel_id, thread_ts, text, unfurl_links=False, unfurl_media=False
-    )
+async def apply_control(
+    record: Incident, action: str, actor: dict[str, Any], *, keep_run_id: str = ""
+) -> Incident:
+    """Pause, resume, complete, or reopen an incident and tell the channel.
 
-
-async def start_incident(channel_id: str, user_id: str, background_tasks: BackgroundTasks) -> str:
-    """Follow the current channel on a responder's request; returns the reply to show them."""
-    policy = await service.get_policy()
-    if not policy.enabled:
-        return "Incidents is not enabled in this workspace."
-    actor = await linked_slack_user(user_id)
-    if actor is None:
-        return (
-            "Connect your Open SWE account in the dashboard (Sign in with Slack) to start an "
-            "incident. Anyone in the channel can pause or complete one."
-        )
-    record = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
-    if record is not None:
-        if record.is_archived:
-            return "This channel is archived, so Incidents cannot follow it."
-        if record.status in {"paused", "completed"}:
-            action = "reopen" if record.status == "completed" else "resume"
-            background_tasks.add_task(apply_control, record, action, dict(actor))
-            return "Incidents is following this channel again."
-        return "Incidents is already following this channel."
-    info = await get_slack_channel_info(channel_id, use_cache=False)
-    if info is None or not service.channel_allowed(info, policy, require_prefix=False):
-        return "Incidents can only follow a public internal channel that is not excluded."
-    name = str(info.get("name") or channel_id)
-    background_tasks.add_task(enroll_channel, channel_id, name, policy, manual=True)
-    return f"Incidents is joining #{name}; findings will appear in the channel."
-
-
-async def apply_control(record: Incident, action: str, actor: dict[str, Any]) -> Incident:
-    """Pause, resume, complete, or reopen an incident and tell the channel."""
+    `keep_run_id` names the run applying the control (the manage_incident tool), which
+    must survive the cancellation of the others.
+    """
     policy = await service.get_policy()
     blocks: list[dict[str, Any]] | None = None
     if action in {"pause", "complete"}:
-        await turns.cancel_active_runs(record.thread_id)
+        await turns.cancel_active_runs(record.thread_id, keep_run_id=keep_run_id)
         record.status = "completed" if action == "complete" else "paused"
         record.reason = str(actor.get("reason") or f"responder_{action}")
         text = (
@@ -310,14 +280,7 @@ async def handle_slack_event(
         and str(channel.get("name", "")).startswith(policy.channel_prefix)
         and channel_id not in policy.excluded_channel_ids
     )
-    mention_user = event.get("user") if kind == "app_mention" else None
-    manual_start = (
-        record is None
-        and isinstance(mention_user, str)
-        and bool(mention_user)
-        and parse_mention(str(event.get("text") or ""))[1].lower() in START_PHRASES
-    )
-    if record is None and not enrollment and not manual_start:
+    if record is None and not enrollment:
         return None
     if (
         payload.get("team_id") != policy.workspace_id
@@ -328,11 +291,6 @@ async def handle_slack_event(
     event_ts = str(event.get("event_ts") or event.get("ts") or "")
     if not await claim_slack_event(event_id, channel_id, event_ts):
         return {"status": "duplicate"}
-    if manual_start:
-        assert isinstance(mention_user, str)
-        reply = await start_incident(channel_id, mention_user, background_tasks)
-        background_tasks.add_task(_reply_in_thread, channel_id, str(event.get("ts") or ""), reply)
-        return {"status": "accepted"}
     if record is None:
         assert isinstance(channel, dict)
         background_tasks.add_task(enroll_channel, channel_id, str(channel.get("name")), policy)

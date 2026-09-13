@@ -121,6 +121,13 @@ def test_parse_mention(control, expected):
 async def test_unknown_channels_fall_through_to_the_regular_path(configured):
     response, _ = await handle({"type": "message", "channel": "C9", "text": "hello"})
     assert response is None
+    # Asking the bot to follow a channel is the regular path's job (the manage_incident tool).
+    mention, _ = await handle(
+        {"type": "app_mention", "channel": "C9", "user": "U1", "text": "<@UBOT> incidents"},
+        event_id="E2",
+    )
+    assert mention is None
+    assert await service.INCIDENTS.get(service.incident_id("T1", "C9")) is None
 
 
 async def test_enrollment_binds_thread_queues_history_and_starts_one_turn(configured):
@@ -305,7 +312,7 @@ async def test_pause_cancels_runs_and_tells_the_channel(enrolled):
         {"type": "app_mention", "channel": "C1", "user": "U1", "text": "<@UBOT> pause", "ts": "6.0"}
     )
     assert response == {"status": "accepted"}
-    turns.cancel_active_runs.assert_awaited_once_with("thread-1")
+    turns.cancel_active_runs.assert_awaited_once_with("thread-1", keep_run_id="")
     saved = await service.INCIDENTS.get(enrolled.id)
     assert (saved.status, saved.reason) == ("paused", "responder_pause")
     assert saved.activity[-1].type == "control"
@@ -382,65 +389,3 @@ async def test_excluded_channels_are_ignored_after_enrollment(enrolled):
     assert response == mention == {"status": "ignored"}
     turns.queue_context.assert_not_awaited()
     turns.dispatch_turn.assert_not_awaited()
-
-
-async def test_mention_start_follows_a_channel_without_the_prefix(configured):
-    channels.get_slack_channel_info.return_value = {
-        **CHANNEL,
-        "id": "C7",
-        "name": "payments-oncall",
-    }
-    channels.fetch_slack_thread_messages.return_value = []
-
-    response, _ = await handle(
-        {
-            "type": "app_mention",
-            "channel": "C7",
-            "user": "U1",
-            "text": "<@UBOT> incidents",
-            "ts": "8.0",
-        }
-    )
-
-    assert response == {"status": "accepted"}
-    record = await service.INCIDENTS.get(service.incident_id("T1", "C7"))
-    assert record is not None and record.status == "watching"
-    assert record.channel_name == "payments-oncall"
-    replies = [call.args for call in channels.post_slack_thread_reply_with_ts.await_args_list]
-    assert any(args[1] == "8.0" and "joining #payments-oncall" in args[2] for args in replies)
-    assert any(
-        args[1] == "0" and "`pause`" in args[2] and "`complete`" in args[2] for args in replies
-    )
-
-
-async def test_mention_start_requires_a_connected_account_and_other_mentions_fall_through(
-    configured,
-):
-    channels.login_for_slack_id.return_value = None
-    response, _ = await handle(
-        {
-            "type": "app_mention",
-            "channel": "C7",
-            "user": "U9",
-            "text": "<@UBOT> incidents",
-            "ts": "8.1",
-        }
-    )
-    assert response == {"status": "accepted"}
-    assert await service.INCIDENTS.get(service.incident_id("T1", "C7")) is None
-    assert (
-        "Connect your Open SWE account"
-        in channels.post_slack_thread_reply_with_ts.await_args.args[2]
-    )
-
-    ordinary, _ = await handle(
-        {
-            "type": "app_mention",
-            "channel": "C7",
-            "user": "U1",
-            "text": "<@UBOT> fix the build",
-            "ts": "8.2",
-        },
-        event_id="E3",
-    )
-    assert ordinary is None

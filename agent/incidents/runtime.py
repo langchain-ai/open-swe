@@ -32,7 +32,8 @@ INCIDENT_SOURCE = "incidents_agent"
 INCIDENT_TOOL_NAMES = frozenset({"record_incident_report", "search_incidents", "read_incident"})
 
 
-def _current_run_id() -> str:
+def current_run_id() -> str:
+    """The id of the run executing right now, or "" outside a run."""
     try:
         config = get_config()
     except Exception:  # noqa: BLE001
@@ -72,7 +73,9 @@ class IncidentSession:
             "remediation. Do not repeat a completed action from an earlier turn. Delegate only "
             "within that same request and pass these limits to subagents. record_incident_report "
             "publishes the findings and updates the postmortem summary; do not duplicate those "
-            "Slack messages. Use Slack tools for additional communications only when requested.\n"
+            "Slack messages. Use Slack tools for additional communications only when requested. "
+            "manage_incident pauses, resumes, or completes this incident only when the current "
+            "authorized request asks for that; it notifies the channel itself.\n"
             "Current authorized responder request (null means automatic investigation): "
             + json.dumps(explicit_request)
         )
@@ -135,7 +138,7 @@ class IncidentSession:
         record = self.record
         digest = service.fingerprint(report_message(report, report.summary, None)[0])
         previous = await service.REPORTS.get(record.id)
-        run_id = _current_run_id()
+        run_id = current_run_id()
         # The postmortem update runs first: if it fails, nothing is recorded and the agent
         # sees the error instead of a report that was never fully written.
         await documents.update_from_report(record, report)

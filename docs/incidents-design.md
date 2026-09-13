@@ -17,6 +17,7 @@ main `agent` graph on the incident thread
   IncidentMiddleware  — incident instructions, watching/paused check, evidence from context and tools
   record_incident_report — validates citations, stores the report, updates the postmortem, posts when changed
   search_incidents / read_incident — retained history
+  manage_incident — start (follow this channel), pause, resume, complete; also on regular Slack runs
 
 run-completion webhook ──► agent.incidents.turns.handle_run_completion
 ```
@@ -29,7 +30,7 @@ An enrolled channel maps to one agent thread at the Slack location `(channel_id,
 
 ## Context and debounce
 
-Every channel message, including bot alerts, is queued for the thread as a context block with a citable `slack:<ts>` header, its permalink, and redacted text; the standard queue middleware drains it before the next model call. A plain message schedules one automatic turn with `after_seconds=15` unless a run is already pending or running, so a burst becomes one turn. A mention by any channel member can be a control word (`pause`, `resume`, `complete`, `reopen`). A question dispatches an explicit turn with `multitask_strategy="interrupt"`, answered in the mention's thread when it has one, and unlocks the agent's tools, so it requires the sender to have a connected Open SWE account, like any other Open SWE mention; unlinked senders get the standard account-link prompt. Paused and completed channels still accumulate context but schedule nothing; a resume with waiting context schedules a turn.
+Every channel message, including bot alerts, is queued for the thread as a context block with a citable `slack:<ts>` header, its permalink, and redacted text; the standard queue middleware drains it before the next model call. A plain message schedules one automatic turn with `after_seconds=15` unless a run is already pending or running, so a burst becomes one turn. A mention by any channel member can be a control word (`pause`, `resume`, `complete`, `reopen`); a question can ask for the same in plain words, and the agent's `manage_incident` tool applies the control and posts the notice without cancelling its own run. On a regular Slack run in a channel that is not enrolled, `manage_incident start` enrolls that channel for a connected Open SWE account. A question dispatches an explicit turn with `multitask_strategy="interrupt"`, answered in the mention's thread when it has one, and unlocks the agent's tools, so it requires the sender to have a connected Open SWE account, like any other Open SWE mention; unlinked senders get the standard account-link prompt. Paused and completed channels still accumulate context but schedule nothing; a resume with waiting context schedules a turn.
 
 ## Records
 

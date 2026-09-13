@@ -169,6 +169,11 @@ async def test_cancel_interrupts_pending_and_running_runs(record, platform):
     platform.runs.cancel_many.assert_awaited_once_with(
         thread_id="thread-1", run_ids=["a", "b"], action="interrupt"
     )
+    platform.runs.cancel_many.reset_mock()
+    await turns.cancel_active_runs("thread-1", keep_run_id="b")
+    platform.runs.cancel_many.assert_awaited_once_with(
+        thread_id="thread-1", run_ids=["a"], action="interrupt"
+    )
     assert await turns.has_active_run("thread-1") is True
     assert await turns.queued_context_count("thread-1") == 0
 
