@@ -9,6 +9,7 @@ import {
   type EnvironmentRefreshStep,
 } from "@/lib/api"
 import { formatRelativeTime } from "@/lib/utils"
+import { EnvironmentAuthProxy } from "./EnvironmentAuthProxy"
 
 const REFRESH_LABEL: Record<EnvironmentRefreshStatus, string> = {
   never: "Never refreshed",
@@ -124,6 +125,12 @@ function EnvironmentRow({
             {log}
           </pre>
         </details>
+      )}
+      {isAdmin && (
+        <EnvironmentAuthProxy
+          environmentSlug={environment.slug}
+          environmentName={environment.name}
+        />
       )}
     </div>
   )

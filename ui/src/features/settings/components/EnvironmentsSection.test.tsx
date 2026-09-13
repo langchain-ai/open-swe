@@ -29,7 +29,7 @@ function renderSection(isAdmin: boolean) {
 }
 
 describe("EnvironmentsSection", () => {
-  it("shows refresh outcomes without edit controls", async () => {
+  it("shows refresh outcomes and admin authentication controls", async () => {
     vi.spyOn(api, "listEnvironmentOptions").mockResolvedValue({
       default_slug: "default",
       environments: [
@@ -63,7 +63,17 @@ describe("EnvironmentsSection", () => {
     expect(screen.getByText(/Refresh failed/)).toBeTruthy()
     expect(screen.getByText("setup script exited 1")).toBeTruthy()
     expect(screen.getByText("Refresh log")).toBeTruthy()
-    expect(view.container.querySelector("button, input, textarea")).toBeNull()
+    expect(
+      screen.getByRole("button", {
+        name: "Configure authentication proxy for Default",
+      })
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("button", {
+        name: "Configure authentication proxy for Preview",
+      })
+    ).toBeTruthy()
+    expect(view.container.querySelector("input, textarea")).toBeNull()
   })
 
   it("never renders a refresh log for non-admins, even if one arrives", async () => {
@@ -89,6 +99,9 @@ describe("EnvironmentsSection", () => {
     expect(await screen.findByText(/Rebuilt 1 hour ago/)).toBeTruthy()
     expect(screen.queryByText("Refresh log")).toBeNull()
     expect(screen.queryByText(/hunter2/)).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: /authentication proxy/i })
+    ).toBeNull()
   })
 
   it("says so when an environment has never been refreshed", async () => {

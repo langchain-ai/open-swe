@@ -645,6 +645,9 @@ class EnvironmentStore(TypedStore[Environment]):
         record = await self.get(slug)
         if record is None:
             return False
+        from agent.dashboard.environment_auth import delete_environment_auth
+
+        await delete_environment_auth(slug)
         await self.delete(slug)
         from agent.dashboard.environment_refresh import remove_refresh_cron
 
@@ -823,36 +826,43 @@ def _stamp_captured(
 ENVIRONMENTS = EnvironmentStore()
 
 
-async def resolve_default_environment() -> Environment | None:
+async def resolve_default_environment(*, fail_on_error: bool = False) -> Environment | None:
     """Return the environment named ``default``, or ``None``.
 
     Fail-soft on purpose: this runs while a sandbox is being created, and a
     store failure must fall back to the base snapshot with no environment
-    prompt rather than fail the run.
+    prompt rather than fail the run. Runtime paths that also resolve environment
+    credentials opt into strict failure handling.
     """
     try:
         return await ENVIRONMENTS.get(DEFAULT_ENVIRONMENT_SLUG)
     except Exception:
+        if fail_on_error:
+            raise
         logger.warning("default environment resolution failed", exc_info=True)
         return None
 
 
-async def resolve_environment(slug: str | None) -> Environment | None:
+async def resolve_environment(
+    slug: str | None, *, fail_on_error: bool = False
+) -> Environment | None:
     """Return the environment a run uses: the one it selected, else ``default``.
 
-    Never raises, and a selection that no longer exists falls back to ``default``
-    rather than failing the run.
+    By default, a selection that no longer exists or cannot be read falls back
+    to ``default``. Runtime paths that resolve credentials request strict errors.
     """
     if not slug or slug == DEFAULT_ENVIRONMENT_SLUG:
-        return await resolve_default_environment()
+        return await resolve_default_environment(fail_on_error=fail_on_error)
     try:
         record = await ENVIRONMENTS.get(slug)
     except Exception:
+        if fail_on_error:
+            raise
         logger.warning("environment resolution failed for %s", slug, exc_info=True)
         record = None
     if record is None:
         logger.info("Environment %s is not configured; falling back to the default", slug)
-        return await resolve_default_environment()
+        return await resolve_default_environment(fail_on_error=fail_on_error)
     return record
 
 

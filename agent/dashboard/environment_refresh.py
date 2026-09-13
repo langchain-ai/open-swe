@@ -163,6 +163,7 @@ async def _create_builder_sandbox(record: Environment, snapshot_id: str | None) 
         raise RuntimeError("GitHub App installation token is unavailable")
     return await create_langsmith_sandbox(
         github_token=token,
+        environment_slug=record.slug,
         snapshot_id=snapshot_id,
         create_params={
             **record.sandbox_create_params(),

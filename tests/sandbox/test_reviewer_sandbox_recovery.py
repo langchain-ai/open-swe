@@ -17,6 +17,8 @@ from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_threa
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
 
+pytestmark = pytest.mark.usefixtures("fake_store")
+
 
 @pytest.mark.asyncio
 async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:

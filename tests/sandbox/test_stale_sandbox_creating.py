@@ -11,6 +11,8 @@ import pytest
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from agent.sandboxes.state import get_or_create_sandbox_backend_proxy
 
+pytestmark = pytest.mark.usefixtures("fake_store")
+
 
 @pytest.mark.asyncio
 async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
@@ -60,6 +62,7 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
         _github_proxy_token=None,
         _github_proxy_repositories=None,
         _base_proxy_config=None,
+        _environment_slug=None,
     ):
         return sandbox_backend
 
@@ -108,6 +111,7 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
         _github_proxy_token=None,
         _github_proxy_repositories=None,
         _base_proxy_config=None,
+        _environment_slug=None,
     ):
         return sandbox_backend
 
