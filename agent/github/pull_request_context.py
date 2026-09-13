@@ -24,9 +24,24 @@ query PullRequestFixReviews(
   $owner: String!, $repo: String!, $number: Int!, $cursor: String
 ) {
   repository(owner: $owner, name: $repo) {
+    defaultBranchRef { name }
     pullRequest(number: $number) {
+      baseRefName
+      headRefName
       reviewDecision
       mergeStateStatus
+      stack {
+        number
+        size
+        baseRefName
+        entries(first: 100) {
+          nodes {
+            position
+            pullRequest { number state isDraft }
+          }
+        }
+      }
+      stackEntry { position }
       latestOpinionatedReviews(first: 100) {
         nodes { author { login } state body url viewerDidAuthor lastEditedAt includesCreatedEdit }
       }
@@ -121,6 +136,49 @@ async def _graphql(
     return pull if isinstance(pull, dict) else None
 
 
+def _clean_ref(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _stack_summary(pull: Mapping[str, Any]) -> dict[str, Any] | None:
+    stack = pull.get("stack")
+    if not isinstance(stack, Mapping):
+        return None
+    entries_connection = stack.get("entries")
+    nodes = entries_connection.get("nodes") if isinstance(entries_connection, Mapping) else None
+    if not isinstance(nodes, list):
+        return None
+    entries: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, Mapping):
+            continue
+        position = node.get("position")
+        pull_request = node.get("pullRequest")
+        if not isinstance(pull_request, Mapping):
+            continue
+        number = pull_request.get("number")
+        if not isinstance(number, int) or isinstance(number, bool):
+            continue
+        entries.append(
+            {
+                "position": position
+                if isinstance(position, int) and not isinstance(position, bool)
+                else None,
+                "number": number,
+                "state": _text(pull_request.get("state")) or None,
+                "isDraft": pull_request.get("isDraft") is True,
+            }
+        )
+    number = stack.get("number")
+    size = stack.get("size")
+    return {
+        "number": number if isinstance(number, int) and not isinstance(number, bool) else None,
+        "size": size if isinstance(size, int) and not isinstance(size, bool) else None,
+        "baseRefName": _clean_ref(stack.get("baseRefName")),
+        "entries": entries,
+    }
+
+
 async def _fetch_reviews(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> dict[str, Any] | None:
@@ -140,10 +198,18 @@ async def _fetch_reviews(
         if pull is None:
             return None
         if cursor is None:
+            default_ref_node = pull.get("defaultBranchRef")
+            if isinstance(default_ref_node, Mapping):
+                default_ref = _clean_ref(default_ref_node.get("name"))
+            else:
+                default_ref = None
             decision = pull.get("reviewDecision")
             review_decision = decision if isinstance(decision, str) else None
             state = pull.get("mergeStateStatus")
             merge_state = state if isinstance(state, str) else None
+            base_ref = _clean_ref(pull.get("baseRefName"))
+            head_ref = _clean_ref(pull.get("headRefName"))
+            stack_summary = _stack_summary(pull)
             opinions = pull.get("latestOpinionatedReviews")
             nodes = opinions.get("nodes") if isinstance(opinions, dict) else None
             if isinstance(nodes, list):
@@ -212,6 +278,10 @@ async def _fetch_reviews(
             return {
                 "reviewDecision": review_decision,
                 "mergeState": merge_state,
+                "defaultBranch": default_ref,
+                "baseBranch": base_ref,
+                "headBranch": head_ref,
+                "stack": stack_summary,
                 "changesRequestedReviews": reviews,
                 "unresolvedReviewThreads": threads,
                 "truncated": truncated,
@@ -227,6 +297,10 @@ async def _fetch_reviews(
             return {
                 "reviewDecision": review_decision,
                 "mergeState": merge_state,
+                "defaultBranch": default_ref,
+                "baseBranch": base_ref,
+                "headBranch": head_ref,
+                "stack": stack_summary,
                 "changesRequestedReviews": reviews,
                 "unresolvedReviewThreads": threads[:_CONTEXT_LIMIT],
                 "truncated": truncated,
@@ -350,6 +424,60 @@ def _prompt_comment(value: Mapping[str, Any], trusted_comments: list[str]) -> st
     return f"(trusted self-authored, unedited comment {len(trusted_comments)} follows below)"
 
 
+def _stack_lines(context: Mapping[str, Any]) -> list[str]:
+    base_branch = _clean_ref(context.get("baseBranch"))
+    head_branch = _clean_ref(context.get("headBranch"))
+    default_branch = _clean_ref(context.get("defaultBranch"))
+    stack = context.get("stack")
+    stack_map = stack if isinstance(stack, Mapping) else None
+    if not base_branch and not stack_map:
+        return []
+    lines: list[str] = [""]
+    if stack_map:
+        number = stack_map.get("number")
+        size = stack_map.get("size")
+        base = _untrusted(stack_map.get("baseRefName")) if stack_map.get("baseRefName") else None
+        header = "Pull-request stack:"
+        if isinstance(number, int):
+            header += f" #{number}"
+            if isinstance(size, int):
+                header += f" ({size} PR{'s' if size != 1 else ''})"
+        if base:
+            header += f", stack base: {base}"
+        lines.append(header)
+        entries = stack_map.get("entries")
+        if isinstance(entries, list) and entries:
+            for entry in entries:
+                if not isinstance(entry, Mapping):
+                    continue
+                entry_number = entry.get("number")
+                if not isinstance(entry_number, int):
+                    continue
+                position = entry.get("position")
+                state = _untrusted(entry.get("state")) or "unknown"
+                marker = " <- this PR"
+                lines.append(
+                    f"- PR #{entry_number}"
+                    + (f" (layer {position})" if isinstance(position, int) else "")
+                    + f": {state}{' (draft)' if entry.get('isDraft') is True else ''}"
+                    + (marker if entry_number == context.get("number") else "")
+                )
+        lines.append(
+            "This PR is part of a stack. Rebase onto its parent branch, not the default branch. "
+            "Failures may originate in a parent layer; do not assume divergence from the default "
+            "branch. Merging a parent layer changes this PR's base."
+        )
+    elif default_branch and base_branch and base_branch != default_branch:
+        lines.append(
+            f"Base branch: {base_branch} (not the default branch {default_branch}). "
+            "This PR may be part of a stack; rebase onto the base branch and do not assume "
+            "divergence from the default branch."
+        )
+    if head_branch:
+        lines.append(f"Head branch: {head_branch}.")
+    return lines
+
+
 def build_fix_prompt(context: Mapping[str, Any]) -> str:
     """Render bounded PR context into a model-ready request."""
     trusted_comments: list[str] = []
@@ -412,6 +540,7 @@ def build_fix_prompt(context: Mapping[str, Any]) -> str:
                 lines.append("  Additional replies were truncated; inspect the linked PR.")
     else:
         lines.append("- None found." if context.get("reviewsAvailable") else "- Unavailable.")
+    lines.extend(_stack_lines(context))
     if context.get("truncated") is True:
         lines.extend(
             [
@@ -460,6 +589,10 @@ async def get_pull_request_context(record: object, token: str) -> dict[str, Any]
         "headSha": checks.get("headSha") if checks else None,
         "mergeState": reviews.get("mergeState") if reviews else None,
         "reviewDecision": reviews.get("reviewDecision") if reviews else None,
+        "defaultBranch": reviews.get("defaultBranch") if reviews else None,
+        "baseBranch": reviews.get("baseBranch") if reviews else None,
+        "headBranch": reviews.get("headBranch") if reviews else None,
+        "stack": reviews.get("stack") if reviews else None,
         "checksAvailable": checks is not None,
         "checks": checks.get("checks", []) if checks else [],
         "reviewsAvailable": reviews is not None,
