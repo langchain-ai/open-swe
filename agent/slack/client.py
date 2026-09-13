@@ -820,6 +820,76 @@ async def upload_slack_thread_file(
         return None, error
 
 
+SLACK_FILE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+
+async def download_slack_file(file_id: str) -> tuple[bytes | None, str | None]:
+    """Download a Slack file after resolving its private URL."""
+    if not SLACK_BOT_TOKEN:
+        return None, "missing_slack_bot_token"
+
+    if file_id.startswith(("http://", "https://")):
+        url = file_id
+    else:
+        try:
+            async with slack_client(token=SLACK_BOT_TOKEN) as client:
+                file_response = await client.files_info(file=file_id)
+            file_info = file_response.get("file")
+            url = file_info.get("url_private") if isinstance(file_info, dict) else None
+            if not isinstance(url, str) or not url:
+                return None, "missing_private_url"
+        except SlackApiError as exc:
+            error = slack_error(exc)
+            logger.warning("Slack file metadata lookup failed", extra={"slack_error": error})
+            return None, "missing_scope:files:read" if error == "missing_scope" else error
+        except SLACK_REQUEST_ERRORS as exc:
+            error = slack_error(exc)
+            logger.warning("Slack file metadata lookup failed", extra={"slack_error": error})
+            return None, error
+
+    def auth_headers(original_url: str, current_url: str) -> dict[str, str] | None:
+        def slack_host(target: str) -> bool:
+            host = (urlparse(target).hostname or "").lower()
+            return host == "files.slack.com" or host.endswith(".files.slack.com")
+
+        if slack_host(original_url) and slack_host(current_url):
+            return {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+        return None
+
+    try:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+            response, blocked = await request_with_safe_redirects(
+                http_client,
+                "GET",
+                url,
+                headers_for_url=auth_headers,
+                stream=True,
+            )
+            if blocked:
+                return None, "unsafe_download_url"
+            if response is None:
+                return None, "download_failed"
+            try:
+                response.raise_for_status()
+                try:
+                    content_length = int(response.headers.get("Content-Length", ""))
+                except ValueError:
+                    content_length = 0
+                if content_length > SLACK_FILE_DOWNLOAD_MAX_BYTES:
+                    return None, "file_too_large"
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(content) + len(chunk) > SLACK_FILE_DOWNLOAD_MAX_BYTES:
+                        return None, "file_too_large"
+                    content.extend(chunk)
+                return bytes(content), None
+            finally:
+                await response.aclose()
+    except (*SLACK_REQUEST_ERRORS, httpx2.HTTPError) as exc:
+        logger.warning("Slack file download failed", extra={"slack_error": slack_error(exc)})
+        return None, "download_failed"
+
+
 def _validate_slack_upload_url(url: str) -> tuple[bool, str]:
     parsed = urlparse(url)
     if (

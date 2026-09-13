@@ -4,9 +4,11 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
+import posixpath
 import re
 from datetime import UTC, datetime
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import httpx2
 from langchain_core.messages.content import create_text_block
@@ -265,6 +267,134 @@ async def _format_slack_run_links_section(thread_id: str) -> str:
 
 
 _OPEN_SWE_SENDER_ID = "system:open-swe"
+
+_SLACK_FILE_DIR = "/workspace/.open-swe/slack-files"
+_MAX_SLACK_FILE_ATTACHMENTS = 10
+
+
+def _slack_file_entries(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Files attached to the given messages, in first-seen order."""
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for message in messages:
+        files = message.get("files")
+        if not isinstance(files, list):
+            continue
+        for file_info in files:
+            if not isinstance(file_info, dict):
+                continue
+            file_id = file_info.get("id")
+            if not isinstance(file_id, str) or not file_id:
+                continue
+            dedupe_key = file_id
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            entries.append(file_info)
+            if len(entries) >= _MAX_SLACK_FILE_ATTACHMENTS:
+                return entries
+    return entries
+
+
+def _sanitize_slack_filename(name: Any, url: str) -> str:
+    filename = name.strip() if isinstance(name, str) else ""
+    if not filename or "/" in filename or "\x00" in filename:
+        parsed = urlparse(url).path
+        filename = posixpath.basename(parsed) if parsed else ""
+    filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename).strip("._") or "slack-file"
+    return filename[:120]
+
+
+async def _download_slack_files_to_sandbox(
+    entries: list[dict[str, Any]],
+    thread_id: str,
+    *,
+    environment_slug: str | None = None,
+    failures: list[str] | None = None,
+) -> list[tuple[str, str, str, int]]:
+    """Download Slack files and stage them in the thread's sandbox.
+
+    Returns ``(filename, sandbox_path, mimetype, size)`` entries for staged files.
+    Best-effort: a missing sandbox or a failed download only skips that file.
+    """
+    if not entries:
+        return []
+    try:
+        from agent.sandboxes.lifecycle import ensure_sandbox_for_thread
+
+        backend = await ensure_sandbox_for_thread(thread_id, environment_slug=environment_slug)
+    except Exception:
+        common.logger.warning(
+            "Could not reach sandbox for thread %s; skipping Slack file attachments",
+            thread_id,
+            exc_info=True,
+        )
+        return []
+    staged: list[tuple[str, str, str, int]] = []
+    used_names: set[str] = set()
+    for entry in entries:
+        mimetype = entry.get("mimetype")
+        if isinstance(mimetype, str) and mimetype.startswith("image/"):
+            continue
+        file_id = entry.get("id")
+        if not isinstance(file_id, str) or not file_id:
+            common.logger.info(
+                "Slack file download skipped", extra={"slack_error": "missing_file_id"}
+            )
+            continue
+        content, error = await slack_utils.download_slack_file(file_id)
+        if content is None:
+            common.logger.info(
+                "Slack file download skipped", extra={"slack_error": error or "unknown"}
+            )
+            if failures is not None and error == "missing_scope:files:read":
+                failures.append(
+                    "Slack could not download an attachment because the app is missing the "
+                    "`files:read` scope. Add that scope under OAuth & Permissions and reinstall "
+                    "the Slack app in this workspace."
+                )
+            continue
+        url = str(entry.get("url_private") or "")
+        filename = _sanitize_slack_filename(entry.get("name"), url)
+        base = filename
+        suffix = 1
+        while filename in used_names:
+            filename = f"{base.rsplit('.', 1)[0] if '.' in base else base}-{suffix}"
+            suffix += 1
+        used_names.add(filename)
+        sandbox_path = posixpath.join(_SLACK_FILE_DIR, filename)
+        content_size = len(content)
+        try:
+            responses = await backend.aupload_files([(sandbox_path, content)])
+        finally:
+            del content
+        if not responses:
+            continue
+        response = responses[0]
+        error = (
+            response.get("error")
+            if isinstance(response, dict)
+            else getattr(response, "error", None)
+        )
+        if error:
+            common.logger.info(
+                "Slack file staging failed", extra={"slack_error": str(error), "file": filename}
+            )
+            continue
+        staged.append((filename, sandbox_path, str(mimetype or "unknown"), content_size))
+    return staged
+
+
+def _slack_files_section(staged: list[tuple[str, str, str, int]]) -> str:
+    lines = [
+        "## Slack File Attachments",
+        "These files from Slack were staged into this thread's sandbox:",
+        *[
+            f"- `{filename}` ({mimetype}, {size} bytes) — sandbox path: `{path}`"
+            for filename, path, mimetype, size in staged
+        ],
+    ]
+    return "\n".join(lines)
 
 
 async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
@@ -938,6 +1068,21 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     ):
         common.logger.info("Queued Slack message edit for thread %s", thread_id)
         return
+
+    if persisted:
+        slack_file_failures: list[str] = []
+        staged_files = await _download_slack_files_to_sandbox(
+            _slack_file_entries(source_messages),
+            thread_id,
+            environment_slug=thread_environment,
+            failures=slack_file_failures,
+        )
+        if staged_files:
+            operational_context += f"\n\n{_slack_files_section(staged_files)}"
+        if slack_file_failures:
+            operational_context += "\n\n## Slack File Attachment Errors\n- " + "\n- ".join(
+                dict.fromkeys(slack_file_failures)
+            )
 
     explicitly_tagged = _interrupts_active_run(
         text,

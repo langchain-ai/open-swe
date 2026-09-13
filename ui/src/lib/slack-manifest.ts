@@ -4,6 +4,7 @@ const LEGACY_BOT_SCOPES = [
   "channels:history",
   "channels:read",
   "chat:write",
+  "files:read",
   "files:write",
   "groups:history",
   "groups:read",
@@ -67,7 +68,6 @@ export function slackAppManifest(
           ? [
               ...LEGACY_BOT_SCOPES,
               "code_channels:manage",
-              "files:read",
               // conversations.invite, for public and private channels.
               "channels:manage",
               "groups:write",

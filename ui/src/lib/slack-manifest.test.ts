@@ -7,7 +7,6 @@ import {
 
 const CODE_CHANNEL_SCOPES = [
   "code_channels:manage",
-  "files:read",
   // conversations.invite needs these, or a named invitee silently stays out.
   "channels:manage",
   "groups:write",
@@ -27,6 +26,7 @@ describe("slackAppManifest", () => {
     expect(manifest.oauth_config.scopes.bot).not.toEqual(
       expect.arrayContaining(CODE_CHANNEL_SCOPES)
     )
+    expect(manifest.oauth_config.scopes.bot).toContain("files:read")
     expect(manifest.settings.event_subscriptions.bot_events).not.toEqual(
       expect.arrayContaining(CODE_CHANNEL_EVENTS)
     )
