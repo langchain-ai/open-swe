@@ -133,6 +133,8 @@ async def _graphql(
     data = payload.get("data")
     repository = data.get("repository") if isinstance(data, dict) else None
     pull = repository.get("pullRequest") if isinstance(repository, dict) else None
+    if isinstance(pull, dict):
+        pull = {**pull, "repository": repository}
     return pull if isinstance(pull, dict) else None
 
 
@@ -198,7 +200,12 @@ async def _fetch_reviews(
         if pull is None:
             return None
         if cursor is None:
-            default_ref_node = pull.get("defaultBranchRef")
+            pull_repository = pull.get("repository")
+            default_ref_node = (
+                pull_repository.get("defaultBranchRef")
+                if isinstance(pull_repository, Mapping)
+                else None
+            )
             if isinstance(default_ref_node, Mapping):
                 default_ref = _clean_ref(default_ref_node.get("name"))
             else:
@@ -436,14 +443,14 @@ def _stack_lines(context: Mapping[str, Any]) -> list[str]:
     if stack_map:
         number = stack_map.get("number")
         size = stack_map.get("size")
-        base = _untrusted(stack_map.get("baseRefName")) if stack_map.get("baseRefName") else None
+        base = _clean_ref(stack_map.get("baseRefName"))
         header = "Pull-request stack:"
         if isinstance(number, int):
             header += f" #{number}"
             if isinstance(size, int):
                 header += f" ({size} PR{'s' if size != 1 else ''})"
         if base:
-            header += f", stack base: {base}"
+            header += f", stack base: {_untrusted(base)}"
         lines.append(header)
         entries = stack_map.get("entries")
         if isinstance(entries, list) and entries:
@@ -469,12 +476,13 @@ def _stack_lines(context: Mapping[str, Any]) -> list[str]:
         )
     elif default_branch and base_branch and base_branch != default_branch:
         lines.append(
-            f"Base branch: {base_branch} (not the default branch {default_branch}). "
+            f"Base branch: {_untrusted(base_branch)} "
+            f"(not the default branch {_untrusted(default_branch)}). "
             "This PR may be part of a stack; rebase onto the base branch and do not assume "
             "divergence from the default branch."
         )
     if head_branch:
-        lines.append(f"Head branch: {head_branch}.")
+        lines.append(f"Head branch: {_untrusted(head_branch)}.")
     return lines
 
 
