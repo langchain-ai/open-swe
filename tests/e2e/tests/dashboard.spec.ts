@@ -39,8 +39,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible();
 
     // The transcript that started in Slack is here too (incl. the PR link).
+    const pullRequestLink = page
+      .getByRole("link", { name: "Add greet() helper" })
+      .first();
+    await expect(pullRequestLink).toBeVisible();
+    await pullRequestLink.hover();
     await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
+      page.getByTestId("pr-hover-card-fakeorg/demo-1"),
     ).toBeVisible();
   });
 
@@ -225,12 +230,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/agents");
-    const dismissOnboarding = page.getByRole("button", {
-      name: "Maybe later",
-    });
-    await expect(dismissOnboarding).toBeVisible();
-    await dismissOnboarding.click();
-    await expect(dismissOnboarding).toBeHidden();
+    await dismissOnboardingIfShown(page);
 
     const prompt = "list my open langchainplus PRs";
     await typeIntoComposer(page, prompt);

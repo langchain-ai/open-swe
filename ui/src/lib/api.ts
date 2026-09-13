@@ -91,15 +91,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
-export async function transcribeAudio(audio: Blob): Promise<string> {
-  const response = await request<{ text: string }>("/voice/transcriptions", {
-    method: "POST",
-    body: audio,
-    headers: { "Content-Type": audio.type },
-  })
-  return response.text
-}
-
 export interface SessionUser {
   login: string
   email: string | null
@@ -188,7 +179,6 @@ export interface TeamSettings {
   model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
-  transcription_model?: string
   fable_enabled?: boolean
   org_guidelines?: string | null
   default_agent_model?: string | null
@@ -825,11 +815,6 @@ export const api = {
     request<TeamSettings>("/team-settings", {
       method: "PUT",
       body: JSON.stringify(body),
-    }),
-  saveTranscriptionModel: (transcription_model: string) =>
-    request<TeamSettings>("/team-settings/transcription", {
-      method: "PUT",
-      body: JSON.stringify({ transcription_model }),
     }),
   getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
   revealWorkspaceMCPHeaders: (name: string) =>

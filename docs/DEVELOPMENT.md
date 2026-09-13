@@ -175,8 +175,6 @@ The dev server then attaches that session to everything it proxies, and presents
 
 `pnpm run build`, `pnpm run typecheck`, and `pnpm run test` run across the workspace through Turborepo (`pnpm --filter open-swe-dashboard run <script>` scopes one); `pnpm run lint` (oxlint) and `pnpm run format` / `pnpm run format:check` (oxfmt) run once from the root over every JS and TS file.
 
-**Voice dictation** in the composer uses your OpenAI configuration (`OPENAI_API_KEY`, optional `OPENAI_BASE_URL`); admins choose the transcription model on the Admin page.
-
 ## Desktop app (experimental)
 
 The Electron app in `desktop/` includes the compiled dashboard UI. Run it next to the backend:
