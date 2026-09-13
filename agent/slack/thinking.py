@@ -306,16 +306,15 @@ async def stream_slack_thinking_steps(
 async def show_slack_thinking_status(
     *, client: LangGraphClient, thread_id: str, run_id: str, channel_id: str, thread_ts: str
 ) -> None:
-    """Keep Slack's animated "Thinking..." thread status alive until the run ends."""
+    """Keep Slack's animated "Thinking..." thread status alive until the run ends.
+
+    Slack stops the animation when the assistant posts a message, so the status
+    is refreshed in the background for the whole run and cleared by the run
+    completion webhook once no run is left.
+    """
     if not await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS):
         return
-
-    async def refresh() -> None:
-        while True:
-            await asyncio.sleep(_STATUS_REFRESH_SECONDS)
-            await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS)
-
-    refresher = asyncio.create_task(refresh())
+    refresher = asyncio.create_task(_refresh_thinking_status(channel_id, thread_ts))
     try:
         async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
             async for event in thread_stream.subscribe(["lifecycle"]):
@@ -330,15 +329,10 @@ async def show_slack_thinking_status(
         logger.warning("Slack thinking status observer failed for run %s", run_id, exc_info=True)
     finally:
         refresher.cancel()
-        if not await asyncio.shield(_thread_has_active_runs(client, thread_id)):
-            await asyncio.shield(set_slack_thread_status(channel_id, thread_ts, ""))
 
 
-async def _thread_has_active_runs(client: LangGraphClient, thread_id: str) -> bool:
-    try:
-        for status in ("pending", "running"):
-            if await client.runs.list(thread_id, status=status, limit=1):
-                return True
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not list runs for thread %s", thread_id, exc_info=True)
-    return False
+async def _refresh_thinking_status(channel_id: str, thread_ts: str) -> None:
+    """Re-assert the status periodically; Slack drops it on each assistant message."""
+    while True:
+        await asyncio.sleep(_STATUS_REFRESH_SECONDS)
+        await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS)
