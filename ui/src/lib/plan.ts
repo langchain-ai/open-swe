@@ -1,5 +1,7 @@
 /** Client for the sandboxed HTML plan-artifact review API. */
 
+import { queryOptions } from "@tanstack/react-query"
+
 import { dashboardApiBase } from "./api-base"
 import {
   dashboardForwardedHeaders,
@@ -104,6 +106,18 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export function getPlan(threadId: string): Promise<PlanData> {
   return req<PlanData>(`/plan/${encodeURIComponent(threadId)}`)
+}
+
+export function planQueryOptions(threadId: string) {
+  return queryOptions({
+    queryKey: ["plan", threadId] as const,
+    queryFn: () => getPlan(threadId),
+    retry: (count: number, error: Error) =>
+      !(
+        error instanceof PlanApiError &&
+        (error.status === 401 || error.status === 404)
+      ) && count < 3,
+  })
 }
 
 export async function getPlanComments(

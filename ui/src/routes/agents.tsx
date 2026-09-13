@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
   Outlet,
   createFileRoute,
@@ -7,6 +8,7 @@ import {
 } from "@tanstack/react-router"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
+import { planQueryOptions } from "@/lib/plan"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentStreamProvider } from "@/features/agents/lib/stream/AgentStreamProvider"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -32,6 +34,18 @@ function useAgentsTheme() {
   }, [])
 }
 
+/** Only shared plans render full screen, and the status arrives with the plan
+ * fetch, so the sidebar stays hidden until it resolves: showing it first would
+ * make it vanish again on every shared plan. */
+function useHideSidebarForPlan(threadId: string | undefined): boolean {
+  const plan = useQuery({
+    ...planQueryOptions(threadId ?? ""),
+    enabled: Boolean(threadId),
+  })
+  if (!threadId) return false
+  return plan.isPending || plan.data?.status === "shared"
+}
+
 function AgentsLayout() {
   useAgentsTheme()
   const session = useSession()
@@ -48,6 +62,9 @@ function AgentsLayout() {
     from: "/agents/$threadId_/plan",
     shouldThrow: false,
   })
+  const hideSidebar = useHideSidebarForPlan(
+    session.data ? planMatch?.params.threadId : undefined
+  )
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
   const location = useRouterState({
@@ -80,7 +97,7 @@ function AgentsLayout() {
       localOnly={localOnly}
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
-      hideSidebar={Boolean(planMatch)}
+      hideSidebar={hideSidebar}
     >
       <AgentStreamProvider
         threadId={activeLocalSessionId ?? activeThreadId ?? null}

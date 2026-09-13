@@ -4,11 +4,12 @@ import { ArrowLeft } from "lucide-react"
 import { useIsHydrated } from "@/lib/hydration"
 
 import { PlanReview } from "@/features/agents/components/PlanReview"
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"
 import { currentAuthRedirectPath } from "@/lib/auth-redirect"
-import { PlanApiError, getPlan } from "@/lib/plan"
+import { PlanApiError, planQueryOptions } from "@/lib/plan"
 import { cn } from "@/lib/utils"
 
 function Centered({
@@ -65,17 +66,14 @@ export function PlanView({
   onApprove?: (runId: string) => void
 }) {
   const mounted = useIsHydrated()
+  const sidebarCollapsed = useSidebarCollapsed()
+  const isDesktopApp =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   const query = useQuery({
-    queryKey: ["plan", threadId],
-    queryFn: () => getPlan(threadId),
+    ...planQueryOptions(threadId),
     refetchInterval: (q) =>
       q.state.data?.html || q.state.data?.markdown ? false : 2000,
-    retry: (count, error) =>
-      !(
-        error instanceof PlanApiError &&
-        (error.status === 401 || error.status === 404)
-      ) && count < 3,
   })
   const backLink = standalone ? <BackLink threadId={threadId} /> : null
 
@@ -122,7 +120,16 @@ export function PlanView({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {standalone && (
-        <div className="flex h-10 items-center border-b border-border px-3">
+        <div
+          className={cn(
+            "flex h-10 items-center border-b border-border px-3",
+            // Shared plans drop the sidebar, and with it the fixed expand toggle
+            // this padding clears.
+            plan.status !== "shared" &&
+              sidebarCollapsed &&
+              (isDesktopApp ? "pl-32" : "pl-14")
+          )}
+        >
           {backLink}
         </div>
       )}
