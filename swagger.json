@@ -1905,11 +1905,6 @@
             "default": true,
             "title": "Review Trace Links",
             "type": "boolean"
-          },
-          "transcription_model": {
-            "default": "gpt-transcribe",
-            "title": "Transcription Model",
-            "type": "string"
           }
         },
         "title": "TeamSettingsUpdate",
@@ -2090,17 +2085,6 @@
           }
         },
         "title": "ThreadResolveBody",
-        "type": "object"
-      },
-      "TranscriptionSettingsUpdate": {
-        "properties": {
-          "transcription_model": {
-            "default": "gpt-transcribe",
-            "title": "Transcription Model",
-            "type": "string"
-          }
-        },
-        "title": "TranscriptionSettingsUpdate",
         "type": "object"
       },
       "UserInstructionsUpdate": {
@@ -6837,54 +6821,6 @@
         ]
       }
     },
-    "/dashboard/api/team-settings/transcription": {
-      "put": {
-        "operationId": "api_put_transcription_settings_dashboard_api_team_settings_transcription_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TranscriptionSettingsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Put Transcription Settings Dashboard Api Team Settings Transcription Put",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Put Transcription Settings",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
     "/dashboard/api/threads": {
       "get": {
         "operationId": "api_list_threads_dashboard_api_threads_get",
@@ -8478,36 +8414,6 @@
           }
         ],
         "summary": "Api Get Thread Working Tree Diff",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/voice/transcriptions": {
-      "post": {
-        "operationId": "create_voice_transcription_dashboard_api_voice_transcriptions_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Create Voice Transcription Dashboard Api Voice Transcriptions Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Create Voice Transcription",
         "tags": [
           "dashboard"
         ]

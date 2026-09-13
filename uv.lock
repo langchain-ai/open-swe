@@ -1634,6 +1634,7 @@ name = "open-swe-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "cryptography" },
     { name = "deepagents" },
     { name = "exa-py" },
@@ -1657,7 +1658,7 @@ dependencies = [
     { name = "markdownify" },
     { name = "openai" },
     { name = "pyjwt" },
-    { name = "stagehand" },
+    { name = "slack-sdk" },
     { name = "uvicorn" },
     { name = "websockets" },
 ]
@@ -1673,6 +1674,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.14.3,<4.0.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "deepagents", specifier = "==0.7.13" },
     { name = "exa-py", specifier = ">=2.18.1" },
@@ -1700,7 +1702,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.4" },
-    { name = "stagehand", specifier = ">=3.23.0,<4.0.0" },
+    { name = "slack-sdk", specifier = ">=3.44.1,<4.0.0" },
     { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.78" },
     { name = "uvicorn", specifier = ">=0.52.4" },
     { name = "websockets", specifier = ">=16.1.1" },
@@ -2487,6 +2489,15 @@ wheels = [
 ]
 
 [[package]]
+name = "slack-sdk"
+version = "3.44.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/4e/371068dd7281139307e60cd18553b96b9c8c391a4c3040617192713a3cc4/slack_sdk-3.44.1.tar.gz", hash = "sha256:ca19505423789fa2a3189ff486f989f02e49289f008d0a5813df7255b3fb93ea", size = 256661, upload-time = "2026-09-03T14:21:13.879Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/fc/67352b742fc6fa520a550581b0284f5757e4e31a32327c2a00276747fd30/slack_sdk-3.44.1-py2.py3-none-any.whl", hash = "sha256:d6f20a0fbe3fecf9cac955c99d686301b48a645b7045472c3a0cdd186d7c42b2", size = 319865, upload-time = "2026-09-03T14:21:12.405Z" },
+]
+
+[[package]]
 name = "sniffio"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2515,26 +2526,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/26/8c/f9290339ef6d79badbc010f067cd769d6601ec11a57d78569c683fb4dd87/sse_starlette-3.3.4.tar.gz", hash = "sha256:aaf92fc067af8a5427192895ac028e947b484ac01edbc3caf00e7e7137c7bef1", size = 32427, upload-time = "2026-03-29T09:00:23.307Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f8/7f/3de5402f39890ac5660b86bcf5c03f9d855dad5c4ed764866d7b592b46fd/sse_starlette-3.3.4-py3-none-any.whl", hash = "sha256:84bb06e58939a8b38d8341f1bc9792f06c2b53f48c608dd207582b664fc8f3c1", size = 14330, upload-time = "2026-03-29T09:00:21.846Z" },
-]
-
-[[package]]
-name = "stagehand"
-version = "3.23.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "anyio" },
-    { name = "distro" },
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "sniffio" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/53/ce/66ee1591c4bc8a2a4615d986e166d5ff40c96f2e4d6ed94906680c31f259/stagehand-3.23.0.tar.gz", hash = "sha256:1a26631de1291f3b21238bf0c14fcd95083d419632ff9da64a0a20c87ea79c71", size = 290300, upload-time = "2026-08-20T01:11:19.881Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e8/0b/be3e7328eded67ba123e908802238948def272c428358405b07d3a464c26/stagehand-3.23.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:6aac8ae3aee9174cf9d6a0d278d666401436664cb76e069cc107c6efd90bff1c", size = 34611667, upload-time = "2026-08-20T01:11:23.423Z" },
-    { url = "https://files.pythonhosted.org/packages/c7/97/350624cca9cfde181d66a53aaf1e42dd7edb0f5df8e74f313cab4b03923e/stagehand-3.23.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:bc159bac0c55c8b4bf5d91f81e944cfb1dd16b922ec01a4bbaa3bc925c7116bb", size = 33309376, upload-time = "2026-08-20T01:11:28.212Z" },
-    { url = "https://files.pythonhosted.org/packages/d5/c6/74393018f8b5300471caeb94f6fdbf587dca9e98b4ff62f14e364f9712a4/stagehand-3.23.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:914fbd51263763981950db472e8148f58d75301e50a192524538ae50390a6bd1", size = 37386395, upload-time = "2026-08-20T01:11:33.855Z" },
-    { url = "https://files.pythonhosted.org/packages/4f/47/cbe9c82abb29ceb4f817dcb509a2a2e6ea403c3affd9a1eb07a61618bc1c/stagehand-3.23.0-py3-none-win_amd64.whl", hash = "sha256:c4855c8f604898a4b5778a1013cfde143699732c50eaaf2df70854394fdaf2ad", size = 30875778, upload-time = "2026-08-20T01:11:17.378Z" },
 ]
 
 [[package]]

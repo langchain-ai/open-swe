@@ -6,7 +6,13 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from agent.slack.http import slack_client
+from agent.slack.http import (
+    slack_bot_members,
+    slack_cache_key,
+    slack_client,
+    slack_http_errors,
+    slack_identity,
+)
 from agent.store import TypedStore, now_iso
 from agent.utils import ttl_cache
 
@@ -62,25 +68,25 @@ async def resolve_allowed_slack_bot(
 
 async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> AllowedSlackBot:
     login = admin["sub"]
-    async with slack_client() as client:
-        auth = await client.identity()
+    async with slack_http_errors(), slack_client() as client:
+        auth = await slack_identity(client)
         team_id = auth["team_id"]
         bot_id = body.bot_id
         user: dict[str, Any] | None = None
         if not bot_id.startswith("B"):
-            user = (await client.request("users.info", user=body.bot_id)).get("user")
+            user = (await client.users_info(user=body.bot_id)).get("user")
             profile = user.get("profile") if isinstance(user, dict) else None
             bot_id = profile.get("bot_id") if isinstance(profile, dict) else None
             if not isinstance(bot_id, str) or not bot_id:
                 raise HTTPException(400, "That Slack member is not a bot.")
-        bot = (await client.request("bots.info", bot=bot_id)).get("bot")
+        bot = (await client.bots_info(bot=bot_id)).get("bot")
         if not isinstance(bot, dict) or bot.get("deleted") or bot.get("id") != bot_id:
             raise HTTPException(400, "That Slack bot is unavailable.")
         user_id = bot.get("user_id") or ""
         if bot_id == auth.get("bot_id") or (user_id and user_id == auth.get("user_id")):
             raise HTTPException(400, "Open SWE cannot trigger itself.")
         if user_id and user is None:
-            user = (await client.request("users.info", user=user_id)).get("user")
+            user = (await client.users_info(user=user_id)).get("user")
         if (user_id or user is not None) and (
             not isinstance(user, dict)
             or user.get("is_bot") is not True
@@ -110,13 +116,13 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
 
 
 async def list_slack_bots() -> list[SlackBotOption]:
-    async with slack_client() as client:
+    async with slack_http_errors(), slack_client() as client:
 
         async def load() -> list[SlackBotOption]:
-            auth = await client.identity()
+            auth = await slack_identity(client)
             team_id = auth["team_id"]
             bots: dict[str, SlackBotOption] = {}
-            async for member in client.paginate("users.list", "members", limit=200):
+            async for member in slack_bot_members(client):
                 if (
                     member.get("is_bot") is not True
                     or member.get("deleted")
@@ -151,4 +157,4 @@ async def list_slack_bots() -> list[SlackBotOption]:
             return sorted(bots.values(), key=lambda bot: (bot.name.casefold(), bot.bot_id))
 
         # A directory is only a suggestion; every selection is reverified when added.
-        return await ttl_cache.cached(f"{client.cache_key}:bot-directory", 300, load)
+        return await ttl_cache.cached(f"{slack_cache_key(client)}:bot-directory", 300, load)

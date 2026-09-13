@@ -212,7 +212,6 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
         patch("agent.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
-        patch("agent.server.load_browser_tools", return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
@@ -398,34 +397,6 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert report_platform_issue in tools
-
-
-@pytest.mark.asyncio
-async def test_agent_loads_browser_tools_dynamically_without_a_browser_subagent() -> None:
-    from langchain_core.tools import StructuredTool
-
-    from agent.middleware import DynamicToolMiddleware
-
-    async def browser_navigate(url: str) -> str:
-        """Navigate to a URL."""
-        return url
-
-    browser_tool = StructuredTool.from_function(coroutine=browser_navigate)
-    with patch("agent.server.load_browser_tools", return_value=[browser_tool]):
-        captured = await _capture_create_deep_agent_kwargs()
-
-    tools = captured["tools"]
-    middleware = captured["middleware"]
-    subagents = captured["subagents"]
-    assert isinstance(tools, list)
-    assert isinstance(middleware, list)
-    assert isinstance(subagents, list)
-    assert browser_tool not in tools
-    assert {subagent["name"] for subagent in subagents} == {"general-purpose"}
-
-    dynamic_tools = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
-    loader = dynamic_tools.tools[0]
-    assert "browser_navigate (integration: Browser)" in loader.description
 
 
 @pytest.mark.asyncio
