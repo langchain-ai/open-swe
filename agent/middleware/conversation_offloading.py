@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Any, NotRequired
+from typing import Any, NotRequired, cast
 
 from deepagents.middleware.summarization import (
     DEEPAGENTS_DEFAULT_SUMMARY_PROMPT,
@@ -77,8 +77,9 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
                     include_system=True,
                     text_splitter=lambda text: list(text),
                 )
-                if summary_messages:
-                    messages_to_summarize = summary_messages
+                trimmed = list(summary_messages)
+                if trimmed:
+                    messages_to_summarize = cast("list[AnyMessage]", trimmed)
             response = await self.model.ainvoke(
                 DEEPAGENTS_DEFAULT_SUMMARY_PROMPT.format(
                     messages=get_buffer_string(messages_to_summarize, format="xml")
