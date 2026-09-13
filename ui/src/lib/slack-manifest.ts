@@ -5,6 +5,7 @@ const BASE_BOT_SCOPES = [
   "channels:read",
   "channels:join",
   "chat:write",
+  "commands",
   "files:write",
   "groups:history",
   "groups:read",
@@ -55,6 +56,15 @@ export function slackAppManifest(
       messages_tab_read_only_enabled: false,
     },
     bot_user: { display_name: "Open SWE", always_online: true },
+    slash_commands: [
+      {
+        command: "/openswe",
+        url: `${backendUrl}/webhooks/slack/commands`,
+        description: "Open SWE commands",
+        usage_hint: "incidents [start|stop]",
+        should_escape: false,
+      },
+    ],
   }
   if (codeChannelsEnabled) {
     features.code_channels = {

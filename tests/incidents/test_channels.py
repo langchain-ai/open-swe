@@ -381,3 +381,86 @@ async def test_excluded_channels_are_ignored_after_enrollment(enrolled):
     assert response == mention == {"status": "ignored"}
     turns.queue_context.assert_not_awaited()
     turns.dispatch_turn.assert_not_awaited()
+
+
+async def test_mention_start_follows_a_channel_without_the_prefix(configured):
+    channels.get_slack_channel_info.return_value = {
+        **CHANNEL,
+        "id": "C7",
+        "name": "payments-oncall",
+    }
+    channels.fetch_slack_thread_messages.return_value = []
+
+    response, _ = await handle(
+        {
+            "type": "app_mention",
+            "channel": "C7",
+            "user": "U1",
+            "text": "<@UBOT> incidents",
+            "ts": "8.0",
+        }
+    )
+
+    assert response == {"status": "accepted"}
+    record = await service.INCIDENTS.get(service.incident_id("T1", "C7"))
+    assert record is not None and record.status == "watching"
+    assert record.channel_name == "payments-oncall"
+    replies = [call.args for call in channels.post_slack_thread_reply_with_ts.await_args_list]
+    assert any(args[1] == "8.0" and "joining #payments-oncall" in args[2] for args in replies)
+    assert any(
+        args[1] == "0" and "`pause`" in args[2] and "`complete`" in args[2] for args in replies
+    )
+
+
+async def test_mention_start_requires_a_responder_and_other_mentions_fall_through(configured):
+    channels.get_slack_user_info.return_value = {"profile": {"email": "guest@example.com"}}
+    response, _ = await handle(
+        {
+            "type": "app_mention",
+            "channel": "C7",
+            "user": "U9",
+            "text": "<@UBOT> incidents",
+            "ts": "8.1",
+        }
+    )
+    assert response == {"status": "accepted"}
+    assert await service.INCIDENTS.get(service.incident_id("T1", "C7")) is None
+    assert "Only incident responders" in channels.post_slack_thread_reply_with_ts.await_args.args[2]
+
+    ordinary, _ = await handle(
+        {
+            "type": "app_mention",
+            "channel": "C7",
+            "user": "U1",
+            "text": "<@UBOT> fix the build",
+            "ts": "8.2",
+        },
+        event_id="E3",
+    )
+    assert ordinary is None
+
+
+async def test_slash_command_starts_and_stops_in_the_current_channel(configured, enrolled):
+    tasks = BackgroundTasks()
+    usage = await channels.slash_command("deploy", "C1", "U1", "T1", "A1", tasks)
+    wrong_workspace = await channels.slash_command("incidents", "C1", "U1", "T9", "A1", tasks)
+    already = await channels.slash_command("incidents", "C1", "U1", "T1", "A1", tasks)
+    stop = await channels.slash_command("incidents stop", "C1", "U1", "T1", "A1", tasks)
+    for task in tasks.tasks:
+        await task()
+
+    assert usage == channels.COMMAND_USAGE
+    assert "not enabled for this workspace" in wrong_workspace
+    assert "already following" in already
+    assert "stop following" in stop
+    assert (await service.INCIDENTS.get(enrolled.id)).status == "completed"
+
+    tasks = BackgroundTasks()
+    restart = await channels.slash_command("incidents start", "C1", "U1", "T1", "A1", tasks)
+    for task in tasks.tasks:
+        await task()
+    assert "following this channel again" in restart
+    assert (await service.INCIDENTS.get(enrolled.id)).status == "watching"
+    assert "not following" in await channels.slash_command(
+        "incidents stop", "C8", "U1", "T1", "A1", tasks
+    )

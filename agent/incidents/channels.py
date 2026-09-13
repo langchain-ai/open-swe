@@ -30,6 +30,13 @@ from agent.webhooks.common import upsert_agent_thread_metadata
 logger = logging.getLogger(__name__)
 
 CONTROL_WORDS = frozenset({"pause", "resume", "complete", "reopen"})
+START_PHRASES = frozenset(
+    {"incident", "incidents", "start incident", "incidents start", "incident start"}
+)
+COMMAND_USAGE = (
+    "Usage: `/openswe incidents` follows this channel as an incident; "
+    "`/openswe incidents stop` ends it."
+)
 HISTORY_LIMIT = 100
 _HANDLED_EVENTS = frozenset(
     {
@@ -94,7 +101,11 @@ def _introduction(record: Incident) -> str:
     link = dashboard_incident_url(record.id)
     if link:
         text += f"; the full incident is at <{link}|Open incident>"
-    return text + ". Mention me with a question, or with pause, resume, or complete."
+    return (
+        text + ". Mention me with a question. To turn it off, mention me with `pause` to stop "
+        "automatic analysis or `complete` to close the incident (or run `/openswe incidents stop`); "
+        "`resume` turns it back on."
+    )
 
 
 async def _post(
@@ -118,9 +129,12 @@ async def _post(
 
 
 async def enroll_channel(
-    channel_id: str, channel_name: str, policy: IncidentPolicy
+    channel_id: str, channel_name: str, policy: IncidentPolicy, *, manual: bool = False
 ) -> Incident | None:
-    """Join a prefix-matched channel and bind it to a new system-owned agent thread."""
+    """Join a channel and bind it to a new system-owned agent thread.
+
+    Automatic enrollment requires the channel prefix; a manual start by a responder does not.
+    """
     incident_id = service.incident_id(policy.workspace_id, channel_id)
     if await service.INCIDENTS.get(incident_id):
         return None
@@ -135,7 +149,7 @@ async def enroll_channel(
         async with slack_client(token=ENV.SLACK_BOT_TOKEN.get()) as slack:
             await slack.conversations_join(channel=channel_id)
         info = await get_slack_channel_info(channel_id, use_cache=False)
-        if not info or not service.channel_allowed(info, policy):
+        if not info or not service.channel_allowed(info, policy, require_prefix=not manual):
             record.status, record.reason = "needs_attention", "setup_failed"
             service.note(record, "error", "Channel is not an eligible public internal channel.")
             await service.save(record)
@@ -186,6 +200,75 @@ def _is_context(message: dict[str, Any], policy: IncidentPolicy) -> bool:
         and not _own_message(message, policy)
         and bool(turns.message_text(message))
     )
+
+
+async def _reply_in_thread(channel_id: str, thread_ts: str, text: str) -> None:
+    await post_slack_thread_reply_with_ts(
+        channel_id, thread_ts, text, unfurl_links=False, unfurl_media=False
+    )
+
+
+async def start_incident(channel_id: str, user_id: str, background_tasks: BackgroundTasks) -> str:
+    """Follow the current channel on a responder's request; returns the reply to show them."""
+    policy = await service.get_policy()
+    if not policy.enabled:
+        return "Incidents is not enabled in this workspace."
+    actor = await authorized_slack_user(user_id)
+    if actor is None:
+        return "Only incident responders can start an incident."
+    record = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
+    if record is not None:
+        if record.is_archived:
+            return "This channel is archived, so Incidents cannot follow it."
+        if record.status in {"paused", "completed"}:
+            action = "reopen" if record.status == "completed" else "resume"
+            background_tasks.add_task(apply_control, record, action, dict(actor))
+            return "Incidents is following this channel again."
+        return "Incidents is already following this channel."
+    info = await get_slack_channel_info(channel_id, use_cache=False)
+    if info is None or not service.channel_allowed(info, policy, require_prefix=False):
+        return "Incidents can only follow a public internal channel that is not excluded."
+    name = str(info.get("name") or channel_id)
+    background_tasks.add_task(enroll_channel, channel_id, name, policy, manual=True)
+    return f"Incidents is joining #{name}; findings will appear in the channel."
+
+
+async def stop_incident(channel_id: str, user_id: str, background_tasks: BackgroundTasks) -> str:
+    """Complete the current channel's incident on a responder's request."""
+    policy = await service.get_policy()
+    record = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
+    if record is None:
+        return "Incidents is not following this channel."
+    actor = await authorized_slack_user(user_id)
+    if actor is None:
+        return "Only incident responders can stop an incident."
+    if record.status == "completed":
+        return "This incident is already complete."
+    background_tasks.add_task(apply_control, record, "complete", dict(actor))
+    return "Incidents will stop following this channel and post the final summary."
+
+
+async def slash_command(
+    text: str,
+    channel_id: str,
+    user_id: str,
+    team_id: str,
+    api_app_id: str,
+    background_tasks: BackgroundTasks,
+) -> str:
+    """`/openswe incidents [start|stop]`, run in the channel the command was typed in."""
+    policy = await service.get_policy()
+    if team_id != policy.workspace_id or api_app_id != policy.slack_app_id:
+        return "Incidents is not enabled for this workspace."
+    words = text.lower().split()
+    if not words or words[0] not in {"incident", "incidents"} or len(words) > 2:
+        return COMMAND_USAGE
+    subcommand = words[1] if len(words) == 2 else "start"
+    if subcommand == "stop":
+        return await stop_incident(channel_id, user_id, background_tasks)
+    if subcommand != "start":
+        return COMMAND_USAGE
+    return await start_incident(channel_id, user_id, background_tasks)
 
 
 async def apply_control(record: Incident, action: str, actor: dict[str, Any]) -> Incident:
@@ -244,7 +327,14 @@ async def handle_slack_event(
         and str(channel.get("name", "")).startswith(policy.channel_prefix)
         and channel_id not in policy.excluded_channel_ids
     )
-    if record is None and not enrollment:
+    mention_user = event.get("user") if kind == "app_mention" else None
+    manual_start = (
+        record is None
+        and isinstance(mention_user, str)
+        and bool(mention_user)
+        and parse_mention(str(event.get("text") or ""))[1].lower() in START_PHRASES
+    )
+    if record is None and not enrollment and not manual_start:
         return None
     if (
         payload.get("team_id") != policy.workspace_id
@@ -255,6 +345,11 @@ async def handle_slack_event(
     event_ts = str(event.get("event_ts") or event.get("ts") or "")
     if not await claim_slack_event(event_id, channel_id, event_ts):
         return {"status": "duplicate"}
+    if manual_start:
+        assert isinstance(mention_user, str)
+        reply = await start_incident(channel_id, mention_user, background_tasks)
+        background_tasks.add_task(_reply_in_thread, channel_id, str(event.get("ts") or ""), reply)
+        return {"status": "accepted"}
     if record is None:
         assert isinstance(channel, dict)
         background_tasks.add_task(enroll_channel, channel_id, str(channel.get("name")), policy)

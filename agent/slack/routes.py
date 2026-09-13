@@ -555,6 +555,33 @@ async def slack_webhook(
     return await answer_slack_request(target, dispatch)
 
 
+@router.post("/webhooks/slack/commands")
+async def slack_command(
+    request: common.Request, background_tasks: common.BackgroundTasks
+) -> SlashCommandResponse:
+    """Handle the app's `/openswe` slash command."""
+    body = await request.body()
+    _verify_signature(request, body, "commands")
+
+    form = common.parse_qs(body.decode("utf-8"))
+    value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    if not (value("channel_id") and value("user_id")) or len(value("text")) > 200:
+        return ephemeral("That command was invalid.")
+
+    from agent.incidents import channels as incidents
+
+    return ephemeral(
+        await incidents.slash_command(
+            value("text"),
+            value("channel_id"),
+            value("user_id"),
+            value("team_id"),
+            value("api_app_id"),
+            background_tasks,
+        )
+    )
+
+
 @router.post("/webhooks/slack/code-channel-commands")
 async def slack_code_channel_command(
     request: common.Request, background_tasks: common.BackgroundTasks

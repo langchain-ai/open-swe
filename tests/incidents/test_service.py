@@ -308,3 +308,15 @@ async def test_retried_commands_are_not_repeated(configured, monkeypatch):
     assert (await service.submit_command(record.id, "ask", "Retry me", "r2", actor))["status"] == (
         "accepted"
     )
+
+
+def test_manual_starts_do_not_need_the_prefix_but_keep_the_other_rules():
+    policy = IncidentPolicy(channel_prefix="inc-", excluded_channel_ids=["C9"])
+    channel = {**CHANNEL, "id": "C7", "name": "payments-oncall"}
+    assert service.channel_allowed(channel, policy) is False
+    assert service.channel_allowed(channel, policy, require_prefix=False) is True
+    assert service.channel_allowed({**channel, "id": "C9"}, policy, require_prefix=False) is False
+    assert (
+        service.channel_allowed({**channel, "is_private": True}, policy, require_prefix=False)
+        is False
+    )

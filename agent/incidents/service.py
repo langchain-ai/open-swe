@@ -117,7 +117,11 @@ async def get_policy() -> IncidentPolicy:
 
 
 def channel_allowed(
-    channel: dict[str, Any], policy: IncidentPolicy, *, for_read: bool = False
+    channel: dict[str, Any],
+    policy: IncidentPolicy,
+    *,
+    for_read: bool = False,
+    require_prefix: bool = True,
 ) -> bool:
     public_internal = (
         channel.get("is_channel") is True
@@ -132,7 +136,7 @@ def channel_allowed(
     if for_read:
         return channel.get("is_member") is True
     return (
-        str(channel.get("name", "")).startswith(policy.channel_prefix)
+        (not require_prefix or str(channel.get("name", "")).startswith(policy.channel_prefix))
         and channel.get("id") not in policy.excluded_channel_ids
         and channel.get("is_archived") is not True
     )

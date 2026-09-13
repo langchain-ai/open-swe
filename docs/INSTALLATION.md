@@ -132,7 +132,16 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
         "bot_user": {
             "display_name": "Open SWE",
             "always_online": true
-        }
+        },
+        "slash_commands": [
+            {
+                "command": "/openswe",
+                "url": "https://<your-url>/webhooks/slack/commands",
+                "description": "Open SWE commands",
+                "usage_hint": "incidents [start|stop]",
+                "should_escape": false
+            }
+        ]
     },
     "oauth_config": {
         "redirect_urls": [
@@ -146,6 +155,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
                 "channels:read",
                 "channels:join",
                 "chat:write",
+                "commands",
                 "files:write",
                 "groups:history",
                 "groups:read",
@@ -261,7 +271,7 @@ The **Incidents** dashboard at `/incidents` investigates public internal Slack c
 1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**. Incidents needs the `channel_created`, `channel_rename`, `channel_archive`, `message.channels`, `app_mention`, and `agent_session_stopped` events. The manifest includes the public-channel scopes and `users:read` / `users:read.email` needed for authorized Slack controls.
 2. Set `OBSERVABILITY_AUTHORIZED_EMAILS` to a comma-separated list of responder email addresses. Users in `CONFIGURED_ADMINS` also have access; only admins can change incident settings. Document and history reads recheck current channel access.
 3. Optionally give the agent an incident tracker: add its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, under **Admin → Workspace MCPs** following [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers). The agent uses those tools like any other workspace integration, only for an explicit responder request.
-4. In **Admin → Incidents**, set a channel prefix such as `inc-` and optionally a model and a model-call limit per turn. Enable Incidents, then create a matching public channel or rename one into the prefix.
+4. In **Admin → Incidents**, set a channel prefix such as `inc-` and optionally a model and a model-call limit per turn. Enable Incidents, then create a matching public channel or rename one into the prefix. A responder can also follow any public channel by running `/openswe incidents` in it, or by mentioning the bot with `incidents`; `/openswe incidents stop`, or mentioning the bot with `complete`, ends the incident, and `pause` stops automatic analysis without closing it.
 
 Slack findings and control notices use compact messages directly in the incident channel. Questions posted in the channel receive channel replies; questions inside an existing thread receive replies in that thread. Detailed hypotheses, questions, coverage gaps, and citations remain in the incident report and postmortem. Changes only to those detailed hypotheses or questions do not generate another Slack update.
 
