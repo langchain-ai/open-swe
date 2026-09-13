@@ -4,9 +4,11 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
+import posixpath
 import re
 from datetime import UTC, datetime
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import httpx2
 from langchain_core.messages.content import create_text_block
@@ -265,6 +267,114 @@ async def _format_slack_run_links_section(thread_id: str) -> str:
 
 
 _OPEN_SWE_SENDER_ID = "system:open-swe"
+
+_SLACK_FILE_DIR = "/workspace/.open-swe/slack-files"
+_MAX_SLACK_FILE_ATTACHMENTS = 10
+
+
+def _slack_file_entries(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Non-image files attached to the given messages, in first-seen order."""
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for message in messages:
+        files = message.get("files")
+        if not isinstance(files, list):
+            continue
+        for file_info in files:
+            if not isinstance(file_info, dict) or file_info.get("url_private") in (None, ""):
+                continue
+            mimetype = file_info.get("mimetype")
+            if isinstance(mimetype, str) and mimetype.startswith("image/"):
+                continue
+            url = str(file_info["url_private"])
+            if url in seen:
+                continue
+            seen.add(url)
+            entries.append(file_info)
+            if len(entries) >= _MAX_SLACK_FILE_ATTACHMENTS:
+                return entries
+    return entries
+
+
+def _sanitize_slack_filename(name: Any, url: str) -> str:
+    filename = name.strip() if isinstance(name, str) else ""
+    if not filename or "/" in filename or "\x00" in filename:
+        parsed = urlparse(url).path
+        filename = posixpath.basename(parsed) if parsed else ""
+    filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename).strip("._") or "slack-file"
+    return filename[:120]
+
+
+async def _download_slack_files_to_sandbox(
+    entries: list[dict[str, Any]], thread_id: str
+) -> list[tuple[str, str]]:
+    """Download Slack files and stage them in the thread's sandbox.
+
+    Returns ``(filename, sandbox_path)`` pairs for the files that made it.
+    Best-effort: a missing sandbox or a failed download only skips that file.
+    """
+    if not entries:
+        return []
+    try:
+        from agent.sandboxes.lifecycle import ensure_sandbox_for_thread
+
+        backend = await ensure_sandbox_for_thread(thread_id)
+    except Exception:
+        common.logger.warning(
+            "Could not reach sandbox for thread %s; skipping Slack file attachments",
+            thread_id,
+            exc_info=True,
+        )
+        return []
+    downloads: list[tuple[str, bytes]] = []
+    used_names: set[str] = set()
+    for entry in entries:
+        url = str(entry.get("url_private"))
+        content, error = await slack_utils.download_slack_file(url)
+        if content is None:
+            common.logger.info(
+                "Slack file download skipped", extra={"slack_error": error or "unknown"}
+            )
+            continue
+        filename = _sanitize_slack_filename(entry.get("name"), url)
+        base = filename
+        suffix = 1
+        while filename in used_names:
+            filename = f"{base.rsplit('.', 1)[0] if '.' in base else base}-{suffix}"
+            suffix += 1
+        used_names.add(filename)
+        downloads.append((filename, content))
+    if not downloads:
+        return []
+    responses = await backend.aupload_files(
+        [(posixpath.join(_SLACK_FILE_DIR, name), content) for name, content in downloads]
+    )
+    staged: list[tuple[str, str]] = []
+    for (filename, _content), response in zip(downloads, responses, strict=False):
+        error = (
+            response.get("error")
+            if isinstance(response, dict)
+            else getattr(response, "error", None)
+        )
+        if error:
+            common.logger.info(
+                "Slack file staging failed", extra={"slack_error": str(error), "file": filename}
+            )
+            continue
+        staged.append((filename, posixpath.join(_SLACK_FILE_DIR, filename)))
+    return staged
+
+
+def _slack_files_section(staged: list[tuple[str, str]]) -> str:
+    lines = [
+        "## Slack File Attachments",
+        "These files from Slack were staged into this thread's sandbox:",
+        *[
+            f"- `{path}` (originally uploaded to Slack as `{filename}`)"
+            for filename, path in staged
+        ],
+    ]
+    return "\n".join(lines)
 
 
 async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
@@ -749,6 +859,11 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         source_messages, user_names_by_id
     )
 
+    staged_files = await _download_slack_files_to_sandbox(
+        _slack_file_entries(source_messages), thread_id
+    )
+    staged_files_section = _slack_files_section(staged_files) if staged_files else ""
+
     slack_thread_section = _format_slack_thread_section(
         channel_id, thread_ts, context_source, channel_context
     )
@@ -766,6 +881,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         f"{slack_thread_section}\n\n"
         f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
+        + (f"\n\n{staged_files_section}" if staged_files_section else "")
         + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
     )
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]

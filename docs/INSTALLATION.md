@@ -145,6 +145,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
                 "channels:history",
                 "channels:read",
                 "chat:write",
+                "files:read",
                 "files:write",
                 "groups:history",
                 "groups:read",
@@ -192,6 +193,8 @@ SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```
 
 Both Slack URLs must point at the Open SWE deployment, and Block Kit buttons only work with Interactivity enabled and pointed at `/webhooks/slack/interactivity`. Slack messages are routed to the thread's repository, a `repo:owner/name` token in the message, or the team default repository. Open SWE refuses Slack Connect channels (`is_ext_shared`) and fails closed when it cannot verify a channel.
+
+`files:read` lets Open SWE download non-image files attached to a message (archives, logs, CSVs) and stage them in the thread's sandbox, where the agent reads them by path. Existing installations must add the scope in **OAuth & Permissions** and reinstall the app before attachments reach the agent; without it, uploads stay invisible and only the message text is used.
 
 Slack verifies the events Request URL the first time it can reach it; if the backend is not up yet when you create the app, use **Retry** under **Event Subscriptions** after step 7.
 
