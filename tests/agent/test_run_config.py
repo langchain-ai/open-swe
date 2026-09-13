@@ -97,3 +97,23 @@ def test_bools_are_not_accepted_as_integers():
 
 def test_numeric_strings_still_coerce_to_int():
     assert RunConfig.parse({"pr_number": "7"}).pr_number == 7
+
+
+def test_dump_drops_extras_that_cannot_be_json_encoded():
+    class ProxyUser:
+        pass
+
+    cfg = RunConfig.parse(
+        {
+            "thread_id": "t1",
+            "github_login": "octocat",
+            "langgraph_auth_user": ProxyUser(),
+            "nested": {"user": ProxyUser()},
+            "custom": {"a": 1},
+        }
+    )
+    assert cfg.dump() == {
+        "thread_id": "t1",
+        "github_login": "octocat",
+        "custom": {"a": 1},
+    }

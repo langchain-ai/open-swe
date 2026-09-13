@@ -13,26 +13,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  promote:
+  typecheck:
+    name: Typecheck the commit to promote
     runs-on: ubuntu-latest
     outputs:
-      promoted_sha: ${{ steps.promoted.outputs.sha }}
+      sha: ${{ steps.candidate.outputs.sha }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: main
-          fetch-depth: 0
-      - name: Record promoted commit
-        id: promoted
+      - name: Record candidate commit
+        id: candidate
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Force-push main to prod
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Run typecheck
+        run: make typecheck
+
+  promote:
+    needs: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.typecheck.outputs.sha }}
+          fetch-depth: 0
+      - name: Force-push the typechecked commit to prod
         run: |
           git push --force origin HEAD:refs/heads/prod
 
   release-desktop-nightly:
-    needs: promote
+    needs: [typecheck, promote]
     uses: ./.github/workflows/desktop-release.yml
     with:
-      release_ref: ${{ needs.promote.outputs.promoted_sha }}
+      release_ref: ${{ needs.typecheck.outputs.sha }}
       nightly: true
     secrets: inherit

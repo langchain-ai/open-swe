@@ -4,8 +4,9 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useState,
 } from "react"
-import { useStream } from "@langchain/react"
+import { useChannelEffect, useStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 
 import { agentsApi } from "@/features/agents/lib/api"
@@ -18,7 +19,6 @@ import {
   createLocalGraphClient,
   dashboardFetch,
 } from "@/lib/langgraph-client"
-import { trackDatadogAction } from "@/lib/datadog"
 import { selectStreamFor, useStreamPool } from "./streamPool"
 import type { ReactNode } from "react"
 import type {
@@ -31,10 +31,6 @@ export type { AgentStream, AgentThreadTransport } from "./streamPool"
 
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
-// The SDK stops retrying after this many failed reconnects and the instance is
-// dead for good (isLoading frozen, no error). ~5 minutes of backoff covers a
-// wifi blip or a backend deploy; anything longer is caught by the reconcile kick.
-const MAX_RECONNECT_ATTEMPTS = 50
 
 const AgentStreamContext = createContext<AgentStream | null>(null)
 
@@ -56,26 +52,21 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [cloud]
   )
   const pool = useStreamPool.getState
+  const [isOffloading, setIsOffloading] = useState(false)
 
   const stream = useStream({
     client,
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
-    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
-    onReconnect: ({ attempt, cause }) => {
-      trackDatadogAction("agent-stream.reconnect", {
-        threadId: entry.threadId,
-        attempt,
-        cause: cause instanceof Error ? cause.message : String(cause),
-      })
-    },
     onThreadId: (threadId) => pool().rekey(entry.id, threadId),
     onCreated: () => {
+      setIsOffloading(false)
       pool().runAccepted(entry.id)
       if (cloud) invalidateAgentThreadLists(queryClient)
     },
     onCompleted: () => {
+      setIsOffloading(false)
       if (!cloud) return
       const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
       if (threadId) {
@@ -87,8 +78,22 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     },
   })
 
+  useChannelEffect(stream, ["custom"], {
+    onEvent: (event) => {
+      if (event.method !== "custom" || event.params.namespace.length) return
+      const payload = event.params.data.payload
+      if (payload?.type === "conversation_offloading") {
+        setIsOffloading(payload.status === "started")
+      }
+    },
+    onError: () => setIsOffloading(false),
+  })
+
   const publish = useStreamPool((state) => state.publish)
-  useLayoutEffect(() => publish(entry.id, stream), [entry.id, publish, stream])
+  useLayoutEffect(
+    () => publish(entry.id, { ...stream, isOffloading }),
+    [entry.id, publish, stream, isOffloading]
+  )
 
   return null
 }
@@ -140,7 +145,7 @@ export function AgentStreamProvider({
   return (
     <>
       {entries.map((entry) => (
-        <PooledStream key={`${entry.id}:${entry.generation}`} entry={entry} />
+        <PooledStream key={entry.id} entry={entry} />
       ))}
       {stream && (
         <AgentStreamContext.Provider value={stream}>

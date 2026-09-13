@@ -4,12 +4,13 @@ import asyncio
 import base64
 import json
 import logging
+import shlex
 from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx2
 from deepagents.backends import LangSmithSandbox
-from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from deepagents.backends.protocol import DeleteResult, ExecuteResponse, SandboxBackendProtocol
 from langsmith.sandbox import (
     AsyncSandboxClient,
     CommandTimeoutError,
@@ -47,7 +48,6 @@ PROXY_CONFIG_NOT_READY_STATUS = 400
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
-PROXY_MODEL_KEY_PLACEHOLDER = "proxy-injected"
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -191,32 +191,6 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
                 }
             ],
         },
-    ]
-
-
-def _stagehand_proxy_rules() -> list[dict[str, Any]]:
-    model = ENV.STAGEHAND_MODEL.get()
-    provider = model.split("/", 1)[0].split(":", 1)[0]
-    key = (
-        ENV.STAGEHAND_MODEL_API_KEY.optional()
-        or ENV.MODEL_API_KEY.optional()
-        or ENV.ANTHROPIC_API_KEY.optional()
-    )
-    if not key:
-        return []
-    if provider == "anthropic":
-        host, header, value = "api.anthropic.com", "x-api-key", key
-    elif provider == "openai":
-        host, header, value = "api.openai.com", "Authorization", f"Bearer {key}"
-    else:
-        return []
-    return [
-        {
-            "name": "stagehand-model",
-            "match_hosts": [host],
-            "headers": [{"name": header, "type": "opaque", "value": value}],
-            "env_vars": {"MODEL_API_KEY": PROXY_MODEL_KEY_PLACEHOLDER},
-        }
     ]
 
 
@@ -407,16 +381,16 @@ async def configure_github_proxy(
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
-    # Retire rules saved by the former personal LangSmith connection.
+    # Retire credentials saved by removed built-in integrations.
     preserved_rules = [
         rule
         for rule in (custom_rules if isinstance(custom_rules, list) else [])
-        if not isinstance(rule, dict) or rule.get("name") != "open-swe-langsmith"
+        if not isinstance(rule, dict)
+        or rule.get("name") not in {"open-swe-langsmith", "stagehand-model"}
     ]
     proxy_config["rules"] = [
         *preserved_rules,
         *_github_proxy_rules(github_token),
-        *_stagehand_proxy_rules(),
     ]
     payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
@@ -656,6 +630,18 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
+
+    async def adelete(self, file_path: str) -> DeleteResult:
+        quoted = shlex.quote(file_path)
+        exists = await self.aexecute(f"test -e {quoted} || test -L {quoted}")
+        if exists.exit_code is not None and exists.exit_code != 0:
+            return DeleteResult(error=f"Error: '{file_path}' not found")
+        result = await self.aexecute(f"rm -rf {quoted}")
+        if result.exit_code == 0:
+            return DeleteResult(path=file_path)
+        return DeleteResult(
+            error=f"Error deleting file '{file_path}': {result.output.strip() or 'unknown error'}"
+        )
 
     async def aexecute(
         self,
