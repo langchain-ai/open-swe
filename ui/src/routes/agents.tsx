@@ -50,6 +50,11 @@ function AgentsLayout() {
   })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
+  const runtimeThreadId = activeLocalSessionId ?? activeThreadId ?? null
+  // Only a thread route has to wait for the profile: mounting the runtime the
+  // profile does not select hydrates that thread's transcript a second time.
+  const awaitingRuntimeChoice =
+    Boolean(session.data) && profile.isPending && runtimeThreadId !== null
   const location = useRouterState({
     select: (state) => state.location,
   })
@@ -81,13 +86,13 @@ function AgentsLayout() {
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
-      {session.data && profile.isPending ? (
+      {awaitingRuntimeChoice ? (
         <main className="flex min-w-0 flex-1 items-center justify-center p-6">
           <Skeleton className="h-40 w-full max-w-md" />
         </main>
       ) : experimentalAssistantUi ? (
         <ExperimentalRuntimeProvider
-          threadId={activeLocalSessionId ?? activeThreadId ?? null}
+          threadId={runtimeThreadId}
           transport={activeLocalSessionId ? "local" : "cloud"}
           cloudEnabled={Boolean(session.data)}
           onThreadCreated={(id) => {
@@ -101,7 +106,7 @@ function AgentsLayout() {
         </ExperimentalRuntimeProvider>
       ) : (
         <AgentStreamProvider
-          threadId={activeLocalSessionId ?? activeThreadId ?? null}
+          threadId={runtimeThreadId}
           transport={activeLocalSessionId ? "local" : "cloud"}
           onThreadCreated={(id) => {
             if (!activeThreadId) {
