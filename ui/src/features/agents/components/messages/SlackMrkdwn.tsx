@@ -1,6 +1,8 @@
 import { Fragment } from "react"
 import type { ReactNode } from "react"
 
+import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
+
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"])
 const LINK_CLASS =
   "text-foreground/90 underline decoration-foreground/40 break-words [overflow-wrap:anywhere]"
@@ -113,7 +115,7 @@ function slackTokenNode(token: string, key: string): ReactNode {
 
   const linkText = rawLabel || rawTarget
   return (
-    <a
+    <PreviewablePullRequestLink
       key={key}
       href={href}
       target="_blank"
@@ -121,7 +123,7 @@ function slackTokenNode(token: string, key: string): ReactNode {
       className={LINK_CLASS}
     >
       {renderRange(linkText, 0, linkText.length, `${key}-label`)}
-    </a>
+    </PreviewablePullRequestLink>
   )
 }
 
