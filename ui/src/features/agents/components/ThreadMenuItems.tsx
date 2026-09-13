@@ -3,7 +3,6 @@ import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
   CopyIcon,
-  LockIcon,
   PushPinIcon,
   PushPinSlashIcon,
   TrashIcon,
@@ -21,7 +20,6 @@ export function ThreadMenuItems({
   onTogglePin,
   onToggleArchived,
   onDelete,
-  onContinuePrivately,
 }: {
   thread: AgentThread | null
   pinned: boolean
@@ -30,7 +28,6 @@ export function ThreadMenuItems({
   onTogglePin: () => void
   onToggleArchived: () => void
   onDelete: () => void
-  onContinuePrivately?: () => void
 }) {
   return (
     <>
@@ -80,16 +77,6 @@ export function ThreadMenuItems({
         >
           <CopyIcon className="size-3.5" />
           Copy sandbox ID
-        </Menu.Item>
-      )}
-      {thread && thread.visibility !== "private" && onContinuePrivately && (
-        <Menu.Item
-          onClick={onContinuePrivately}
-          title="Copy this transcript into a new private thread that only you can prompt"
-          className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-        >
-          <LockIcon className="size-3.5" />
-          Continue privately
         </Menu.Item>
       )}
       <Menu.Item

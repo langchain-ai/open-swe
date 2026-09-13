@@ -1,4 +1,5 @@
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -8,7 +9,7 @@ from agent.tools import automations
 
 @pytest.fixture(autouse=True)
 def admin(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(automations, "require_admin", lambda action: None)
+    monkeypatch.setattr(automations, "require_admin", AsyncMock(return_value=None))
     monkeypatch.setattr(
         automations,
         "configurable",
@@ -34,13 +35,16 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
     assert called["kwargs"] == {
         "email": "alice@example.com",
         "allow_admin_thread": True,
+        "use_workspace_credentials": False,
     }
     assert called["body"].repo == "langchain-ai/open-swe"
 
 
 async def test_automation_tools_recheck_admin(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
-        automations, "require_admin", lambda action: "Only workspace admins can manage automations."
+        automations,
+        "require_admin",
+        AsyncMock(return_value="Only workspace admins can manage automations."),
     )
 
     result = await automations.delete_automation("schedule-1")

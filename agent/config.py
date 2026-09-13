@@ -271,6 +271,11 @@ ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention d
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
+ENV.var(
+    "SLACK_PUBLIC_BASE_URL",
+    "Public URL for Slack webhooks and the Sign in with Slack callback; defaults to "
+    "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
+)
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
@@ -317,31 +322,18 @@ ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks
 
 # --- Models and tools ------------------------------------------------------------------------
 ENV.var("ANTHROPIC_API_KEY", "Anthropic API key.", secret=True)
-ENV.var("OPENAI_API_KEY", "OpenAI API key (models and voice dictation).", secret=True)
+ENV.var("OPENAI_API_KEY", "OpenAI API key.", secret=True)
 ENV.var("OPENAI_BASE_URL", "OpenAI-compatible API base URL.", aliases=("OPENAI_API_BASE",))
 ENV.var("GOOGLE_API_KEY", "Google AI API key.", secret=True)
 ENV.var("GROQ_API_KEY", "Groq API key.", secret=True)
 ENV.var("FIREWORKS_API_KEY", "Fireworks API key.", secret=True)
 ENV.var("BASETEN_API_KEY", "Baseten API key.", secret=True)
-ENV.var("MODEL_API_KEY", "Generic model API key handed to sandbox tooling.", secret=True)
 ENV.var("LLM_MODEL_ID", "Default model in provider:model form.")
 ENV.var(
     "LLM_REASONING_EFFORT",
     "Reasoning effort for the default model (low, medium, high, max) when no team or profile setting applies.",
 )
 ENV.var("LLM_FALLBACK_MODEL_ID", "Fallback model in provider:model form.")
-ENV.var(
-    "STAGEHAND_MODEL",
-    "Model Stagehand browser automation uses.",
-    default="anthropic/claude-sonnet-4-5",
-)
-ENV.var("STAGEHAND_MODEL_API_KEY", "API key for the Stagehand model.", secret=True)
-ENV.var("STAGEHAND_HEADLESS", "Run the Stagehand browser headless.", default="true")
-ENV.var(
-    "STAGEHAND_LOCAL_CHROME_PATH",
-    "Chromium binary for local Stagehand runs.",
-    default="/usr/bin/chromium",
-)
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
 ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"
