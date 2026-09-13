@@ -81,12 +81,10 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     with (
         patch("agent.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps,
         patch("agent.server._notion_tools_for", AsyncMock(return_value=[])) as notion,
-        patch("agent.server.load_browser_tools", return_value=[]) as browser,
     ):
         result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(config))
     mcps.assert_awaited_once_with(workspace_mcp_source)
     notion.assert_awaited_once_with(None)
-    browser.assert_called_once()
     assert isinstance(result["backend"].default, SandboxBackendProxy)
     names = {_registered_tool_name(tool) for tool in result["tools"]}
     assert {
