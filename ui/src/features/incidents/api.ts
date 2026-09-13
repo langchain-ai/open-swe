@@ -4,12 +4,7 @@ import {
   dashboardForwardedHeaders,
 } from "@/lib/dashboard-fetch"
 
-export type IncidentView =
-  | "active"
-  | "paused"
-  | "needs_attention"
-  | "completed"
-  | "history"
+export type IncidentView = "active" | "inactive" | "all" | "history"
 export type IncidentAction =
   | "ask"
   | "investigate_again"

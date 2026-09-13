@@ -88,7 +88,8 @@ async def update_settings(
 @router.get("/records")
 async def list_incidents(
     session: Annotated[dict[str, Any], Depends(_responder)],
-    view: Literal["active", "paused", "needs_attention", "completed"] | None = None,
+    view: Literal["active", "inactive", "all", "paused", "needs_attention", "completed"]
+    | None = None,
     q: str | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     cursor: str | None = None,

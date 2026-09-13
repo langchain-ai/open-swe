@@ -391,9 +391,11 @@ async def list_incidents(
             continue
         item = summary(record) if can_read else setup_summary(record)
         if view and view != "all":
-            if view == "active" and record.status not in {"pending", "watching", "investigating"}:
-                continue
-            if view != "active" and record.status != view:
+            statuses = {
+                "active": {"pending", "watching", "investigating", "needs_attention"},
+                "inactive": {"paused", "completed"},
+            }.get(view, {view})
+            if record.status not in statuses:
                 continue
         if q and q.lower() not in f"{item['title']} {item['channel_name']}".lower():
             continue

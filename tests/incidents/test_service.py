@@ -175,6 +175,42 @@ async def test_admin_sees_redacted_setup_failure_but_responder_cannot(configured
     assert detail["allowed_actions"] == []
 
 
+@pytest.mark.parametrize(
+    ("view", "expected"),
+    [
+        ("active", ["pending", "investigating", "watching", "needs_attention"]),
+        ("inactive", ["paused", "completed"]),
+        ("all", ["pending", "investigating", "watching", "needs_attention", "paused", "completed"]),
+    ],
+)
+async def test_activity_filters_paginate_matching_incidents(
+    configured, readable_channel, view, expected
+):
+    for index, status in enumerate(
+        ["pending", "investigating", "watching", "needs_attention", "paused", "completed"]
+    ):
+        record = Incident(
+            id=status,
+            workspace_id="T1",
+            channel_id="C1",
+            thread_id=f"thread-{status}",
+            channel_name="inc-api",
+            status=status,
+            joined=True,
+            updated_at=f"2026-09-12T12:{59 - index}:00+00:00",
+        )
+        await service.INVESTIGATIONS.put(record.id, record)
+    items = []
+    cursor = None
+    while True:
+        page = await service.list_incidents(view=view, q="api", limit=2, cursor=cursor)
+        items.extend(item["id"] for item in page["items"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    assert items == expected
+
+
 async def test_command_retries_remain_idempotent_after_state_change(configured, readable_channel):
     import time
 

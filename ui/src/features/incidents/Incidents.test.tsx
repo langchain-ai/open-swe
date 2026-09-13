@@ -131,7 +131,7 @@ it("applies view and search filters through the API and links the matching incid
   stubFetch(async (input: string) => {
     const url = new URL(input, "http://localhost")
     const matches =
-      url.searchParams.get("view") === "paused" &&
+      url.searchParams.get("view") === "inactive" &&
       url.searchParams.get("q") === "checkout"
     return Response.json({
       items: matches ? [{ ...summary, status: "paused" }] : [],
@@ -144,7 +144,7 @@ it("applies view and search filters through the API and links the matching incid
   }
   mount(<Page />)
   await screen.findByText("Waiting for matching channel events")
-  fireEvent.click(screen.getByRole("button", { name: "Paused" }))
+  fireEvent.click(screen.getByRole("button", { name: "Inactive" }))
   fireEvent.change(screen.getByRole("searchbox"), {
     target: { value: "checkout" },
   })

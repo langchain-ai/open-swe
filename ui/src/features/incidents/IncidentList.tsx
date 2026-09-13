@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
-import { ArrowRight, Search } from "lucide-react"
+import { ArrowRight, History, Search } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -58,15 +58,28 @@ export function IncidentList({
   const filtered = Boolean(search.trim())
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-10 sm:py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Incidents</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {view === "history" ? "Incident history" : "Incidents"}
+        </h1>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onViewChange(view === "history" ? "all" : "history")}
+        >
+          <History className="size-3.5" />
+          {view === "history" ? "Current incidents" : "Incident history"}
+        </Button>
+      </div>
       <p className="mt-2 mb-6 text-sm text-muted-foreground">
         Investigations, findings, and the context to act.
       </p>
-      <div className="rounded-xl border border-border bg-card">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border p-4">
+      <div className="mb-5 flex flex-wrap items-center gap-4">
+        {view !== "history" && (
           <div
-            className="flex flex-wrap gap-1"
-            aria-label="Agent activity and history filters"
+            role="group"
+            className="flex gap-1 rounded-lg border border-border p-1"
+            aria-label="Agent activity filters"
           >
             {incidentViews.map(({ value, label }) => (
               <button
@@ -75,7 +88,7 @@ export function IncidentList({
                 onClick={() => onViewChange(value)}
                 aria-pressed={view === value}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-xs transition-colors",
+                  "min-h-8 rounded-md px-3 py-1.5 text-xs transition-colors",
                   view === value
                     ? "bg-accent font-medium text-foreground"
                     : "text-muted-foreground hover:bg-accent/60"
@@ -85,29 +98,40 @@ export function IncidentList({
               </button>
             ))}
           </div>
-          <span className="ml-auto text-xs text-muted-foreground">
-            {incidents.data
-              ? `${items.length} ${items.length === 1 ? "incident" : "incidents"}${incidents.hasNextPage ? " loaded" : ""}`
-              : ""}
-          </span>
+        )}
+        <div className="relative min-w-0 flex-1 basis-56">
+          <Search className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
+          <Input
+            type="search"
+            aria-label="Search incidents"
+            placeholder={
+              view === "history"
+                ? "Search incident history…"
+                : "Search incident titles or channels…"
+            }
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className="h-9 bg-transparent pl-9"
+          />
         </div>
-        <div className="flex flex-wrap gap-3 border-b border-border p-4">
-          <div className="relative min-w-48 flex-1">
-            <Search className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
-            <Input
-              type="search"
-              aria-label="Search incidents"
-              placeholder={
-                view === "history"
-                  ? "Search incident history…"
-                  : "Search channels, findings…"
-              }
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="h-9 bg-transparent pl-9"
-            />
-          </div>
-        </div>
+      </div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>
+          {view === "inactive"
+            ? "Paused or completed agent activity"
+            : view === "history"
+              ? "Retained summaries and postmortems"
+              : view === "active"
+                ? "Active investigations, including those needing attention"
+                : "All current investigations"}
+        </span>
+        <span aria-live="polite">
+          {incidents.data
+            ? `${items.length} ${items.length === 1 ? "incident" : "incidents"}${incidents.hasNextPage ? " loaded" : ""}`
+            : ""}
+        </span>
+      </div>
+      <div className="border-t border-border">
         {incidents.isPending ? (
           <LoadingState />
         ) : incidents.error ? (
@@ -125,12 +149,16 @@ export function IncidentList({
                 ? "No matching incidents"
                 : view === "active"
                   ? "Waiting for matching channel events"
-                  : `No ${humanize(view).toLowerCase()} incidents`}
+                  : view === "all"
+                    ? "No incidents yet"
+                    : view === "history"
+                      ? "No incident history yet"
+                      : "No inactive incidents"}
             </h2>
             {(filtered || view === "active") && (
               <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
                 {filtered
-                  ? "No channels or findings match your search."
+                  ? "No incidents match your search."
                   : "New public channels matching the prefix appear here once Incidents is enabled."}
               </p>
             )}
@@ -142,7 +170,7 @@ export function IncidentList({
                 key={item.id}
                 to="/incidents/$incidentId"
                 params={{ incidentId: item.id }}
-                className="group flex flex-wrap items-start gap-4 px-5 py-5 transition-colors hover:bg-accent/40"
+                className="group flex flex-wrap items-start gap-4 px-2 py-5 transition-colors hover:bg-accent/40"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">

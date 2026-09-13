@@ -34,6 +34,8 @@ Provider lifecycle changes require an explicit responder action. Pausing or comp
 
 ## Documents and history
 
+The main list has **Active**, **Inactive**, and **All** filters beside search. Active includes investigations needing attention; Inactive includes paused and completed agent activity. These filters do not change the provider's incident status. App navigation stays in the sidebar, and **Incident history** opens retained summaries and postmortems.
+
 The detail page opens on **Overview**, with the latest finding, evidence-backed suggested next steps, sources, and provider context. **Postmortem** contains the editable incident document, a **Copy incident** action, and revision history; **Timeline** shows chronological agent activity. Switching tabs preserves unsaved document edits. Temporary Slack verification failures preserve drafts; revoked channel access hides incident content.
 
 Slack updates show a concise finding, the first suggested next step when available, and links to sources and the investigation. Detailed impact, checks, hypotheses, and coverage gaps remain on the incident page. Recommendations are separate from completed actions.
@@ -42,7 +44,7 @@ The postmortem starts with summary, impact, timeline, cause, mitigation, resolut
 
 **Copy incident** copies the visible postmortem as Markdown, including source links and any unsaved edits. The status-page section is hidden while its workflow is being designed. Provider postmortems remain separately attributed content; provider postmortem writes and status-page publishing remain unsupported by the provider adapter. An authorized responder can ask the agent to implement a fix, open a PR, or perform a specified action through its configured workspace tools. Ordinary channel messages steer investigation; they do not authorize external changes.
 
-Use **History** to search retained incident metadata and postmortems. The agent can also search and read permitted historical incidents as context; a prior cause does not establish the current cause. Channel access is rechecked for history and revision reads. Expired or unavailable evidence is marked unavailable rather than restored from historical references.
+Use **Incident history** to search retained incident metadata and postmortems. The agent can also search and read permitted historical incidents as context; a prior cause does not establish the current cause. Channel access is rechecked for history and revision reads. Expired or unavailable evidence is marked unavailable rather than restored from historical references.
 
 ## Runtime and retention
 

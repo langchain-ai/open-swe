@@ -1,13 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router"
-import {
-  Activity,
-  ArrowLeft,
-  CheckCheck,
-  CircleAlert,
-  Pause,
-  History,
-  Settings2,
-} from "lucide-react"
+import { GitPullRequest, MessagesSquare, Radar, Settings2 } from "lucide-react"
 import type { ReactNode } from "react"
 
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
@@ -19,15 +11,13 @@ import {
 } from "@/components/sidebar-layout"
 import type { SessionUser } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { IncidentsMark, incidentViews } from "./shared"
+import { IncidentsMark } from "./shared"
 
-const viewIcons = {
-  active: Activity,
-  paused: Pause,
-  needs_attention: CircleAlert,
-  completed: CheckCheck,
-  history: History,
-}
+const navigation = [
+  { to: "/agents", label: "Open SWE Agent", icon: MessagesSquare },
+  { to: "/agents/reviews", label: "Reviews", icon: GitPullRequest },
+  { to: "/incidents", label: "Incidents", icon: Radar },
+] as const
 
 export function IncidentsShell({
   user,
@@ -61,22 +51,18 @@ export function IncidentsShell({
             </Link>
             <SidebarCollapseButton onToggle={layout.toggle} />
           </div>
-          <div className="px-4 pt-5 pb-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-            Incidents
-          </div>
-          <nav className="space-y-1 px-2" aria-label="Incidents navigation">
-            {incidentViews.map(({ value, label }) => {
-              const Icon = viewIcons[value]
+          <nav className="space-y-1 px-2" aria-label="Open SWE navigation">
+            {navigation.map(({ to, label, icon: Icon }) => {
+              const selected = to === "/incidents"
               return (
                 <Link
-                  key={value}
-                  to="/incidents"
-                  search={{ view: value }}
+                  key={to}
+                  to={to}
                   onClick={layout.closeOnMobile}
-                  aria-current={isList && view === value ? "page" : undefined}
+                  aria-current={selected ? "page" : undefined}
                   className={cn(
                     "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors hover:bg-sidebar-row-hover",
-                    isList && view === value
+                    selected
                       ? "bg-sidebar-row-selected font-medium text-foreground"
                       : "text-muted-foreground"
                   )}
@@ -105,13 +91,6 @@ export function IncidentsShell({
             </div>
           )}
           <div className="mt-auto p-4">
-            <Link
-              to="/agents"
-              className="mb-4 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeft className="size-3.5" />
-              Open SWE Agent
-            </Link>
             <SidebarUserMenu user={user} showSettingsLink />
           </div>
         </SidebarFrame>
@@ -128,7 +107,9 @@ export function IncidentsShell({
               {pathname.endsWith("/settings")
                 ? "Settings"
                 : isList
-                  ? "Incidents"
+                  ? view === "history"
+                    ? "History"
+                    : "All investigations"
                   : "Incident details"}
             </span>
           </div>

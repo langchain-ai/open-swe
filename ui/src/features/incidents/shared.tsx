@@ -11,10 +11,8 @@ export const incidentViews: Array<{
   label: string
 }> = [
   { value: "active", label: "Active" },
-  { value: "paused", label: "Paused" },
-  { value: "needs_attention", label: "Needs attention" },
-  { value: "completed", label: "Completed" },
-  { value: "history", label: "History" },
+  { value: "inactive", label: "Inactive" },
+  { value: "all", label: "All" },
 ]
 
 export function humanize(value: string) {

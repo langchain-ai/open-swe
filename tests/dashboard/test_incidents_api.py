@@ -143,12 +143,13 @@ def test_list_rejects_invalid_filters(client, query) -> None:
     assert response.status_code == 422
 
 
-def test_authorized_list_and_detail_use_incidents_projections(client, service) -> None:
+@pytest.mark.parametrize("view", ["paused", "active", "inactive", "all"])
+def test_authorized_list_and_detail_use_incidents_projections(client, service, view) -> None:
     _login(client)
 
     listed = client.get(
         "/dashboard/api/incidents/records",
-        params={"view": "paused", "q": "payments", "limit": 30, "cursor": "c1"},
+        params={"view": view, "q": "payments", "limit": 30, "cursor": "c1"},
     )
     detail = client.get("/dashboard/api/incidents/records/i1")
 
@@ -157,7 +158,7 @@ def test_authorized_list_and_detail_use_incidents_projections(client, service) -
     assert detail.status_code == 200
     assert detail.json() == {"incident": {"id": "i1"}, "report": None}
     service.list_incidents.assert_awaited_once_with(
-        view="paused", q="payments", limit=30, cursor="c1", include_setup=False
+        view=view, q="payments", limit=30, cursor="c1", include_setup=False
     )
     service.get_incident.assert_awaited_once_with("i1", include_setup=False)
 
