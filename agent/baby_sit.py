@@ -23,7 +23,6 @@ from agent.github.ci import (
     list_commit_statuses,
 )
 from agent.github.comments import post_github_comment
-from agent.linear.client import comment_on_linear_issue
 from agent.prompts import render_prompt
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
@@ -288,8 +287,6 @@ async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
         destination = context.slack_location
         if destination is not None:
             return await post_slack_thread_reply(destination[0], destination[1], message)
-        if context.linear_issue and context.linear_issue.id:
-            return await comment_on_linear_issue(context.linear_issue.id, message)
         issue_number = context.github_issue.number if context.github_issue else None
         if issue_number is None:
             configured_number = watch.run_config.get("pr_number")

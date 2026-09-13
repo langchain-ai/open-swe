@@ -374,6 +374,11 @@ async def _thread_summary(
         "model": model,
         "effort": effort,
         "planMode": metadata.get("plan_mode") is True,
+        "modelSelection": (
+            metadata.get("model_selection")
+            if metadata.get("model_selection") in {"auto", "explicit"}
+            else None
+        ),
         "adminThread": metadata.get("admin_thread") is True,
         "visibility": metadata.get("visibility", "public"),
         "ownerLogin": metadata.get("owner_login"),

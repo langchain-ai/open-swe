@@ -16,11 +16,16 @@ ThreadVisibility = Literal["public", "private"]
 
 class UserPreferencesUpdate(BaseModel):
     default_visibility: ThreadVisibility
+    local_tracing_project: str | None = None
 
 
 def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
     visibility = (record or {}).get("default_visibility")
-    return {"default_visibility": visibility if visibility in ("public", "private") else "private"}
+    project = (record or {}).get("local_tracing_project")
+    return {
+        "default_visibility": visibility if visibility in ("public", "private") else "private",
+        "local_tracing_project": project if isinstance(project, str) and project.strip() else None,
+    }
 
 
 async def get_user_preferences(login: str) -> dict[str, Any]:
@@ -39,6 +44,9 @@ async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dic
         **existing,
         "login": login,
         "default_visibility": update.default_visibility,
+        "local_tracing_project": update.local_tracing_project.strip()
+        if update.local_tracing_project
+        else None,
         "created_at": existing.get("created_at") or now_iso(),
         "updated_at": now_iso(),
     }

@@ -25,5 +25,5 @@ async def discover_workspace_mcp(
     return [{"name": tool.name, "description": tool.description or ""} for tool in definitions]
 
 
-async def load_workspace_mcp_tools() -> list[BaseTool]:
-    return await load_mcp_tools(workspace_mcp_source)
+async def load_workspace_mcp_tools(*, connection_name: str | None = None) -> list[BaseTool]:
+    return await load_mcp_tools(workspace_mcp_source, connection_name=connection_name)

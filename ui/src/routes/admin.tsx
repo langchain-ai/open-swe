@@ -2,6 +2,7 @@ import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
+import type { ReactNode } from "react"
 
 import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
@@ -23,8 +24,15 @@ import {
 } from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { slackAppManifestJson } from "@/lib/slack-manifest"
-import { WorkspaceMCPSection } from "@/features/settings/components/WorkspaceMCPSection"
+import {
+  slackAppManifestJson,
+  slackManifestPlaceholdersRemain,
+} from "@/lib/slack-manifest"
+import { dashboardApiBase } from "@/lib/api-base"
+import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
+import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
+import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import { useRepos } from "@/lib/profile"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -59,12 +67,14 @@ function AdminPage() {
         )}
       />
 
-      <SlackIntegrationSection />
-      <WorkspaceMCPSection />
+      <SlackIntegrationSection
+        backendUrl={session.data.slack_base_url ?? session.data.api_base_url}
+      >
+        <AllowedSlackBotsSection />
+      </SlackIntegrationSection>
+      <MCPConnectionsSection scope="workspace" />
 
       <LLMGatewaySection />
-
-      <DictationSection />
 
       <FableSection />
 
@@ -98,7 +108,13 @@ function AdminPage() {
 const SLACK_CODE_CHANNELS_STORAGE_KEY =
   "open-swe.admin.slack-code-channels-enabled"
 
-export function SlackIntegrationSection() {
+export function SlackIntegrationSection({
+  backendUrl,
+  children,
+}: {
+  backendUrl?: string
+  children?: ReactNode
+}) {
   const [enabled, setEnabled] = useState(false)
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle"
@@ -117,9 +133,19 @@ export function SlackIntegrationSection() {
     window.localStorage.setItem(SLACK_CODE_CHANNELS_STORAGE_KEY, String(next))
   }
 
+  const manifestConfig = {
+    backendUrl:
+      backendUrl ||
+      dashboardApiBase() ||
+      (typeof window === "undefined" ? "" : window.location.origin),
+  }
+  const placeholdersRemain = slackManifestPlaceholdersRemain(manifestConfig)
+
   const copyManifest = async () => {
     try {
-      await navigator.clipboard.writeText(slackAppManifestJson(enabled))
+      await navigator.clipboard.writeText(
+        slackAppManifestJson(enabled, manifestConfig)
+      )
       setCopyState("copied")
     } catch {
       setCopyState("failed")
@@ -129,7 +155,7 @@ export function SlackIntegrationSection() {
   return (
     <SettingsSection
       title="Slack integration"
-      description="Select the Slack app manifest for this installation. This browser-only setting does not change backend behavior."
+      description="Configure Slack and choose which bots can start Open SWE runs."
     >
       <SettingsRow
         htmlFor="slack-code-channels"
@@ -153,8 +179,9 @@ export function SlackIntegrationSection() {
             App manifest
           </span>
           <span className="text-xs/relaxed text-muted-foreground">
-            Copy the selected manifest, replace its URL/provider placeholders,
-            then paste it into your Slack app settings and reinstall the app.
+            {placeholdersRemain
+              ? "Copy the selected manifest, replace its remaining <…> placeholders, then paste it into your Slack app settings and reinstall the app."
+              : "Copy the selected manifest — its URLs are filled in from this deployment — then paste it into your Slack app settings and reinstall the app."}
           </span>
         </div>
         <Button size="sm" variant="outline" onClick={() => void copyManifest()}>
@@ -165,6 +192,7 @@ export function SlackIntegrationSection() {
               : "Copy manifest"}
         </Button>
       </div>
+      {children}
     </SettingsSection>
   )
 }
@@ -520,96 +548,6 @@ function LLMGatewaySection() {
   )
 }
 
-const TRANSCRIPTION_MODELS = [
-  { value: "gpt-transcribe", label: "GPT Transcribe (recommended)" },
-  { value: "gpt-4o-transcribe", label: "GPT-4o Transcribe (legacy)" },
-  { value: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe (legacy)" },
-]
-
-function DictationSection() {
-  const qc = useQueryClient()
-  const settings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
-  })
-  const [error, setError] = useState<string | null>(null)
-  const [customModel, setCustomModel] = useState<string | null>(null)
-  const selectedModel = settings.data?.transcription_model ?? "gpt-transcribe"
-  const preset = TRANSCRIPTION_MODELS.some(
-    (model) => model.value === selectedModel
-  )
-  const save = useMutation({
-    mutationFn: api.saveTranscriptionModel,
-    onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved)
-      setError(null)
-    },
-    onError: (e: Error) => setError(e.message),
-  })
-
-  return (
-    <SettingsSection
-      title="Voice dictation"
-      description="Configure speech-to-text for the web and desktop message composer. Uses the same OpenAI API key and base URL as OpenAI LLMs."
-    >
-      <SettingsRow
-        label="Transcription model"
-        description="GPT Transcribe is OpenAI's recommended model for recorded speech."
-        control={
-          <Select
-            value={preset && customModel === null ? selectedModel : "custom"}
-            onValueChange={(model) => {
-              if (model === null) return
-              if (model === "custom")
-                setCustomModel(preset ? "" : selectedModel)
-              else {
-                setCustomModel(null)
-                save.mutate(model)
-              }
-            }}
-            disabled={!settings.data || save.isPending}
-          >
-            <SelectTrigger className="w-56">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TRANSCRIPTION_MODELS.map((model) => (
-                <SelectItem key={model.value} value={model.value}>
-                  {model.label}
-                </SelectItem>
-              ))}
-              <SelectItem value="custom">Custom model</SelectItem>
-            </SelectContent>
-          </Select>
-        }
-      />
-      {(!preset || customModel !== null) && (
-        <SettingsRow
-          label="Custom model ID"
-          control={
-            <div className="flex items-center gap-2">
-              <Input
-                className="w-56"
-                value={customModel ?? selectedModel}
-                onChange={(event) => setCustomModel(event.target.value)}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!customModel?.trim() || save.isPending}
-                onClick={() => customModel && save.mutate(customModel.trim())}
-              >
-                Save
-              </Button>
-            </div>
-          }
-        />
-      )}
-      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
-    </SettingsSection>
-  )
-}
-
 function FableSection() {
   const qc = useQueryClient()
   const settings = useQuery({
@@ -658,13 +596,8 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
     queryKey: ["teamSettings"],
     queryFn: api.getTeamSettings,
   })
+  const repos = useRepos()
   const [error, setError] = useState<string | null>(null)
-  const [defaultRepoDraft, setDefaultRepoDraft] = useState("")
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setDefaultRepoDraft(settings.data?.default_repo ?? "")
-  }, [settings.data?.default_repo])
 
   const save = useMutation({
     mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
@@ -681,6 +614,20 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
       description="Workspace-wide model defaults. Per-user Cloud Agent selections override the agent defaults."
     >
       <div className="divide-y divide-border">
+        <SettingsRow
+          label="Adaptive model routing"
+          description="Automatically choose a model for each turn, org-wide. Users can still override this in their personal settings."
+          control={
+            <Switch
+              checked={settings.data?.model_routing_enabled ?? false}
+              onCheckedChange={(next) =>
+                settings.data &&
+                save.mutate({ ...settings.data, model_routing_enabled: next })
+              }
+              disabled={!settings.data || save.isPending}
+            />
+          }
+        />
         <RolePicker
           label="Open SWE Agent"
           description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Open SWE Agent."
@@ -789,22 +736,23 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
         />
         <SettingsRow
           label="Default Repository"
-          description="Global fallback used when a run has no explicit repo and the user has no profile default. Use owner/repo."
+          description="Global fallback used when a run has no explicit repo and the user has no profile default."
           control={
-            <Input
-              className="w-56"
-              placeholder="owner/repo"
-              value={defaultRepoDraft}
-              onChange={(e) => setDefaultRepoDraft(e.target.value)}
-              onBlur={() =>
-                settings.data &&
-                save.mutate({
-                  ...settings.data,
-                  default_repo: defaultRepoDraft.trim() || null,
-                })
-              }
-              disabled={!settings.data || save.isPending}
-            />
+            <div className="w-56">
+              <RepoSelector
+                repos={repos.data?.repositories}
+                selectedRepo={settings.data?.default_repo ?? null}
+                onRepoChange={(repo) =>
+                  settings.data &&
+                  save.mutate({ ...settings.data, default_repo: repo })
+                }
+                placeholder="Pick a repository…"
+                emptySelectionLabel="No default repository"
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                dropdownClassName="w-56"
+                disabled={!settings.data || save.isPending}
+              />
+            </div>
           }
         />
         <RolePicker
