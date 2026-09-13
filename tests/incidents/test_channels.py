@@ -348,13 +348,6 @@ async def test_archive_completes_quietly(enrolled):
     channels.post_slack_thread_reply_with_ts.assert_not_awaited()
 
 
-async def test_native_session_stop_pauses_for_any_human(enrolled):
-    response, _ = await handle({"type": "agent_session_stopped", "channel": "C1", "user": "U1"})
-    assert response == {"status": "accepted"}
-    assert (await service.INCIDENTS.get(enrolled.id)).status == "paused"
-    turns.cancel_active_runs.assert_awaited_once()
-
-
 async def test_disabled_policy_ignores_enrolled_channel_traffic(enrolled):
     await service.POLICIES.put(
         "default", IncidentPolicy(enabled=False, workspace_id="T1", slack_app_id="A1")
@@ -451,29 +444,3 @@ async def test_mention_start_requires_a_connected_account_and_other_mentions_fal
         event_id="E3",
     )
     assert ordinary is None
-
-
-async def test_slash_command_starts_and_stops_in_the_current_channel(configured, enrolled):
-    tasks = BackgroundTasks()
-    usage = await channels.slash_command("deploy", "C1", "U1", "T1", "A1", tasks)
-    wrong_workspace = await channels.slash_command("incidents", "C1", "U1", "T9", "A1", tasks)
-    already = await channels.slash_command("incidents", "C1", "U1", "T1", "A1", tasks)
-    stop = await channels.slash_command("incidents stop", "C1", "U1", "T1", "A1", tasks)
-    for task in tasks.tasks:
-        await task()
-
-    assert usage == channels.COMMAND_USAGE
-    assert "not enabled for this workspace" in wrong_workspace
-    assert "already following" in already
-    assert "stop following" in stop
-    assert (await service.INCIDENTS.get(enrolled.id)).status == "completed"
-
-    tasks = BackgroundTasks()
-    restart = await channels.slash_command("incidents start", "C1", "U1", "T1", "A1", tasks)
-    for task in tasks.tasks:
-        await task()
-    assert "following this channel again" in restart
-    assert (await service.INCIDENTS.get(enrolled.id)).status == "watching"
-    assert "not following" in await channels.slash_command(
-        "incidents stop", "C8", "U1", "T1", "A1", tasks
-    )

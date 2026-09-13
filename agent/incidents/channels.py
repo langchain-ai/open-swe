@@ -33,10 +33,6 @@ CONTROL_WORDS = frozenset({"pause", "resume", "complete", "reopen"})
 START_PHRASES = frozenset(
     {"incident", "incidents", "start incident", "incidents start", "incident start"}
 )
-COMMAND_USAGE = (
-    "Usage: `/openswe incidents` follows this channel as an incident; "
-    "`/openswe incidents stop` ends it."
-)
 HISTORY_LIMIT = 100
 _HANDLED_EVENTS = frozenset(
     {
@@ -45,7 +41,6 @@ _HANDLED_EVENTS = frozenset(
         "channel_archive",
         "message",
         "app_mention",
-        "agent_session_stopped",
     }
 )
 _MEMBERSHIP_SUBTYPES = frozenset({"channel_join", "channel_leave", "group_join", "group_leave"})
@@ -125,9 +120,9 @@ def _introduction(record: Incident) -> str:
         text += f"; the full incident is at <{link}|Open incident>"
     return (
         text
-        + ". Mention me with a question. Anyone here can turn it off: mention me with `pause` to stop "
-        "automatic analysis or `complete` to close the incident (or run `/openswe incidents stop`); "
-        "`resume` turns it back on."
+        + ". Mention me with a question. Anyone here can turn it off: mention me with `pause` to "
+        "stop automatic analysis or `complete` to close the incident, or use the Incidents page in "
+        "the dashboard; `resume` turns it back on."
     )
 
 
@@ -259,42 +254,6 @@ async def start_incident(channel_id: str, user_id: str, background_tasks: Backgr
     return f"Incidents is joining #{name}; findings will appear in the channel."
 
 
-async def stop_incident(channel_id: str, user_id: str, background_tasks: BackgroundTasks) -> str:
-    """Complete the current channel's incident on a responder's request."""
-    policy = await service.get_policy()
-    record = await service.INCIDENTS.get(service.incident_id(policy.workspace_id, channel_id))
-    if record is None:
-        return "Incidents is not following this channel."
-    actor = await slack_person(user_id)
-    if record.status == "completed":
-        return "This incident is already complete."
-    background_tasks.add_task(apply_control, record, "complete", dict(actor))
-    return "Incidents will stop following this channel and post the final summary."
-
-
-async def slash_command(
-    text: str,
-    channel_id: str,
-    user_id: str,
-    team_id: str,
-    api_app_id: str,
-    background_tasks: BackgroundTasks,
-) -> str:
-    """`/openswe incidents [start|stop]`, run in the channel the command was typed in."""
-    policy = await service.get_policy()
-    if team_id != policy.workspace_id or api_app_id != policy.slack_app_id:
-        return "Incidents is not enabled for this workspace."
-    words = text.lower().split()
-    if not words or words[0] not in {"incident", "incidents"} or len(words) > 2:
-        return COMMAND_USAGE
-    subcommand = words[1] if len(words) == 2 else "start"
-    if subcommand == "stop":
-        return await stop_incident(channel_id, user_id, background_tasks)
-    if subcommand != "start":
-        return COMMAND_USAGE
-    return await start_incident(channel_id, user_id, background_tasks)
-
-
 async def apply_control(record: Incident, action: str, actor: dict[str, Any]) -> Incident:
     """Pause, resume, complete, or reopen an incident and tell the channel."""
     policy = await service.get_policy()
@@ -396,11 +355,6 @@ async def handle_slack_event(
         return {"status": "accepted"}
     if not policy.enabled:
         return {"status": "ignored"}
-    if kind == "agent_session_stopped":
-        user = event.get("user")
-        if isinstance(user, str) and user and record.status in {"watching", "needs_attention"}:
-            background_tasks.add_task(control_by_slack_user, record, "pause", user)
-        return {"status": "accepted"}
     message = event.get("message") if event.get("subtype") == "message_changed" else event
     if not isinstance(message, dict):
         return {"status": "ignored"}

@@ -8,7 +8,7 @@ Incidents runs each enrolled Slack channel as one ordinary system-owned Open SWE
 Slack event ──► /webhooks/slack ──► agent.incidents.channels.handle_slack_event
                                      │  channel not enrolled and not an enrollment ──► regular Slack path
                                      ├─ channel_created / channel_rename with the prefix ──► enroll
-                                     ├─ channel_archive / agent_session_stopped ──► complete / pause
+                                     ├─ channel_archive ──► complete
                                      ├─ mention by an authorized responder ──► control, or explicit turn (interrupt)
                                      └─ any other message ──► queued as thread context
                                                                + one automatic turn 15 s later (enqueue)

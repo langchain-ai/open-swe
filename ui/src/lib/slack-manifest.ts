@@ -5,7 +5,6 @@ const BASE_BOT_SCOPES = [
   "channels:read",
   "channels:join",
   "chat:write",
-  "commands",
   "files:write",
   "groups:history",
   "groups:read",
@@ -27,7 +26,6 @@ const BASE_BOT_EVENTS = [
   "channel_created",
   "channel_rename",
   "channel_archive",
-  "agent_session_stopped",
 ]
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
@@ -56,15 +54,6 @@ export function slackAppManifest(
       messages_tab_read_only_enabled: false,
     },
     bot_user: { display_name: "Open SWE", always_online: true },
-    slash_commands: [
-      {
-        command: "/openswe",
-        url: `${backendUrl}/webhooks/slack/commands`,
-        description: "Open SWE commands",
-        usage_hint: "incidents [start|stop]",
-        should_escape: false,
-      },
-    ],
   }
   if (codeChannelsEnabled) {
     features.code_channels = {
@@ -99,7 +88,7 @@ export function slackAppManifest(
       event_subscriptions: {
         request_url: `${backendUrl}/webhooks/slack`,
         bot_events: codeChannelsEnabled
-          ? [...BASE_BOT_EVENTS, "code_channel_action", "message.groups"]
+          ? [...BASE_BOT_EVENTS, "agent_session_stopped", "code_channel_action", "message.groups"]
           : BASE_BOT_EVENTS,
       },
       interactivity: {

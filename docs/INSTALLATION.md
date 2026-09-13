@@ -132,16 +132,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
         "bot_user": {
             "display_name": "Open SWE",
             "always_online": true
-        },
-        "slash_commands": [
-            {
-                "command": "/openswe",
-                "url": "https://<your-url>/webhooks/slack/commands",
-                "description": "Open SWE commands",
-                "usage_hint": "incidents [start|stop]",
-                "should_escape": false
-            }
-        ]
+        }
     },
     "oauth_config": {
         "redirect_urls": [
@@ -155,7 +146,6 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
                 "channels:read",
                 "channels:join",
                 "chat:write",
-                "commands",
                 "files:read",
                 "files:write",
                 "groups:history",
@@ -271,16 +261,14 @@ Open a section when you want that feature; everything above keeps working withou
 
 The **Incidents** dashboard at `/incidents` investigates public internal Slack channels. Each incident is one persistent, system-owned conversation on the main `agent` graph, driven by the same Slack webhook path as code channels, with the normal sandbox, coding/PR tools, subagents, organization skills, and configured workspace integrations. Responders can copy the agent's postmortem summary and consult retained incident history.
 
-1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**. Incidents needs the `channel_created`, `channel_rename`, `channel_archive`, `message.channels`, `app_mention`, and `agent_session_stopped` events. The manifest includes the public-channel scopes and `users:read` / `users:read.email` needed for authorized Slack controls.
+1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**. Incidents needs the `channel_created`, `channel_rename`, `channel_archive`, `message.channels`, and `app_mention` events. The manifest includes the public-channel scopes and `users:read` / `users:read.email` needed for authorized Slack controls.
 2. Access follows the rest of Open SWE: any signed-in dashboard user can read incidents, postmortems, and history, and only `CONFIGURED_ADMINS` can change incident settings. In Slack, anyone in an incident channel can pause, resume, or complete it; asking the agent a question or starting an incident manually requires a connected Open SWE account (Sign in with Slack in the dashboard), the same as mentioning Open SWE anywhere else. Reads recheck current channel access.
 3. Optionally give the agent an incident tracker: add its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, under **Admin → Workspace MCPs** following [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers). The agent uses those tools like any other workspace integration, only for an explicit responder request.
-4. In **Admin → Incidents**, set a channel prefix such as `inc-` and optionally a model and a model-call limit per turn. Enable Incidents, then create a matching public channel or rename one into the prefix. A responder can also follow any public channel by running `/openswe incidents` in it, or by mentioning the bot with `incidents`; `/openswe incidents stop`, or mentioning the bot with `complete`, ends the incident, and `pause` stops automatic analysis without closing it.
+4. In **Admin → Incidents**, set a channel prefix such as `inc-` and optionally a model and a model-call limit per turn. Enable Incidents, then create a matching public channel or rename one into the prefix. Anyone with a connected Open SWE account can also follow any public channel by mentioning the bot with `incidents`. To turn it off, anyone in the channel mentions the bot with `pause` (stops automatic analysis) or `complete` (ends the incident), or uses the buttons on the incident's dashboard page.
 
 Slack findings and control notices use compact messages directly in the incident channel. Questions posted in the channel receive channel replies; questions inside an existing thread receive replies in that thread. Detailed hypotheses, questions, coverage gaps, and citations remain in the incident report and postmortem. Changes only to those detailed hypotheses or questions do not generate another Slack update.
 
 Ordinary channel messages, including bot alerts, are queued as context and analyzed together in one turn about 15 seconds after the first arrives; enrollment queues the most recent channel history the same way. Direct questions and pause/stop controls bypass the delay. As in the main Slack handler, a direct mention interrupts an active turn, while ordinary messages wait for the next one. Nothing runs while the channel is quiet, so there is no idle timeout or watch limit; complete, pause, or archiving the channel stops the bot.
-
-If the Slack app is declared as an agent, subscribe to `agent_session_stopped` (included in the generated manifest): an authorized responder's stop action pauses incident analysis.
 
 The agent stores its latest postmortem summary as Markdown in the existing LangGraph Store. The **Postmortem** tab renders it and **Copy incident** copies the text and source links for use elsewhere. **History** searches retained incident metadata and summaries, including incidents whose raw context has expired. There is no document editor or revision-history UI.
 

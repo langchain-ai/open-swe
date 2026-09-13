@@ -37,7 +37,6 @@ describe("slackAppManifest", () => {
           "channel_created",
           "channel_rename",
           "channel_archive",
-          "agent_session_stopped",
           "message.channels",
           "app_mention",
           "message.im",
@@ -45,13 +44,6 @@ describe("slackAppManifest", () => {
         ])
       )
       expect(new Set(events).size).toBe(events.length)
-      expect(manifest.oauth_config.scopes.bot).toContain("commands")
-      expect(manifest.features.slash_commands).toEqual([
-        expect.objectContaining({
-          command: "/openswe",
-          url: "https://<your-backend-url>/webhooks/slack/commands",
-        }),
-      ])
     }
   )
 
