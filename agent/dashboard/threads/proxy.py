@@ -140,7 +140,7 @@ async def _observe_dashboard_run_ttft(
 
 async def proxy_dashboard_thread_commands(
     thread_id: str,
-    login: str,
+    login: str | None,
     body: bytes,
     *,
     email: str | None = None,
@@ -171,6 +171,8 @@ async def proxy_dashboard_thread_commands(
 
     creating = False
     if thread is None:
+        if login is None:
+            raise HTTPException(404, "thread not found")
         if method != "run.start":
             raise HTTPException(404, "thread not found")
         creating = True

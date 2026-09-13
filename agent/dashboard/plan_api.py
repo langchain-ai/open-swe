@@ -230,10 +230,16 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
             name=_approval_actor_name(session),
             source="dashboard",
         ),
+        workspace_context=session.get("_workspace_context") is True,
     )
 
 
-async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -> dict[str, Any]:
+async def approve_plan_for_thread(
+    thread_id: str,
+    *,
+    approver: dict[str, str],
+    workspace_context: bool = False,
+) -> dict[str, Any]:
     approver = make_plan_approver(
         actor_id=str(approver.get("id") or ""),
         name=str(approver.get("name") or ""),
@@ -280,7 +286,14 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
         if feedback:
             text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
         try:
-            run = await dispatch_followup(thread_id, metadata, text, plan_mode=False)
+            dispatch_kwargs = {"workspace_context": True} if workspace_context else {}
+            run = await dispatch_followup(
+                thread_id,
+                metadata,
+                text,
+                plan_mode=False,
+                **dispatch_kwargs,
+            )
         except Exception:
             await set_plan_status(thread_id, PLAN_STATUS_READY, plan_mode=True)
             raise
@@ -321,7 +334,16 @@ async def reject_plan(
         "existing self-contained HTML file under /workspace/plans/, then publish an updated "
         f"artifact with the save_plan tool:\n\n{feedback or '(no specific comments were left)'}"
     )
-    await dispatch_followup(thread_id, metadata, text, plan_mode=True)
+    dispatch_kwargs = (
+        {"workspace_context": True} if session.get("_workspace_context") is True else {}
+    )
+    await dispatch_followup(
+        thread_id,
+        metadata,
+        text,
+        plan_mode=True,
+        **dispatch_kwargs,
+    )
     return {"status": PLAN_STATUS_REVISING}
 
 
@@ -380,7 +402,12 @@ async def _maybe_post_plan_approved_to_slack(
 
 
 async def dispatch_followup(
-    thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+    thread_id: str,
+    metadata: dict[str, Any],
+    text: str,
+    *,
+    plan_mode: bool,
+    workspace_context: bool = False,
 ) -> Run:
     """Continue the existing thread with the decision as a new instruction run."""
     configurable: dict[str, Any] = {
@@ -388,17 +415,24 @@ async def dispatch_followup(
         "source": thread_source(metadata) or "slack",
     }
     email = metadata.get("triggering_user_email")
-    if isinstance(email, str) and email:
+    if not workspace_context and isinstance(email, str) and email:
         configurable["user_email"] = email
     login = metadata.get("github_login")
-    if isinstance(login, str) and login:
+    if not workspace_context and isinstance(login, str) and login:
         configurable["github_login"] = login
     repo = repo_config_from_metadata(metadata)
     if repo:
         configurable["repo"] = repo
     context = SourceContext.from_metadata(metadata)
     if context.slack_thread is not None:
-        configurable["slack_thread"] = context.dump()["slack_thread"]
+        slack_thread = context.dump()["slack_thread"]
+        if workspace_context:
+            slack_thread = {
+                key: value
+                for key, value in slack_thread.items()
+                if not key.startswith("triggering_user_")
+            }
+        configurable["slack_thread"] = slack_thread
     configurable["plan_mode"] = plan_mode
 
     return await dispatch_agent_run(

@@ -40,6 +40,7 @@ from agent.dashboard.threads.summary import (
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.input_messages import (
     PersonIdentity,
+    SystemIdentity,
     build_input_messages,
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
@@ -286,26 +287,26 @@ async def _create_dashboard_thread_record(
 
 async def _build_dashboard_configurable(
     thread_id: str,
-    login: str,
+    login: str | None,
     metadata: Mapping[str, Any],
     *,
     profile: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    profile = profile if profile is not None else await get_profile(login) or {}
     source = thread_source(metadata)
-    configurable: dict[str, Any] = {
-        "thread_id": thread_id,
-        "source": source,
-        "github_login": login,
-        "user_email": await resolve_run_email(login, profile),
-    }
+    configurable: dict[str, Any] = {"thread_id": thread_id, "source": source}
+    if login:
+        profile = profile if profile is not None else await get_profile(login) or {}
+        configurable["github_login"] = login
+        configurable["user_email"] = await resolve_run_email(login, profile)
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
     elif metadata.get("repo_explicitly_none") is True:
         configurable["repo_explicitly_none"] = True
     for key, value in SourceContext.from_metadata(metadata).dump().items():
+        if login is None and key == "slack_thread" and isinstance(value, dict):
+            value = {k: v for k, v in value.items() if not k.startswith("triggering_user_")}
         configurable.setdefault(key, value)
     if metadata.get("plan_mode") is True:
         configurable["plan_mode"] = True
@@ -420,7 +421,7 @@ def _validate_command_images(content: Any, *, model_id: str | None) -> None:
 
 async def _enrich_run_start_command(
     thread_id: str,
-    login: str,
+    login: str | None,
     command: dict[str, Any],
     *,
     metadata: dict[str, Any],
@@ -440,7 +441,8 @@ async def _enrich_run_start_command(
         params = {}
         command["params"] = params
 
-    await _ensure_dashboard_github_token(login)
+    if login is not None:
+        await _ensure_dashboard_github_token(login)
 
     client_config = params.get("config")
     if not isinstance(client_config, dict):
@@ -473,6 +475,8 @@ async def _enrich_run_start_command(
     run_effort: str | None = None
 
     if creating:
+        if login is None:
+            raise HTTPException(400, "workspace runs require an existing thread")
         # First ``run.start`` for a client-minted thread id: stamp the full
         # dashboard thread record (owner, title, repo, model) and validate any
         # attached images against the resolved model before the run is
@@ -531,7 +535,7 @@ async def _enrich_run_start_command(
 
     if content is None:
         content = ""
-    sender_id = f"github:{login}"
+    sender_id = f"github:{login}" if login else "system:workspace"
     injected = injected_dynamic_context_hashes_from_metadata(metadata)
     persisted_message_ids: set[str] = set()
     if not creating:
@@ -550,19 +554,28 @@ async def _enrich_run_start_command(
                     }
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-    person: PersonIdentity = {
-        "id": sender_id,
-        "platform": "github",
-        "github_login": login,
-    }
+    person: PersonIdentity = {"id": sender_id, "platform": "github"}
+    if login:
+        person["github_login"] = login
     if email:
         person["email"] = email
+    system: SystemIdentity = {
+        "id": sender_id,
+        "display_name": "Open SWE",
+        "platform": "open-swe",
+    }
     structured = build_input_messages(
         content,
-        {"sender_id": sender_id, "surface": "web", "kind": "human"},
-        people=[person],
+        {
+            "sender_id": sender_id,
+            "surface": "web" if login else "automation",
+            "kind": "human" if login else "system",
+        },
+        people=[person] if login else None,
         systems=(
-            [
+            [system]
+            if not login
+            else [
                 {
                     "id": "system:dashboard-handoff",
                     "display_name": "Dashboard handoff",

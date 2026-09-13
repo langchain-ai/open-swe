@@ -43,7 +43,9 @@ async def _github_token_for_login(login: str) -> str:
     return token
 
 
-async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:
+async def _authorized_thread(
+    thread_id: str, login: str | None, *, email: str | None = None
+) -> ThreadLike:
     try:
         thread = await langgraph_client().threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001

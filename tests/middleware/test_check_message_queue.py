@@ -94,6 +94,51 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
 
 
 @pytest.mark.asyncio
+async def test_check_message_queue_preserves_workspace_system_provenance() -> None:
+    store = _FakeStore(
+        {
+            (("queue", "thread-1"), "pending_messages"): {
+                "messages": [
+                    {
+                        "content": {
+                            "text": "continue workspace task",
+                            "source": "dashboard",
+                            "surface": "automation",
+                            "queue_id": "workspace-message",
+                            "sender": {
+                                "id": "system:workspace",
+                                "platform": "open-swe",
+                            },
+                        }
+                    },
+                ]
+            }
+        }
+    )
+
+    with (
+        patch(
+            "agent.middleware.check_message_queue.get_config",
+            return_value={"configurable": {"thread_id": "thread-1"}},
+        ),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+    ):
+        result = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": []}),
+            MagicMock(),
+        )
+
+    assert result is not None
+    entity = ElementTree.fromstring(_envelope(result["messages"][2]))
+    message = ElementTree.fromstring(_envelope(result["messages"][3]))
+    assert entity.tag == "dynamic-context"
+    assert entity.attrib["kind"] == "system"
+    assert entity.attrib["id"] == "system:workspace"
+    assert message.attrib["kind"] == "system"
+    assert message.attrib["surface"] == "automation"
+
+
+@pytest.mark.asyncio
 async def test_check_message_queue_injects_pending_autofix_event() -> None:
     store = _FakeStore(
         {

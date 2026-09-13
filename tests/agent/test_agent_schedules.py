@@ -714,6 +714,10 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert "user_email" not in run["config"]["configurable"]
     assert run["config"]["configurable"]["admin_thread"] is True
     assert run["config"]["configurable"]["repo"] == record["repo"]
+    assert metadata["system_authorization"] == {
+        "schedule_id": "sched_1",
+        "invocation_id": run["config"]["configurable"]["invocation_id"],
+    }
 
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_thread_id"] == thread_id
@@ -772,6 +776,7 @@ async def test_system_schedule_can_run_without_user_credentials(
     configurable = fake_client.runs.created[0]["config"]["configurable"]
     assert "github_login" not in configurable
     assert "user_email" not in configurable
+    assert "system_authorization" not in metadata
 
 
 async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
