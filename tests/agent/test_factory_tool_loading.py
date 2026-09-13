@@ -45,7 +45,6 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
-    monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "other@example.com")
     monkeypatch.setattr(
         langgraph_sdk,
         "get_client",
