@@ -310,9 +310,7 @@ async def incidents(
                 document = await documents.document_context(record.id)
                 provider = await providers.provider_context(record.id)
                 end = datetime.now(UTC)
-                collector = EvidenceCollector(
-                    policy, window_start=end - timedelta(hours=2), window_end=end
-                )
+                collector = EvidenceCollector()
                 context = message_context(messages, policy, collector)
                 bundle = {
                     "context": context,
@@ -323,14 +321,13 @@ async def incidents(
                     "postmortem": document.get("postmortem") if not reset else None,
                     "provider": provider,
                     "telemetry_window": {
-                        "from": collector.window_start.isoformat(),
+                        "from": (end - timedelta(hours=2)).isoformat(),
                         "to": end.isoformat(),
                     },
                 }
                 message = HumanMessage(
                     content=json.dumps(service.redact_context(bundle)), id=saved.id
                 )
-                inputs: list[Any] = [message]
                 saved.dispatch_started = True
                 await PASSES.put(saved.id, saved)
                 from agent.dashboard.options import normalize_model_choice
@@ -339,7 +336,7 @@ async def incidents(
                 run = await create_durable_run(
                     thread_id,
                     "agent",
-                    input={"messages": [item.model_dump(mode="json") for item in inputs]},
+                    input={"messages": [message.model_dump(mode="json")]},
                     source="incidents_agent",
                     client=client,
                     multitask_strategy="reject",

@@ -256,14 +256,14 @@ Open a section when you want that feature; everything above keeps working withou
 <details id="incidents">
 <summary><strong>Incidents</strong></summary>
 
-The **Incidents** dashboard at `/incidents` investigates public internal Slack channels. Each incident uses a persistent, system-owned conversation on the main `agent` graph, with the normal sandbox, coding/PR tools, subagents, organization skills, and configured workspace integrations. Responders can maintain a postmortem, prepare a separate status-page draft, and consult retained incident history.
+The **Incidents** dashboard at `/incidents` investigates public internal Slack channels. Each incident uses a persistent, system-owned conversation on the main `agent` graph, with the normal sandbox, coding/PR tools, subagents, organization skills, and configured workspace integrations. Responders can maintain and copy a postmortem and consult retained incident history.
 
 1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**. Incidents needs the `channel_created`, `channel_rename`, `channel_archive`, `message.channels`, `app_mention`, and `agent_session_stopped` events. The manifest includes the public-channel scopes and `users:read` / `users:read.email` needed for authorized Slack controls.
 2. Set `OBSERVABILITY_AUTHORIZED_EMAILS` to a comma-separated list of responder email addresses. Users in `CONFIGURED_ADMINS` also have access; only admins can change incident settings. Document and history reads recheck current channel access.
 3. To use incident.io, add or reuse a connection under **Admin → Workspace MCPs** with Streamable HTTP at `https://mcp.incident.io/mcp`. Follow [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers) for encrypted header configuration and [incident.io's remote MCP guide](https://docs.incident.io/ai/remote-mcp) for service-actor authentication. Select `incident_show`, `incident_list`, and `resource_show` when available. Select `incident_update` only if responders should be able to request lifecycle changes. Available actions depend on the discovered tool schemas and the selected permissions.
-4. In **Admin → Incidents**, set a channel prefix such as `inc-`, choose analysis limits, and optionally enter the existing workspace MCP connection name as **Default provider connection**. Enable Incidents, then create a matching public channel or rename one into the prefix. Open its detail page to attach an incident.io incident by ID or link; the provider's Slack channel association must match.
+4. In **Admin → Incidents**, set a channel prefix such as `inc-`, choose analysis limits, and optionally enter the existing workspace MCP connection name as **Default provider connection**. Enable Incidents, then create a matching public channel or rename one into the prefix. Use **Ask Open SWE** with the incident.io ID or link to request context or actions through MCP.
 
-Provider status and severity are separate from agent activity: pausing or completing analysis does not update the provider's lifecycle. Responders request provider changes explicitly, and the dashboard shows their delivery outcome and last successful sync. A provider outage does not discard accepted Slack events. Refresh an uncertain provider operation to reconcile it before retrying.
+Provider status and severity are separate from agent activity: pausing or completing analysis does not update the provider's lifecycle. Responders request provider changes explicitly through **Ask Open SWE**; no provider management screens are included. A provider outage does not discard accepted Slack events. Check provider state after an uncertain operation before retrying.
 
 Slack findings and control notices use compact messages directly in the incident channel. Questions posted in the channel receive channel replies; questions inside an existing thread receive replies in that thread. Detailed hypotheses, questions, coverage gaps, and citations remain in the incident report and postmortem. Changes only to those detailed hypotheses or questions do not generate another Slack update.
 
@@ -273,9 +273,9 @@ For native progress and stop controls, declare the Slack app as an agent in its 
 
 The Open SWE postmortem has immutable revisions recording the author, time, and source. New reports append findings while preserving responder edits; conflicting edits require reloading the current revision. **History** searches retained metadata and postmortems, including incidents whose raw context has expired. Reading external provider history does not enroll channels or start analysis.
 
-Public status-page publishing and provider postmortem writes are unsupported. Saving a status-page draft stores editable text in Open SWE; it does not publish it or copy internal findings into public communications. Authorized responders can ask the agent to edit code, open a PR as the GitHub App, or use configured integrations for a specified action. Automatic passes investigate and propose mitigation; alerts and ordinary channel messages do not authorize external changes. Personal integrations remain unavailable in these system-owned threads.
+Public status-page publishing and provider postmortem writes are unsupported. The status-page section is hidden pending workflow design. Authorized responders can ask the agent to edit code, open a PR as the GitHub App, or use configured integrations for a specified action. Automatic passes investigate and propose mitigation; alerts and ordinary channel messages do not authorize external changes. Personal integrations remain unavailable in these system-owned threads.
 
-See [Incidents locally](incidents-local.md) for the isolated preview, runtime behavior, and retention limits.
+See [Incidents locally](incidents-local.md) for local testing, runtime behavior, and retention limits.
 
 </details>
 

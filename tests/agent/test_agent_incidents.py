@@ -2,6 +2,7 @@
 
 import json
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -34,7 +35,7 @@ class ScriptedModel(BaseChatModel):
     def _generate(self, *args, **kwargs):
         raise NotImplementedError
 
-    async def _agenerate(self, messages, **kwargs):
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
         return ChatResult(generations=[ChatGeneration(message=self.responses.pop(0))])
 
 
@@ -82,7 +83,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         patch("agent.server._notion_tools_for", AsyncMock(return_value=[])) as notion,
         patch("agent.server.load_browser_tools", return_value=[]) as browser,
     ):
-        result = await _capture_create_deep_agent_kwargs(config)
+        result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(config))
     mcps.assert_awaited_once_with(workspace_mcp_source)
     notion.assert_awaited_once_with(None)
     browser.assert_called_once()
@@ -93,7 +94,6 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         "http_request",
         "background_execute",
         "slack_thread_reply",
-        "incidents_read_repo_file",
     } <= names
     assert not {"save_user_instructions", "save_user_skill", "read_user_settings"} & names
     assert result["skills"] == ["/organization-skills/", "/bundled-skills/"]
@@ -211,7 +211,7 @@ async def test_main_agent_executes_and_persists_incident_report(
             "incident_pass_id": saved.id,
         }
     }
-    kwargs = await _capture_create_deep_agent_kwargs(config)
+    kwargs = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(config))
     kwargs.pop("make_model_calls")
     model = ScriptedModel(
         responses=[
@@ -228,7 +228,7 @@ async def test_main_agent_executes_and_persists_incident_report(
             return await performed()
 
         class ActionModel(ScriptedModel):
-            async def _agenerate(self, messages, **kwargs):
+            async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
                 observation = next(
                     (
                         m

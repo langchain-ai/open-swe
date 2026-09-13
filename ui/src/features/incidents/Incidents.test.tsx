@@ -85,19 +85,6 @@ function stubFetch(
 ) {
   vi.stubGlobal("fetch", (input: string, init: RequestInit) => {
     const path = new URL(input, "http://localhost").pathname
-    if (path === "/dashboard/api/incidents/providers/connections")
-      return Promise.resolve(Response.json({ items: [] }))
-    if (path.startsWith("/dashboard/api/incidents/providers/"))
-      return Promise.resolve(
-        Response.json({
-          binding: null,
-          snapshot: null,
-          capabilities: {},
-          last_synced_at: null,
-          error: null,
-          error_kind: null,
-        })
-      )
     if (
       path.startsWith("/dashboard/api/incidents/documents/") &&
       !path.endsWith("/history")

@@ -34,6 +34,7 @@ class SchedulerState(BaseModel):
     agent_thread_id: str | None = None
     run_id: str | None = None
     invocation_id: str | None = None
+    incident_id: str | None = None
     prepare_run_id: str | None = None
     channel_id: str | None = None
     thread_ts: str | None = None
@@ -49,6 +50,14 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         from agent.incidents import service
 
         return {"result": await service.recover()}
+    if task == "incidents_coordinator":
+        from agent.incidents.coordinator import coordinate
+
+        return {"result": await coordinate()}
+    if task == "incidents_worker":
+        from agent.incidents.worker import process_channel
+
+        return {"result": await process_channel(state.incident_id or "")}
     if task == "reconcile":
         return {"result": await reconcile_stale_runs()}
     if task == "baby_sit":

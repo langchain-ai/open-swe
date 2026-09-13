@@ -23,7 +23,6 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { incidentsApi } from "./api"
-import { IncidentProvider } from "./IncidentProvider"
 import { IncidentDocuments } from "./IncidentDocuments"
 import type { IncidentAction } from "./api"
 import {
@@ -419,10 +418,6 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
               )}
             </div>
             <aside className="min-w-0 space-y-5">
-              <IncidentProvider
-                incidentId={incidentId}
-                allowedActions={allowed_actions}
-              />
               {report?.impact && (
                 <Section title="Observed impact">
                   <p className="text-sm leading-relaxed text-muted-foreground">

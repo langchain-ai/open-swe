@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -25,115 +24,8 @@ def policy() -> IncidentPolicy:
     return IncidentPolicy(workspace_id="T1", enabled=True)
 
 
-def collector(policy: IncidentPolicy, before=None) -> evidence_tools.EvidenceCollector:
-    end = datetime(2026, 9, 7, tzinfo=UTC)
-    return evidence_tools.EvidenceCollector(
-        policy,
-        window_start=end - timedelta(hours=2),
-        window_end=end,
-        before_tool_call=before,
-    )
-
-
-async def test_control_revocation_stops_tool_before_request(policy, monkeypatch):
-    checks = []
-
-    async def revoked():
-        checks.append(True)
-        if len(checks) == 1:
-            raise PermissionError("paused")
-
-    def forbidden(*args, **kwargs):
-        pytest.fail("Revoked incident reached a provider")
-
-    monkeypatch.setattr(evidence_tools.httpx, "AsyncClient", forbidden)
-    tools = {tool.name: tool for tool in collector(policy, revoked).tools()}
-    for _ in range(2):
-        with pytest.raises(PermissionError, match="paused"):
-            await tools["incidents_read_repo_file"].ainvoke(
-                {"repository": "acme/backend", "path": "app.py"}
-            )
-    assert checks == [True]
-
-
-async def test_github_file_uses_repo_scoped_app_and_redacts_content(policy, monkeypatch):
-    import base64
-
-    token_scopes = []
-
-    async def installation(owner, name):
-        assert (owner, name) == ("acme", "backend")
-        return 72
-
-    async def token(**kwargs):
-        token_scopes.append(kwargs)
-        return "installation-test-token"
-
-    def respond(request):
-        assert request.method == "GET"
-        assert (
-            str(request.url)
-            == "https://api.github.com/repos/acme/backend/contents/app.py?ref=release"
-        )
-        assert request.headers["authorization"] == "Bearer installation-test-token"
-        content = 'password="synthetic-secret"\nreturn unavailable()'
-        return httpx.Response(
-            200,
-            json={
-                "type": "file",
-                "encoding": "base64",
-                "size": len(content),
-                "content": base64.b64encode(content.encode()).decode(),
-            },
-        )
-
-    original_client = httpx.AsyncClient
-    monkeypatch.setattr(evidence_tools, "get_github_app_installation_id_for_repo", installation)
-    monkeypatch.setattr(evidence_tools, "get_github_app_installation_token", token)
-    monkeypatch.setattr(
-        evidence_tools.httpx,
-        "AsyncClient",
-        lambda **kwargs: original_client(
-            transport=httpx.MockTransport(respond),
-            **kwargs,
-        ),
-    )
-    collected = collector(policy)
-    tools = {tool.name: tool for tool in collected.tools()}
-    result = await tools["incidents_read_repo_file"].ainvoke(
-        {"repository": "acme/backend", "path": "app.py", "ref": "release"}
-    )
-    assert token_scopes == [
-        {
-            "installation_id": 72,
-            "repositories": ["backend"],
-            "permissions": {"contents": "read"},
-        }
-    ]
-    assert "unavailable" in result["observation"]
-    assert "synthetic-secret" not in result["observation"]
-    assert "synthetic-secret" not in json.dumps([item.model_dump() for item in collected.evidence])
-    assert collected.evidence[0].url == "https://github.com/acme/backend/blob/release/app.py"
-
-
-@pytest.mark.parametrize(
-    "path", [".env", "config/.env.production", "../app.py", "/app.py", ".git/config", "deploy.key"]
-)
-async def test_secret_or_escaping_file_paths_never_reach_github(policy, monkeypatch, path):
-    async def forbidden(*args, **kwargs):
-        pytest.fail("Secret or escaping file requested a GitHub token")
-
-    monkeypatch.setattr(evidence_tools, "get_github_app_installation_id_for_repo", forbidden)
-    collected = collector(policy)
-    tools = {tool.name: tool for tool in collected.tools()}
-    result = await tools["incidents_read_repo_file"].ainvoke(
-        {"repository": "acme/backend", "path": path}
-    )
-    assert "gap" in result
-
-
 def test_report_keeps_supported_claims_and_drops_invented_or_partial_citations(policy):
-    collected = collector(policy)
+    collected = evidence_tools.EvidenceCollector()
     collected.evidence = [Evidence(id="slack:1", source="slack", summary="Reported errors")]
     draft = engine.ReportDraft.model_validate(
         {
@@ -173,7 +65,7 @@ def test_report_without_supported_summary_remains_inconclusive(policy, reference
                 "summary": [{"text": "Everything is healthy", "evidence_ids": references}],
             }
         ),
-        collector(policy),
+        evidence_tools.EvidenceCollector(),
     )
     assert report.outcome == "inconclusive"
     assert "Everything is healthy" not in report.summary
@@ -181,7 +73,7 @@ def test_report_without_supported_summary_remains_inconclusive(policy, reference
 
 
 def test_edited_context_replaces_citation_identity_and_deleted_messages_are_unavailable(policy):
-    collected = collector(policy)
+    collected = evidence_tools.EvidenceCollector()
     context = engine.message_context(
         [
             IncidentMessage(id="1", ts="1", text="Corrected symptom", edited_at="2", user="U1"),
@@ -211,7 +103,7 @@ def test_edited_context_replaces_citation_identity_and_deleted_messages_are_unav
 def test_channel_membership_events_are_not_incident_evidence(policy):
     from agent.incidents import slack
 
-    collected = collector(policy)
+    collected = evidence_tools.EvidenceCollector()
     messages = [
         slack.message("C1", {"ts": "1", "subtype": "channel_join", "text": "<@U1> joined"}),
         slack.message("C1", {"ts": "2", "subtype": "channel_leave", "text": "<@U1> left"}),

@@ -90,7 +90,7 @@ async def test_incident_context_preserves_system_instructions_and_full_tools(liv
         messages=[],
         tools=[{"name": "execute"}, {"name": "open_pull_request"}],
         system_message=SystemMessage(content="Normal system instructions"),
-        state={},
+        state={"messages": []},
     )
     handler = AsyncMock()
     await runtime.IncidentMiddleware(session).awrap_model_call(request, handler)
@@ -106,7 +106,7 @@ async def test_only_current_explicit_request_is_presented_as_authorized(live_pas
     live_pass.saved.question = "Open the requested PR"
     await runtime.PASSES.put(live_pass.saved.id, live_pass.saved)
     session = await runtime.load_incident_session(live_pass.config)
-    request = ModelRequest(model=MagicMock(), messages=[], tools=[], state={})
+    request = ModelRequest(model=MagicMock(), messages=[], tools=[], state={"messages": []})
     handler = AsyncMock()
     await runtime.IncidentMiddleware(session).awrap_model_call(request, handler)
     text = handler.call_args.args[0].system_message.text
@@ -207,7 +207,7 @@ async def test_completed_tool_outcome_survives_stop_and_is_available_to_retry(
     retried = await runtime.load_incident_session(live_pass.config)
     handler = AsyncMock()
     await runtime.IncidentMiddleware(retried).awrap_model_call(
-        ModelRequest(model=MagicMock(), messages=[], tools=[], state={}), handler
+        ModelRequest(model=MagicMock(), messages=[], tools=[], state={"messages": []}), handler
     )
     assert outcomes[0].result in handler.call_args.args[0].system_message.text
 
@@ -427,7 +427,7 @@ async def test_mcp_evidence_preserves_successful_observations(live_pass, mode):
     evidence = next(item for item in session.collector.evidence if item.source == "tool")
     assert evidence.id in str(result.content)
     assert ("18%" if mode == "text" else "0.18") in str(result.content)
-    assert "service:api" in evidence.query
+    assert evidence.query is not None and "service:api" in evidence.query
 
 
 @pytest.mark.parametrize("mode", ["error", "artifact_error", "structured_error"])

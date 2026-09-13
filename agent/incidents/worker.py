@@ -8,15 +8,14 @@ import time
 from typing import Any, Literal
 
 from agent.config import ENV
-from agent.dispatch import create_durable_run
 from agent.incidents import documents, providers, service, slack
 from agent.incidents.access import is_observability_authorized
+from agent.incidents.engine import incidents as run_engine
 from agent.incidents.models import (
     Activity,
     Incident,
     IncidentMessage,
     IncidentPolicy,
-    IncidentReport,
     PendingPublication,
     PendingRequest,
     Publication,
@@ -35,25 +34,6 @@ _MAX_MESSAGE_WAIT_SECONDS = 60
 
 class IncidentStopped(RuntimeError):
     """A checked control or access change stopped the current pass."""
-
-
-async def run_engine(*args: Any, **kwargs: Any) -> IncidentReport:
-    from agent.incidents.engine import incidents
-
-    return await incidents(*args, **kwargs)
-
-
-async def schedule_wake(seconds: float = 0) -> None:
-    thread_id = service.incident_id("coordinator", "default")
-    await create_durable_run(
-        thread_id,
-        "incidents_coordinator",
-        input={},
-        source="incidents_coordinator",
-        metadata={"source": "incidents_coordinator"},
-        multitask_strategy="enqueue",
-        after_seconds=max(0, seconds),
-    )
 
 
 def note(record: Incident, kind: str, text: str) -> None:
@@ -729,7 +709,7 @@ async def _process_channel(incident_id: str) -> dict[str, Any]:
             delay = debounce_delay(record, time.time())
             if delay:
                 await save(record)
-                await schedule_wake(delay)
+                await service.schedule_wake(delay)
                 return {"status": "debouncing"}
         record.pass_return_status, record.pass_return_reason = return_status, return_reason
         record.status, record.reason, record.pending_since = "investigating", "", 0

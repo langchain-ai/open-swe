@@ -7,9 +7,7 @@
     "reviewer": "agent.graphs.reviewer:traced_reviewer_agent",
     "analyzer": "agent.graphs.analyzer:traced_analyzer",
     "chat": "agent.graphs.chat:traced_chat_agent",
-    "scheduler": "agent.graphs.scheduler:get_scheduler",
-    "incidents": "agent.graphs.incidents:get_incidents",
-    "incidents_coordinator": "agent.graphs.incidents_coordinator:get_coordinator"
+    "scheduler": "agent.graphs.scheduler:get_scheduler"
   },
   "dependencies": [
     "."

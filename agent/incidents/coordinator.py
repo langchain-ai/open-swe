@@ -154,8 +154,8 @@ async def coordinate() -> dict[str, Any]:
             ):
                 await create_durable_run(
                     active.thread_id,
-                    "incidents",
-                    input={"incident_id": active.id},
+                    "scheduler",
+                    input={"task": "incidents_worker", "incident_id": active.id},
                     source="incidents",
                     metadata={"source": "incidents"},
                     multitask_strategy="interrupt",
@@ -226,8 +226,8 @@ async def coordinate() -> dict[str, Any]:
     await service.COORDINATORS.put("default", state)
     await create_durable_run(
         record.thread_id,
-        "incidents",
-        input={"incident_id": record.id},
+        "scheduler",
+        input={"task": "incidents_worker", "incident_id": record.id},
         source="incidents",
         metadata={"source": "incidents"},
         multitask_strategy="enqueue",

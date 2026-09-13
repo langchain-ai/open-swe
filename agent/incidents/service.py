@@ -80,7 +80,7 @@ async def get_policy() -> IncidentPolicy:
     return await POLICIES.get("default") or IncidentPolicy()
 
 
-async def _wake() -> None:
+async def schedule_wake(seconds: float = 0) -> None:
     thread_id = incident_id("coordinator", "default")
     await store_client().threads.create(
         thread_id=thread_id,
@@ -89,17 +89,18 @@ async def _wake() -> None:
     )
     await create_durable_run(
         thread_id,
-        "incidents_coordinator",
-        input={},
+        "scheduler",
+        input={"task": "incidents_coordinator"},
         source="incidents_coordinator",
         metadata={"source": "incidents_coordinator"},
         multitask_strategy="enqueue",
+        after_seconds=max(0, seconds),
     )
 
 
 async def wake() -> None:
     try:
-        await _wake()
+        await schedule_wake()
     except Exception:
         # The durable inbox remains available to the recovery tick.
         logger.exception("Incident dispatch deferred to recovery")
@@ -509,5 +510,5 @@ async def submit_command(
 
 
 async def recover() -> dict[str, str]:
-    await _wake()
+    await schedule_wake()
     return {"status": "accepted"}

@@ -3,7 +3,6 @@
 import json
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import langgraph_sdk
@@ -75,13 +74,7 @@ class IncidentSession:
     def __init__(self, saved: IncidentPass) -> None:
         self.saved = saved
         self.slack_thread: SlackThreadRef | None = None
-        end = datetime.fromtimestamp(saved.started_at, UTC)
-        self.collector = EvidenceCollector(
-            saved.policy,
-            window_start=end - timedelta(hours=2),
-            window_end=end,
-            before_tool_call=self.check,
-        )
+        self.collector = EvidenceCollector()
         message_context(saved.messages, saved.policy, self.collector)
         existing = {e.id for e in self.collector.evidence}
         self.collector.evidence.extend(e for e in saved.evidence if e.id not in existing)
@@ -115,7 +108,7 @@ class IncidentSession:
                 "Incident lifecycle is separate from whether the agent is watching."
             )
         )
-        self.tools: list[BaseTool] = self.collector.tools()
+        self.tools: list[BaseTool] = []
 
     async def check(self) -> None:
         from agent.incidents.worker import channel_receipts, command_for_receipt, stale_control

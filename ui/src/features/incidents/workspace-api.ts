@@ -1,41 +1,6 @@
 import { request } from "./api"
 import type { Timestamp } from "./api"
 
-export type Capability =
-  | "supported"
-  | "unsupported"
-  | "permission_denied"
-  | "unavailable"
-export interface ProviderSnapshot {
-  title: string
-  status: { id: string; name: string } | null
-  severity: { id: string; name: string } | null
-  url: string | null
-  postmortem: string | null
-}
-export interface ProviderState {
-  default_connection_name: string | null
-  binding: {
-    provider: string
-    connection_name: string
-    external_id: string
-    url: string | null
-  } | null
-  snapshot: ProviderSnapshot | null
-  capabilities: Record<string, Capability>
-  status_options: Array<{ id: string; name: string }>
-  severity_options: Array<{ id: string; name: string }>
-  configuration_error: string | null
-  configuration_error_kind: string | null
-  last_synced_at: Timestamp | null
-  error: string | null
-  error_kind: string | null
-}
-export interface ProviderOperation {
-  id: string
-  status: "accepted" | "sending" | "succeeded" | "failed" | "unknown"
-  error: string | null
-}
 export type DocumentKind = "postmortem" | "status_page_draft"
 export interface DocumentRevision {
   kind: DocumentKind
@@ -69,48 +34,7 @@ export interface IncidentDocuments {
   operations: DocumentOperation[]
 }
 const encoded = encodeURIComponent
-const post = (body: unknown): RequestInit => ({
-  method: "POST",
-  body: JSON.stringify(body),
-})
-
 export const workspaceApi = {
-  provider: (id: string) => request<ProviderState>(`/providers/${encoded(id)}`),
-  connections: (id: string) =>
-    request<{
-      items: Array<{ name: string; capabilities: Record<string, Capability> }>
-    }>(`/providers/connections?incident_id=${encoded(id)}`),
-  providerCommand: (
-    id: string,
-    action: "attach" | "refresh" | "status",
-    body: Record<string, string>
-  ) =>
-    request<{ command_id: string; status: "accepted" | "duplicate" }>(
-      `/providers/${encoded(id)}/${action}`,
-      post(body)
-    ),
-  providerOperation: (id: string, operationId: string) =>
-    request<ProviderOperation>(
-      `/providers/${encoded(id)}/operations/${encoded(operationId)}`
-    ),
-  searchProvider: (id: string, connection: string, query: string) =>
-    request<{
-      external: true
-      gaps: string[]
-      items: Array<ProviderSnapshot & { external_id: string }>
-    }>(
-      "/providers/search",
-      post({ incident_id: id, connection_name: connection, query })
-    ),
-  externalIncident: (id: string, connection: string, externalId: string) =>
-    request<{ external: true; incident: ProviderSnapshot }>(
-      "/providers/external",
-      post({
-        incident_id: id,
-        connection_name: connection,
-        external_id: externalId,
-      })
-    ),
   documents: (id: string) =>
     request<IncidentDocuments>(`/documents/${encoded(id)}`),
   revisions: (id: string, kind: DocumentKind) =>

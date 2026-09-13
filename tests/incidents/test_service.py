@@ -18,7 +18,7 @@ async def configured(fake_store, monkeypatch):
             enabled_at=100,
         ),
     )
-    monkeypatch.setattr(service, "_wake", AsyncMock())
+    monkeypatch.setattr(service, "schedule_wake", AsyncMock())
     return fake_store
 
 
@@ -93,7 +93,7 @@ async def test_receipt_storage_failure_is_retryable_not_acknowledged(configured,
 
 
 async def test_dispatch_failure_preserves_accepted_receipt_for_recovery(configured, monkeypatch):
-    monkeypatch.setattr(service, "_wake", AsyncMock(side_effect=RuntimeError("offline")))
+    monkeypatch.setattr(service, "schedule_wake", AsyncMock(side_effect=RuntimeError("offline")))
     assert await service.accept_slack_event(event()) == {"status": "accepted"}
     assert len(await service.RECEIPTS.search_all()) == 1
 
@@ -240,7 +240,7 @@ def _auth(team_id="T1"):
 
 
 async def test_enabling_binds_identity_from_installation_and_env(fake_store, monkeypatch):
-    monkeypatch.setattr(service, "_wake", AsyncMock())
+    monkeypatch.setattr(service, "schedule_wake", AsyncMock())
     monkeypatch.setattr(service, "ensure_recovery", AsyncMock())
     monkeypatch.setattr(service.slack, "request", _auth("T9"))
     monkeypatch.setenv("SLACK_APP_ID", "A9")
@@ -253,7 +253,7 @@ async def test_enabling_binds_identity_from_installation_and_env(fake_store, mon
 
 
 async def test_enabling_requires_slack_app_id(fake_store, monkeypatch):
-    monkeypatch.setattr(service, "_wake", AsyncMock())
+    monkeypatch.setattr(service, "schedule_wake", AsyncMock())
     monkeypatch.setattr(service.slack, "request", _auth())
     monkeypatch.delenv("SLACK_APP_ID", raising=False)
     with pytest.raises(HTTPException) as error:

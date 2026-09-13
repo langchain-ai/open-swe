@@ -20,7 +20,7 @@ async def record(fake_store, monkeypatch):
     await service.POLICIES.put(
         "default", IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
     )
-    monkeypatch.setattr(service, "_wake", AsyncMock())
+    monkeypatch.setattr(service, "schedule_wake", AsyncMock())
     monkeypatch.setattr(
         service.slack,
         "channel_info",

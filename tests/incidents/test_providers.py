@@ -260,7 +260,7 @@ async def test_provider_outage_retains_last_sync_and_does_not_block_slack_receip
     assert current.last_synced_at == previous.last_synced_at
     assert current.snapshot.status.id == "open"
     assert current.error_kind == "unavailable"
-    assert "sensitive" not in current.error
+    assert current.error is not None and "sensitive" not in current.error
     assert await service.RECEIPTS.search_all()
 
 

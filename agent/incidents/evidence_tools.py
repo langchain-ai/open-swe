@@ -1,23 +1,12 @@
-"""Read-only evidence tools bounded by the installed credentials. Credentials never enter the model context."""
+"""Bounded, redacted evidence collected from the main agent and incident context."""
 
-import base64
 import hashlib
 import json
 import re
-from collections.abc import Awaitable, Callable
-from datetime import datetime
-from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 
-import httpx
-from langchain_core.tools import BaseTool, tool
-
-from agent.github.app import (
-    get_github_app_installation_id_for_repo,
-    get_github_app_installation_token,
-)
-from agent.incidents.models import Evidence, IncidentPolicy
+from agent.incidents.models import Evidence
 from agent.store import now_iso
 
 # Every repetition is bounded so a long hostile string cannot make matching
@@ -31,13 +20,6 @@ _SECRET = re.compile(
     r"|[\w.+-]{1,64}@[\w.-]{1,255}\.[A-Za-z]{2,24}"
     r"|-----BEGIN [^-]{0,64}PRIVATE KEY-----[\s\S]{0,20000}?-----END [^-]{0,64}PRIVATE KEY-----)"
 )
-_REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
-_SECRET_FILE = re.compile(
-    r"(?i)(?:^|/)(?:\.env(?:\.[^/]*)?|\.npmrc|\.pypirc|\.netrc|\.git(?:/.*)?"
-    r"|credentials\.json|token(?:\.json)?|[^/]*\.(?:pem|key|crt|p12|pfx|jks|keystore)"
-    r"|[^/]*_(?:rsa|ed25519))$"
-)
-_MAX_RESPONSE_BYTES = 1_000_000
 
 
 def redact(value: str, limit: int = 4000) -> str:
@@ -59,59 +41,11 @@ def source_url(value: str | None) -> str:
 
 
 class EvidenceCollector:
-    def __init__(
-        self,
-        policy: IncidentPolicy,
-        *,
-        window_start: datetime,
-        window_end: datetime,
-        before_tool_call: Callable[[], Awaitable[None]] | None = None,
-    ) -> None:
-        self.policy = policy
-        self.window_start = window_start
-        self.window_end = window_end
-        self.before_tool_call = before_tool_call
+    def __init__(self) -> None:
         self.evidence: list[Evidence] = []
         self.gaps: list[str] = []
         self.checked: list[str] = []
-        self._calls = 0
         self._remaining_chars = 30_000
-        self.control_error: Exception | None = None
-
-    async def run_evidence(
-        self, operation: str, call: Callable[[], Awaitable[dict[str, Any]]]
-    ) -> dict[str, Any]:
-        # The callback must propagate control revocation, never turn it into evidence.
-        if self.control_error is not None:
-            raise self.control_error
-        if self.before_tool_call is not None:
-            try:
-                await self.before_tool_call()
-            except Exception as exc:
-                self.control_error = exc
-                raise
-        self._calls += 1
-        try:
-            if not self.policy.enabled:
-                raise PermissionError("Incident is disabled by the workspace policy")
-            if self._calls > min(40, self.policy.max_model_calls * 2):
-                raise ValueError("Evidence tool-call budget exhausted")
-            if self._remaining_chars <= 0:
-                raise ValueError("Evidence context budget exhausted")
-            result = await call()
-            self.checked.append(operation)
-            return result
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-            gap = f"{operation}: source returned HTTP {status}."
-            if status == 429:
-                gap += " Rate limited; no immediate retry was attempted."
-        except (ValueError, PermissionError) as exc:
-            gap = f"{operation}: {redact(str(exc), 250)}."
-        except Exception:  # noqa: BLE001
-            gap = f"{operation}: source unavailable or response could not be read."
-        self.gaps.append(gap)
-        return {"gap": gap}
 
     def record_observation(
         self, *, source: str, url: str, summary: str, query: str, content: Any
@@ -135,132 +69,3 @@ class EvidenceCollector:
                 self.gaps.append(gap)
         self._remaining_chars -= len(serialized)
         return {"evidence_id": evidence.id, "source_url": url, "observation": serialized}
-
-    async def _request(self, method: str, url: str, **kwargs: Any) -> Any:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
-            async with client.stream(method, url, **kwargs) as response:
-                response.raise_for_status()
-                chunks = bytearray()
-                async for chunk in response.aiter_bytes():
-                    chunks.extend(chunk)
-                    if len(chunks) > _MAX_RESPONSE_BYTES:
-                        raise ValueError("Source response exceeded the size budget")
-                return json.loads(chunks)
-
-    async def _github(self, repository: str, suffix: str, *, params=None) -> Any:
-        if not _REPOSITORY.fullmatch(repository):
-            raise PermissionError("Repository must be named as owner/repository")
-        owner, name = repository.split("/")
-        installation = await get_github_app_installation_id_for_repo(owner, name)
-        if installation is None:
-            raise PermissionError("GitHub App repository installation is unavailable")
-        token = await get_github_app_installation_token(
-            installation_id=installation, repositories=[name], permissions={"contents": "read"}
-        )
-        if not token:
-            raise PermissionError("GitHub App read access is unavailable")
-        url = f"https://api.github.com/repos/{repository}/{suffix}"
-        if suffix == "search/code":
-            url = "https://api.github.com/search/code"
-        return await self._request(
-            "GET",
-            url,
-            params=params,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        )
-
-    def tools(self) -> list[BaseTool]:
-        @tool
-        async def incidents_read_repo_file(repository: str, path: str, ref: str = "HEAD") -> dict:
-            """Read one non-secret source file in an allowed owner/repo at a revision."""
-
-            async def read():
-                parts = PurePosixPath(path).parts
-                if not path or path.startswith("/") or ".." in parts or _SECRET_FILE.search(path):
-                    raise PermissionError("File path is outside the permitted source-file scope")
-                if len(path) > 500 or len(ref) > 200:
-                    raise ValueError("File path or revision is too long")
-                data = await self._github(
-                    repository, f"contents/{quote(path, safe='/')}", params={"ref": ref}
-                )
-                if not isinstance(data, dict) or data.get("type") != "file":
-                    raise ValueError("The source is not a file")
-                if data.get("encoding") != "base64" or data.get("size", 0) > 100_000:
-                    raise ValueError("File exceeds the permitted text-file size")
-                content = base64.b64decode(data["content"]).decode("utf-8")
-                url = f"https://github.com/{repository}/blob/{quote(ref, safe='')}/{quote(path, safe='/')}"
-                return self.record_observation(
-                    source="github",
-                    url=url,
-                    query=f"{repository}:{path}@{ref}",
-                    summary=f"Source file {repository}/{path} at {ref}; deployed revision is not verified.",
-                    content=content,
-                )
-
-            return await self.run_evidence("GitHub source file", read)
-
-        @tool
-        async def incidents_search_repo_code(repository: str, term: str) -> dict:
-            """Search an allowed owner/repo for a plain symbol or phrase (no query operators)."""
-
-            async def search():
-                if not re.fullmatch(r"[A-Za-z0-9_ ./-]{1,120}", term):
-                    raise ValueError("Search requires a plain symbol or phrase")
-                query = f'"{term}" repo:{repository}'
-                data = await self._github(
-                    repository, "search/code", params={"q": query, "per_page": 20}
-                )
-                matches = [
-                    {"path": item.get("path"), "sha": item.get("sha")}
-                    for item in data.get("items", [])[:20]
-                    if not _SECRET_FILE.search(item.get("path", ""))
-                ]
-                if data.get("incomplete_results") or data.get("total_count", 0) > len(matches):
-                    self.gaps.append("GitHub code search returned a partial result set.")
-                return self.record_observation(
-                    source="github",
-                    url=f"https://github.com/{repository}/search?"
-                    + urlencode({"q": term, "type": "code"}),
-                    summary=f"Code search in {repository} found {len(matches)} visible matches.",
-                    query=query,
-                    content=matches,
-                )
-
-            return await self.run_evidence("GitHub code search", search)
-
-        @tool
-        async def incidents_recent_commits(repository: str) -> dict:
-            """Read at most 20 commits in the fixed incident time window."""
-
-            async def commits():
-                params = {
-                    "since": self.window_start.isoformat(),
-                    "until": self.window_end.isoformat(),
-                    "per_page": 20,
-                }
-                data = await self._github(repository, "commits", params=params)
-                commits = [
-                    {
-                        "sha": row["sha"],
-                        "message": redact(row["commit"]["message"], 300),
-                        "date": row["commit"]["committer"]["date"],
-                    }
-                    for row in data[:20]
-                ]
-                if len(data) >= 20:
-                    self.gaps.append("Recent commits are limited to the first 20 results.")
-                return self.record_observation(
-                    source="github",
-                    url=f"https://github.com/{repository}/commits",
-                    query=json.dumps(params),
-                    summary=f"Found {len(commits)} recent commits in {repository}; deployment is unverified.",
-                    content=commits,
-                )
-
-            return await self.run_evidence("GitHub recent commits", commits)
-
-        return [incidents_read_repo_file, incidents_search_repo_code, incidents_recent_commits]

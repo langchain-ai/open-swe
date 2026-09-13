@@ -62,7 +62,7 @@ async def incident(fake_store, monkeypatch):
         "run_engine",
         AsyncMock(return_value=IncidentReport(summary="Cause remains unknown.")),
     )
-    monkeypatch.setattr(worker, "schedule_wake", AsyncMock())
+    monkeypatch.setattr(service, "schedule_wake", AsyncMock())
     monkeypatch.setattr(service, "wake", AsyncMock())
     monkeypatch.setattr(worker.slack, "publish", AsyncMock(return_value="100.0"))
     monkeypatch.setattr(worker.slack, "set_session_status", AsyncMock())

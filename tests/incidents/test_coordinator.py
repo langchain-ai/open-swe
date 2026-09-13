@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from agent.incidents import coordinator, documents, service, worker
+from agent.incidents import coordinator, documents, service
 from agent.incidents.models import (
     CoordinatorState,
     Incident,
@@ -25,7 +25,7 @@ async def runtime(fake_store, monkeypatch):
     )
     monkeypatch.setattr(coordinator, "store_client", lambda: client)
     monkeypatch.setattr(coordinator, "create_durable_run", AsyncMock())
-    monkeypatch.setattr(service, "_wake", AsyncMock())
+    monkeypatch.setattr(service, "schedule_wake", AsyncMock())
     await service.POLICIES.put(
         "default",
         IncidentPolicy(
@@ -157,6 +157,9 @@ async def test_expiry_removes_content_and_checkpoints_without_reenrollment(runti
 
 
 async def test_expiry_retains_history_and_dispatches_queued_document_edit(runtime, monkeypatch):
+    from agent.scheduler import get_scheduler
+
+    scheduler = get_scheduler()
     record = Incident(
         id="historical",
         thread_id="historical-worker",
@@ -195,7 +198,10 @@ async def test_expiry_retains_history_and_dispatches_queued_document_edit(runtim
         actor={"id": "github:responder"},
     )
 
-    assert await coordinator.coordinate() == {"status": "dispatched", "incident_id": record.id}
+    coordinated = await scheduler.ainvoke({"task": "incidents_coordinator"})
+    assert coordinated["result"] == {"status": "dispatched", "incident_id": record.id}
+    dispatch = coordinator.create_durable_run.await_args
+    assert dispatch.args[1] == "scheduler"
     expired = await service.INVESTIGATIONS.get(record.id)
     assert expired.expired and expired.thread_id
     assert await service.RECEIPTS.get(operation["id"])
@@ -205,7 +211,8 @@ async def test_expiry_retains_history_and_dispatches_queued_document_edit(runtim
     )
     assert (await documents.search_history(q="Checkout"))["items"][0]["id"] == record.id
 
-    assert await worker.process_channel(record.id) == {"status": "completed"}
+    processed = await scheduler.ainvoke(dispatch.kwargs["input"])
+    assert processed["result"] == {"status": "completed"}
     assert (await documents.get_operation(record.id, operation["id"]))["status"] == "applied"
     assert (await documents.document_context(record.id))["postmortem"][
         "markdown"

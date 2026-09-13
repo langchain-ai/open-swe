@@ -206,7 +206,7 @@ function PolicyForm({
             label="Default provider connection"
             value={initial.provider_connection_name ?? ""}
             placeholder="incident-io"
-            description="Name of an existing incident.io connection in workspace MCP settings. This connection is preselected when you attach a provider incident."
+            description="Name of an existing incident.io connection in workspace MCP settings. Use Ask Open SWE to request provider context or actions."
           />
         </SettingsPanel>
         <details>
