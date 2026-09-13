@@ -9,6 +9,7 @@ import type {
 } from "@/desktop"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import type { ShowInDiffTarget } from "@/features/agents/lib/showInDiff"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
@@ -44,6 +45,10 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import {
+  useShowInDiffRequests,
+  useShowInDiffScopeFallback,
+} from "@/features/agents/lib/showInDiff"
 import {
   modelConfigurable,
   promptMessage,
@@ -132,7 +137,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     { kind: "local", sessionId },
     thread?.worktreePath ?? thread?.cwd ?? ""
   )
-  const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
+  const [revealTarget, setRevealTarget] = useState<ShowInDiffTarget | null>(
+    null
+  )
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
   const handlePanelCollapsedChange = useCallback(
     (next: boolean) => {
@@ -141,14 +148,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     },
     [sessionId]
   )
-  const handleOpenFile = useCallback(
-    (filePath: string) => {
-      setRevealFilePath(filePath)
+  const revealInDiff = useCallback(
+    (target: ShowInDiffTarget) => {
+      setRevealTarget({ ...target })
       openSurface(threadRef, "diff")
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange, openSurface, threadRef]
   )
+  const handleOpenFile = useCallback(
+    (filePath: string) =>
+      revealInDiff({ path: filePath, line: null, side: "new" }),
+    [revealInDiff]
+  )
+  // The agent's own `show_in_diff` calls, driving the same reveal.
+  useShowInDiffRequests(stream.messages, !stream.isThreadLoading, revealInDiff)
 
   const worktreePath = thread?.worktreePath ?? null
   const refsQuery = useLocalProjectRefs(thread?.cwd)
@@ -208,6 +222,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
+  useShowInDiffScopeFallback({
+    target: revealTarget,
+    files,
+    loaded: !diff.isPending && !diff.error,
+    scope,
+    branchScopeAvailable,
+    onScopeChange: (next) => selectScope(threadRef, next),
+  })
   const messages = useMemo(() => {
     const live = streamMessagesToUi(
       stream.messages,
@@ -528,7 +550,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             truncated={diff.data?.truncated}
             branch={repository?.branch}
             pr={pr}
-            revealFilePath={revealFilePath}
+            revealTarget={revealTarget}
             fullScreen={fullScreen}
             onRefresh={() => void diff.refetch()}
             scope={scope}

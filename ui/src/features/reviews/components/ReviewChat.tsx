@@ -24,6 +24,8 @@ import { Menu } from "@base-ui/react/menu"
 import type { BaseMessage } from "@langchain/core/messages"
 
 import type { ReviewChatThread } from "@/lib/api"
+import type { ShowInDiffTarget } from "@/features/agents/lib/showInDiff"
+import { useShowInDiffRequests } from "@/features/agents/lib/showInDiff"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -92,6 +94,43 @@ export function ReviewChatComposerProvider({
 
 export function useReviewChatComposer(): ReviewChatComposer | null {
   return useContext(ReviewChatComposerContext)
+}
+
+// --- Diff navigation bridge --------------------------------------------------
+//
+// The other direction: the chat agent's `show_in_diff` tool asks the diff column
+// to scroll to a file/line. The diff column reads `target` and drives its own
+// scroller; a repeat of the same location arrives as a new object so it still
+// moves the view.
+
+interface ReviewDiffNavigation {
+  target: ShowInDiffTarget | null
+  navigate: (target: ShowInDiffTarget) => void
+}
+
+const ReviewDiffNavigationContext = createContext<ReviewDiffNavigation | null>(
+  null
+)
+
+export function ReviewDiffNavigationProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const [target, setTarget] = useState<ShowInDiffTarget | null>(null)
+  const value = useMemo<ReviewDiffNavigation>(
+    () => ({ target, navigate: (next) => setTarget({ ...next }) }),
+    [target]
+  )
+  return (
+    <ReviewDiffNavigationContext.Provider value={value}>
+      {children}
+    </ReviewDiffNavigationContext.Provider>
+  )
+}
+
+export function useReviewDiffNavigation(): ReviewDiffNavigation | null {
+  return useContext(ReviewDiffNavigationContext)
 }
 
 function attachmentBasename(path: string): string {
@@ -422,6 +461,7 @@ function ChatBody({
   expectsHistory: boolean
 }) {
   const composer = useReviewChatComposer()
+  const diffNavigation = useReviewDiffNavigation()
   const stream = useStreamContext()
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Array<ChatAttachment>>([])
@@ -448,6 +488,14 @@ function ChatBody({
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id))
   }, [])
+
+  // Hand the agent's `show_in_diff` calls to the diff column.
+  const navigateDiff = diffNavigation?.navigate
+  const showInDiff = useCallback(
+    (target: ShowInDiffTarget) => navigateDiff?.(target),
+    [navigateDiff]
+  )
+  useShowInDiffRequests(messages, !hydrating, showInDiff)
 
   const send = useCallback(
     (text: string, atts: Array<ChatAttachment>) => {

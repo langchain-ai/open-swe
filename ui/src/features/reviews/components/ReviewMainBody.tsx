@@ -74,7 +74,9 @@ import { PrHeader } from "@/features/reviews/components/PrHeader"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
+  ReviewDiffNavigationProvider,
   useReviewChatComposer,
+  useReviewDiffNavigation,
 } from "@/features/reviews/components/ReviewChat"
 import {
   ReviewSidebarPanel,
@@ -368,23 +370,35 @@ function scrollElementToCenter(el: HTMLElement, scroller: HTMLElement): number {
   return Math.abs(targetTop - before)
 }
 
+// Absolute scrollTop that centers a diff line, or null when the diff hasn't
+// rendered that line yet (its rows are still windowed out).
+function diffLineCenterTarget(
+  target: RegisteredDiffInstance,
+  lineNumber: number,
+  side: SelectionSide,
+  scroller: HTMLElement
+): number | null {
+  if (!hasLinePosition(target.instance)) return null
+  const line = target.instance.getLinePosition(lineNumber, side)
+  if (!line) return null
+  const hostTop =
+    target.host.getBoundingClientRect().top -
+    scroller.getBoundingClientRect().top +
+    scroller.scrollTop
+  return clampScrollTop(
+    scroller,
+    hostTop + line.top - (scroller.clientHeight - line.height) / 2
+  )
+}
+
 function scrollDiffLineToCenter(
   target: RegisteredDiffInstance,
   lineNumber: number,
   side: SelectionSide,
   scroller: HTMLElement
 ): boolean {
-  if (!hasLinePosition(target.instance)) return false
-  const line = target.instance.getLinePosition(lineNumber, side)
-  if (!line) return false
-  const hostTop =
-    target.host.getBoundingClientRect().top -
-    scroller.getBoundingClientRect().top +
-    scroller.scrollTop
-  const targetTop = clampScrollTop(
-    scroller,
-    hostTop + line.top - (scroller.clientHeight - line.height) / 2
-  )
+  const targetTop = diffLineCenterTarget(target, lineNumber, side, scroller)
+  if (targetTop === null) return false
   scroller.scrollTo({ top: targetTop, behavior: "auto" })
   return true
 }
@@ -585,14 +599,16 @@ export function ReviewMainBody({
   }
   return (
     <ReviewChatComposerProvider>
-      <ReviewBodyInner
-        detail={detail}
-        diffFiles={diffFiles}
-        variant="full"
-        openComment={openComment ?? null}
-        onUpdateOpenComment={onUpdateOpenComment}
-        onCloseOpenComment={onCloseOpenComment}
-      />
+      <ReviewDiffNavigationProvider>
+        <ReviewBodyInner
+          detail={detail}
+          diffFiles={diffFiles}
+          variant="full"
+          openComment={openComment ?? null}
+          onUpdateOpenComment={onUpdateOpenComment}
+          onCloseOpenComment={onCloseOpenComment}
+        />
+      </ReviewDiffNavigationProvider>
     </ReviewChatComposerProvider>
   )
 }
@@ -1143,6 +1159,56 @@ function ReviewBodyInner({
     }
     requestAnimationFrame(snap)
   }, [openComment])
+
+  // The chat agent's `show_in_diff`: open the file it names and center the line.
+  // Same shape as openComment, minus the annotation — there is nothing to mount,
+  // so once the line reports a position we hold that offset while the rows above
+  // it finish measuring. A path the diff doesn't contain leaves the view alone.
+  const navigationTarget = useReviewDiffNavigation()?.target ?? null
+  useEffect(() => {
+    if (!navigationTarget) return
+    const file = filesByPathRef.current.get(navigationTarget.path)
+    if (!file) return
+    const { line } = navigationTarget
+    const side: SelectionSide =
+      navigationTarget.side === "old" ? "deletions" : "additions"
+    setUserSelection(null)
+    setSelectedFile(file.path)
+    setExpandedFiles((prev) => ({ ...prev, [file.path]: true }))
+    scrollHoldStopRef.current?.()
+    const requestId = ++findingScrollRequestRef.current
+    let frames = 0
+    const snap = () => {
+      if (requestId !== findingScrollRequestRef.current) return
+      const scroller = diffScrollElRef.current
+      if (!scroller) return
+      const diffTarget = diffInstanceRefs.current[file.path]
+      if (line !== null && diffTarget) {
+        const top = diffLineCenterTarget(diffTarget, line, side, scroller)
+        if (top !== null) {
+          scrollHoldStopRef.current = jumpAndHold(
+            scroller,
+            () =>
+              diffLineCenterTarget(diffTarget, line, side, scroller) ??
+              scroller.scrollTop
+          )
+          return
+        }
+      }
+      const fileNode = fileRefs.current[file.path]
+      if (fileNode) {
+        if (line === null) {
+          scrollHoldStopRef.current = jumpAndHold(scroller, () =>
+            elementCenterTarget(fileNode, scroller)
+          )
+          return
+        }
+        scrollElementToCenter(fileNode, scroller)
+      }
+      if (frames++ < FINDING_SCROLL_MAX_FRAMES) requestAnimationFrame(snap)
+    }
+    requestAnimationFrame(snap)
+  }, [navigationTarget])
 
   const renderFileCard = (file: ReviewDiffFile) => {
     // Keep the range highlighted while its comment composer is open, so the
