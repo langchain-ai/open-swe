@@ -1150,6 +1150,7 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
 
 
 _AUTOFIX_COMMAND_RE = re.compile(r"^[ \t]+autofix[ \t]+(on|off)\b", re.IGNORECASE)
+_REVIEW_COMMAND_RE = re.compile(r"^[ \t]+review[ \t]*$", re.IGNORECASE)
 
 
 def _parse_autofix_command(comment_body: str) -> bool | None:
@@ -1163,6 +1164,15 @@ def _parse_autofix_command(comment_body: str) -> bool | None:
     if match is None:
         return None
     return match.group(1).lower() == "off"
+
+
+def _is_review_command(comment_body: str) -> bool:
+    mention = common.classify_comment_mention(comment_body, common.OPEN_SWE_TAGS)
+    if mention.disposition != "accepted" or mention.end is None:
+        return False
+    remaining = comment_body[mention.end :]
+    line_tail = remaining.splitlines()[0] if remaining else ""
+    return _REVIEW_COMMAND_RE.match(line_tail) is not None
 
 
 async def process_github_autofix_command(payload: dict[str, Any], *, disabled: bool) -> None:

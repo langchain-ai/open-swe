@@ -11,7 +11,10 @@ import httpx
 
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_http import GITHUB_API_BASE, GITHUB_GRAPHQL, github_client, github_request
+from .utils.slack import GitHubPrRef
 from .utils.thread_ops import langgraph_client
+from .webhooks import common as webhook_common
+from .webhooks import github as github_webhook
 
 logger = logging.getLogger(__name__)
 _SEARCH_PAGE_SIZE = 100
@@ -118,6 +121,126 @@ async def reconcile_stale_runs(*, max_age_seconds: int = 1800) -> dict[str, int]
         "cancelled": cancelled,
     }
     logger.info("Reconcile sweep complete: %s", counts)
+    return counts
+
+
+async def reconcile_reviewer_heads() -> dict[str, int]:
+    """Recover watched pull request heads missed by synchronize delivery."""
+    client = langgraph_client()
+    counts = {"threads_checked": 0, "dispatched": 0, "skipped": 0, "errors": 0}
+    offset = 0
+    while True:
+        try:
+            threads = await client.threads.search(
+                metadata={"kind": webhook_common.REVIEWER_THREAD_KIND, "watch": True},
+                limit=_SEARCH_PAGE_SIZE,
+                offset=offset,
+            )
+        except Exception:
+            logger.exception("Reviewer head reconcile: thread search failed at offset %d", offset)
+            counts["errors"] += 1
+            break
+        if not threads:
+            break
+        for thread in threads:
+            metadata = thread.get("metadata") if isinstance(thread, dict) else None
+            metadata = metadata if isinstance(metadata, dict) else {}
+            if (
+                metadata.get("kind") != webhook_common.REVIEWER_THREAD_KIND
+                or metadata.get("watch") is not True
+            ):
+                counts["skipped"] += 1
+                continue
+            pr = metadata.get("pr")
+            if not isinstance(pr, dict):
+                counts["skipped"] += 1
+                continue
+            owner = pr.get("owner")
+            repo = pr.get("name")
+            number = pr.get("number")
+            url = pr.get("url")
+            if (
+                not isinstance(owner, str)
+                or not isinstance(repo, str)
+                or not isinstance(number, int)
+                or not isinstance(url, str)
+            ):
+                counts["skipped"] += 1
+                continue
+            counts["threads_checked"] += 1
+            try:
+                repo_config = {"owner": owner, "name": repo}
+                if not await webhook_common._is_repo_auto_review_enabled(repo_config):
+                    counts["skipped"] += 1
+                    continue
+                token, _ = await webhook_common._reviewer_token_for_repo(
+                    repo_config, repo_private=None
+                )
+                if not token:
+                    raise RuntimeError("GitHub App token unavailable")
+                live_pr = await webhook_common.fetch_github_pr_metadata(
+                    GitHubPrRef(owner=owner, repo=repo, number=number, url=url), token=token
+                )
+                if not live_pr:
+                    raise RuntimeError("Pull request unavailable")
+                head_sha = (live_pr.get("head") or {}).get("sha")
+                if live_pr.get("state") != "open" or live_pr.get("draft") is True:
+                    counts["skipped"] += 1
+                    continue
+                if not isinstance(head_sha, str) or not head_sha:
+                    raise RuntimeError("Pull request head unavailable")
+                if metadata.get("last_reviewed_sha") == head_sha:
+                    counts["skipped"] += 1
+                    continue
+                review_start = metadata.get("review_start")
+                if isinstance(review_start, dict) and review_start.get("head_sha") == head_sha:
+                    counts["skipped"] += 1
+                    continue
+                thread_id = thread.get("thread_id") or thread.get("id")
+                if isinstance(thread_id, str) and github_webhook._existing_synchronize_review_start(
+                    metadata, head_sha=head_sha, thread_id=thread_id
+                ):
+                    counts["skipped"] += 1
+                    continue
+                base_repo = (live_pr.get("base") or {}).get("repo") or {}
+                result = await github_webhook.process_github_pr_synchronize(
+                    {
+                        "repository": {
+                            "owner": {"login": owner},
+                            "name": repo,
+                            "private": base_repo.get("private"),
+                            "id": base_repo.get("id"),
+                        },
+                        "pull_request": live_pr,
+                    }
+                )
+                status = result.get("status", "unknown")
+                outcome = result.get("ownership") or result.get("code") or status
+                if status == "accepted":
+                    counts["dispatched"] += 1
+                elif status == "ignored":
+                    counts["skipped"] += 1
+                else:
+                    counts["errors"] += 1
+                logger.info(
+                    "Reviewer head reconcile: repository=%s/%s pr=%s head=%s outcome=%s",
+                    owner,
+                    repo,
+                    number,
+                    head_sha,
+                    outcome,
+                )
+            except Exception:
+                counts["errors"] += 1
+                logger.exception(
+                    "Reviewer head reconcile failed: repository=%s/%s pr=%s",
+                    owner,
+                    repo,
+                    number,
+                )
+        if len(threads) < _SEARCH_PAGE_SIZE:
+            break
+        offset += len(threads)
     return counts
 
 

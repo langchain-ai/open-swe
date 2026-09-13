@@ -60,6 +60,211 @@ def _patch(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> None:
     monkeypatch.setattr(reconcile, "langgraph_client", lambda: client)
 
 
+def _reviewer_thread(**metadata: Any) -> dict[str, Any]:
+    base = {
+        "kind": "reviewer",
+        "watch": True,
+        "last_reviewed_sha": "old-head",
+        "pr": {
+            "owner": "acme",
+            "name": "widget",
+            "number": 7,
+            "url": "https://github.com/acme/widget/pull/7",
+        },
+    }
+    base.update(metadata)
+    return {"thread_id": "reviewer-thread", "metadata": base}
+
+
+def _live_review_pr(**overrides: Any) -> dict[str, Any]:
+    pr = {
+        "number": 7,
+        "html_url": "https://github.com/acme/widget/pull/7",
+        "state": "open",
+        "draft": False,
+        "base": {
+            "sha": "base-head",
+            "ref": "main",
+            "repo": {"id": 12, "private": True},
+        },
+        "head": {"sha": "new-head", "ref": "feature"},
+    }
+    pr.update(overrides)
+    return pr
+
+
+def _patch_reviewer_reconcile(
+    monkeypatch: pytest.MonkeyPatch,
+    threads: _FakeThreads,
+    *,
+    live_pr: dict[str, Any] | Exception | None = None,
+    enabled: bool = True,
+) -> AsyncMock:
+    _patch(monkeypatch, _FakeClient(threads, _FakeRuns({})))
+    monkeypatch.setattr(
+        reconcile.webhook_common, "_is_repo_auto_review_enabled", AsyncMock(return_value=enabled)
+    )
+    monkeypatch.setattr(
+        reconcile.webhook_common,
+        "_reviewer_token_for_repo",
+        AsyncMock(return_value=("app-token", None)),
+    )
+
+    async def fetch(*_args: Any, **_kwargs: Any) -> dict[str, Any] | None:
+        if isinstance(live_pr, Exception):
+            raise live_pr
+        return live_pr or _live_review_pr()
+
+    monkeypatch.setattr(reconcile.webhook_common, "fetch_github_pr_metadata", fetch)
+    dispatch = AsyncMock(return_value={"status": "accepted", "ownership": "created"})
+    monkeypatch.setattr(reconcile.github_webhook, "process_github_pr_synchronize", dispatch)
+    return dispatch
+
+
+@pytest.mark.asyncio
+async def test_reviewer_head_reconcile_dispatches_missed_head(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    threads = _FakeThreads([[_reviewer_thread()]])
+    dispatch = _patch_reviewer_reconcile(monkeypatch, threads)
+
+    with caplog.at_level("INFO"):
+        counts = await reconcile.reconcile_reviewer_heads()
+
+    assert counts == {"threads_checked": 1, "dispatched": 1, "skipped": 0, "errors": 0}
+    payload = dispatch.await_args.args[0]
+    assert payload["pull_request"]["head"]["sha"] == "new-head"
+    assert payload["repository"] == {
+        "owner": {"login": "acme"},
+        "name": "widget",
+        "private": True,
+        "id": 12,
+    }
+    assert "repository=acme/widget pr=7 head=new-head outcome=created" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_reviewer_head_reconcile_ignores_old_head_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreads(
+        [[_reviewer_thread(review_start={"head_sha": "old-head", "status": "started"})]]
+    )
+    dispatch = _patch_reviewer_reconcile(monkeypatch, threads)
+
+    counts = await reconcile.reconcile_reviewer_heads()
+
+    assert counts["dispatched"] == 1
+    dispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"review_start": {"head_sha": "new-head", "status": "claimed"}},
+        {
+            "head_sha": "new-head",
+            "review_check_run_id": 10,
+            "current_reviewer_run_id": "run-1",
+        },
+        {"last_reviewed_sha": "new-head"},
+    ],
+)
+async def test_reviewer_head_reconcile_skips_owned_or_reviewed_head(
+    monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any]
+) -> None:
+    threads = _FakeThreads([[_reviewer_thread(**metadata)]])
+    dispatch = _patch_reviewer_reconcile(monkeypatch, threads)
+
+    counts = await reconcile.reconcile_reviewer_heads()
+
+    assert counts["skipped"] == 1
+    dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("thread", "live_pr", "enabled"),
+    [
+        (_reviewer_thread(watch=False), _live_review_pr(), True),
+        (_reviewer_thread(), _live_review_pr(state="closed"), True),
+        (_reviewer_thread(), _live_review_pr(draft=True), True),
+        (_reviewer_thread(), _live_review_pr(), False),
+    ],
+)
+async def test_reviewer_head_reconcile_skips_ineligible_pr(
+    monkeypatch: pytest.MonkeyPatch,
+    thread: dict[str, Any],
+    live_pr: dict[str, Any],
+    enabled: bool,
+) -> None:
+    threads = _FakeThreads([[thread]])
+    dispatch = _patch_reviewer_reconcile(monkeypatch, threads, live_pr=live_pr, enabled=enabled)
+
+    counts = await reconcile.reconcile_reviewer_heads()
+
+    assert counts["skipped"] == 1
+    dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reviewer_head_reconcile_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
+    full_page = [_reviewer_thread(watch=False) for _ in range(reconcile._SEARCH_PAGE_SIZE)]
+    threads = _FakeThreads([full_page, [_reviewer_thread()]])
+    dispatch = _patch_reviewer_reconcile(monkeypatch, threads)
+
+    counts = await reconcile.reconcile_reviewer_heads()
+
+    assert len(threads.search_calls) == 2
+    assert threads.search_calls[0]["metadata"] == {"kind": "reviewer", "watch": True}
+    assert threads.search_calls[1]["offset"] == reconcile._SEARCH_PAGE_SIZE
+    assert counts["dispatched"] == 1
+    dispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reviewer_head_reconcile_isolates_pr_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bad = _reviewer_thread()
+    good = _reviewer_thread(
+        pr={
+            "owner": "acme",
+            "name": "widget",
+            "number": 8,
+            "url": "https://github.com/acme/widget/pull/8",
+        }
+    )
+    good["thread_id"] = "reviewer-thread-8"
+    threads = _FakeThreads([[bad, good]])
+    _patch(monkeypatch, _FakeClient(threads, _FakeRuns({})))
+    monkeypatch.setattr(
+        reconcile.webhook_common, "_is_repo_auto_review_enabled", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        reconcile.webhook_common,
+        "_reviewer_token_for_repo",
+        AsyncMock(return_value=("app-token", None)),
+    )
+
+    async def fetch(pr_ref: Any, **_kwargs: Any) -> dict[str, Any]:
+        if pr_ref.number == 7:
+            raise RuntimeError("GitHub unavailable")
+        return _live_review_pr(number=8)
+
+    monkeypatch.setattr(reconcile.webhook_common, "fetch_github_pr_metadata", fetch)
+    dispatch = AsyncMock(return_value={"status": "accepted", "ownership": "created"})
+    monkeypatch.setattr(reconcile.github_webhook, "process_github_pr_synchronize", dispatch)
+
+    counts = await reconcile.reconcile_reviewer_heads()
+
+    assert counts["errors"] == 1
+    assert counts["dispatched"] == 1
+    dispatch.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_cancels_only_stale_pending_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     threads = _FakeThreads([[{"thread_id": "t1"}]])
@@ -698,11 +903,13 @@ def test_auto_merge_reconciler_has_no_native_queue_state_or_mutations() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduler_reconcile_runs_both_sweeps(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_scheduler_reconcile_runs_all_sweeps(monkeypatch: pytest.MonkeyPatch) -> None:
     stale = AsyncMock(return_value={"cancelled": 1})
     auto_merge = AsyncMock(return_value={"queued": 1})
+    reviewer_heads = AsyncMock(return_value={"dispatched": 1})
     monkeypatch.setattr(scheduler, "reconcile_stale_runs", stale)
     monkeypatch.setattr(scheduler, "reconcile_auto_merge_prs", auto_merge)
+    monkeypatch.setattr(scheduler, "reconcile_reviewer_heads", reviewer_heads)
 
     result = await scheduler._launch({"task": "reconcile"}, {})
 
@@ -710,7 +917,9 @@ async def test_scheduler_reconcile_runs_both_sweeps(monkeypatch: pytest.MonkeyPa
         "result": {
             "stale_runs": {"cancelled": 1},
             "auto_merge": {"queued": 1},
+            "reviewer_heads": {"dispatched": 1},
         }
     }
     stale.assert_awaited_once()
     auto_merge.assert_awaited_once()
+    reviewer_heads.assert_awaited_once()

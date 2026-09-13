@@ -184,6 +184,27 @@ async def github_webhook(
     if gate_rejection is not None:
         return gate_rejection
 
+    if is_pull_request_comment and service._is_review_command(comment_body):
+        pr_number = issue.get("number")
+        if not isinstance(pr_number, int):
+            return {"status": "ignored", "reason": "Pull request number unavailable"}
+        pr_ref = service.GitHubPrRef(
+            owner=webhook_repo_config["owner"],
+            repo=webhook_repo_config["name"],
+            number=pr_number,
+            url=f"https://github.com/{webhook_repo_config['owner']}/"
+            f"{webhook_repo_config['name']}/pull/{pr_number}",
+        )
+        sender = payload.get("sender") or {}
+        background_tasks.add_task(
+            service.trigger_pr_review_from_ref,
+            pr_ref,
+            source="github_comment",
+            github_login=sender.get("login", ""),
+            github_user_id=sender.get("id"),
+        )
+        return {"status": "accepted", "message": "Processing explicit PR review request"}
+
     common.logger.info("Accepted GitHub webhook: event=%s, scheduling background task", event_type)
     if is_pull_request_comment or event_type in {
         "pull_request_review_comment",

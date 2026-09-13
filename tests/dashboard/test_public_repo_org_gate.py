@@ -107,11 +107,12 @@ def test_gate_allows_org_member_on_public_pr_comment(monkeypatch) -> None:
 
     called: dict[str, object] = {}
 
-    async def fake_process_github_pr_comment(payload, event_type) -> None:
-        called["event"] = event_type
+    async def fake_trigger_pr_review_from_ref(pr_ref, **kwargs) -> None:
+        called["pr_ref"] = pr_ref
+        called["kwargs"] = kwargs
 
     monkeypatch.setattr(
-        github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
+        github_webhooks, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref
     )
 
     client = TestClient(app)
@@ -140,7 +141,8 @@ def test_gate_allows_org_member_on_public_pr_comment(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
-    assert called["event"] == "issue_comment"
+    assert called["pr_ref"].number == 7
+    assert called["kwargs"]["github_login"] == "insider"
 
 
 def test_gate_skipped_on_private_repo(monkeypatch) -> None:

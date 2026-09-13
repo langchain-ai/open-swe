@@ -2564,70 +2564,80 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     assert "## Repository" not in prompt
 
 
-def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:
+@pytest.mark.parametrize("tag", ["@openswe", "@open-swe"])
+def test_github_review_command_routes_to_reviewer(
+    monkeypatch: pytest.MonkeyPatch, tag: str
+) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_process_pr_comment(payload: dict[str, object], event_type: str) -> None:
-        captured["payload"] = payload
-        captured["event_type"] = event_type
+    async def fake_trigger(pr_ref: GitHubPrRef, **kwargs: object) -> dict[str, object]:
+        captured["pr_ref"] = pr_ref
+        captured["kwargs"] = kwargs
+        return {"success": True}
 
-    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fake_process_pr_comment)
+    async def fail_task_dispatch(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("explicit review command must not dispatch the task agent")
+
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setattr(github_webhooks, "trigger_pr_review_from_ref", fake_trigger)
+    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fail_task_dispatch)
 
-    client = TestClient(app)
     response = _post_github_webhook(
-        client,
+        TestClient(app),
         "issue_comment",
         {
             "action": "created",
-            "issue": {
-                "id": 12345,
-                "number": 1244,
-                "pull_request": {"url": "https://api.github.com/repos/x/y/pulls/1244"},
-            },
-            "comment": {"id": 9, "body": "@open-swe review"},
-            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
-            "sender": {"login": "octocat"},
+            "issue": {"number": 1244, "pull_request": {"url": "https://example.test/pr"}},
+            "comment": {"id": 9, "body": f"{tag} review"},
+            "repository": {"owner": {"login": "acme"}, "name": "widgets"},
+            "sender": {"login": "octocat", "id": 123},
         },
     )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "accepted", "message": "Processing issue_comment event"}
-    assert captured["event_type"] == "issue_comment"
+    assert response.json() == {
+        "status": "accepted",
+        "message": "Processing explicit PR review request",
+    }
+    assert captured["pr_ref"] == GitHubPrRef(
+        owner="acme",
+        repo="widgets",
+        number=1244,
+        url="https://github.com/acme/widgets/pull/1244",
+    )
+    assert captured["kwargs"] == {
+        "source": "github_comment",
+        "github_login": "octocat",
+        "github_user_id": 123,
+    }
 
 
-def test_github_webhook_routes_pr_review_request_comment_to_agent(monkeypatch) -> None:
+def test_github_task_comment_keeps_task_agent_route(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_process_pr_comment(payload: dict[str, object], event_type: str) -> None:
+    async def fake_task_dispatch(payload: dict[str, object], event_type: str) -> None:
         captured["payload"] = payload
         captured["event_type"] = event_type
 
-    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fake_process_pr_comment)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    async def fail_reviewer_dispatch(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("task comment must not dispatch the reviewer")
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
-        "issue_comment",
-        {
-            "action": "created",
-            "issue": {
-                "id": 12345,
-                "number": 1244,
-                "pull_request": {"url": "https://api.github.com/repos/x/y/pulls/1244"},
-            },
-            "comment": {"id": 9, "body": "@open-swe review"},
-            "repository": {"owner": {"login": "langchain-ai"}, "name": "public-demo"},
-            "sender": {"login": "octocat"},
-        },
-    )
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fake_task_dispatch)
+    monkeypatch.setattr(github_webhooks, "trigger_pr_review_from_ref", fail_reviewer_dispatch)
+    payload: dict[object, object] = {
+        "action": "created",
+        "issue": {"number": 1244, "pull_request": {"url": "https://example.test/pr"}},
+        "comment": {"id": 9, "body": "@openswe fix the failing test"},
+        "repository": {"owner": {"login": "acme"}, "name": "widgets"},
+        "sender": {"login": "octocat", "id": 123},
+    }
+
+    response = _post_github_webhook(TestClient(app), "issue_comment", payload)
 
     assert response.status_code == 200
     assert response.json() == {"status": "accepted", "message": "Processing issue_comment event"}
-    assert captured["event_type"] == "issue_comment"
+    assert captured == {"payload": payload, "event_type": "issue_comment"}
 
 
 @pytest.mark.parametrize("alias", ["@openswe", "@open-swe", "@openswe-dev"])
