@@ -51,7 +51,15 @@ function ReviewsPage() {
   const page = filters.page ?? 0
   const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
     void navigate({
-      search: (previous) => ({ ...previous, ...changes }),
+      search: (previous) => ({
+        ...previous,
+        ...changes,
+        ...(Object.keys(changes).some((key) =>
+          ["repo", "q", "status", "sort", "direction"].includes(key)
+        )
+          ? { page: undefined }
+          : {}),
+      }),
       replace,
     })
   }

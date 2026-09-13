@@ -21,6 +21,36 @@ def response(payload, status=200):
     )
 
 
+async def test_lightweight_list_uses_server_sort_and_does_not_wait_for_details(monkeypatch):
+    monkeypatch.setattr(prs, "github_client", client)
+    search = AsyncMock(
+        return_value=response(
+            {
+                "items": [
+                    {
+                        "number": 1,
+                        "title": "PR 1",
+                        "repository_url": "https://api.github.com/repos/acme/app",
+                        "created_at": "2026-01-01T00:00:00Z",
+                    }
+                ],
+                "total_count": 1,
+            }
+        )
+    )
+    monkeypatch.setattr(prs, "github_request", search)
+    details = AsyncMock()
+    monkeypatch.setattr(prs, "_fetch_pull_request", details)
+    result = await prs.list_open_pull_requests(
+        "octocat", "user-token", lightweight=True, sort="created", direction="asc"
+    )
+    details.assert_not_awaited()
+    assert search.await_args.kwargs["params"]["sort"] == "created"
+    assert search.await_args.kwargs["params"]["order"] == "asc"
+    assert result["pullRequests"][0]["title"] == "PR 1"
+    assert result["pullRequests"][0]["detailsLoading"] is True
+
+
 async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypatch):
     monkeypatch.setattr(prs, "github_client", client)
     queries = []
@@ -137,7 +167,9 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     monkeypatch.setattr(routes, "get_valid_access_token", token)
     monkeypatch.setattr(routes, "list_open_pull_requests", listing)
     await routes.api_list_my_pull_requests(repo="acme/app", session={"sub": "octocat"})
-    listing.assert_awaited_once_with("octocat", "user-token", "acme/app")
+    listing.assert_awaited_once_with(
+        "octocat", "user-token", "acme/app", lightweight=False, sort="updated", direction="desc"
+    )
     token.return_value = None
     with pytest.raises(HTTPException) as error:
         await routes.api_list_my_pull_requests(session={"sub": "another-user"})

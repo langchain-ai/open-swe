@@ -404,7 +404,15 @@ async def _fetch_review_decision(
     return "approved" if "APPROVED" in decisions else "none"
 
 
-async def list_open_pull_requests(login: str, token: str, repo: str = "") -> dict[str, Any]:
+async def list_open_pull_requests(
+    login: str,
+    token: str,
+    repo: str = "",
+    *,
+    lightweight: bool = False,
+    sort: str = "updated",
+    direction: str = "desc",
+) -> dict[str, Any]:
     """Read the caller's open PRs and current-head checks using their own token."""
     if not _OWNER_PATTERN.fullmatch(login):
         raise HTTPException(422, "invalid GitHub login")
@@ -414,6 +422,8 @@ async def list_open_pull_requests(login: str, token: str, repo: str = "") -> dic
         for name in repositories
     ):
         raise HTTPException(422, "repository must be owner/repo")
+    if sort not in {"created", "updated"} or direction not in {"asc", "desc"}:
+        raise HTTPException(422, "invalid PR sort")
     query = f"is:pr is:open author:{login}"
     for name in repositories:
         query += f" repo:{name}"
@@ -423,7 +433,7 @@ async def list_open_pull_requests(login: str, token: str, repo: str = "") -> dic
                 client,
                 "GET",
                 f"{GITHUB_API_BASE}/search/issues",
-                params={"q": query, "per_page": "100", "sort": "updated", "order": "desc"},
+                params={"q": query, "per_page": "100", "sort": sort, "order": direction},
             )
             response.raise_for_status()
             payload = response.json()
@@ -434,99 +444,8 @@ async def list_open_pull_requests(login: str, token: str, repo: str = "") -> dic
         semaphore = asyncio.Semaphore(4)
 
         async def load(item: object) -> dict[str, Any] | None:
-            if not isinstance(item, dict):
-                return None
-            repository_url = item.get("repository_url")
-            prefix = f"{GITHUB_API_BASE}/repos/"
-            full_name = (
-                repository_url.removeprefix(prefix)
-                if isinstance(repository_url, str) and repository_url.startswith(prefix)
-                else ""
-            )
-            identity = pull_request_identity(
-                {"repo_full_name": full_name, "number": item.get("number")}
-            )
-            if identity is None:
-                return None
-            owner, name, number = identity
             async with semaphore:
-                pull = await _fetch_pull_request(client, owner, name, number)
-                if pull is not None and _live_state(pull) != "open":
-                    return None
-                result: dict[str, Any] = {
-                    "repo": full_name,
-                    "number": number,
-                    "title": item.get("title", ""),
-                    "createdAt": item.get("created_at"),
-                    "updatedAt": item.get("updated_at"),
-                    "draft": None,
-                    "additions": None,
-                    "deletions": None,
-                    "mergeable": None,
-                    "mergeState": "unknown",
-                    "headSha": None,
-                    "headRef": None,
-                    "statusAvailable": pull is not None,
-                    "ci": "unknown",
-                    "reviewDecision": None,
-                    "failingChecks": [],
-                    "pendingChecks": [],
-                }
-                if pull is None:
-                    return result
-                result.update(
-                    title=pull.get("title", ""),
-                    createdAt=pull.get("created_at"),
-                    updatedAt=pull.get("updated_at"),
-                    draft=pull.get("draft"),
-                    additions=pull.get("additions"),
-                    deletions=pull.get("deletions"),
-                    mergeable=pull.get("mergeable"),
-                    mergeState=pull.get("mergeable_state", "unknown"),
-                )
-                head = pull.get("head")
-                result["headRef"] = head.get("ref") if isinstance(head, dict) else None
-                sha = head.get("sha") if isinstance(head, dict) else None
-                if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
-                    return result
-                result["headSha"] = sha
-                runs, statuses, decision = await asyncio.gather(
-                    _fetch_check_runs(client, owner, name, sha),
-                    _fetch_commit_statuses(client, owner, name, sha),
-                    _fetch_review_decision(client, owner, name, number),
-                )
-                result["reviewDecision"] = decision
-                if runs is None or statuses is None:
-                    return result
-                failed, _, _ = _normalize_checks(runs, statuses)
-                failures = [check["name"] for check in failed]
-                failures.extend(
-                    run.get("name", "Unnamed check")
-                    for run in runs
-                    if run.get("status") == "completed"
-                    and run.get("conclusion") in {"cancelled", "stale"}
-                )
-                pending = [
-                    run.get("name", "Unnamed check")
-                    for run in runs
-                    if run.get("status") != "completed"
-                ] + [
-                    status.get("context", "Unnamed status")
-                    for status in statuses
-                    if status.get("state") == "pending"
-                ]
-                result.update(
-                    failingChecks=failures,
-                    pendingChecks=pending,
-                    ci="failing"
-                    if failures
-                    else "pending"
-                    if pending
-                    else "passing"
-                    if runs or statuses
-                    else "none",
-                )
-                return result
+                return await load_open_pull_request(client, item, details=not lightweight)
 
         items = await asyncio.gather(*(load(item) for item in payload["items"][:100]))
     return {
@@ -535,3 +454,96 @@ async def list_open_pull_requests(login: str, token: str, repo: str = "") -> dic
         "incomplete": payload.get("incomplete_results") is True,
         "updatedAt": datetime.now(UTC).isoformat(),
     }
+
+
+async def load_open_pull_request(
+    client: httpx2.AsyncClient, item: object, details: bool = True
+) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    repository_url = item.get("repository_url")
+    prefix = f"{GITHUB_API_BASE}/repos/"
+    full_name = (
+        repository_url.removeprefix(prefix)
+        if isinstance(repository_url, str) and repository_url.startswith(prefix)
+        else ""
+    )
+    identity = pull_request_identity({"repo_full_name": full_name, "number": item.get("number")})
+    if identity is None:
+        return None
+    owner, name, number = identity
+    pull = await _fetch_pull_request(client, owner, name, number) if details else None
+    if pull is not None and _live_state(pull) != "open":
+        return None
+    result: dict[str, Any] = {
+        "repo": full_name,
+        "number": number,
+        "title": item.get("title", ""),
+        "createdAt": item.get("created_at"),
+        "updatedAt": item.get("updated_at"),
+        "draft": item.get("draft"),
+        "detailsLoading": not details,
+        "additions": None,
+        "deletions": None,
+        "mergeable": None,
+        "mergeState": "unknown",
+        "headSha": None,
+        "headRef": None,
+        "statusAvailable": pull is not None,
+        "ci": "unknown",
+        "reviewDecision": None,
+        "failingChecks": [],
+        "pendingChecks": [],
+    }
+    if pull is None:
+        return result
+    result.update(
+        title=pull.get("title", ""),
+        createdAt=pull.get("created_at"),
+        updatedAt=pull.get("updated_at"),
+        draft=pull.get("draft"),
+        additions=pull.get("additions"),
+        deletions=pull.get("deletions"),
+        mergeable=pull.get("mergeable"),
+        mergeState=pull.get("mergeable_state", "unknown"),
+    )
+    head = pull.get("head")
+    result["headRef"] = head.get("ref") if isinstance(head, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
+        return result
+    result["headSha"] = sha
+    runs, statuses, decision = await asyncio.gather(
+        _fetch_check_runs(client, owner, name, sha),
+        _fetch_commit_statuses(client, owner, name, sha),
+        _fetch_review_decision(client, owner, name, number),
+    )
+    result["reviewDecision"] = decision
+    if runs is None or statuses is None:
+        return result
+    failed, _, _ = _normalize_checks(runs, statuses)
+    failures = [check["name"] for check in failed]
+    failures.extend(
+        run.get("name", "Unnamed check")
+        for run in runs
+        if run.get("status") == "completed" and run.get("conclusion") in {"cancelled", "stale"}
+    )
+    pending = [
+        run.get("name", "Unnamed check") for run in runs if run.get("status") != "completed"
+    ] + [
+        status.get("context", "Unnamed status")
+        for status in statuses
+        if status.get("state") == "pending"
+    ]
+    result.update(
+        failingChecks=failures,
+        pendingChecks=pending,
+        ci="failing"
+        if failures
+        else "pending"
+        if pending
+        else "passing"
+        if runs or statuses
+        else "none",
+    )
+    return result

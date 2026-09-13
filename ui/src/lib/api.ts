@@ -91,6 +91,31 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
+let activePrDetails = 0
+const pendingPrDetails: Array<() => void> = []
+
+async function loadPrDetails(
+  repo: string,
+  number: number
+): Promise<OpenPullRequest | null> {
+  await new Promise<void>((resolve) => {
+    const start = () => {
+      activePrDetails++
+      resolve()
+    }
+    if (activePrDetails < 4) start()
+    else pendingPrDetails.push(start)
+  })
+  try {
+    return await request<OpenPullRequest | null>(
+      `/my-pull-requests/${repo.split("/").map(encodeURIComponent).join("/")}/${number}`
+    )
+  } finally {
+    activePrDetails--
+    pendingPrDetails.shift()?.()
+  }
+}
+
 export async function transcribeAudio(audio: Blob): Promise<string> {
   const response = await request<{ text: string }>("/voice/transcriptions", {
     method: "POST",
@@ -535,6 +560,8 @@ export interface ReviewListPayload {
 }
 
 export interface OpenPullRequest {
+  detailsLoading?: boolean
+  detailsError?: boolean
   repo: string
   number: number
   title: string
@@ -901,10 +928,16 @@ export const api = {
     ),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
-  myPullRequests: (repo: string) =>
+  myPullRequests: (
+    repo: string,
+    sort: "createdAt" | "updatedAt" = "updatedAt",
+    direction: "asc" | "desc" = "asc"
+  ) =>
     request<OpenPullRequestsPayload>(
-      `/my-pull-requests?repo=${encodeURIComponent(repo)}`
+      `/my-pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}`
     ),
+  myPullRequestDetails: (repo: string, number: number) =>
+    loadPrDetails(repo, number),
   fixPullRequest: (pr: OpenPullRequest) =>
     request<{ thread_id: string }>(
       `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/fix`,

@@ -1,10 +1,4 @@
-export type ReviewSort =
-  | "number"
-  | "title"
-  | "additions"
-  | "diffstat"
-  | "updatedAt"
-  | "createdAt"
+export type ReviewSort = "updatedAt" | "createdAt"
 export const reviewStatuses = [
   "Draft",
   "Conflicted",
@@ -48,16 +42,9 @@ export function validateReviewsSearch(
     repo: repo.length ? repo : undefined,
     q: typeof search.q === "string" ? search.q.slice(0, 200) : undefined,
     status: status.length ? status : undefined,
-    sort: (
-      [
-        "number",
-        "title",
-        "additions",
-        "diffstat",
-        "updatedAt",
-        "createdAt",
-      ] as const
-    ).find((sort) => sort === search.sort),
+    sort: (["updatedAt", "createdAt"] as const).find(
+      (sort) => sort === search.sort
+    ),
     direction: search.direction === "desc" ? "desc" : undefined,
     page: Number.isInteger(page) && page > 0 && page <= 50 ? page : undefined,
   }

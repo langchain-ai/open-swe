@@ -17,6 +17,7 @@ import type { ReviewsSearch } from "./search"
 vi.mock("@/lib/api", () => ({
   api: {
     myPullRequests: vi.fn(),
+    myPullRequestDetails: vi.fn(),
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
     fixPullRequest: vi.fn(),
@@ -108,45 +109,78 @@ afterEach(() => {
 })
 
 describe("My PRs", () => {
-  it("sorts PR numbers numerically and titles alphabetically in both directions", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
-      ...payload,
-      pullRequests: [
-        pull(10, { title: "Change Alpha" }),
-        pull(2, { title: "Change Zebra" }),
-      ],
-    })
-    mount()
-    await screen.findByText("Change Alpha")
-    fireEvent.click(screen.getByRole("button", { name: "PR" }))
-    expect(titles()).toEqual(["Change Zebra", "Change Alpha"])
-    fireEvent.click(screen.getByRole("button", { name: "PR" }))
-    expect(titles()).toEqual(["Change Alpha", "Change Zebra"])
-    fireEvent.click(screen.getByRole("button", { name: /Pull request/ }))
-    expect(titles()).toEqual(["Change Alpha", "Change Zebra"])
-    fireEvent.click(screen.getByRole("button", { name: /Pull request/ }))
-    expect(titles()).toEqual(["Change Zebra", "Change Alpha"])
-  })
-  it("sorts added lines and both dates in either direction, and shows actionable status", async () => {
+  it("offers only global date sorting and passes it to the server", async () => {
     mount()
     await screen.findByText("Change 1")
-    expect(titles()).toEqual(["Change 1", "Change 2"])
-    expect(screen.getByText("Browser E2E")).toBeTruthy()
-    expect(
-      within(screen.getByRole("table")).getByText("Conflicted")
-    ).toBeTruthy()
-    expect(
-      within(screen.getByRole("table")).getByText("Reviewable")
-    ).toBeTruthy()
-    expect(screen.getByLabelText("1 lines added, 3 lines deleted")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: /Last updated/ }))
-    expect(titles()).toEqual(["Change 2", "Change 1"])
-    fireEvent.click(screen.getByRole("button", { name: /Last updated/ }))
-    expect(titles()).toEqual(["Change 1", "Change 2"])
+    for (const name of ["PR", "Pull request", "Diffstat"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull()
+    }
     fireEvent.click(screen.getByRole("button", { name: /Created/ }))
-    expect(titles()).toEqual(["Change 1", "Change 2"])
+    await waitFor(() =>
+      expect(api.myPullRequests).toHaveBeenCalledWith("", "createdAt", "asc")
+    )
     fireEvent.click(screen.getByRole("button", { name: /Created/ }))
-    expect(titles()).toEqual(["Change 2", "Change 1"])
+    await waitFor(() =>
+      expect(api.myPullRequests).toHaveBeenCalledWith("", "createdAt", "desc")
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Last updated/ }))
+    await waitFor(() =>
+      expect(api.myPullRequests).toHaveBeenCalledWith("", "updatedAt", "asc")
+    )
+  })
+
+  it("shows ten lightweight rows before their details finish and loads the next page on demand", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: Array.from({ length: 12 }, (_, index) =>
+        pull(index + 1, { detailsLoading: true, additions: null })
+      ),
+    })
+    let resolve!: (value: OpenPullRequest) => void
+    vi.mocked(api.myPullRequestDetails).mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    mount()
+    await screen.findByText("Change 10")
+    expect(screen.queryByText("Change 11")).toBeNull()
+    expect(screen.getAllByRole("row")).toHaveLength(11)
+    await waitFor(() =>
+      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(10)
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Next" }))
+    await screen.findByText("Change 11")
+    expect(screen.queryByText("Change 1")).toBeNull()
+    expect(screen.getAllByRole("row")).toHaveLength(3)
+    await waitFor(() =>
+      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(12)
+    )
+    resolve(pull(12))
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("12 lines added, 3 lines deleted")
+      ).toBeTruthy()
+    )
+  })
+
+  it("rediscovers a reopened PR on manual refresh", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { detailsLoading: true })],
+    })
+    vi.mocked(api.myPullRequestDetails)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(pull(1))
+    mount()
+    await waitFor(() => expect(api.myPullRequestDetails).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    expect(await screen.findByText("Change 1")).toBeTruthy()
+    await waitFor(() =>
+      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(2)
+    )
   })
 
   it("filters conflicts and sends the applied repository to the server", async () => {
@@ -166,7 +200,7 @@ describe("My PRs", () => {
     fireEvent.click(
       screen.getByRole("menuitemcheckbox", { name: "Reviewable" })
     )
-    expect(titles()).toEqual(["Change 1", "Change 2"])
+    expect(titles()).toEqual(["Change 2", "Change 1"])
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
     fireEvent.click(screen.getByLabelText("Filter by repository"))
     expect(api.repos).not.toHaveBeenCalled()
@@ -175,13 +209,21 @@ describe("My PRs", () => {
       await screen.findByRole("menuitemcheckbox", { name: "acme/other" })
     )
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenLastCalledWith("acme/other")
+      expect(api.myPullRequests).toHaveBeenLastCalledWith(
+        "acme/other",
+        "updatedAt",
+        "asc"
+      )
     )
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: "acme/app" })
     )
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenLastCalledWith("acme/other,acme/app")
+      expect(api.myPullRequests).toHaveBeenLastCalledWith(
+        "acme/other,acme/app",
+        "updatedAt",
+        "asc"
+      )
     )
   })
 
@@ -207,7 +249,7 @@ describe("My PRs", () => {
     expect(screen.getByText("Change 1")).toBeTruthy()
   })
 
-  it("cycles diffstat modes and limits inline failures to three", async () => {
+  it("limits inline failures to three", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -220,27 +262,12 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 1")
-    expect(titles()).toEqual(["Change 2", "Change 1"])
-    for (const expected of [
-      ["Change 1", "Change 2"],
-      ["Change 1", "Change 2"],
-      ["Change 2", "Change 1"],
-      ["Change 2", "Change 1"],
-    ]) {
-      fireEvent.click(screen.getByRole("button", { name: /Diffstat/ }))
-      expect(titles()).toEqual(expected)
-    }
     const more = screen.getByText("+2 more").closest("details")!
     expect(more.open).toBe(false)
     expect(within(more).getByText("four")).toBeTruthy()
     expect(
       screen.queryByRole("columnheader", { name: "Lines added" })
     ).toBeNull()
-    expect(
-      within(screen.getAllByRole("columnheader")[0]!).getByRole("button", {
-        name: "PR",
-      })
-    ).toBeTruthy()
   })
 
   it("restores linked bug and flag counts with review progress", async () => {
@@ -323,7 +350,9 @@ describe("My PRs", () => {
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)
-    expect(api.fixPullRequest).toHaveBeenCalledWith(payload.pullRequests[0])
+    expect(api.fixPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining(payload.pullRequests[0]!)
+    )
     resolve({ thread_id: "fix-thread" })
     const queued = await screen.findByRole("button", { name: "Fix queued" })
     expect((queued as HTMLButtonElement).disabled).toBe(true)

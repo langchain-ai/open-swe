@@ -1,4 +1,9 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { BugBeetleIcon, FlagIcon } from "@phosphor-icons/react"
 
 import { Button } from "@/components/ui/button"
@@ -12,6 +17,8 @@ const control =
   "rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
 
 function overallStatus(pr: OpenPullRequest) {
+  if (pr.detailsLoading) return "Loading…"
+  if (pr.detailsError) return "Could not load status"
   if (pr.draft) return "Draft"
   if (pr.mergeable === false || pr.mergeState === "dirty") return "Conflicted"
   if (pr.ci === "failing") return "Failing"
@@ -101,6 +108,7 @@ function dateLabel(value: string | null) {
 }
 
 function Diffstat({ pr }: { pr: OpenPullRequest }) {
+  if (pr.detailsLoading) return <Skeleton className="h-4 w-20" />
   if (pr.additions === null || pr.deletions === null) return <span>—</span>
   const total = pr.additions + pr.deletions
   return (
@@ -150,44 +158,96 @@ export function MyPullRequests({
     repo = [],
     q: search = "",
     status: filter,
-    sort = "diffstat",
+    sort = "updatedAt",
+    page = 0,
     direction = "asc",
   } = filters
   const toggleSort = (next: ReviewSort) =>
     onFiltersChange({
+      page: undefined,
       sort: next,
       direction: sort === next && direction === "asc" ? "desc" : "asc",
     })
-  const cycleDiffstat = () => {
-    const modes = [
-      { sort: "diffstat", direction: "asc" },
-      { sort: "diffstat", direction: "desc" },
-      { sort: "additions", direction: "asc" },
-      { sort: "additions", direction: "desc" },
-    ] as const
-    const current = modes.findIndex(
-      (mode) => mode.sort === sort && mode.direction === direction
-    )
-    onFiltersChange(modes[(current + 1) % modes.length]!)
-  }
+  const queryClient = useQueryClient()
   const query = useQuery({
-    queryKey: ["my-pull-requests", login, repo],
-    queryFn: () => api.myPullRequests(repo.join(",")),
+    queryKey: ["my-pull-requests", login, repo, sort, direction],
+    queryFn: () => api.myPullRequests(repo.join(","), sort, direction),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
   })
   const repos = useQuery({
-    queryKey: ["my-pull-requests", login, []],
+    queryKey: ["my-pull-requests", login, [], "updatedAt", "asc"],
     queryFn: () => api.myPullRequests(""),
     retry: false,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   })
-  const all = query.data?.pullRequests ?? []
-  const reviewRefs = all.map((pr) => ({ repo: pr.repo, number: pr.number }))
+  const rows = query.data?.pullRequests ?? []
+  const matchingRows = rows
+    .filter(
+      (pr) =>
+        queryClient.getQueryData([
+          "my-pr-details",
+          login,
+          pr.repo,
+          pr.number,
+        ]) !== null
+    )
+    .filter((pr) =>
+      `${pr.repo} #${pr.number} ${pr.title}`
+        .toLowerCase()
+        .includes(search.toLowerCase())
+    )
+  const requestedRows = filter?.length
+    ? matchingRows
+    : matchingRows.slice(page * 10, (page + 1) * 10)
+  const detailQueries = useQueries({
+    queries: requestedRows.map((pr) => ({
+      queryKey: ["my-pr-details", login, pr.repo, pr.number],
+      queryFn: () => api.myPullRequestDetails(pr.repo, pr.number),
+      enabled: pr.detailsLoading === true,
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: false,
+    })),
+  })
+  const all = matchingRows.flatMap((pr) => {
+    const index = requestedRows.findIndex(
+      (row) => row.repo === pr.repo && row.number === pr.number
+    )
+    const detail = detailQueries[index]
+    if (detail?.data === null) return []
+    if (detail?.data)
+      return [
+        {
+          ...pr,
+          ...detail.data,
+          detailsLoading: false,
+          detailsError: false,
+          title: detail.data.title || pr.title,
+          createdAt: detail.data.createdAt || pr.createdAt,
+          updatedAt: detail.data.updatedAt || pr.updatedAt,
+        },
+      ]
+    return [
+      {
+        ...pr,
+        detailsLoading: pr.detailsLoading && !detail?.isError,
+        detailsError: detail?.isError,
+      },
+    ]
+  })
+  const filtered = all.filter(
+    (pr) =>
+      !filter?.length || filter.some((status) => overallStatus(pr) === status)
+  )
+  const visible = filtered.slice(page * 10, (page + 1) * 10)
+  const detailsLoading = detailQueries.some((detail) => detail.isFetching)
+  const reviewRefs = visible.map((pr) => ({ repo: pr.repo, number: pr.number }))
   const reviews = useQuery({
     queryKey: ["my-pr-review-summaries", login, reviewRefs],
     queryFn: () => api.reviewSummaries(reviewRefs),
@@ -203,45 +263,6 @@ export function MyPullRequests({
       ...(repos.data?.pullRequests ?? []).map((pr) => pr.repo),
     ]),
   ].sort()
-  const visible = all
-    .filter((pr) => {
-      if (
-        !`${pr.repo} #${pr.number} ${pr.title}`
-          .toLowerCase()
-          .includes(search.toLowerCase())
-      )
-        return false
-      return (
-        !filter?.length || filter.some((status) => overallStatus(pr) === status)
-      )
-    })
-    .sort((a, b) => {
-      if (sort === "title") {
-        return (
-          a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) *
-            (direction === "asc" ? 1 : -1) || a.number - b.number
-        )
-      }
-      const value = (pr: OpenPullRequest) =>
-        sort === "number"
-          ? pr.number
-          : sort === "diffstat"
-            ? pr.additions === null || pr.deletions === null
-              ? null
-              : pr.additions + pr.deletions
-            : sort === "additions"
-              ? pr.additions
-              : pr[sort]
-                ? Date.parse(pr[sort])
-                : null
-      const left = value(a),
-        right = value(b)
-      if (left === null) return right === null ? 0 : 1
-      if (right === null) return -1
-      return (
-        (left - right) * (direction === "asc" ? 1 : -1) || a.number - b.number
-      )
-    })
 
   return (
     <section className="mt-5 space-y-4" aria-label="My open pull requests">
@@ -258,8 +279,15 @@ export function MyPullRequests({
           variant="outline"
           disabled={query.isFetching}
           onClick={() => {
+            queryClient.removeQueries({
+              queryKey: ["my-pr-details", login],
+              predicate: (cached) => cached.state.data === null,
+            })
             void query.refetch()
             if (repo.length) void repos.refetch()
+            void queryClient.invalidateQueries({
+              queryKey: ["my-pr-details", login],
+            })
             if (reviewRefs.length) void reviews.refetch()
           }}
         >
@@ -309,7 +337,7 @@ export function MyPullRequests({
       {(query.data?.truncated || query.data?.incomplete) && (
         <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
           {query.data.truncated
-            ? "Showing the 100 most recently updated open PRs. Filter by repository to narrow the list. "
+            ? "Showing the first 100 matching open PRs in the selected order. Filter by repository to narrow the list. "
             : ""}
           {query.data.incomplete &&
             "GitHub returned incomplete search results. Refresh to try again."}
@@ -326,9 +354,9 @@ export function MyPullRequests({
                   <tr>
                     {(
                       [
-                        ["PR", "number"],
-                        ["Pull request", "title"],
-                        ["Diffstat", "diffstat"],
+                        ["PR", null],
+                        ["Pull request", null],
+                        ["Diffstat", null],
                         ["Status", null],
                         ["Review issues", null],
                         ["Last updated", "updatedAt"],
@@ -340,8 +368,7 @@ export function MyPullRequests({
                         scope="col"
                         aria-sort={
                           key
-                            ? sort === key ||
-                              (key === "diffstat" && sort === "additions")
+                            ? sort === key
                               ? direction === "asc"
                                 ? "ascending"
                                 : "descending"
@@ -353,23 +380,12 @@ export function MyPullRequests({
                         {key ? (
                           <button
                             type="button"
-                            onClick={() =>
-                              key === "diffstat"
-                                ? cycleDiffstat()
-                                : toggleSort(key)
-                            }
+                            onClick={() => toggleSort(key)}
                             className="inline-flex items-center gap-1 hover:text-foreground"
                           >
                             {label}
-                            {key === "diffstat" &&
-                              (sort === "diffstat" || sort === "additions") && (
-                                <span className="font-normal">
-                                  {sort === "diffstat" ? "total" : "added"}
-                                </span>
-                              )}
                             <span aria-hidden="true">
-                              {sort === key ||
-                              (key === "diffstat" && sort === "additions")
+                              {sort === key
                                 ? direction === "asc"
                                   ? "↑"
                                   : "↓"
@@ -420,7 +436,7 @@ export function MyPullRequests({
                             {pr.headRef}
                           </div>
                         )}
-                        {!pr.statusAvailable && (
+                        {!pr.statusAvailable && !pr.detailsLoading && (
                           <p className="mt-1 text-amber-700 dark:text-amber-400">
                             Live PR status unavailable
                           </p>
@@ -527,19 +543,43 @@ export function MyPullRequests({
                         colSpan={7}
                         className="px-4 py-12 text-center text-muted-foreground"
                       >
-                        {all.length
-                          ? "No PRs match these filters."
-                          : "No open PRs found."}
+                        {detailsLoading
+                          ? "Loading matching PRs…"
+                          : all.length
+                            ? "No PRs match these filters."
+                            : "No open PRs found."}
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
+            <div className="flex items-center gap-3 text-xs">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={page === 0 || query.isFetching}
+                onClick={() => onFiltersChange({ page: page - 1 || undefined })}
+              >
+                Prev
+              </Button>
+              <span>Page {page + 1}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={
+                  (page + 1) * 10 >= filtered.length || query.isFetching
+                }
+                onClick={() => onFiltersChange({ page: page + 1 })}
+              >
+                Next
+              </Button>
+              {detailsLoading && <span role="status">Loading PR details…</span>}
+            </div>
             <p className="text-xs text-muted-foreground">
-              {visible.length} of {all.length} PRs · Added/deleted lines include
-              tests and docs. Reviewable means ready for human review; pending
-              checks are shown above.
+              {visible.length} of {filtered.length} PRs · Added/deleted lines
+              include tests and docs. Reviewable means ready for human review;
+              pending checks are shown above.
             </p>
           </>
         )

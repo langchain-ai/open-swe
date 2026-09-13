@@ -246,8 +246,13 @@ from agent.dashboard.workspace_mcps import (
     list_workspace_mcps,
     save_workspace_mcp,
 )
+from agent.github.http import github_client
 from agent.github.pull_request_checks import PullRequestState
-from agent.github.pull_request_status import list_open_pull_requests, pull_request_identity
+from agent.github.pull_request_status import (
+    list_open_pull_requests,
+    load_open_pull_request,
+    pull_request_identity,
+)
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
 from agent.mcp import (
     MCPConnection,
@@ -1504,12 +1509,33 @@ async def api_get_review_summaries(
 @router.get("/my-pull-requests")
 async def api_list_my_pull_requests(
     repo: str = "",
+    lightweight: bool = False,
+    sort: Literal["created", "updated"] = "updated",
+    direction: Literal["asc", "desc"] = "desc",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     token = await get_valid_access_token(session["sub"])
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await list_open_pull_requests(session["sub"], token, repo)
+    return await list_open_pull_requests(
+        session["sub"], token, repo, lightweight=lightweight, sort=sort, direction=direction
+    )
+
+
+@router.get("/my-pull-requests/{owner}/{repo}/{number}")
+async def api_my_pull_request_details(
+    owner: str, repo: str, number: int, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, Any] | None:
+    if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
+        raise HTTPException(422, "invalid pull request")
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    async with github_client(token=token) as client:
+        return await load_open_pull_request(
+            client,
+            {"repository_url": f"https://api.github.com/repos/{owner}/{repo}", "number": number},
+        )
 
 
 @router.get("/reviews")
