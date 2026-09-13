@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import {
   keepPreviousData,
   useQuery,
@@ -17,6 +17,7 @@ import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 import { MyPullRequests } from "@/features/reviews/MyPullRequests"
+import { PullRequestLinks } from "@/features/reviews/PullRequestLinks"
 import {
   validateReviewsSearch,
   type ReviewsSearch,
@@ -93,7 +94,7 @@ function ReviewsPage() {
         )}
       >
         <h1 className="font-heading text-base font-medium text-foreground">
-          PR Reviews
+          Pull Requests
         </h1>
         <p className="mt-1 text-xs text-muted-foreground">
           {mine
@@ -187,14 +188,8 @@ function ReviewsPage() {
               )}
             >
               {items.map((review) => (
-                <Link
+                <div
                   key={review.thread_id}
-                  to="/agents/reviews/$owner/$repo/$number"
-                  params={{
-                    owner: review.owner,
-                    repo: review.repo,
-                    number: String(review.number),
-                  }}
                   className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-sidebar-row-hover"
                 >
                   <div className="flex min-w-0 items-center gap-3">
@@ -203,15 +198,14 @@ function ReviewsPage() {
                       <div className="truncate text-xs font-medium text-foreground">
                         {review.title}
                       </div>
+                      <PullRequestLinks
+                        repo={`${review.owner}/${review.repo}`}
+                        number={review.number}
+                      />
                       <div className="mt-0.5 text-xs text-muted-foreground">
                         {review.owner}/{review.repo}#{review.number}
                         {review.author && !mine && (
                           <span className="ml-2">by {review.author}</span>
-                        )}
-                        {review.head_ref && (
-                          <span className="ml-2 font-mono text-[11px]">
-                            {review.head_ref}
-                          </span>
                         )}
                       </div>
                     </div>
@@ -234,7 +228,7 @@ function ReviewsPage() {
                       {review.counts.flags}
                     </span>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
             {(page > 0 || reviews.data?.has_more) && (

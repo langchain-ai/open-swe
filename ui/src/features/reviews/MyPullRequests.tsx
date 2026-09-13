@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
+import { PullRequestLinks } from "./PullRequestLinks"
 
 const control =
   "rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
@@ -22,6 +23,7 @@ function overallStatus(pr: OpenPullRequest) {
   if (pr.draft) return "Draft"
   if (pr.mergeable === false || pr.mergeState === "dirty") return "Conflicted"
   if (pr.ci === "failing") return "Failing"
+  if (pr.ci === "pending") return "Pending"
   if (
     !pr.statusAvailable ||
     pr.mergeable === null ||
@@ -160,7 +162,7 @@ export function MyPullRequests({
     status: filter,
     sort = "updatedAt",
     page = 0,
-    direction = "asc",
+    direction = "desc",
   } = filters
   const toggleSort = (next: ReviewSort) =>
     onFiltersChange({
@@ -178,7 +180,7 @@ export function MyPullRequests({
     retry: false,
   })
   const repos = useQuery({
-    queryKey: ["my-pull-requests", login, [], "updatedAt", "asc"],
+    queryKey: ["my-pull-requests", login, [], "updatedAt", "desc"],
     queryFn: () => api.myPullRequests(""),
     retry: false,
     staleTime: Infinity,
@@ -329,11 +331,6 @@ export function MyPullRequests({
           {query.error.message}
         </p>
       )}
-      {reviews.error && (
-        <p role="alert" className="text-xs text-destructive">
-          Review indicators unavailable. {reviews.error.message}
-        </p>
-      )}
       {(query.data?.truncated || query.data?.incomplete) && (
         <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
           {query.data.truncated
@@ -355,6 +352,7 @@ export function MyPullRequests({
                     {(
                       [
                         ["PR", null],
+                        ["Repository", null],
                         ["Pull request", null],
                         ["Diffstat", null],
                         ["Status", null],
@@ -362,41 +360,46 @@ export function MyPullRequests({
                         ["Last updated", "updatedAt"],
                         ["Created", "createdAt"],
                       ] as const
-                    ).map(([label, key]) => (
-                      <th
-                        key={label}
-                        scope="col"
-                        aria-sort={
-                          key
-                            ? sort === key
-                              ? direction === "asc"
-                                ? "ascending"
-                                : "descending"
-                              : "none"
-                            : undefined
-                        }
-                        className="px-4 py-3 font-medium whitespace-nowrap"
-                      >
-                        {key ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleSort(key)}
-                            className="inline-flex items-center gap-1 hover:text-foreground"
-                          >
-                            {label}
-                            <span aria-hidden="true">
-                              {sort === key
+                    )
+                      .filter(
+                        ([label]) =>
+                          label !== "Review issues" || !reviews.isError
+                      )
+                      .map(([label, key]) => (
+                        <th
+                          key={label}
+                          scope="col"
+                          aria-sort={
+                            key
+                              ? sort === key
                                 ? direction === "asc"
-                                  ? "↑"
-                                  : "↓"
-                                : "↕"}
-                            </span>
-                          </button>
-                        ) : (
-                          label
-                        )}
-                      </th>
-                    ))}
+                                  ? "ascending"
+                                  : "descending"
+                                : "none"
+                              : undefined
+                          }
+                          className="px-4 py-3 font-medium whitespace-nowrap"
+                        >
+                          {key ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(key)}
+                              className="inline-flex items-center gap-1 hover:text-foreground"
+                            >
+                              {label}
+                              <span aria-hidden="true">
+                                {sort === key
+                                  ? direction === "asc"
+                                    ? "↑"
+                                    : "↓"
+                                  : "↕"}
+                              </span>
+                            </button>
+                          ) : (
+                            label
+                          )}
+                        </th>
+                      ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -406,36 +409,14 @@ export function MyPullRequests({
                       className="align-top hover:bg-muted/20"
                     >
                       <td className="px-4 py-4 font-mono tabular-nums">
-                        <a
-                          href={`https://github.com/${pr.repo}/pull/${pr.number}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-muted-foreground hover:text-foreground hover:underline"
-                        >
-                          #{pr.number}
-                        </a>
+                        #{pr.number}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <span className="text-muted-foreground">{pr.repo}</span>
                       </td>
                       <td className="max-w-md min-w-64 px-4 py-4">
-                        <a
-                          href={`https://github.com/${pr.repo}/pull/${pr.number}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-medium hover:underline"
-                        >
-                          {pr.title}
-                        </a>
-                        <div className="mt-1 text-muted-foreground">
-                          {pr.repo}
-                          {pr.draft && " · Draft"}
-                        </div>
-                        {pr.headRef && (
-                          <div
-                            className="mt-1 truncate font-mono text-[11px] text-muted-foreground"
-                            title={pr.headRef}
-                          >
-                            {pr.headRef}
-                          </div>
-                        )}
+                        <span className="font-medium">{pr.title}</span>
+                        <PullRequestLinks repo={pr.repo} number={pr.number} />
                         {!pr.statusAvailable && !pr.detailsLoading && (
                           <p className="mt-1 text-amber-700 dark:text-amber-400">
                             Live PR status unavailable
@@ -491,34 +472,36 @@ export function MyPullRequests({
                             </ul>
                           </details>
                         )}
-                        {["Conflicted", "Failing"].includes(
-                          overallStatus(pr)
-                        ) && <FixPullRequest pr={pr} />}
+                        {(pr.mergeable === false ||
+                          pr.mergeState === "dirty" ||
+                          pr.ci === "failing") && <FixPullRequest pr={pr} />}
                       </td>
-                      <td className="min-w-36 px-4 py-4 text-muted-foreground">
-                        {reviews.error ? (
-                          "Unavailable"
-                        ) : reviews.data?.[
-                            `${pr.repo}#${pr.number}`.toLowerCase()
-                          ] ? (
-                          <ReviewIndicators
-                            review={
-                              reviews.data[
-                                `${pr.repo}#${pr.number}`.toLowerCase()
-                              ]!
-                            }
-                          />
-                        ) : reviews.isPending ? (
-                          "Loading review…"
-                        ) : !Object.hasOwn(
-                            reviews.data ?? {},
-                            `${pr.repo}#${pr.number}`.toLowerCase()
-                          ) ? (
-                          "Unavailable"
-                        ) : (
-                          "Not reviewed"
-                        )}
-                      </td>
+                      {!reviews.isError && (
+                        <td className="min-w-36 px-4 py-4 text-muted-foreground">
+                          {reviews.error ? (
+                            "Unavailable"
+                          ) : reviews.data?.[
+                              `${pr.repo}#${pr.number}`.toLowerCase()
+                            ] ? (
+                            <ReviewIndicators
+                              review={
+                                reviews.data[
+                                  `${pr.repo}#${pr.number}`.toLowerCase()
+                                ]!
+                              }
+                            />
+                          ) : reviews.isPending ? (
+                            "Loading review…"
+                          ) : !Object.hasOwn(
+                              reviews.data ?? {},
+                              `${pr.repo}#${pr.number}`.toLowerCase()
+                            ) ? (
+                            "Unavailable"
+                          ) : (
+                            "Not reviewed"
+                          )}
+                        </td>
+                      )}
                       <td className="px-4 py-4 whitespace-nowrap text-muted-foreground">
                         <time
                           dateTime={pr.updatedAt ?? undefined}
@@ -540,7 +523,7 @@ export function MyPullRequests({
                   {visible.length === 0 && (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={reviews.isError ? 7 : 8}
                         className="px-4 py-12 text-center text-muted-foreground"
                       >
                         {detailsLoading
@@ -578,8 +561,7 @@ export function MyPullRequests({
             </div>
             <p className="text-xs text-muted-foreground">
               {visible.length} of {filtered.length} PRs · Added/deleted lines
-              include tests and docs. Reviewable means ready for human review;
-              pending checks are shown above.
+              include tests and docs. PRs with checks still running are Pending.
             </p>
           </>
         )

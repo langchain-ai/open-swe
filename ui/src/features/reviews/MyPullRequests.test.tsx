@@ -24,7 +24,25 @@ vi.mock("@/lib/api", () => ({
   },
 }))
 const navigate = vi.hoisted(() => vi.fn())
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }))
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => navigate,
+  Link: ({
+    params,
+    children,
+    className,
+  }: {
+    params: { owner: string; repo: string; number: string }
+    children: React.ReactNode
+    className?: string
+  }) => (
+    <a
+      className={className}
+      href={`/agents/reviews/${params.owner}/${params.repo}/${params.number}`}
+    >
+      {children}
+    </a>
+  ),
+}))
 
 const pull = (
   number: number,
@@ -91,9 +109,7 @@ const titles = () =>
   screen
     .getAllByRole("row")
     .slice(1)
-    .map(
-      (row) => within(row).getByRole("link", { name: /^Change/ }).textContent
-    )
+    .map((row) => within(row).getByText(/^Change/).textContent)
 
 beforeEach(() => {
   vi.mocked(api.reviewSummaries).mockResolvedValue({})
@@ -109,9 +125,101 @@ afterEach(() => {
 })
 
 describe("My PRs", () => {
+  it("keeps titles and numbers plain and provides explicit destination links", async () => {
+    mount()
+    const title = await screen.findByText("Change 1")
+    const row = title.closest("tr")!
+    expect(title.closest("a")).toBeNull()
+    expect(
+      screen.getByRole("columnheader", { name: "Repository" })
+    ).toBeTruthy()
+    expect(within(row).getAllByRole("cell")[1]?.textContent).toBe("acme/app")
+    expect(screen.queryByText("feature/example")).toBeNull()
+    expect(within(row).getByText("#1").closest("a")).toBeNull()
+    expect(
+      within(row).getByRole("link", { name: "GitHub" }).getAttribute("href")
+    ).toBe("https://github.com/acme/app/pull/1")
+    expect(
+      within(row)
+        .getByRole("link", { name: "Review Mode" })
+        .getAttribute("href")
+    ).toBe("/agents/reviews/acme/app/1")
+  })
+  it("shows pending checks as Pending, preserving draft and conflict priority", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, { ci: "pending", pendingChecks: ["build"] }),
+        pull(2, { ci: "pending", reviewDecision: "approved" }),
+        pull(3, { ci: "pending", draft: true }),
+        pull(4, { ci: "pending", mergeable: false }),
+      ],
+    })
+    mount()
+    await screen.findByText("Change 4")
+    expect(
+      screen
+        .getAllByRole("row")
+        .slice(1)
+        .map(
+          (row) =>
+            within(row).getAllByRole("cell")[4]?.firstElementChild?.textContent
+        )
+    ).toEqual(["Pending", "Pending", "Draft", "Conflicted"])
+    fireEvent.click(screen.getByLabelText("Filter by status"))
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Pending" })
+    )
+    expect(titles()).toEqual(["Change 1", "Change 2"])
+  })
+  it("shows fix actions on conflicted or failing drafts but not healthy drafts", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, { draft: true, mergeable: false }),
+        pull(2, { draft: true, ci: "failing" }),
+        pull(3, { draft: true }),
+      ],
+    })
+    mount()
+    await screen.findByText("Change 3")
+    const rows = screen.getAllByRole("row").slice(1)
+    for (const row of rows)
+      expect(
+        within(row).getAllByRole("cell")[4]?.firstElementChild?.textContent
+      ).toBe("Draft")
+    expect(
+      within(rows[0]!).getByRole("button", { name: "Fix in Open SWE" })
+    ).toBeTruthy()
+    expect(
+      within(rows[1]!).getByRole("button", { name: "Fix in Open SWE" })
+    ).toBeTruthy()
+    expect(
+      within(rows[2]!).queryByRole("button", { name: "Fix in Open SWE" })
+    ).toBeNull()
+  })
+
+  it("hides the review issues column and banner when the review backend is unavailable", async () => {
+    vi.mocked(api.reviewSummaries).mockRejectedValue(
+      new Error("Review records require the backend")
+    )
+    mount()
+    await screen.findByText("Change 1")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("columnheader", { name: "Review issues" })
+      ).toBeNull()
+    )
+    expect(screen.queryByText(/Review records require/)).toBeNull()
+    expect(screen.getAllByRole("columnheader")).toHaveLength(7)
+    expect(
+      within(screen.getAllByRole("row")[1]!).getAllByRole("cell")
+    ).toHaveLength(7)
+  })
   it("offers only global date sorting and passes it to the server", async () => {
     mount()
     await screen.findByText("Change 1")
+    expect(api.myPullRequests).toHaveBeenCalledWith("", "updatedAt", "desc")
     for (const name of ["PR", "Pull request", "Diffstat"]) {
       expect(screen.queryByRole("button", { name })).toBeNull()
     }
@@ -212,7 +320,7 @@ describe("My PRs", () => {
       expect(api.myPullRequests).toHaveBeenLastCalledWith(
         "acme/other",
         "updatedAt",
-        "asc"
+        "desc"
       )
     )
     fireEvent.click(
@@ -222,7 +330,7 @@ describe("My PRs", () => {
       expect(api.myPullRequests).toHaveBeenLastCalledWith(
         "acme/other,acme/app",
         "updatedAt",
-        "asc"
+        "desc"
       )
     )
   })
@@ -319,7 +427,7 @@ describe("My PRs", () => {
         .slice(1)
         .map(
           (row) =>
-            within(row).getAllByRole("cell")[3]?.firstElementChild?.textContent
+            within(row).getAllByRole("cell")[4]?.firstElementChild?.textContent
         )
     ).toEqual([
       "Draft",

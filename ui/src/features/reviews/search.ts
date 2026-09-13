@@ -3,6 +3,7 @@ export const reviewStatuses = [
   "Draft",
   "Conflicted",
   "Failing",
+  "Pending",
   "Reviewable",
   "Approved",
   "Changes Requested",
@@ -45,7 +46,10 @@ export function validateReviewsSearch(
     sort: (["updatedAt", "createdAt"] as const).find(
       (sort) => sort === search.sort
     ),
-    direction: search.direction === "desc" ? "desc" : undefined,
+    direction:
+      search.direction === "asc" || search.direction === "desc"
+        ? search.direction
+        : undefined,
     page: Number.isInteger(page) && page > 0 && page <= 50 ? page : undefined,
   }
 }

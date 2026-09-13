@@ -1,6 +1,12 @@
 import { expect, it } from "vitest"
 import { validateReviewsSearch } from "./search"
 
+it("preserves an explicit ascending direction", () => {
+  expect(
+    validateReviewsSearch({ sort: "updatedAt", direction: "asc" }).direction
+  ).toBe("asc")
+})
+
 it("restores a shared view and bounds malformed URL state", () => {
   expect(
     validateReviewsSearch({

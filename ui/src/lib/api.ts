@@ -948,7 +948,7 @@ export const api = {
   myPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",
-    direction: "asc" | "desc" = "asc"
+    direction: "asc" | "desc" = "desc"
   ) =>
     request<OpenPullRequestsPayload>(
       `/my-pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}`
