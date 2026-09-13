@@ -1,9 +1,10 @@
 """Dashboard thread time-to-first-token measurement."""
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any
+
+from agent.utils.streaming import root_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -20,48 +21,20 @@ class AssistantTextEventDetector:
     """Detect each run's first non-empty streamed AI text delta."""
 
     def __init__(self, run_id: str | None = None) -> None:
-        self._buffer = bytearray()
-        self._run_id = run_id
+        self._target_run_id = run_id
+        self._run_id: str | None = None
         self._ai_namespaces: set[tuple[str, ...]] = set()
         self._observed_namespaces: set[tuple[str, ...]] = set()
 
-    def feed(self, chunk: bytes) -> list[AssistantTextObservation]:
-        self._buffer.extend(chunk)
-        observations: list[AssistantTextObservation] = []
-        while True:
-            frame = self._pop_frame()
-            if frame is None:
-                return observations
-            payload = self._payload(frame)
-            if payload is not None and (observation := self._observe(payload)) is not None:
-                observations.append(observation)
-
-    def _pop_frame(self) -> bytes | None:
-        separators = ((self._buffer.find(b"\r\n\r\n"), 4), (self._buffer.find(b"\n\n"), 2))
-        matches = [(index, length) for index, length in separators if index >= 0]
-        if not matches:
+    def observe(self, event: dict[str, Any]) -> AssistantTextObservation | None:
+        lifecycle = root_lifecycle(event)
+        if lifecycle is not None:
+            if lifecycle[1] == "running" and self._target_run_id in (None, lifecycle[0]):
+                self._run_id = lifecycle[0]
+                self._ai_namespaces.clear()
+                self._observed_namespaces.clear()
             return None
-        index, length = min(matches)
-        frame = bytes(self._buffer[:index])
-        del self._buffer[: index + length]
-        return frame
-
-    @staticmethod
-    def _payload(frame: bytes) -> dict[str, Any] | None:
-        data_lines = []
-        for line in frame.splitlines():
-            if line.startswith(b"data:"):
-                data_lines.append(line[5:].lstrip())
-        if not data_lines:
-            return None
-        try:
-            payload = json.loads(b"\n".join(data_lines))
-        except json.JSONDecodeError, UnicodeDecodeError:
-            return None
-        return payload if isinstance(payload, dict) else None
-
-    def _observe(self, payload: dict[str, Any]) -> AssistantTextObservation | None:
-        params = payload.get("params")
+        params = event.get("params")
         if not isinstance(params, dict):
             return None
         namespace_value = params.get("namespace")
@@ -71,24 +44,19 @@ class AssistantTextEventDetector:
             return None
         namespace = tuple(namespace_value)
         data = params.get("data")
-        if not isinstance(data, dict):
+        if not isinstance(data, dict) or event.get("method") != "messages":
             return None
-        if payload.get("method") == "lifecycle" and not namespace:
-            self._observe_lifecycle(payload, data)
-            return None
-        if payload.get("method") != "messages":
-            return None
-        event = data.get("event")
-        if event == "message-start":
+        message_event = data.get("event")
+        if message_event == "message-start":
             if data.get("role") == "ai":
                 self._ai_namespaces.add(namespace)
                 self._observed_namespaces.discard(namespace)
             return None
-        if event == "message-finish":
+        if message_event == "message-finish":
             self._ai_namespaces.discard(namespace)
             self._observed_namespaces.discard(namespace)
             return None
-        if event != "content-block-delta" or namespace not in self._ai_namespaces:
+        if message_event != "content-block-delta" or namespace not in self._ai_namespaces:
             return None
         delta = data.get("delta")
         if not isinstance(delta, dict) or delta.get("type") != "text-delta":
@@ -99,6 +67,7 @@ class AssistantTextEventDetector:
             or not text
             or namespace in self._observed_namespaces
             or self._run_id is None
+            or self._target_run_id not in (None, self._run_id)
         ):
             return None
         timestamp = params.get("timestamp")
@@ -109,19 +78,6 @@ class AssistantTextEventDetector:
             run_id=self._run_id,
             event_timestamp_ms=int(timestamp),
         )
-
-    def _observe_lifecycle(self, payload: dict[str, Any], data: dict[str, Any]) -> None:
-        event_id = payload.get("event_id")
-        if not isinstance(event_id, str):
-            return
-        parts = event_id.split(":", 2)
-        if len(parts) != 3 or parts[0] != "synth" or not parts[1]:
-            return
-        event = data.get("event")
-        if event == "running":
-            self._run_id = parts[1]
-            self._ai_namespaces.clear()
-            self._observed_namespaces.clear()
 
 
 def _record_ttft_histogram(duration_seconds: float) -> None:

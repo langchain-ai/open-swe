@@ -6,7 +6,7 @@ from langchain.agents.middleware import AgentState, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.agent_cost import finalize_agent_run_usage
+from agent.agent_cost import finalize_agent_invocation_usage
 from agent.middleware.record_run_usage import record_run_usage
 
 
@@ -43,7 +43,7 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
             return_value={"configurable": {"thread_id": "thread-1", "prepare_run_id": "run-1"}},
         ),
         patch(
-            "agent.agent_cost.record_agent_run_completion",
+            "agent.agent_cost.record_agent_invocation_completion",
             new_callable=AsyncMock,
             return_value=True,
         ) as record,
@@ -53,7 +53,7 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
             return_value=True,
         ) as schedule,
         patch(
-            "agent.agent_cost.mark_agent_cost_refresh_scheduled",
+            "agent.agent_cost.mark_agent_invocation_cost_refresh_scheduled",
             new_callable=AsyncMock,
         ) as mark_scheduled,
     ):
@@ -63,20 +63,20 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
     assert usage.input_tokens == 300
     assert usage.output_tokens == 30
     assert usage.total_tokens == 330
-    schedule.assert_awaited_once_with({"thread_id": "thread-1", "run_id": "run-1"})
-    mark_scheduled.assert_awaited_once_with(run_id="run-1")
+    schedule.assert_awaited_once_with({"thread_id": "thread-1", "invocation_id": "run-1"})
+    mark_scheduled.assert_awaited_once_with(invocation_id="run-1")
 
 
 @pytest.mark.asyncio
 async def test_retries_cost_scheduling_after_completion_was_recorded() -> None:
     with (
         patch(
-            "agent.agent_cost.record_agent_run_completion",
+            "agent.agent_cost.record_agent_invocation_completion",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.agent_cost.agent_run_needs_cost_refresh",
+            "agent.agent_cost.agent_invocation_needs_cost_refresh",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -86,15 +86,19 @@ async def test_retries_cost_scheduling_after_completion_was_recorded() -> None:
             side_effect=[False, True],
         ) as schedule,
         patch(
-            "agent.agent_cost.mark_agent_cost_refresh_scheduled",
+            "agent.agent_cost.mark_agent_invocation_cost_refresh_scheduled",
             new_callable=AsyncMock,
         ) as mark_scheduled,
     ):
-        await finalize_agent_run_usage(run_id="run-1", thread_id="thread-1", state=None)
-        await finalize_agent_run_usage(run_id="run-1", thread_id="thread-1", state=None)
+        await finalize_agent_invocation_usage(
+            invocation_id="run-1", thread_id="thread-1", state=None
+        )
+        await finalize_agent_invocation_usage(
+            invocation_id="run-1", thread_id="thread-1", state=None
+        )
 
     assert schedule.await_count == 2
-    mark_scheduled.assert_awaited_once_with(run_id="run-1")
+    mark_scheduled.assert_awaited_once_with(invocation_id="run-1")
 
 
 @pytest.mark.asyncio
@@ -107,4 +111,5 @@ async def test_tags_model_responses_with_run_id() -> None:
     ):
         result = await record_run_usage.awrap_model_call(MagicMock(), handler)
 
+    assert result.result[0].response_metadata["open_swe_invocation_id"] == "run-1"
     assert result.result[0].response_metadata["open_swe_run_id"] == "run-1"

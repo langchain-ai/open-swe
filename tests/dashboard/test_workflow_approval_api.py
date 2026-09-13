@@ -23,7 +23,7 @@ async def test_list_workflow_push_approvals_returns_records(monkeypatch) -> None
             }
         }
 
-    monkeypatch.setattr(workflow_approval_api, "_thread_metadata", fake_thread_metadata)
+    monkeypatch.setattr(workflow_approval_api, "fetch_thread_metadata", fake_thread_metadata)
     monkeypatch.setattr(
         workflow_approval_api,
         "get_workflow_push_approvals",

@@ -30,7 +30,14 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.encryption import decrypt_token, encrypt_token
-from agent.store import delete_value, get_value, now_iso, put_value, search_values
+from agent.store import (
+    delete_value,
+    get_value,
+    now_iso,
+    put_value,
+    search_all_values,
+    search_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +54,7 @@ class ProfileUpdate(BaseModel):
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
+    model_routing_enabled: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
@@ -130,6 +138,18 @@ async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
     return await get_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
+async def resolve_oauth_login(login: str) -> str | None:
+    """Recover the stored OAuth key when older thread metadata lost its casing."""
+    if await get_oauth_token_record(login):
+        return login
+    matches = {
+        candidate
+        for record in await search_all_values(OAUTH_TOKENS_NAMESPACE)
+        if isinstance(candidate := record.get("login"), str) and candidate.lower() == login.lower()
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
     """Write the user's editable settings.
 
@@ -150,6 +170,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
+        "model_routing_enabled": (
+            update.model_routing_enabled
+            if "model_routing_enabled" in update.model_fields_set
+            else existing.get("model_routing_enabled")
+        ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
@@ -282,7 +307,7 @@ async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str
     try:
         data = await refresh_user_access_token(refresh_token)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("GitHub token refresh failed for %s", login, exc_info=True)
+        logger.warning("GitHub token refresh failed")
         return None, is_unrecoverable_refresh_error(exc)
     email_value = record.get("email")
     email = email_value if isinstance(email_value, str) else ""
@@ -331,7 +356,7 @@ async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> 
                 "encrypted_gh_refresh_token"
             ):
                 return _decrypt_access_token(latest)
-            logger.info("Dropping dead GitHub authorization for %s; re-login required", login)
+            logger.info("Dropping dead GitHub authorization; re-login required")
             await delete_access_token(login)
             return None
         return access_token

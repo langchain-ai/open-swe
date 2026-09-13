@@ -2,7 +2,7 @@ import socket
 from typing import Any, cast
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 
 import agent.utils.multimodal as multimodal
 import agent.utils.url_safety as url_safety
@@ -146,10 +146,10 @@ class FakeImageResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise httpx.HTTPStatusError(
+            raise httpx2.HTTPStatusError(
                 f"{self.status_code} error",
-                request=httpx.Request("GET", self.url),
-                response=httpx.Response(self.status_code, request=httpx.Request("GET", self.url)),
+                request=httpx2.Request("GET", self.url),
+                response=httpx2.Response(self.status_code, request=httpx2.Request("GET", self.url)),
             )
 
 
@@ -190,7 +190,7 @@ async def test_fetch_image_block_blocks_redirect_to_internal_url(monkeypatch: An
     client = FakeImageClient(responder)
 
     result = await fetch_image_block(
-        "https://example.com/start.png", cast(httpx.AsyncClient, client)
+        "https://example.com/start.png", cast(httpx2.AsyncClient, client)
     )
 
     assert result is None
@@ -212,7 +212,7 @@ async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) 
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
         if urlparse(url).hostname == "93.184.216.34":
-            raise httpx.ConnectError("address unreachable")
+            raise httpx2.ConnectError("address unreachable")
         return FakeImageResponse(
             status_code=200,
             url=url,
@@ -223,7 +223,7 @@ async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) 
     client = FakeImageClient(responder)
 
     result = await fetch_image_block(
-        "https://example.com/image.png", cast(httpx.AsyncClient, client)
+        "https://example.com/image.png", cast(httpx2.AsyncClient, client)
     )
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}
@@ -247,7 +247,7 @@ async def test_fetch_image_block_accepts_image_at_size_limit(monkeypatch: Any) -
         )
 
     result = await fetch_image_block(
-        "https://example.com/image.png", cast(httpx.AsyncClient, FakeImageClient(responder))
+        "https://example.com/image.png", cast(httpx2.AsyncClient, FakeImageClient(responder))
     )
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}
@@ -267,7 +267,7 @@ async def test_fetch_image_block_warns_about_image_above_size_limit(monkeypatch:
         )
 
     result = await fetch_image_block(
-        "https://example.com/image.png", cast(httpx.AsyncClient, FakeImageClient(responder))
+        "https://example.com/image.png", cast(httpx2.AsyncClient, FakeImageClient(responder))
     )
 
     assert result is not None
@@ -302,7 +302,7 @@ async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
     client = FakeImageClient(responder)
 
     result = await fetch_image_block(
-        "https://files.slack.com/image.png", cast(httpx.AsyncClient, client)
+        "https://files.slack.com/image.png", cast(httpx2.AsyncClient, client)
     )
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}
@@ -336,7 +336,7 @@ async def test_fetch_image_block_does_not_add_slack_auth_after_untrusted_redirec
     client = FakeImageClient(responder)
 
     result = await fetch_image_block(
-        "https://example.com/start.png", cast(httpx.AsyncClient, client)
+        "https://example.com/start.png", cast(httpx2.AsyncClient, client)
     )
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}
@@ -366,7 +366,7 @@ async def test_fetch_image_block_keeps_auth_within_slack_host_family(monkeypatch
     client = FakeImageClient(responder)
 
     result = await fetch_image_block(
-        "https://files.slack.com/image.png", cast(httpx.AsyncClient, client)
+        "https://files.slack.com/image.png", cast(httpx2.AsyncClient, client)
     )
 
     assert result == {"base64": "cG5n", "mime_type": "image/png"}

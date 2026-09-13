@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
 
-import httpx
+import httpx2
 
 _MAX_REDIRECTS = 5
 _REDIRECT_CODES = {301, 302, 303, 307, 308}
@@ -98,21 +98,26 @@ def _redirect_method(method: str, status_code: int) -> str:
 
 
 async def request_with_safe_redirects(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     method: str,
     url: str,
     *,
     headers_for_url: Callable[[str, str], Mapping[str, str] | None] | None = None,
     validate_url: Callable[[str], tuple[bool, str]] | None = None,
+    stream: bool = False,
     **kwargs: Any,
-) -> tuple[httpx.Response | None, dict[str, Any] | None]:
-    """Issue a request with DNS pinning and per-hop redirect validation."""
+) -> tuple[httpx2.Response | None, dict[str, Any] | None]:
+    """Issue a request with DNS pinning and per-hop redirect validation.
+
+    With ``stream=True``, the caller must close the returned response.
+    Redirect responses are closed without reading their bodies.
+    """
     current_method = method.upper()
     current_url = url
     request_kwargs = dict(kwargs)
     caller_headers = dict(request_kwargs.pop("headers", None) or {})
     caller_extensions = dict(request_kwargs.pop("extensions", None) or {})
-    response: httpx.Response | None = None
+    response: httpx2.Response | None = None
 
     for redirect_count in range(_MAX_REDIRECTS + 1):
         if validate_url:
@@ -131,27 +136,46 @@ async def request_with_safe_redirects(
         pinned_ips = list(dict.fromkeys(addr_info[4][0] for addr_info in addr_infos))
         for address_index, pinned_ip in enumerate(pinned_ips):
             try:
-                response = await client.request(
-                    current_method,
-                    pinned_url(current_url, pinned_ip),
-                    follow_redirects=False,
-                    headers=headers,
-                    extensions=extensions,
-                    **request_kwargs,
-                )
+                if stream:
+                    build_kwargs = dict(request_kwargs)
+                    send_kwargs = (
+                        {"auth": build_kwargs.pop("auth")} if "auth" in build_kwargs else {}
+                    )
+                    request = client.build_request(
+                        current_method,
+                        pinned_url(current_url, pinned_ip),
+                        headers=headers,
+                        extensions=extensions,
+                        **build_kwargs,
+                    )
+                    response = await client.send(
+                        request, stream=True, follow_redirects=False, **send_kwargs
+                    )
+                else:
+                    response = await client.request(
+                        current_method,
+                        pinned_url(current_url, pinned_ip),
+                        follow_redirects=False,
+                        headers=headers,
+                        extensions=extensions,
+                        **request_kwargs,
+                    )
                 break
-            except httpx.ConnectError, httpx.ConnectTimeout:
+            except httpx2.ConnectError, httpx2.ConnectTimeout:
                 if address_index == len(pinned_ips) - 1:
                     raise
 
         if response is None:
-            raise httpx.ConnectError("No response received from pinned address")
+            raise httpx2.ConnectError("No response received from pinned address")
         if response.status_code not in _REDIRECT_CODES:
             return response, None
 
         location = response.headers.get("Location")
         if not location:
             return response, None
+
+        if stream:
+            await response.aclose()
 
         if redirect_count == _MAX_REDIRECTS:
             return None, _blocked_response(current_url, "Too many redirects")

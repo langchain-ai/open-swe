@@ -46,7 +46,7 @@ async def _mark_action_posted(thread_id: str, notified_at: str) -> None:
 
 
 async def notify_automation_channel(message: str) -> dict[str, Any]:
-    """Notify the configured automation channel once after a concrete requested action."""
+    """Implement the `notify_automation_channel` tool."""
     cfg = RunConfig.from_runtime()
     if cfg.source != "schedule":
         return {"success": False, "error": "This tool is only available to scheduled runs"}

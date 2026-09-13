@@ -20,7 +20,7 @@ import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-import httpx
+import httpx2
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -193,12 +193,12 @@ class DashboardDevProxyRoute(DashboardCatchAll):
     passed back rather than followed.
     """
 
-    def __init__(self, upstream: str, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(self, upstream: str, client: httpx2.AsyncClient | None = None) -> None:
         self.upstream = upstream.rstrip("/")
-        self.client = client or httpx.AsyncClient(
+        self.client = client or httpx2.AsyncClient(
             base_url=self.upstream,
             # Vite compiles a route on its first request; that can take a while.
-            timeout=httpx.Timeout(120.0, connect=5.0),
+            timeout=httpx2.Timeout(120.0, connect=5.0),
             follow_redirects=False,
         )
         super().__init__(self._proxy, _PROXIED_METHODS)
@@ -217,7 +217,7 @@ class DashboardDevProxyRoute(DashboardCatchAll):
                 request.method, target, headers=headers, content=body
             )
             upstream = await self.client.send(upstream_request, stream=True)
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             return PlainTextResponse(
                 f"The dashboard dev server at {self.upstream} did not answer ({exc}). "
                 "Start it with `make web`, or unset DASHBOARD_DEV_SERVER_URL to serve a build.",
@@ -248,8 +248,8 @@ def mount_dashboard_ui(app: FastAPI) -> Path | None:
     dev_server = ENV.DASHBOARD_DEV_SERVER_URL.optional()
     if dev_server:
         app.router.routes.append(DashboardDevProxyRoute(dev_server))
-        # httpx logs every request at INFO; that is one line per module Vite serves.
-        logging.getLogger("httpx").setLevel(logging.WARNING)
+        # httpx2 logs every request at INFO; that is one line per module Vite serves.
+        logging.getLogger("httpx2").setLevel(logging.WARNING)
         logger.info("Serving the dashboard from the Vite dev server at %s", dev_server)
         return None
     static_dir = dashboard_static_dir()

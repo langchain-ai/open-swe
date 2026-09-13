@@ -159,12 +159,15 @@ declare global {
   interface Window {
     openSweDesktop?: {
       isDesktop: true
+      writeClipboard: (value: string) => Promise<void>
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{
         current: string | null
         branches: Array<DesktopProjectRef>
       }>
+      watchProjectHead: (cwd: string | null) => Promise<void>
+      onProjectHeadChanged: (callback: (cwd: string) => void) => () => void
       checkoutProjectBranch: (input: {
         cwd: string
         branch: string
@@ -225,6 +228,7 @@ declare global {
       localActivity: () => Promise<DesktopLocalActivity>
       updateLocalThread: (input: {
         threadId: string
+        title?: string
         viewed?: boolean
         archived?: boolean
         modelId?: string

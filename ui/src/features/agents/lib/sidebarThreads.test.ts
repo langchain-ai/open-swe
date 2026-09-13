@@ -9,6 +9,7 @@ import {
   groupSidebarThreadsByProject,
   localSidebarThread,
   sidebarProjectOptions,
+  sortSidebarThreads,
 } from "./sidebarThreads"
 
 function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
@@ -125,6 +126,28 @@ describe("sidebar thread adapters", () => {
     expect(applyProjectKeyAliases([local], aliases)[0]?.projectKey).toBe(
       local.projectKey
     )
+  })
+})
+
+describe("sortSidebarThreads", () => {
+  it("sorts chats by creation time without moving recently updated chats", () => {
+    const olderUpdated = cloudSidebarThread(
+      cloudThread({ id: "older-updated", createdAt: 10, updatedAt: 50 })
+    )
+    const newer = cloudSidebarThread(
+      cloudThread({ id: "newer", createdAt: 20, updatedAt: 20 })
+    )
+
+    expect(
+      sortSidebarThreads([olderUpdated, newer], "created").map(
+        (thread) => thread.id
+      )
+    ).toEqual(["newer", "older-updated"])
+    expect(
+      sortSidebarThreads([olderUpdated, newer], "updated").map(
+        (thread) => thread.id
+      )
+    ).toEqual(["older-updated", "newer"])
   })
 })
 

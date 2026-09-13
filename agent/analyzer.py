@@ -41,6 +41,7 @@ from agent.middleware import (
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
+from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
 from agent.run_config import RunConfig
 from agent.runtime import (
@@ -53,7 +54,7 @@ from agent.runtime import (
     graph_loaded_for_execution,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
-from agent.sandboxes.providers.langsmith import _configure_github_proxy
+from agent.sandboxes.providers.langsmith import configure_github_proxy
 from agent.sandboxes.state import unwrap_sandbox_backend
 from agent.tools.read_finding_outcomes import read_finding_outcomes
 from agent.tools.save_review_style import save_review_style_prompt
@@ -68,27 +69,7 @@ STYLE_ANALYZER_MODEL_CALL_LIMIT = 80
 
 # The per-mode procedure lives in the bundled SKILL.md playbooks (agent/skills/).
 # This base prompt only orients the agent and points it at the right skill.
-STYLE_ANALYZER_PROMPT = """You are a code-review style analyst for `{repo_owner}/{repo_name}`.
-
-Sandbox: `{working_dir}`. Use the shell (``execute``) to run GitHub commands.
-`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
-
-Your job is to produce/refine the per-repo review-style prompt and persist it with
-`save_review_style_prompt`.
-
-# Run mode: {mode}
-
-Read and follow the playbook for this mode, then proceed:
-
-    read_file("{skill_path}", limit=1000)
-
-Do not improvise the procedure — the skill is authoritative for how to gather
-evidence and what to save.
-
-# Alignment with our reviewer agent
-
-{reviewer_themes}
-"""
+STYLE_ANALYZER_PROMPT = load_prompt("analyzer/main.md")
 
 
 async def _configure_sandbox_github_proxy(
@@ -98,7 +79,7 @@ async def _configure_sandbox_github_proxy(
     if ENV.SANDBOX_TYPE.get() != "langsmith":
         return
     backend = unwrap_sandbox_backend(sandbox_backend)
-    await _configure_github_proxy(backend.id, github_token)
+    await configure_github_proxy(backend.id, github_token)
 
 
 async def _cached_gateway_enabled() -> bool:
@@ -125,7 +106,7 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> object:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
             "full_name": cfg.review_style_full_name,
             "mode": cfg.analyzer_mode,
@@ -144,7 +125,8 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
             github_token = await get_github_app_installation_token()
         if isinstance(github_token, str) and github_token:
             await _configure_sandbox_github_proxy(sandbox_backend, github_token)
-        system_prompt = STYLE_ANALYZER_PROMPT.format(
+        system_prompt = render_prompt(
+            "analyzer/main.md",
             repo_owner=owner or "<owner>",
             repo_name=name or "<repo>",
             working_dir=work_dir,
@@ -184,7 +166,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt="",
-        tools=[save_review_style_prompt, read_finding_outcomes],
+        tools=apply_tool_descriptions([save_review_style_prompt, read_finding_outcomes]),
         backend=backend,
         skills=[SKILLS_ROUTE],
         middleware=cast(

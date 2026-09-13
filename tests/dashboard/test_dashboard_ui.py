@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 from starlette.routing import Match
@@ -196,9 +196,9 @@ def test_serving_under_a_mount_prefix(build_dir: Path) -> None:
 
 def _vite_response(
     status: int, body: bytes, headers: list[tuple[str, str]] | None = None
-) -> httpx.Response:
+) -> httpx2.Response:
     """What a real Vite sends: a response whose body is still to be streamed."""
-    return httpx.Response(status, stream=httpx.ByteStream(body), headers=headers)
+    return httpx2.Response(status, stream=httpx2.ByteStream(body), headers=headers)
 
 
 def _vite_app(handler, monkeypatch: pytest.MonkeyPatch):
@@ -206,18 +206,18 @@ def _vite_app(handler, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DASHBOARD_DEV_SERVER_URL", "http://vite.test:3000/")
     app = app_module.create_app()
     route = next(r for r in app.router.routes if isinstance(r, DashboardDevProxyRoute))
-    route.client = httpx.AsyncClient(
+    route.client = httpx2.AsyncClient(
         base_url="http://vite.test:3000",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
         follow_redirects=False,
     )
     return app
 
 
 def test_dev_server_url_replaces_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[httpx.Request] = []
+    seen: list[httpx2.Request] = []
 
-    def vite(request: httpx.Request) -> httpx.Response:
+    def vite(request: httpx2.Request) -> httpx2.Response:
         seen.append(request)
         return _vite_response(200, b"<script type=module src=/@vite/client></script>")
 
@@ -232,7 +232,7 @@ def test_dev_server_url_replaces_the_build(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_dev_proxy_forwards_modules_and_headers_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
-    def vite(request: httpx.Request) -> httpx.Response:
+    def vite(request: httpx2.Request) -> httpx2.Response:
         assert request.url.path == "/src/routes/index.tsx"
         return _vite_response(
             200,
@@ -259,7 +259,7 @@ def test_dev_proxy_forwards_modules_and_headers_verbatim(monkeypatch: pytest.Mon
 
 
 def test_dev_proxy_passes_redirects_and_bodies_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    def vite(request: httpx.Request) -> httpx.Response:
+    def vite(request: httpx2.Request) -> httpx2.Response:
         if request.method == "POST":
             assert request.read() == b'{"x":1}'
             return _vite_response(201, b'{"ok": true}', [("content-type", "application/json")])
@@ -278,7 +278,7 @@ def test_dev_proxy_passes_redirects_and_bodies_through(monkeypatch: pytest.Monke
 
 
 def test_dev_proxy_leaves_backend_paths_alone(monkeypatch: pytest.MonkeyPatch) -> None:
-    def vite(request: httpx.Request) -> httpx.Response:
+    def vite(request: httpx2.Request) -> httpx2.Response:
         raise AssertionError(f"reserved path reached Vite: {request.url}")
 
     client = TestClient(_vite_app(vite, monkeypatch))
@@ -288,8 +288,8 @@ def test_dev_proxy_leaves_backend_paths_alone(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_dev_proxy_explains_a_missing_vite(monkeypatch: pytest.MonkeyPatch) -> None:
-    def vite(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused")
+    def vite(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("connection refused")
 
     app = _vite_app(vite, monkeypatch)
     route = next(r for r in app.router.routes if isinstance(r, DashboardDevProxyRoute))

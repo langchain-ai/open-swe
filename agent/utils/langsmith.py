@@ -6,7 +6,8 @@ import math
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import unquote, urlsplit
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
@@ -33,6 +34,12 @@ class LangSmithThreadCost:
     target_end_time: datetime
 
 
+@dataclass(frozen=True)
+class LangSmithLocator:
+    kind: Literal["thread", "run"]
+    id: str
+
+
 class LangSmithCostUnavailable(RuntimeError):
     pass
 
@@ -40,7 +47,7 @@ class LangSmithCostUnavailable(RuntimeError):
 def async_langsmith_client(api_key: str, api_url: str) -> AsyncLangSmithClient:
     """Return a pooled ``AsyncClient`` for these credentials.
 
-    Each client owns an ``httpx`` connection pool bound to the event loop that
+    Each client owns an ``httpx2`` connection pool bound to the event loop that
     built it, so this assumes one loop per process. Keyed on the credentials so
     a test that repoints the env gets a fresh client instead of a stale pool.
     """
@@ -159,6 +166,86 @@ async def get_langsmith_trace_url(thread_id: str, project_name: str | None = Non
     return f"{project_url}/t/{thread_id}" if project_url else None
 
 
+def _langsmith_web_origins() -> set[str]:
+    values = ["https://smith.langchain.com", langsmith_host_url()]
+    origins: set[str] = set()
+    for value in values:
+        try:
+            parsed = urlsplit(value.strip())
+            port = parsed.port
+        except ValueError:
+            continue
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            continue
+        default_port = 443 if parsed.scheme == "https" else 80
+        suffix = f":{port}" if port is not None and port != default_port else ""
+        origins.add(f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{suffix}")
+    return origins
+
+
+def parse_langsmith_locator(locator: str) -> LangSmithLocator | None:
+    """Parse a trusted LangSmith thread or run URL without fetching it."""
+    value = locator.strip().strip("<>")
+    if "|" in value:
+        value = value.split("|", 1)[0]
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+    default_port = 443 if parsed.scheme == "https" else 80
+    suffix = f":{port}" if port is not None and port != default_port else ""
+    origin = f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{suffix}"
+    if origin not in _langsmith_web_origins():
+        return None
+    segments = parsed.path.split("/")
+    for index in range(len(segments) - 2, -1, -1):
+        if segments[index] not in {"t", "r"} or index + 2 != len(segments):
+            continue
+        try:
+            identifier = unquote(segments[index + 1], errors="strict")
+        except UnicodeDecodeError:
+            return None
+        if not identifier or "/" in identifier:
+            return None
+        return LangSmithLocator(kind="thread" if segments[index] == "t" else "run", id=identifier)
+    return None
+
+
+async def get_open_swe_thread_id_from_langsmith(locator: str) -> str | None:
+    """Resolve a LangSmith thread/run URL or run UUID to its Open SWE thread ID."""
+    parsed = parse_langsmith_locator(locator)
+    if parsed is None:
+        try:
+            run_id = str(uuid.UUID(locator.strip()))
+        except ValueError, AttributeError:
+            return None
+        parsed = LangSmithLocator(kind="run", id=run_id)
+    if parsed.kind == "thread":
+        return parsed.id
+    client = _build_langsmith_client()
+    if client is None:
+        return None
+    try:
+        run = await client.read_run(parsed.id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not resolve LangSmith run %s", parsed.id, exc_info=True)
+        return None
+    metadata = _langsmith_value(run, "metadata")
+    if not isinstance(metadata, dict):
+        extra = _langsmith_value(run, "extra")
+        metadata = extra.get("metadata") if isinstance(extra, dict) else None
+    thread_id = metadata.get("thread_id") if isinstance(metadata, dict) else None
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
 def _langsmith_value(value: Any, name: str) -> Any:
     return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
 
@@ -181,13 +268,26 @@ def _langsmith_metadata_filter(key: str, value: str) -> str:
     return f'and(eq(metadata_key, "{escaped_key}"), eq(metadata_value, "{escaped_value}"))'
 
 
+def _langsmith_invocation_filter(invocation_id: str) -> str:
+    filters = [
+        _langsmith_metadata_filter(key, invocation_id)
+        for key in ("invocation_id", "prepare_run_id")
+    ]
+    return f"or({', '.join(filters)})"
+
+
+def _langsmith_trace_filter(trace_ids: list[str]) -> str:
+    filters = [f'eq(trace_id, "{trace_id}")' for trace_id in trace_ids]
+    return filters[0] if len(filters) == 1 else f"or({', '.join(filters)})"
+
+
 async def get_langsmith_thread_cost(
     thread_id: str,
-    prepare_run_id: str,
+    invocation_id: str,
     *,
     run_only: bool = False,
 ) -> LangSmithThreadCost | None:
-    """Return a fresh thread or run cost correlated to a completed agent run."""
+    """Return fresh trace cost correlated to one completed invocation."""
     client = _build_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
@@ -198,23 +298,25 @@ async def get_langsmith_thread_cost(
         roots = client.list_runs(
             project_id=project_id,
             is_root=True,
-            filter=_langsmith_metadata_filter("prepare_run_id", prepare_run_id),
-            select=["end_time"],
-            limit=20,
+            filter=_langsmith_invocation_filter(invocation_id),
+            select=["id", "end_time"],
         )
-        target_times = [
-            parsed
+        matched_roots = [
+            (str(root_id), parsed)
             async for run in roots
-            if (parsed := _parse_langsmith_time(_langsmith_value(run, "end_time"))) is not None
+            if (root_id := _langsmith_value(run, "id"))
+            and (parsed := _parse_langsmith_time(_langsmith_value(run, "end_time"))) is not None
         ]
-        if not target_times:
+        if not matched_roots:
             return None
         stats_kwargs: dict[str, Any] = {
             "session_id": project_id,
             "selects": ["TOTAL_COST", "LAST_END_TIME"],
         }
         if run_only:
-            stats_kwargs["filter"] = _langsmith_metadata_filter("prepare_run_id", prepare_run_id)
+            stats_kwargs["filter"] = _langsmith_trace_filter(
+                [trace_id for trace_id, _ in matched_roots]
+            )
         stats = await client.threads.stats(thread_id, **stats_kwargs)
     except LangSmithNotFoundError as exc:
         raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
@@ -233,7 +335,7 @@ async def get_langsmith_thread_cost(
     except TypeError, ValueError:
         return None
     last_end_time = _parse_langsmith_time(_langsmith_value(stats, "last_end_time"))
-    target_end_time = max(target_times)
+    target_end_time = max(end_time for _, end_time in matched_roots)
     if (
         not math.isfinite(total_cost)
         or total_cost < 0
@@ -276,7 +378,7 @@ async def create_langsmith_thread_feedback(
     thread_id: str,
     key: str,
     *,
-    score: float,
+    score: float | None,
     comment: str | None = None,
     source_info: dict[str, Any] | None = None,
 ) -> bool:
@@ -299,12 +401,12 @@ async def create_langsmith_thread_feedback(
         "feedback_source": {"type": "api", "metadata": source_info or {}},
     }
     try:
-        await client._arequest_with_retries("POST", "/feedback", json=payload)
+        await client._arequest_with_retries("POST", "/feedback", json=payload)  # noqa: SLF001
         return True
     except Exception:  # noqa: BLE001
         pass
     try:
-        await client._arequest_with_retries(
+        await client._arequest_with_retries(  # noqa: SLF001
             "PATCH",
             f"/feedback/{feedback_id}",
             json={"score": score, "comment": comment},

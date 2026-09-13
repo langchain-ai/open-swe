@@ -167,6 +167,24 @@ async function removeWorktree(repo, worktreePath) {
   await ok(git(repo, ["worktree", "prune"], null, 30_000));
 }
 
+async function watchProjectHead(cwd: string, onChange: () => void) {
+  const gitDir = text(
+    await git(cwd, ["rev-parse", "--absolute-git-dir"], null, 5_000),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watcher = fs.watch(gitDir, (_event, filename) => {
+    if (filename && filename.toString() !== "HEAD") return;
+    clearTimeout(timer);
+    timer = setTimeout(onChange, 100);
+  });
+  const close = () => {
+    clearTimeout(timer);
+    watcher.close();
+  };
+  watcher.on("error", close);
+  return close;
+}
+
 async function currentBranch(cwd) {
   try {
     return (
@@ -618,4 +636,5 @@ module.exports = {
   restoreWorktree,
   staleRefs,
   validBranchName,
+  watchProjectHead,
 };

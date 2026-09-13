@@ -173,6 +173,8 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  deliveryStatus?: "sending" | "failed"
+  optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
@@ -226,6 +228,10 @@ export interface QueuedThreadMessage {
   content: string
   images?: Array<ImageChunk>
   createdAt: number
+}
+
+export interface PendingThreadMessage extends QueuedThreadMessage {
+  status: "sending" | "failed"
 }
 
 export type WorkflowApprovalStatus = "pending" | "approved" | "rejected"
@@ -350,6 +356,7 @@ export interface AgentPullRequestContextResponse {
 }
 
 export interface AgentThread {
+  visibility?: "public" | "private"
   id: string
   title: string
   repo: string
@@ -357,6 +364,7 @@ export interface AgentThread {
   branch: string
   model: string
   effort?: string | null
+  modelSelection?: "auto" | "explicit" | null
   planMode?: boolean
   planStatus?: string | null
   adminThread?: boolean
@@ -382,6 +390,7 @@ export interface AgentThread {
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>
+  pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary
   pullRequests?: Array<AgentPullRequest>
   diffStats?: {

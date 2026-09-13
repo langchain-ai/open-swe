@@ -45,7 +45,7 @@ async def test_push_event_skips_branch_deletion() -> None:
         ref="refs/heads/feat-x", after="0000000000000000000000000000000000000000"
     )
     with patch(
-        "agent.webhooks.common._is_repo_auto_review_enabled",
+        "agent.webhooks.common.is_repo_auto_review_enabled",
         new_callable=AsyncMock,
         return_value=True,
     ):
@@ -69,7 +69,7 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
 
     with (
         patch(
-            "agent.webhooks.common._is_repo_auto_review_enabled",
+            "agent.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -79,12 +79,12 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
             return_value="t",
         ),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": False},
         ),
@@ -110,7 +110,7 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
 
     with (
         patch(
-            "agent.webhooks.common._is_repo_auto_review_enabled",
+            "agent.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -120,12 +120,12 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
             return_value=("t", None),
         ),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={
                 "kind": "reviewer",
@@ -183,7 +183,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
 
     with (
         patch(
-            "agent.webhooks.common._is_repo_auto_review_enabled",
+            "agent.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -198,12 +198,12 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
             return_value=("t", None),
         ),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={
                 "kind": "reviewer",
@@ -217,7 +217,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
             side_effect=["old diff", "new diff"],
         ),
         patch(
-            "agent.webhooks.common._ensure_thread_exists_for_metadata",
+            "agent.webhooks.common.ensure_thread_exists_for_metadata",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -279,7 +279,7 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
 
     with (
         patch(
-            "agent.webhooks.common._is_repo_auto_review_enabled",
+            "agent.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -289,12 +289,12 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
             return_value="t",
         ),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={
                 "kind": "reviewer",
@@ -312,7 +312,7 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
 async def test_reviewer_token_for_repo_public_scopes_by_id() -> None:
     get_token = AsyncMock(return_value=("scoped", "exp"))
     with patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token):
-        token, expires = await webhook_common._reviewer_token_for_repo(
+        token, expires = await webhook_common.reviewer_token_for_repo(
             {"owner": "lc", "name": "repo"}, repo_private=False, repo_id=123
         )
     assert (token, expires) == ("scoped", "exp")
@@ -323,7 +323,7 @@ async def test_reviewer_token_for_repo_public_scopes_by_id() -> None:
 async def test_reviewer_token_for_repo_public_scopes_by_name_without_id() -> None:
     get_token = AsyncMock(return_value=("scoped", "exp"))
     with patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token):
-        await webhook_common._reviewer_token_for_repo(
+        await webhook_common.reviewer_token_for_repo(
             {"owner": "lc", "name": "repo"}, repo_private=False, repo_id=None
         )
     get_token.assert_awaited_once_with(repositories=["repo"])
@@ -333,7 +333,7 @@ async def test_reviewer_token_for_repo_public_scopes_by_name_without_id() -> Non
 async def test_reviewer_token_for_repo_private_uses_full_token() -> None:
     get_token = AsyncMock(return_value=("full", "exp"))
     with patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token):
-        await webhook_common._reviewer_token_for_repo(
+        await webhook_common.reviewer_token_for_repo(
             {"owner": "lc", "name": "repo"}, repo_private=True, repo_id=123
         )
     get_token.assert_awaited_once_with()
@@ -343,7 +343,7 @@ async def test_reviewer_token_for_repo_private_uses_full_token() -> None:
 async def test_reviewer_token_for_repo_unknown_privacy_uses_full_token() -> None:
     get_token = AsyncMock(return_value=("full", "exp"))
     with patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token):
-        await webhook_common._reviewer_token_for_repo(
+        await webhook_common.reviewer_token_for_repo(
             {"owner": "lc", "name": "repo"}, repo_private=None, repo_id=123
         )
     get_token.assert_awaited_once_with()
@@ -366,23 +366,23 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
 
     with (
         patch(
-            "agent.webhooks.common._is_repo_auto_review_enabled",
+            "agent.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
         patch(
-            "agent.webhooks.common._ensure_thread_exists_for_metadata",
+            "agent.webhooks.common.ensure_thread_exists_for_metadata",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -421,23 +421,23 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
 
     with (
         patch(
-            "agent.webhooks.common._is_repo_auto_review_enabled",
+            "agent.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
         patch(
-            "agent.webhooks.common._ensure_thread_exists_for_metadata",
+            "agent.webhooks.common.ensure_thread_exists_for_metadata",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -468,12 +468,12 @@ async def test_pr_close_disables_watch() -> None:
 
     with (
         patch(
-            "agent.webhooks.common._is_repo_auto_review_enabled",
+            "agent.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ) as auto_review_enabled,
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
@@ -493,7 +493,7 @@ async def test_pr_reopened_re_enables_watch() -> None:
 
     with (
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": False},
         ),
@@ -508,7 +508,7 @@ async def test_pr_close_skips_non_reviewer_threads() -> None:
     fake_set = AsyncMock()
     with (
         patch(
-            "agent.webhooks.common._get_thread_metadata_safe",
+            "agent.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
             return_value={"kind": "agent"},
         ),

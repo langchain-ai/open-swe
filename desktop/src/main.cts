@@ -6,12 +6,14 @@ const { pathToFileURL } = require("node:url");
 const {
   app,
   BrowserWindow,
+  clipboard,
   ipcMain,
   Menu,
   dialog,
   nativeTheme,
   net,
   protocol,
+  powerMonitor,
   safeStorage,
   session,
   shell,
@@ -34,6 +36,7 @@ const {
   repositoryMetadata,
   restoreWorktree,
   validBranchName,
+  watchProjectHead,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
@@ -121,8 +124,9 @@ let updateState: DesktopUpdateState = { status: "idle" };
 let updateChannel: DesktopUpdateChannel = "stable";
 let autoUpdaterConfigured = false;
 let updateCheckGeneration = 0;
-let updateCheckPromise: Promise<void> | undefined;
 let updateCancellationToken: { cancel: () => void } | undefined;
+let lastUpdateCheck = 0;
+let updateCheck: ReturnType<typeof autoUpdater.checkForUpdates> | null = null;
 const DESKTOP_RELEASES_API =
   "https://api.github.com/repos/langchain-ai/open-swe/releases?per_page=100";
 const DESKTOP_RELEASES_DOWNLOAD =
@@ -159,37 +163,6 @@ async function configureUpdateFeed(channel: DesktopUpdateChannel) {
   autoUpdater.setFeedURL({ provider: "generic", url });
 }
 
-function checkForDesktopUpdates() {
-  const generation = updateCheckGeneration;
-  setUpdateState("idle", undefined);
-  const promise = autoUpdater
-    .checkForUpdates()
-    .then((result) => {
-      if (generation !== updateCheckGeneration) {
-        result?.cancellationToken?.cancel();
-        return result?.downloadPromise?.catch(() => undefined);
-      }
-      updateCancellationToken = result?.cancellationToken;
-      return result?.downloadPromise?.then(() => undefined);
-    })
-    .catch((error) => {
-      if (generation === updateCheckGeneration) {
-        console.warn("Could not check for desktop updates", error);
-      }
-    })
-    .finally(() => {
-      if (updateCheckPromise === promise) updateCheckPromise = undefined;
-    });
-  updateCheckPromise = promise;
-}
-
-async function cancelDesktopUpdateCheck() {
-  updateCheckGeneration += 1;
-  updateCancellationToken?.cancel();
-  updateCancellationToken = undefined;
-  await updateCheckPromise;
-}
-
 function setUpdateState(
   status: DesktopUpdateState["status"],
   version?: string,
@@ -198,6 +171,45 @@ function setUpdateState(
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:update-state", updateState);
   }
+}
+
+function checkForUpdates() {
+  const generation = updateCheckGeneration;
+  lastUpdateCheck = Date.now();
+  updateCheck ??= autoUpdater
+    .checkForUpdates()
+    .then((result) => {
+      if (generation !== updateCheckGeneration) {
+        result?.cancellationToken?.cancel();
+      } else {
+        updateCancellationToken = result?.cancellationToken;
+      }
+      return result;
+    })
+    .finally(() => {
+      updateCheck = null;
+    });
+  return updateCheck;
+}
+
+async function cancelDesktopUpdateCheck() {
+  updateCheckGeneration += 1;
+  updateCancellationToken?.cancel();
+  updateCancellationToken = undefined;
+  await updateCheck?.catch(() => undefined);
+  lastUpdateCheck = 0;
+  if (updateState.status === "downloading") setUpdateState("idle");
+}
+
+function checkForUpdatesInBackground() {
+  if (
+    updateState.status !== "idle" ||
+    Date.now() - lastUpdateCheck < 60 * 60 * 1000
+  )
+    return;
+  void checkForUpdates().catch((error) =>
+    console.warn("Could not check for desktop updates", error),
+  );
 }
 
 async function configureAutoUpdater() {
@@ -214,11 +226,43 @@ async function configureAutoUpdater() {
     );
     autoUpdater.on("error", (error) => {
       console.warn("Desktop update failed", error);
-      setUpdateState("idle", undefined);
+      if (updateState.status === "downloading") setUpdateState("idle");
     });
+    const timer = setInterval(checkForUpdatesInBackground, 4 * 60 * 60 * 1000);
+    timer.unref();
+    powerMonitor.on("resume", checkForUpdatesInBackground);
+    app.on("activate", checkForUpdatesInBackground);
+    app.on("browser-window-focus", checkForUpdatesInBackground);
   }
   await configureUpdateFeed(updateChannel);
-  checkForDesktopUpdates();
+  checkForUpdatesInBackground();
+}
+
+async function checkForDesktopUpdates() {
+  try {
+    if (updateState.status === "ready" || updateState.status === "installing")
+      return;
+    const result = await checkForUpdates();
+    if (result?.isUpdateAvailable) {
+      await dialog.showMessageBox({
+        type: "info",
+        message: `${appRuntime.name} ${result.updateInfo.version} is available`,
+        detail: "The update is downloading and will be ready to install soon.",
+      });
+      return;
+    }
+    await dialog.showMessageBox({
+      type: "info",
+      message: `${appRuntime.name} is up to date`,
+      detail: `Version ${app.getVersion()} is the latest available version.`,
+    });
+  } catch (error) {
+    console.warn("Could not check for desktop updates", error);
+    dialog.showErrorBox(
+      `Could not check for ${appRuntime.name} updates`,
+      error.message,
+    );
+  }
 }
 
 function sendDesktopCommand(commandId) {
@@ -458,6 +502,10 @@ async function discardThreadWorktree(thread) {
 }
 
 function configureDesktopIpc() {
+  ipcMain.handle("desktop:write-clipboard", (event, value) => {
+    requireTrustedDesktopIpc(event);
+    if (typeof value === "string") clipboard.writeText(value);
+  });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
     return app.getVersion();
@@ -484,7 +532,7 @@ function configureDesktopIpc() {
     await configureUpdateFeed(channel);
     writeUpdateChannel(updateChannelPath(), channel);
     updateChannel = channel;
-    checkForDesktopUpdates();
+    checkForUpdatesInBackground();
     return updateChannel;
   });
   ipcMain.handle("desktop:update-state", (event) => {
@@ -516,6 +564,36 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event);
     return listProjects();
+  });
+
+  const projectHeadWatches = new Map<number, () => void>();
+  ipcMain.handle("desktop:watch-project-head", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const sender = event.sender;
+    projectHeadWatches.get(sender.id)?.();
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    if (!project) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    const close = () => {
+      disposed = true;
+      stop?.();
+      projectHeadWatches.delete(sender.id);
+      sender.removeListener("destroyed", close);
+      sender.removeListener("did-start-navigation", close);
+    };
+    projectHeadWatches.set(sender.id, close);
+    sender.once("destroyed", close);
+    sender.once("did-start-navigation", close);
+    try {
+      stop = await watchProjectHead(project, () => {
+        if (!disposed && !sender.isDestroyed())
+          sender.send("desktop:project-head-changed", cwd);
+      });
+      if (disposed) stop();
+    } catch {
+      if (!disposed) close();
+    }
   });
 
   ipcMain.handle("desktop:project-branches", async (event, cwd) => {
@@ -679,6 +757,7 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     return localThreadStore.update(input?.threadId, {
+      ...(typeof input?.title === "string" ? { title: input.title } : {}),
       ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
       ...(typeof input?.archived === "boolean"
         ? { archived: input.archived }
@@ -1031,6 +1110,11 @@ function createMenu() {
     accelerator: "CmdOrCtrl+,",
     click: () => sendDesktopCommand("open-settings"),
   };
+  const checkForUpdatesItem = {
+    label: "Check for Updates…",
+    enabled: app.isPackaged,
+    click: () => void checkForDesktopUpdates(),
+  };
   const template = [
     ...(process.platform === "darwin"
       ? [
@@ -1039,6 +1123,7 @@ function createMenu() {
             submenu: [
               { role: "about" },
               settingsItem,
+              checkForUpdatesItem,
               backendSettingsItem,
               { type: "separator" },
               { role: "services" },
@@ -1099,7 +1184,10 @@ function createMenu() {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
           click: () => {
-            if (mainWindow) void loadApp(mainWindow);
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            if (isAppUrl(mainWindow.webContents.getURL()))
+              mainWindow.webContents.reload();
+            else void loadApp(mainWindow);
           },
         },
         ...(isDevelopment ? [{ role: "toggleDevTools" }] : []),
@@ -1111,10 +1199,12 @@ function createMenu() {
         { role: "togglefullscreen" },
       ],
     },
-    {
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
-    },
+    process.platform === "darwin"
+      ? { role: "windowMenu" }
+      : {
+          label: "Window",
+          submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
+        },
     {
       role: "help",
       submenu: [
@@ -1423,14 +1513,13 @@ function configurePermissions() {
         isTrustedPermissionRequest(
           permission,
           details.requestingUrl || webContents.getURL(),
-          details,
         ),
       );
     },
   );
   session.defaultSession.setPermissionCheckHandler(
-    (_webContents, permission, requestingOrigin, details) =>
-      isTrustedPermissionRequest(permission, requestingOrigin, details),
+    (_webContents, permission, requestingOrigin) =>
+      isTrustedPermissionRequest(permission, requestingOrigin),
   );
 }
 
@@ -1490,6 +1579,25 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
+      tracingEnv: async () => {
+        if (!backendUrl) return {};
+        try {
+          const response = await backendFetch(
+            new URL("/dashboard/api/me/preferences", backendUrl).toString(),
+            { signal: AbortSignal.timeout(2_000) },
+          );
+          if (!response.ok) return {};
+          const preferences = await response.json();
+          const project =
+            preferences.local_tracing_project ||
+            preferences.default_local_tracing_project;
+          return project
+            ? { LANGSMITH_PROJECT: project, LANGSMITH_TRACING: "true" }
+            : {};
+        } catch {
+          return {};
+        }
+      },
       providerEnv: () => openAiOAuth?.backendEnv() || {},
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&

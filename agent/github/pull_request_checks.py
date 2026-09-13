@@ -17,7 +17,7 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, TypedDict
 
-import httpx
+import httpx2
 
 from agent.github.http import GITHUB_GRAPHQL, github_client, github_request
 
@@ -163,7 +163,7 @@ async def get_pull_request_check_states(
             )
             response.raise_for_status()
             payload = response.json()
-    except httpx.HTTPError, ValueError:
+    except httpx2.HTTPError, ValueError:
         payload = None
 
     data = payload.get("data") if isinstance(payload, Mapping) else None

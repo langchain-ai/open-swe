@@ -3,7 +3,7 @@
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -51,24 +51,24 @@ def test_bearer_token_parsing() -> None:
 def _github_transport(user: dict[str, Any], emails: Any = None, *, emails_status: int = 200):
     """Serve /user and /user/emails without touching the network."""
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/user":
-            return httpx.Response(200, json=user)
+            return httpx2.Response(200, json=user)
         if request.url.path == "/user/emails":
-            return httpx.Response(emails_status, json=emails if emails is not None else [])
+            return httpx2.Response(emails_status, json=emails if emails is not None else [])
         raise AssertionError(f"unexpected request to {request.url}")
 
-    return httpx.MockTransport(handler)
+    return httpx2.MockTransport(handler)
 
 
-_REAL_ASYNC_CLIENT = httpx.AsyncClient
+_REAL_ASYNC_CLIENT = httpx2.AsyncClient
 
 
-def _patched_client(transport: httpx.MockTransport):
-    def factory(**kwargs: Any) -> httpx.AsyncClient:
+def _patched_client(transport: httpx2.MockTransport):
+    def factory(**kwargs: Any) -> httpx2.AsyncClient:
         return _REAL_ASYNC_CLIENT(transport=transport, base_url="https://api.github.com")
 
-    return patch.object(github_token_auth.httpx, "AsyncClient", factory)
+    return patch.object(github_token_auth.httpx2, "AsyncClient", factory)
 
 
 async def test_identity_falls_back_to_primary_email(monkeypatch: pytest.MonkeyPatch) -> None:

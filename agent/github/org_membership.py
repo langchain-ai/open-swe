@@ -3,7 +3,7 @@
 import logging
 from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from agent.config import ENV
 from agent.github.app import (
@@ -53,7 +53,7 @@ async def is_user_active_org_member(username: str, org: str) -> bool:
         f"https://api.github.com/orgs/{quote(org, safe='')}/memberships/{quote(username, safe='')}"
     )
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx2.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 url,
                 headers={
