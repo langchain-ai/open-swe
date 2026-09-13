@@ -88,7 +88,6 @@ from agent.input_messages import (
     dynamic_context_hash,
     message_sender_id,
     system_introduction,
-    visible_dynamic_context_hashes,
 )
 from agent.mcp import load_mcp_tools
 from agent.middleware import (
@@ -697,13 +696,30 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
         if sender_id is None:
             return []
+        messages = state.get("messages") or []
+        last_human_index = max(
+            (
+                index
+                for index, candidate in enumerate(messages)
+                if isinstance(candidate, HumanMessage)
+                and (
+                    message_sender_id(candidate.content, kind="human") is not None
+                    or message_sender_id(candidate.content) == "system:dashboard-handoff"
+                )
+            ),
+            default=-1,
+        )
         identity: SystemIdentity = {
             **_SENDER_CONTEXT_SYSTEM,
             "subject_id": sender_id,
             "context_hash": hashlib.sha256(sender_context.encode()).hexdigest(),
         }
         introduction_hash = dynamic_context_hash(system_introduction(identity)["content"])
-        if introduction_hash in visible_dynamic_context_hashes(state):
+        if any(
+            dynamic_context_hash(candidate.content) == introduction_hash
+            for candidate in messages[last_human_index + 1 :]
+            if isinstance(candidate, HumanMessage)
+        ):
             return []
         return cast(
             list[Any],

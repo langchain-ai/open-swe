@@ -135,18 +135,84 @@ def test_sender_context_arrives_as_its_own_message():
     assert envelope.findtext("content") == "sender"
 
 
-def test_sender_context_is_skipped_when_visible_for_same_sender():
+def test_sender_context_is_skipped_when_repeated_within_same_turn():
     state = cast(
         PrepareRunState,
         {
             "messages": [
-                _sender_context_introduction("github:ramon"),
                 _sender_message("github:ramon", "again"),
+                _sender_context_introduction("github:ramon"),
             ]
         },
     )
 
     assert PrepareAgentRunMiddleware._sender_context_messages(state, "sender") == []
+
+
+def test_sender_context_is_added_for_second_and_third_human_turns():
+    first_turn = _sender_message("github:ramon", "first")
+    first_context = _sender_context_introduction("github:ramon")
+    second_turn = _sender_message("github:ramon", "second")
+    second_context = _sender_context_introduction("github:ramon")
+    third_turn = _sender_message("github:ramon", "third")
+
+    assert (
+        len(
+            PrepareAgentRunMiddleware._sender_context_messages(
+                cast(PrepareRunState, {"messages": [first_turn, first_context, second_turn]}),
+                "sender",
+            )
+        )
+        == 2
+    )
+    assert (
+        len(
+            PrepareAgentRunMiddleware._sender_context_messages(
+                cast(
+                    PrepareRunState,
+                    {
+                        "messages": [
+                            first_turn,
+                            first_context,
+                            second_turn,
+                            second_context,
+                            third_turn,
+                        ]
+                    },
+                ),
+                "sender",
+            )
+        )
+        == 2
+    )
+
+
+def test_sender_context_is_added_after_dashboard_handoff():
+    handoff = HumanMessage(
+        content=cast(
+            str,
+            system_input(
+                "Continue from the dashboard",
+                {
+                    "sender_id": "system:dashboard-handoff",
+                    "surface": "automation",
+                    "kind": "system",
+                },
+            )["content"],
+        )
+    )
+    state = cast(
+        PrepareRunState,
+        {
+            "messages": [
+                _sender_message("github:ramon"),
+                _sender_context_introduction("github:ramon"),
+                handoff,
+            ]
+        },
+    )
+
+    assert len(PrepareAgentRunMiddleware._sender_context_messages(state, "sender")) == 2
 
 
 def test_sender_context_is_added_when_same_sender_context_changes():
