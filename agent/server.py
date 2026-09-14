@@ -111,6 +111,7 @@ from agent.middleware import (
     StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
+    ToolCallTimingMiddleware,
     ToolErrorMiddleware,
     ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
@@ -399,7 +400,7 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
 def _subagent_middleware(
     dynamic_tools: DynamicToolMiddleware | None,
 ) -> list[AgentMiddleware[Any, Any, Any]]:
-    middleware: list[AgentMiddleware[Any, Any, Any]] = []
+    middleware: list[AgentMiddleware[Any, Any, Any]] = [ToolCallTimingMiddleware()]
     if dynamic_tools is not None:
         middleware.append(dynamic_tools)
     middleware.append(ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS))
@@ -1353,6 +1354,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                ToolCallTimingMiddleware(),
                 ConversationOffloadingMiddleware(
                     main_model, agent_backend, manual=cfg.offload_conversation is True
                 ),

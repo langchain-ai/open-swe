@@ -20,7 +20,7 @@ import type { KeyboardEvent, ReactNode } from "react"
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
-import { cn } from "@/lib/utils"
+import { cn, formatElapsed } from "@/lib/utils"
 
 const ICONS: Record<WorkEntryIconName, typeof Bot> = {
   bot: Bot,
@@ -125,6 +125,10 @@ export function WorkEntryRow({
   const activate = onActivate ?? (canExpand ? toggle : null)
   const isError = entry.tone === "error"
   const hoverTimestamp = formatHoverTimestamp(timestamp)
+  const elapsed =
+    entry.elapsedMs !== undefined && entry.elapsedMs >= 1000
+      ? `took ${formatElapsed(entry.elapsedMs)}`
+      : null
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
@@ -225,6 +229,9 @@ export function WorkEntryRow({
 
           <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
             {trailing}
+            {elapsed && (
+              <span className="text-[10px] tabular-nums">{elapsed}</span>
+            )}
             {hoverTimestamp && (
               <time className="text-[10px] tabular-nums opacity-0 transition-opacity group-hover/entry:opacity-100">
                 {hoverTimestamp}

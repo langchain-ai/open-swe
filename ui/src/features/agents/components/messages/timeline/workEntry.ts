@@ -34,6 +34,7 @@ export interface WorkEntryView {
   diffStats?: { additions: number; deletions: number }
   tone: WorkEntryTone
   status: AcpToolStatus
+  elapsedMs?: number
   /** Plain-text detail for rows that have no richer renderer of their own. */
   expandedText: string | null
 }
@@ -162,6 +163,7 @@ export function describeWorkEntry(
       ),
       tone: toneForChunk(chunk),
       status: chunk.status,
+      elapsedMs: chunk.elapsedMs,
       // The diff itself is the body; a text dump alongside it would be noise.
       expandedText: null,
     }
@@ -186,6 +188,7 @@ export function describeWorkEntry(
     previewTooltip,
     tone: toneForChunk(chunk),
     status: chunk.status,
+    elapsedMs: chunk.elapsedMs,
     expandedText: expandedTextForChunk(chunk, projectPath),
   }
 }
