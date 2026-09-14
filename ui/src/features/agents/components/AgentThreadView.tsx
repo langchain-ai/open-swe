@@ -273,9 +273,8 @@ export function AgentThreadView({
   const hydrationFailed = !isHydrating && !hasMessages && hydrateRejected
 
   useEffect(() => {
-    if (!stream.isThreadLoading)
-      threadHydrated(thread.id, { messages: stream.messages.length })
-  }, [stream.messages, stream.isThreadLoading, thread.id])
+    if (!stream.isThreadLoading) threadHydrated(thread.id)
+  }, [stream.isThreadLoading, thread.id])
 
   // The transcript's first frame: one rAF after the commit that replaced the
   // hydration placeholder. A commit before the frame fires cancels and

@@ -7,11 +7,6 @@ export const dashboardFetch: typeof fetch = withRequestTiming((input, init) =>
   fetch(input, { ...init, credentials: "include" })
 )
 
-const withCredentials = (_url: URL, init: RequestInit): RequestInit => ({
-  ...init,
-  credentials: "include",
-})
-
 /** The SDK builds request URLs with `new URL(apiUrl + path)`, so the base must be absolute. */
 export function absoluteApiUrl(url: string): string {
   if (/^https?:\/\//.test(url)) return url
@@ -26,7 +21,7 @@ export function createDashboardClient(apiUrl: string): Client {
   return new Client({
     apiUrl: absoluteApiUrl(apiUrl),
     apiKey: null,
-    onRequest: withCredentials,
+    callerOptions: { fetch: dashboardFetch },
   })
 }
 

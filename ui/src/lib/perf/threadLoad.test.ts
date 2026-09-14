@@ -35,8 +35,9 @@ describe("thread load span", () => {
       ttfbMs: 41.2,
       serverTiming: [{ name: "get_state", duration: 30.6 }],
     })
-    threadHydrated(THREAD_A, { messages: 7 })
+    threadHydrated(THREAD_A)
     threadTranscriptBuilt(THREAD_A, 3.2)
+    threadTranscriptBuilt(THREAD_A, 1.1)
     threadTranscriptPainted(THREAD_A, { messages: 7, chunks: 21 })
 
     const [span] = getPerfSpans()
@@ -53,8 +54,8 @@ describe("thread load span", () => {
       state_ttfb_ms: 41,
       state_status: 200,
       state_srv_get_state_ms: 31,
-      hydrated_messages: 7,
-      builds: 1,
+      builds: 2,
+      build_ms: 4,
       messages: 7,
       chunks: 21,
     })
@@ -80,7 +81,7 @@ describe("thread load span", () => {
 
   it("ignores steps for a thread that is not being tracked", () => {
     onRouterNavigation(`/agents/${THREAD_A}`, "/agents")
-    threadHydrated(THREAD_B, { messages: 3 })
+    threadHydrated(THREAD_B)
     threadHydrationFailed(THREAD_B)
     threadTranscriptPainted(THREAD_B, { messages: 3, chunks: 3 })
 

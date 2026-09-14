@@ -18,7 +18,8 @@ import type { PerfAttributes, SpanHandle } from "./trace"
 const THREAD_PATH_RE =
   /^\/agents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
 
-let active: { threadId: string; span: SpanHandle } | null = null
+let active: { threadId: string; span: SpanHandle; buildMs: number } | null =
+  null
 let navigated = false
 
 function threadIdFromPath(pathname: string): string | null {
@@ -60,6 +61,7 @@ function beginThreadLoad(
   abandonThreadLoad("superseded")
   active = {
     threadId,
+    buildMs: 0,
     span: startSpan(
       "thread_load",
       { source, cold: source === "page_load" },
@@ -101,11 +103,8 @@ export function threadDetailFailed(threadId: string): void {
   if (current(threadId)) abandonThreadLoad("detail_failed")
 }
 
-export function threadHydrated(
-  threadId: string,
-  attributes: { messages: number }
-): void {
-  current(threadId)?.mark("hydrate", { hydrated_messages: attributes.messages })
+export function threadHydrated(threadId: string): void {
+  current(threadId)?.mark("hydrate")
 }
 
 export function threadHydrationFailed(threadId: string): void {
@@ -118,8 +117,9 @@ export function threadTranscriptBuilt(
   durationMs: number
 ): void {
   const span = current(threadId)
-  if (!span || span.has("paint")) return
-  span.add("build_ms", durationMs)
+  if (!active || !span || span.has("paint")) return
+  active.buildMs += durationMs
+  span.set({ build_ms: Math.round(active.buildMs) })
   span.add("builds", 1)
 }
 
