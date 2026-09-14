@@ -34,6 +34,82 @@ class PullRequestFixContext(BaseModel):
     reviewDecision: Literal["approved", "changes_requested", "none"] | None
 
 
+async def _find_or_create_pr_thread(
+    owner: str,
+    repo: str,
+    number: int,
+    login: str,
+    email: str | None,
+    *,
+    prompt: str,
+    title: str,
+) -> str:
+    client = langgraph_client()
+    url = f"https://github.com/{owner}/{repo}/pull/{number}"
+    candidates: dict[str, str] = {}
+    for query in ({"pr_url": url}, {"pr_urls": [url]}):
+        offset = 0
+        while True:
+            page = await client.threads.search(metadata=query, limit=50, offset=offset)
+            for thread in page:
+                metadata = thread_metadata(thread)
+                if metadata.get("kind") or metadata.get("graph_id") not in (None, "agent"):
+                    continue
+                try:
+                    _assert_thread_postable(metadata, login, email)
+                except HTTPException:
+                    continue
+                candidates[thread["thread_id"]] = str(thread.get("updated_at", ""))
+            if len(page) < 50:
+                break
+            offset += 50
+    if candidates:
+        return max(candidates, key=lambda thread_id: candidates[thread_id])
+    else:
+        thread = await _create_dashboard_thread_record(
+            str(uuid.uuid4()),
+            login=login,
+            email=email,
+            repo_config={"owner": owner, "name": repo},
+            prompt=prompt,
+            title=title,
+        )
+        await client.threads.update(
+            thread_id=thread["thread_id"],
+            metadata={"pr_url": url, "pr_number": number, "source_context": {"pr_number": number}},
+        )
+    return str(thread["thread_id"])
+
+
+async def open_pull_request_thread(
+    owner: str,
+    repo: str,
+    number: int,
+    login: str,
+    email: str | None = None,
+) -> dict[str, str]:
+    full_name = f"{owner}/{repo}"
+    if pull_request_identity({"repo_full_name": full_name, "number": number}) is None:
+        raise HTTPException(422, "invalid pull request")
+    await require_repo_access_for_user(login, full_name)
+    await _ensure_dashboard_github_token(login)
+    url = f"https://github.com/{full_name}/pull/{number}"
+    client = langgraph_client()
+    async with agent_thread_pr_state_lock(client, f"fix:{login}:{url}"):
+        thread_id = await _find_or_create_pr_thread(
+            owner,
+            repo,
+            number,
+            login,
+            email,
+            prompt=f"Work on {url}.",
+            title=f"{full_name}#{number}",
+        )
+        current = await client.threads.get(thread_id)
+        _assert_thread_postable(thread_metadata(current), login, email)
+        return {"thread_id": thread_id}
+
+
 async def fix_pull_request(
     owner: str,
     repo: str,
@@ -63,38 +139,15 @@ async def fix_pull_request(
             + context.model_dump_json(indent=2)
         )
     async with agent_thread_pr_state_lock(client, f"fix:{login}:{url}"):
-        candidates = {}
-        for query in ({"pr_url": url}, {"pr_urls": [url]}):
-            offset = 0
-            while True:
-                page = await client.threads.search(metadata=query, limit=50, offset=offset)
-                for thread in page:
-                    metadata = thread_metadata(thread)
-                    if metadata.get("kind") or metadata.get("graph_id") not in (None, "agent"):
-                        continue
-                    try:
-                        _assert_thread_postable(metadata, login, email)
-                    except HTTPException:
-                        continue
-                    candidates[thread["thread_id"]] = thread
-                if len(page) < 50:
-                    break
-                offset += 50
-        if candidates:
-            thread = max(candidates.values(), key=lambda item: str(item.get("updated_at", "")))
-        else:
-            thread = await _create_dashboard_thread_record(
-                str(uuid.uuid4()),
-                login=login,
-                email=email,
-                repo_config={"owner": owner, "name": repo},
-                prompt=prompt,
-                title=f"Fix {full_name}#{number}",
-            )
-            await client.threads.update(
-                thread_id=thread["thread_id"], metadata={"pr_url": url, "pr_number": number}
-            )
-        thread_id = thread["thread_id"]
+        thread_id = await _find_or_create_pr_thread(
+            owner,
+            repo,
+            number,
+            login,
+            email,
+            prompt=prompt,
+            title=f"Fix {full_name}#{number}",
+        )
         async with agent_thread_pr_state_lock(client, thread_id):
             await client.threads.update(
                 thread_id=thread_id,

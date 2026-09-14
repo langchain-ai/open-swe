@@ -195,7 +195,11 @@ from agent.dashboard.threads.listing import (
     pin_dashboard_thread,
     unpin_dashboard_thread,
 )
-from agent.dashboard.threads.pr_fixes import PullRequestFixContext, fix_pull_request
+from agent.dashboard.threads.pr_fixes import (
+    PullRequestFixContext,
+    fix_pull_request,
+    open_pull_request_thread,
+)
 from agent.dashboard.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
@@ -1607,6 +1611,18 @@ async def api_list_reviews(
         is_accessible=is_accessible,
     )
     return {"reviews": reviews, "page": page, "has_more": has_more}
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/thread")
+async def api_open_pull_request_thread(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, str] = _SESSION_DEP,
+) -> dict[str, str]:
+    return await open_pull_request_thread(
+        owner, repo, pr_number, session["sub"], session.get("email")
+    )
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/fix")

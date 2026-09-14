@@ -22,6 +22,7 @@ vi.mock("@/lib/api", () => ({
     reviewSummaries: vi.fn(),
     fixPullRequest: vi.fn(),
     mergePullRequest: vi.fn(),
+    openPullRequestThread: vi.fn(),
   },
 }))
 const navigate = vi.hoisted(() => vi.fn())
@@ -126,6 +127,57 @@ afterEach(() => {
 })
 
 describe("My PRs", () => {
+  it("opens the associated coding thread with immediate loading feedback", async () => {
+    let finish!: (result: { thread_id: string }) => void
+    vi.mocked(api.openPullRequestThread).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    mount()
+    const row = (await screen.findByText("Change 1")).closest("tr")!
+    fireEvent.click(
+      within(row).getByRole("button", { name: "Open SWE Thread" })
+    )
+    const opening = await within(row).findByRole("button", {
+      name: "Opening thread…",
+    })
+    expect((opening as HTMLButtonElement).disabled).toBe(true)
+    expect(api.openPullRequestThread).toHaveBeenCalledWith("acme/app", 1)
+    expect(navigate).not.toHaveBeenCalled()
+    finish({ thread_id: "coding-thread" })
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({
+        to: "/agents/$threadId",
+        params: { threadId: "coding-thread" },
+      })
+    )
+  })
+
+  it("keeps the PR page open and allows retry when opening a thread fails", async () => {
+    vi.mocked(api.openPullRequestThread).mockRejectedValue(
+      new Error("Thread backend unavailable")
+    )
+    mount()
+    const row = (await screen.findByText("Change 1")).closest("tr")!
+    fireEvent.click(
+      within(row).getByRole("button", { name: "Open SWE Thread" })
+    )
+    expect(await within(row).findByRole("alert")).toHaveProperty(
+      "textContent",
+      "Thread backend unavailable"
+    )
+    expect(
+      (
+        within(row).getByRole("button", {
+          name: "Open SWE Thread",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   it("merges in the background and removes only confirmed merges", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
