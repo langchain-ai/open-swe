@@ -32,6 +32,7 @@ from agent.slack.client import (
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.utils.json_types import thread_metadata
+from agent.utils.thread_filters import derive_filter_metadata
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -659,6 +660,7 @@ async def _launch_agent_schedule_record(
             "schedule_id": schedule_id,
             "invocation_id": run_config["configurable"]["invocation_id"],
         }
+    metadata.update(derive_filter_metadata(metadata))
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     input_context: InputMessageContext = {

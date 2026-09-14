@@ -52,6 +52,7 @@ from agent.slack.client import (
 from agent.source_context import SourceContext
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
+from agent.utils.thread_filters import derive_filter_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
@@ -273,6 +274,8 @@ async def _create_dashboard_thread_record(
         metadata["repo_name"] = repo_config["name"]
     elif repo_explicitly_none:
         metadata["repo_explicitly_none"] = True
+
+    metadata.update(derive_filter_metadata(metadata))
 
     client = langgraph_client()
     await client.threads.create(

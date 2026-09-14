@@ -19,6 +19,7 @@ from agent.slack.client import (
 from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.thread_filters import derive_filter_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks.common import is_repo_allowed
 
@@ -310,6 +311,7 @@ async def slack_start_new_thread(
         if value:
             new_configurable[key] = value
 
+    metadata.update(derive_filter_metadata(metadata))
     await client.threads.create(thread_id=thread_id, if_exists="do_nothing", metadata=metadata)
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 

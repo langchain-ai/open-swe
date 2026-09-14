@@ -44,6 +44,7 @@ from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
 from agent.slack.client import parse_github_pr_url
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
+from agent.utils.thread_filters import derive_filter_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -511,6 +512,7 @@ async def continue_thread_privately(
             "graph_id": metadata.get("graph_id") or _ASSISTANT_ID,
         }
     )
+    new_metadata.update(derive_filter_metadata(new_metadata))
     new_thread_id = str(uuid.uuid4())
     await client.threads.create(thread_id=new_thread_id, metadata=new_metadata, if_exists="raise")
     if copied:

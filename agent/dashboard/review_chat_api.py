@@ -30,6 +30,7 @@ from agent.review.diff import fetch_pr_diff
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.json_types import as_json_object
+from agent.utils.thread_filters import derive_filter_metadata
 from agent.utils.thread_ops import langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -298,7 +299,9 @@ async def _create_chat_thread(
         "updated_at_ms": now_ms,
     }
     await langgraph_client().threads.create(
-        thread_id=thread_id, metadata=metadata, if_exists="do_nothing"
+        thread_id=thread_id,
+        metadata={**metadata, **derive_filter_metadata(metadata)},
+        if_exists="do_nothing",
     )
 
 

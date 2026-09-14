@@ -152,6 +152,7 @@ from agent.utils.multimodal import (
     vision_not_supported_warning,  # noqa: F401
 )
 from agent.utils.repo import extract_repo_from_text
+from agent.utils.thread_filters import derive_filter_metadata
 from agent.utils.thread_ops import queue_message_for_thread  # noqa: F401
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
@@ -641,6 +642,8 @@ async def upsert_agent_thread_metadata(
         initiating_login = owner_login.strip() or sender_login.strip()
         if initiating_login and owner_type == "user":
             metadata["owner_login"] = initiating_login
+
+    metadata.update(derive_filter_metadata({**existing_meta, **metadata}))
 
     try:
         if existing is None:

@@ -28,6 +28,13 @@ from agent.dashboard.threads.summary import (
     thread_source,
 )
 from agent.utils.json_types import JsonObject, ThreadLike
+from agent.utils.thread_filters import (
+    AUTOMATION_KEY,
+    REPO_KEY,
+    RESOLVED_KEY,
+    filter_pushdown_enabled,
+    repo_key,
+)
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import participant_search_filters
 
@@ -66,6 +73,10 @@ def _search_metadata_filter(
     source: str | None = None,
     automation_id: str | None = None,
     admin_threads: bool | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    repo: str | None = None,
+    ownerless: bool = False,
+    pushdown: bool = False,
 ) -> dict[str, Any]:
     metadata = dict(search_filter)
     if resolved is True:
@@ -76,6 +87,17 @@ def _search_metadata_filter(
         metadata["schedule_id"] = automation_id
     if admin_threads is True:
         metadata["admin_thread"] = True
+    if not pushdown:
+        return metadata
+    if resolved is not None:
+        metadata[RESOLVED_KEY] = resolved
+    if scope != "all":
+        metadata[AUTOMATION_KEY] = scope == "automation"
+    if repo:
+        owner, _, name = repo.partition("/")
+        metadata[REPO_KEY] = repo_key(owner, name)
+    elif ownerless:
+        metadata[REPO_KEY] = ""
     return metadata
 
 
@@ -315,6 +337,7 @@ async def _collect_thread_candidates(
     sort_by: _ThreadSortBy = "updated_at",
     scan_cap: int = _THREADS_PAGE_SCAN_CAP,
 ) -> list[ThreadLike]:
+    pushdown = await filter_pushdown_enabled()
     seen: dict[str, ThreadLike] = {}
     for search_filter in searches:
         matched_for_search = 0
@@ -324,6 +347,10 @@ async def _collect_thread_candidates(
             source=source,
             automation_id=automation_id,
             admin_threads=admin_threads,
+            scope=scope,
+            repo=repo,
+            ownerless=ownerless,
+            pushdown=pushdown,
         )
         async with aclosing(
             _scan_thread_pages(
