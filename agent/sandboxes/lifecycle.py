@@ -321,27 +321,29 @@ async def _connect_existing_sandbox(
     pings the box first: refreshing the proxy below has to reach it anyway, and
     raises the same unreachable error when it cannot.
     """
-    if cached is not None:
-        logger.info("Using cached sandbox backend for thread %s", thread_id)
-        sandbox_backend = cached
-    else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
-        try:
+    try:
+        if cached is not None:
+            logger.info("Using cached sandbox backend for thread %s", thread_id)
+            sandbox_backend = cached
+        else:
+            logger.info("Connecting to existing sandbox %s", sandbox_id)
             async with aphase(thread_id, "sandbox.reconnect", sandbox_id=sandbox_id):
                 sandbox_backend = await create_sandbox(str(sandbox_id))
-        except SandboxGoneError:
-            raise
-        except Exception as exc:
-            logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
-            raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
-    async with git_identity(thread_id, sandbox_backend):
-        refreshed = await _refresh_github_proxy_or_fail(
-            sandbox_backend,
-            thread_id,
-            github_proxy_token,
-            github_proxy_repositories,
-            base_proxy_config,
-        )
+        async with git_identity(thread_id, sandbox_backend):
+            refreshed = await _refresh_github_proxy_or_fail(
+                sandbox_backend,
+                thread_id,
+                github_proxy_token,
+                github_proxy_repositories,
+                base_proxy_config,
+            )
+    except SandboxGoneError:
+        raise
+    except SandboxUnreachableError:
+        raise
+    except Exception as exc:
+        logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
+        raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
     return refreshed
 
 

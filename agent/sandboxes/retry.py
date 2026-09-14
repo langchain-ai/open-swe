@@ -6,7 +6,7 @@ import random
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from langsmith.sandbox import SandboxRetryableConnectionError
+from langsmith.sandbox import SandboxOperationError, SandboxRetryableConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,17 @@ def is_transient_sandbox_error(exc: BaseException) -> bool:
     gateway status (500/502/503/504): the execute frame never went out, so no
     attempt can have run the command, and re-issuing it cannot double-run it.
     """
-    return isinstance(exc, SandboxRetryableConnectionError)
+    return isinstance(exc, SandboxRetryableConnectionError) or _is_read_offset_unavailable(exc)
+
+
+def _is_read_offset_unavailable(exc: BaseException) -> bool:
+    """Whether a stale exec-output cursor can be retried for a fresh read."""
+    if not isinstance(exc, SandboxOperationError):
+        return False
+    error_types = (getattr(exc, "error_type", None), getattr(exc, "code", None))
+    return "ReadOffsetUnavailable" in error_types or (
+        "requested read offset is no longer retained" in str(exc).lower()
+    )
 
 
 def _compute_backoff(attempt: int) -> float:

@@ -9,11 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.runnables import RunnableConfig
-from langsmith.sandbox import SandboxClientError
+from langsmith.sandbox import SandboxClientError, SandboxOperationError
 
 from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
 from agent.run_config import RunConfig
-from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
+from agent.sandboxes.lifecycle import (
+    SANDBOX_BACKENDS,
+    _connect_existing_sandbox,
+    ensure_sandbox_for_thread,
+)
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
 
@@ -137,6 +141,37 @@ async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
     assert excinfo.value.sandbox_id == "sandbox-deleted"
     assert "sandbox API outage" in str(excinfo.value)
     SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+async def test_read_offset_failure_during_git_identity_is_sandbox_unreachable() -> None:
+    sandbox_backend = MagicMock()
+    failure = SandboxOperationError(
+        "requested read offset is no longer retained",
+        error_type="ReadOffsetUnavailable",
+    )
+
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.configure_git_identity",
+            new_callable=AsyncMock,
+            side_effect=failure,
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._refresh_github_proxy_or_fail",
+            new_callable=AsyncMock,
+            return_value=sandbox_backend,
+        ),
+        pytest.raises(SandboxUnreachableError) as excinfo,
+    ):
+        await _connect_existing_sandbox(
+            "thread-reconnect",
+            cached=sandbox_backend,
+            sandbox_id="sandbox-reconnect",
+        )
+
+    assert excinfo.value.sandbox_id == "sandbox-reconnect"
+    assert isinstance(excinfo.value.__cause__, SandboxOperationError)
 
 
 @pytest.mark.asyncio

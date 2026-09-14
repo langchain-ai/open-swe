@@ -1,7 +1,11 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from langsmith.sandbox import SandboxClientError, SandboxRetryableConnectionError
+from langsmith.sandbox import (
+    SandboxClientError,
+    SandboxOperationError,
+    SandboxRetryableConnectionError,
+)
 
 from agent.sandboxes.retry import (
     MAX_TRANSIENT_ATTEMPTS,
@@ -64,3 +68,22 @@ async def test_retries_are_bounded() -> None:
         await retry_transient_sandbox_errors(operation, description="test")
 
     assert operation.await_count == MAX_TRANSIENT_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_read_offset_unavailable_retries_through_attempt_cap() -> None:
+    operation = AsyncMock(
+        side_effect=SandboxOperationError(
+            "requested read offset is no longer retained",
+            error_type="ReadOffsetUnavailable",
+        )
+    )
+
+    with (
+        patch("agent.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        pytest.raises(SandboxOperationError),
+    ):
+        await retry_transient_sandbox_errors(operation, description="test")
+
+    assert operation.await_count == MAX_TRANSIENT_ATTEMPTS
+    assert mock_sleep.await_count == MAX_TRANSIENT_ATTEMPTS - 1
