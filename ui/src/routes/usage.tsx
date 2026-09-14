@@ -633,7 +633,7 @@ function UsageCost({ row }: { row: UsageLeaderboardRow }) {
     ? [
         unavailable ? "No costs have been recorded." : "Recorded cost so far.",
         missing > 0
-          ? `Costs are missing for ${missing} of ${row.invocations} invocations.`
+          ? `Costs are missing for ${missing} of ${row.invocations} invocations (${formatPercent(missing / row.invocations)}).`
           : "",
         partial > 0
           ? `Costs are partial for ${partial} of ${row.invocations} invocations.`
