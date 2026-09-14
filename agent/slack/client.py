@@ -18,6 +18,7 @@ import httpx2
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 from slack_sdk.errors import SlackApiError
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
 from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error, slack_retry_after
@@ -372,11 +373,26 @@ def _log_automated_warning_sent_to_slack(
     logger.error("Sent automated warning message to Slack channel %s: %s", channel_id, text)
 
 
-def _threaded_under(data: Any, reply_ts: str) -> bool:
+def _threaded_under(data: AsyncSlackResponse, reply_ts: str) -> bool:
     message = data.get("message")
     if not isinstance(message, Mapping):
         return True
     return message.get("thread_ts") == reply_ts
+
+
+async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
+    try:
+        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            await client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1)
+    except SLACK_REQUEST_ERRORS as exc:
+        error = slack_error(exc)
+        if error == "thread_not_found":
+            return False
+        logger.warning(
+            "Slack thread lookup failed",
+            extra={"slack_error": error, "slack_channel": channel_id},
+        )
+    return True
 
 
 async def _delete_slack_message(channel_id: str, message_ts: str) -> None:
@@ -420,8 +436,13 @@ async def _post_slack_message_with_ts(
         message_ts = data.get("ts")
         if isinstance(message_ts, str) and message_ts:
             # Slack accepts a reply to a deleted parent and posts it at the channel
-            # root, where it reads as a message nobody asked for.
-            if reply_ts and not _threaded_under(data, reply_ts):
+            # root, where it reads as a message nobody asked for. Confirm the parent
+            # is really gone before removing what was just posted.
+            if (
+                reply_ts
+                and not _threaded_under(data, reply_ts)
+                and not await _slack_thread_exists(channel_id, reply_ts)
+            ):
                 await _delete_slack_message(channel_id, message_ts)
                 logger.warning(
                     "Slack reply landed outside its thread",

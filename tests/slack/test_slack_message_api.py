@@ -349,16 +349,31 @@ async def test_reply_to_a_deleted_parent_is_removed_instead_of_left_at_the_chann
     slack_api,
 ) -> None:
     slack_api.respond({"ok": True, "ts": "2.0", "message": {"text": "Answer"}})
+    slack_api.respond({"ok": False, "error": "thread_not_found"})
     slack_api.respond({"ok": True})
     assert await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Answer") == (
         None,
         "thread_not_found",
     )
-    assert [method for method, _ in slack_api.calls] == ["chat.postMessage", "chat.delete"]
-    assert slack_api.calls[1][1] == {"channel": "C1", "ts": "2.0"}
+    assert [method for method, _ in slack_api.calls] == [
+        "chat.postMessage",
+        "conversations.replies",
+        "chat.delete",
+    ]
+    assert slack_api.calls[2][1] == {"channel": "C1", "ts": "2.0"}
 
 
 async def test_threaded_reply_is_kept(slack_api) -> None:
     slack_api.respond({"ok": True, "ts": "2.0", "message": {"thread_ts": "1.0"}})
     assert await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Answer") == ("2.0", None)
     assert [method for method, _ in slack_api.calls] == ["chat.postMessage"]
+
+
+async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
+    slack_api.respond({"ok": True, "ts": "2.0", "message": {"text": "Answer"}})
+    slack_api.respond({"ok": True, "messages": [{"ts": "1.0"}]})
+    assert await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Answer") == ("2.0", None)
+    assert [method for method, _ in slack_api.calls] == [
+        "chat.postMessage",
+        "conversations.replies",
+    ]
