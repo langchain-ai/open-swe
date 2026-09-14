@@ -36,19 +36,32 @@ class TraceResourceNameMiddleware:
             return
         named = False
 
-        async def send_named(message: Message) -> None:
+        def name_after_routing() -> None:
             nonlocal named
-            if not named and message["type"] == "http.response.start":
-                named = True
-                route_path = getattr(scope.get("route"), "path", None)
-                if isinstance(route_path, str) and route_path:
-                    try:
-                        _rename_root_span(f"{scope.get('method', 'GET')} {route_path}")
-                    except Exception:
-                        logger.debug("Could not name the APM trace resource", exc_info=True)
+            if named:
+                return
+            named = True
+            route_path = getattr(scope.get("route"), "path", None)
+            if not isinstance(route_path, str) or not route_path:
+                return
+            try:
+                _rename_root_span(f"{scope.get('method', 'GET')} {route_path}")
+            except Exception:
+                logger.debug("Could not name the APM trace resource", exc_info=True)
+
+        async def send_named(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                name_after_routing()
             await send(message)
 
-        await self.app(scope, receive, send_named)
+        try:
+            await self.app(scope, receive, send_named)
+        except BaseException:
+            # The 500 is generated outside this middleware, so a raising endpoint
+            # would otherwise keep the unnamed resource and hide route-level
+            # errors from APM. The root span is still open while we unwind.
+            name_after_routing()
+            raise
 
 
 def add_trace_resource_names(app: FastAPI) -> None:
