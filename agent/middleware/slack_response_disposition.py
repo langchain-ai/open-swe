@@ -130,9 +130,6 @@ async def _slack_disposition_required() -> bool | None:
         return True
     if not _configured_slack_run(cfg):
         return False
-    configured_slack = cfg.slack_thread
-    if configured_slack is None:
-        return False
     if not cfg.thread_id:
         return True
     try:
@@ -145,10 +142,7 @@ async def _slack_disposition_required() -> bool | None:
         return None
     if metadata.get("source") != "slack":
         return False
-    location = SourceContext.from_metadata(metadata).slack_location
-    if location is None:
-        return None
-    return location == configured_slack.location
+    return SourceContext.from_metadata(metadata).slack_location is not None
 
 
 def _is_successful_disposition(message: ToolMessage, invocation_id: str) -> bool:

@@ -472,6 +472,58 @@ async def test_unknown_surface_blocks_tool_delivery() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_delivery_allows_verified_slack_location_change() -> None:
+    request = ToolCallRequest(
+        tool_call={
+            "name": "slack_thread_reply",
+            "args": {"message": "Done", "response_type": "final"},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=MagicMock(),
+        state={},
+        runtime=MagicMock(),
+    )
+    handler = AsyncMock(
+        return_value=ToolMessage(
+            content='{"success": true}',
+            artifact={"success": True},
+            name="slack_thread_reply",
+            tool_call_id="call-1",
+        )
+    )
+    client = MagicMock()
+    client.threads.get = AsyncMock(
+        return_value={
+            "metadata": {
+                "source": "slack",
+                "source_context": {
+                    "slack_thread": {"channel_id": "C_CODE", "thread_ts": "session"}
+                },
+            }
+        }
+    )
+
+    with (
+        patch(
+            "agent.middleware.slack_response_disposition.get_config",
+            return_value=_config(thread_id="thread-1"),
+        ),
+        patch("agent.middleware.slack_response_disposition.langgraph_client", return_value=client),
+    ):
+        result = await SlackResponseDispositionMiddleware().awrap_tool_call(request, handler)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status != "error"
+    assert result.artifact == {
+        "success": True,
+        "response_type": "final",
+        "open_swe_invocation_id": _INVOCATION_ID,
+    }
+    assert handler.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_tool_delivery_rechecks_active_surface() -> None:
     request = ToolCallRequest(
         tool_call={
