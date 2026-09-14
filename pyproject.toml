@@ -34,6 +34,9 @@ dependencies = [
     "websockets>=16.1.1",
     "slack-sdk>=3.44.1,<4.0.0",
     "aiohttp>=3.14.3,<4.0.0",
+    "alembic==1.20.0",
+    "sqlalchemy[asyncio]==2.0.52",
+    "asyncpg==0.31.0",
 ]
 
 [project.optional-dependencies]
@@ -110,7 +113,7 @@ testpaths = ["tests"]
 include = ["agent", "tests"]
 
 [tool.ty.analysis]
-allowed-unresolved-imports = ["langgraph_api.metrics_datadog"]
+allowed-unresolved-imports = ["langgraph_api.metrics_datadog", "ddtrace", "ddtrace.trace"]
 
 [tool.ty.terminal]
 error-on-warning = false

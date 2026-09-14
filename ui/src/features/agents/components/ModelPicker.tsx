@@ -13,6 +13,7 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import {
   formatEffort,
   formatModelSelection,
+  routedModelLabel,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { formatTokenCount } from "@/features/agents/lib/contextUsage"
 import { Z } from "@/features/agents/components/z-index"
@@ -30,6 +31,8 @@ export interface ModelPickerProps {
   /** Controlled open state, so `/model` in the composer can raise the picker. */
   open?: boolean
   onOpenChange?: (next: boolean) => void
+  /** Route/model the Auto router picked for the current run. */
+  routed?: { route?: string; modelId?: string | null } | null
 }
 
 type Pane = "main" | "models"
@@ -112,6 +115,7 @@ export function ModelPicker({
   triggerClassName,
   open: controlledOpen,
   onOpenChange,
+  routed,
 }: ModelPickerProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const open = controlledOpen ?? uncontrolledOpen
@@ -342,6 +346,10 @@ export function ModelPicker({
     typeof selectedModel?.context_window === "number"
       ? selectedModel.context_window
       : null
+  const routedLabel = routedModelLabel(models, routed)
+  const triggerLabel = formatModelSelection(models, selection, routed)
+  const triggerTitle =
+    !selection && routedLabel ? `Routed model: ${routedLabel}` : undefined
 
   return (
     <div
@@ -354,14 +362,13 @@ export function ModelPicker({
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        title={triggerTitle}
         className={cn(
           "flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
           triggerClassName
         )}
       >
-        <span className="truncate">
-          {formatModelSelection(models, selection)}
-        </span>
+        <span className="truncate">{triggerLabel}</span>
         {!pickerDisabled && (
           <ChevronDown className="size-3.5 shrink-0 opacity-60" />
         )}
