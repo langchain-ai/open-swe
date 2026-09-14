@@ -383,16 +383,25 @@ def _command_prompt_text(content: Any) -> str:
 
 
 def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
-    """Reconstruct typed image bodies from a command's message content blocks.
-
-    The client sends image blocks as ``{"type": "image", "base64", "mime_type",
-    "file_name"}`` (see the prompt bar). Rebuilding them lets
-    the shared ``_create_dashboard_thread_record`` validate size/type/model.
-    """
+    """Read inline image blocks for size, format, and model validation."""
     if not isinstance(content, list):
         return []
     images: list[DashboardImageBody] = []
     for block in content:
+        if isinstance(block, dict) and block.get("type") == "image_url":
+            image_url = block.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else image_url
+            if not isinstance(url, str):
+                raise HTTPException(422, "invalid image data")
+            header, separator, data = url.partition(",")
+            if (
+                not separator
+                or not header.startswith("data:image/")
+                or not header.endswith(";base64")
+            ):
+                raise HTTPException(422, "images must be embedded as base64 data URLs")
+            images.append(DashboardImageBody(base64=data, mimeType=header[5:-7]))
+            continue
         if not isinstance(block, dict) or block.get("type") != "image":
             continue
         data = block.get("base64")

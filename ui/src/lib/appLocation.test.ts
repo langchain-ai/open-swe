@@ -11,6 +11,9 @@ beforeEach(() => {
 describe("app location", () => {
   it.each([
     "/agents/thread-1?view=diff#latest",
+    "/assistant",
+    "/assistant?noProject=true",
+    "/assistant/thread-1",
     "/incidents",
     "/incidents?view=inactive",
     "/incidents/incident-1",
@@ -23,6 +26,7 @@ describe("app location", () => {
   it.each([
     "/my-settings",
     "/incidents-external",
+    "/assistant-external",
     "https://example.com/incidents",
   ])("ignores locations outside the app: %s", (href) => {
     rememberAppLocation("/agents/thread-1")

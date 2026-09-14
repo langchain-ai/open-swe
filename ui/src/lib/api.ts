@@ -120,6 +120,7 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
+  experimental_assistant_ui?: boolean | null
   login?: string
   email?: string
   default_model?: string
@@ -137,6 +138,7 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
+  experimental_assistant_ui?: boolean | null
   default_model: string
   reasoning_effort: string
   default_subagent_model?: string | null
