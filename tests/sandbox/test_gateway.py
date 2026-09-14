@@ -510,11 +510,26 @@ def test_gateway_configuration_summary_sanitizes_custom_endpoint(monkeypatch) ->
         "model_id": "openai:gpt-5.6-sol",
         "override_enabled": False,
         "resolution_reason": "no LangSmith Gateway environment default is set",
+        "inherited_override_enabled": False,
+        "inherited_resolution_reason": "no LangSmith Gateway environment default is set",
         "endpoint_kind": "custom_endpoint",
         "endpoint": "https://proxy.example:8443/v1",
         "credential_sources": ["OPENAI_API_KEY"],
         "restart_required": False,
     }
+
+
+def test_gateway_configuration_summary_reports_inherited_default_with_workspace_override(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
+
+    summary = gateway.gateway_configuration_summary(False, "anthropic:claude-opus-5")
+
+    assert summary["override_enabled"] is False
+    assert summary["resolution_reason"] == "workspace setting"
+    assert summary["inherited_override_enabled"] is True
+    assert summary["inherited_resolution_reason"] == "LANGSMITH_GATEWAY_ENABLED"
 
 
 def test_gateway_configuration_summary_reports_direct_provider_credential(monkeypatch) -> None:

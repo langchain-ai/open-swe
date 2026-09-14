@@ -105,18 +105,22 @@ def _sanitize_endpoint(value: str) -> str:
 def gateway_configuration_summary(team_value: bool | None, model_id: str) -> dict[str, Any]:
     """Safe metadata describing the effective endpoint for an administrator."""
     explicit = ENV.LANGSMITH_GATEWAY_ENABLED.optional()
+    if explicit is not None:
+        inherited_enabled = _env_bool(explicit)
+        inherited_reason = "LANGSMITH_GATEWAY_ENABLED"
+    elif ENV.LANGSMITH_GATEWAY_API_KEY.is_set():
+        inherited_enabled = True
+        inherited_reason = "LANGSMITH_GATEWAY_API_KEY is set"
+    else:
+        inherited_enabled = False
+        inherited_reason = "no LangSmith Gateway environment default is set"
+
     if team_value is not None:
         enabled = team_value
         reason = "workspace setting"
-    elif explicit is not None:
-        enabled = _env_bool(explicit)
-        reason = "LANGSMITH_GATEWAY_ENABLED"
-    elif ENV.LANGSMITH_GATEWAY_API_KEY.is_set():
-        enabled = True
-        reason = "LANGSMITH_GATEWAY_API_KEY is set"
     else:
-        enabled = False
-        reason = "no LangSmith Gateway environment default is set"
+        enabled = inherited_enabled
+        reason = inherited_reason
 
     provider = _provider_of(model_id)
     path = _GATEWAY_PROVIDER_PATHS.get(provider)
@@ -154,6 +158,8 @@ def gateway_configuration_summary(team_value: bool | None, model_id: str) -> dic
         "model_id": model_id,
         "override_enabled": enabled,
         "resolution_reason": reason,
+        "inherited_override_enabled": inherited_enabled,
+        "inherited_resolution_reason": inherited_reason,
         "endpoint_kind": endpoint_kind,
         "endpoint": endpoint,
         "credential_sources": credential_sources,

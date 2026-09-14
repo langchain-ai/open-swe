@@ -137,3 +137,11 @@ def dashboard_review_url(owner: str, repo: str, pr_number: int) -> str | None:
         f"{base_url}/agents/reviews/"
         f"{quote(owner, safe='')}/{quote(repo, safe='')}/{quote(str(pr_number), safe='')}"
     )
+
+
+def dashboard_incident_url(incident_id: str) -> str | None:
+    """Build the dashboard Incidents detail URL for an incident id."""
+    base_url = dashboard_base_url()
+    if not base_url or not incident_id:
+        return None
+    return f"{base_url}/incidents/{quote(incident_id, safe='')}"

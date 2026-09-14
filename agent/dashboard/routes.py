@@ -26,6 +26,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, ValidationError
 
+from agent.analytics.queries import usage_leaderboard
 from agent.config import ENV
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_instructions import (
@@ -34,7 +35,6 @@ from agent.dashboard.agent_instructions import (
     AgentInstructionsCreate,
     AgentInstructionsUpdate,
 )
-from agent.dashboard.agent_usage import list_agent_usage_leaderboard
 from agent.dashboard.enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
@@ -54,6 +54,7 @@ from agent.dashboard.environments import (
     slugify,
 )
 from agent.dashboard.feedback import feedback_router
+from agent.dashboard.incidents_api import router as incidents_router
 from agent.dashboard.notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -159,13 +160,11 @@ from agent.dashboard.skills import (
 )
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
-    TranscriptionSettingsUpdate,
     get_team_default_model,
     get_team_default_subagent_model,
     get_team_fable_enabled,
     get_team_gateway_enabled,
     get_team_settings,
-    update_team_transcription_model,
     upsert_team_settings,
 )
 from agent.dashboard.threads.api import (
@@ -237,7 +236,6 @@ from agent.dashboard.user_preferences import (
     get_user_preferences,
     set_user_preferences,
 )
-from agent.dashboard.voice import transcribe_audio
 from agent.dashboard.workspace_mcps import (
     MCPRoute,
     delete_workspace_mcp,
@@ -247,6 +245,7 @@ from agent.dashboard.workspace_mcps import (
 )
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
+from agent.incidents.document_api import router as incident_documents_router
 from agent.mcp import (
     MCPConnection,
     MCPConnectionPublic,
@@ -268,6 +267,14 @@ from agent.review.styles import (
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
+)
+from agent.slack.allowed_bots import (
+    ALLOWED_SLACK_BOTS,
+    AllowedSlackBot,
+    AllowSlackBot,
+    SlackBotOption,
+    allow_slack_bot,
+    list_slack_bots,
 )
 from agent.slack.oauth import (
     SLACK_STATE_COOKIE_NAME,
@@ -295,6 +302,8 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 router.include_router(feedback_router)
+router.include_router(incidents_router)
+router.include_router(incident_documents_router, prefix="/incidents/documents")
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
@@ -399,6 +408,10 @@ async def _filter_repo_models_for_user[RepoRecordT: _RepoScopedRecord](
 
 def _api_base_url() -> str:
     return dashboard_api_base_url()
+
+
+def _slack_base_url() -> str:
+    return (ENV.SLACK_PUBLIC_BASE_URL.get() or _api_base_url()).rstrip("/")
 
 
 def _frontend_base_url() -> str:
@@ -620,6 +633,7 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "is_admin": _session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
         "api_base_url": _api_base_url(),
+        "slack_base_url": _slack_base_url(),
     }
 
 
@@ -862,7 +876,7 @@ async def slack_login(
     """Start the Sign in with Slack flow to link the current GitHub account."""
     if not slack_oauth_configured():
         raise HTTPException(500, "Slack OAuth is not configured")
-    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
     nonce = new_state_nonce()
     state = issue_state(
         redirect_to=f"{_frontend_base_url()}/my-settings",
@@ -932,7 +946,7 @@ async def slack_callback(
 
 async def _verified_slack_identity(code: str) -> tuple[str, str]:
     """Resolve an authorization code to a Slack member id and verified email."""
-    redirect_uri = f"{_api_base_url()}/dashboard/api/slack/callback"
+    redirect_uri = f"{_slack_base_url()}/dashboard/api/slack/callback"
     identity = await fetch_slack_identity(await exchange_slack_code(code, redirect_uri))
     verify_team(identity)
     if not identity.email or not identity.email_verified:
@@ -962,6 +976,38 @@ async def slack_desktop_exchange(
     return {"connected": True}
 
 
+@router.get("/slack/bots")
+async def api_list_slack_bots(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[SlackBotOption]:
+    return await list_slack_bots()
+
+
+@router.get("/slack/allowed-bots")
+async def api_list_allowed_slack_bots(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> list[AllowedSlackBot]:
+    return await ALLOWED_SLACK_BOTS.search_all()
+
+
+@router.post("/slack/allowed-bots")
+async def api_allow_slack_bot(
+    body: AllowSlackBot,
+    admin: dict[str, Any] = _ADMIN_DEP,
+) -> AllowedSlackBot:
+    return await allow_slack_bot(body, admin)
+
+
+@router.delete("/slack/allowed-bots/{team_id}/{bot_id}")
+async def api_remove_allowed_slack_bot(
+    team_id: str,
+    bot_id: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, bool]:
+    await ALLOWED_SLACK_BOTS.delete(f"{team_id}:{bot_id}")
+    return {"ok": True}
+
+
 @router.get("/team-settings")
 async def api_get_team_settings(
     session: dict[str, Any] = _SESSION_DEP,
@@ -978,14 +1024,6 @@ async def api_get_gateway_configuration(
     if not isinstance(model_id, str):
         model_id, _ = await get_team_default_model("agent")
     return gateway_configuration_summary(await get_team_gateway_enabled(), model_id)
-
-
-@router.put("/team-settings/transcription")
-async def api_put_transcription_settings(
-    update: TranscriptionSettingsUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    return await update_team_transcription_model(update.transcription_model)
 
 
 @router.put("/team-settings")
@@ -1978,12 +2016,73 @@ async def api_agent_usage_leaderboard(
     limit: int = 10,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await list_agent_usage_leaderboard(
-        period=period,
-        limit=limit,
-        current_login=session["sub"],
-        current_email=session.get("email"),
-    )
+    from asyncpg import PostgresError
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from agent.database.analytics import configured
+
+    try:
+        if not configured():
+            raise HTTPException(503, "Usage analytics is unavailable on this deployment.")
+        return await usage_leaderboard(
+            period=period,
+            limit=limit,
+            current_login=session["sub"],
+            current_email=session.get("email"),
+            admin=_session_is_admin(session),
+        )
+    except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Usage analytics report unavailable",
+            extra={"analytics_error_type": type(exc).__name__},
+        )
+        raise HTTPException(503, "Usage analytics is unavailable on this deployment.") from exc
+
+
+@router.get("/analytics/pr-merge-rate-by-model")
+async def api_pr_merge_rate_by_model(
+    period: str | None = "30d",
+    maturity_days: int | None = Query(default=None, ge=1, le=365),
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    from asyncpg import PostgresError
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from agent.analytics.queries import pr_merge_rate_by_model
+    from agent.database.analytics import configured
+
+    try:
+        if not configured():
+            raise HTTPException(503, "PR analytics is unavailable on this deployment.")
+        return await pr_merge_rate_by_model(
+            period=period,
+            maturity_days=maturity_days,
+            admin=_session_is_admin(session),
+        )
+    except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "PR analytics report unavailable",
+            extra={"analytics_error_type": type(exc).__name__},
+        )
+        raise HTTPException(503, "PR analytics is unavailable on this deployment.") from exc
+
+
+@router.get("/analytics/readiness")
+async def api_analytics_readiness(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    from agent.database.analytics import readiness
+
+    return await readiness()
+
+
+@router.get("/analytics/outbox-status")
+async def api_analytics_outbox_status(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    from agent.analytics.outbox import outbox_status
+
+    return await outbox_status()
 
 
 @router.get("/schedules")
@@ -2496,13 +2595,6 @@ async def api_get_thread_pr_diff(
         session["sub"],
         email=session.get("email"),
     )
-
-
-@router.post("/voice/transcriptions")
-async def create_voice_transcription(
-    request: Request, session: dict[str, Any] = _SESSION_DEP
-) -> dict[str, str]:
-    return {"text": await transcribe_audio(request)}
 
 
 @router.post("/threads/{thread_id}/messages")

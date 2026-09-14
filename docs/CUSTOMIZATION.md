@@ -482,20 +482,6 @@ else:
 return create_deep_agent(tools=tools, ...)
 ```
 
-### Browser automation (Stagehand)
-
-The main agent can dynamically load `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close` to drive Chromium inside the task sandbox via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK. Because the browser shares the sandbox network namespace, it can test development servers on `localhost`. Static reads should still use `fetch_url`.
-
-The browser schemas appear in the `load_integration_tools` catalog only when the tools are available, and remain out of the model context until loaded. The tools require a LangSmith sandbox and a supported model credential. The real credential remains outside the sandbox and is injected by the sandbox egress proxy; only a placeholder is visible to sandbox processes.
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | Model key used by Stagehand. |
-| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Stagehand model; Anthropic and OpenAI are supported. |
-| `STAGEHAND_HEADLESS` | `true` | Run Chromium headless. |
-
-The sandbox snapshot must include Chromium and Stagehand, install `agent/resources/stagehand_runtime.py` at `/opt/open-swe/stagehand_runtime.py`, and set `STAGEHAND_LOCAL_CHROME_PATH` to the Chromium executable (usually `/usr/bin/chromium`).
-
 ---
 
 ## 4. Triggers

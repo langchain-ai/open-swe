@@ -37,6 +37,7 @@ from agent.dashboard.threads.summary import (
     _thread_is_busy,
     _thread_run_id,
     _thread_summary,
+    thread_source,
 )
 from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
@@ -387,6 +388,9 @@ async def admin_cancel_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
 
+    if thread_source(thread_metadata(thread)) == "incidents_agent":
+        raise HTTPException(404, "thread not found")
+
     if thread_metadata(thread).get("visibility", "public") != "public":
         _assert_thread_readable(thread_metadata(thread), login, email)
 
@@ -568,6 +572,11 @@ async def resolve_dashboard_thread(
                 "attention_reason": None,
             }
             await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            if resolved:
+                from agent.analytics.emitter import task_accepted, task_marked_complete
+
+                await task_marked_complete(thread_id, source="dashboard")
+                await task_accepted(thread_id, source="dashboard", actor_key=login)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001

@@ -1,10 +1,11 @@
 """Shared webhook dispatch and thread helpers."""
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -14,13 +15,13 @@ from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from agent.analytics.usage import update_agent_pr_usage_from_webhook
 from agent.config import ENV
 from agent.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
     resolve_login_from_email_async,
 )
-from agent.dashboard.agent_usage import update_agent_pr_usage_from_webhook
 from agent.dashboard.enabled_repos import is_review_repo_enabled
 from agent.dashboard.oauth import build_settings_url
 from agent.dashboard.options import (
@@ -530,8 +531,10 @@ async def upsert_agent_thread_metadata(
     title: str = "",
     source_context: SourceContext | None = None,
     environment: str | None = None,
+    slack_participant_user_ids: Collection[str] = (),
     visibility: str = "public",
     owner_login: str = "",
+    owner_type: str = "user",
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -541,6 +544,9 @@ async def upsert_agent_thread_metadata(
     config; the Agents UI lists threads by thread *metadata*, so we mirror the
     sender onto the thread's participants here. ``visibility`` and ``owner_login``
     are stamped once, when the thread is created, and never changed afterwards.
+    Slack events on an existing thread also pass ``slack_participant_user_ids`` so
+    every linked human in the Slack thread becomes an Open SWE participant of the
+    agent thread.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
     category = "interactive"
@@ -578,10 +584,33 @@ async def upsert_agent_thread_metadata(
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     existing_context = SourceContext.from_metadata(existing_meta)
+    if owner_type == "system" and existing_meta:
+        expected_bot = source_context.slack_thread if source_context else None
+        saved_bot = existing_context.slack_thread
+        if (
+            existing_meta.get("owner_type") != "system"
+            or existing_meta.get("visibility") != "public"
+            or expected_bot is None
+            or saved_bot is None
+            or (saved_bot.team_id, saved_bot.triggering_bot_id)
+            != (expected_bot.team_id, expected_bot.triggering_bot_id)
+        ):
+            return False
     sender_login = github_login or await resolve_login_from_email_async(user_email) or ""
     if sender_login:
         metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
             existing_meta.get(PARTICIPANT_LOGINS_KEY), sender_login
+        )
+    # Slack human senders with linked Open SWE accounts join the thread as
+    # participants on every event, so later conversations credit everyone.
+    slack_logins = await asyncio.gather(
+        *(login_for_slack_id(user_id) for user_id in slack_participant_user_ids)
+    )
+    resolved_slack_logins = [login for login in slack_logins if isinstance(login, str) and login]
+    if resolved_slack_logins:
+        metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
+            metadata.get(PARTICIPANT_LOGINS_KEY, existing_meta.get(PARTICIPANT_LOGINS_KEY)),
+            *resolved_slack_logins,
         )
     if user_email:
         metadata[PARTICIPANT_EMAILS_KEY] = merge_participants(
@@ -608,9 +637,9 @@ async def upsert_agent_thread_metadata(
         "visibility" not in existing_meta and existing_meta.get("created_at_ms") is None
     ):
         metadata["visibility"] = visibility
-        metadata["owner_type"] = "user"
+        metadata["owner_type"] = owner_type
         initiating_login = owner_login.strip() or sender_login.strip()
-        if initiating_login:
+        if initiating_login and owner_type == "user":
             metadata["owner_login"] = initiating_login
 
     try:
@@ -618,6 +647,18 @@ async def upsert_agent_thread_metadata(
             await langgraph_client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )
+            if owner_type == "system":
+                saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
+                saved_meta = saved.get("metadata") or {}
+                if any(
+                    saved_meta.get(key) != metadata.get(key)
+                    for key in (
+                        "owner_type",
+                        "visibility",
+                        "source_context",
+                    )
+                ):
+                    return False
         elif _pr_linked(existing_meta) or _pr_state_reset_for_user_activity(existing_meta):
             # A person is continuing the thread, so PR-driven resolution or the
             # "PRs closed" mark no longer applies. Only the PR webhook sets those,
@@ -1371,10 +1412,17 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
             continue
         if new_state == "merged":
+            from agent.analytics.emitter import task_marked_complete
+
+            await task_marked_complete(thread_id, source="github", auto=True)
             await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
             from agent.thread_feedback import schedule_pr_feedback
 
             await schedule_pr_feedback(thread_id, metadata, pr_url)
+        elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
+            from agent.analytics.emitter import task_rework
+
+            await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
 
 
 async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:

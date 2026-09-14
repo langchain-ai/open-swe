@@ -3,11 +3,13 @@
 import asyncio
 import hashlib
 from time import time_ns
+from typing import Literal, TypedDict, cast
 
 from fastapi import APIRouter
 from langgraph_sdk.client import LangGraphClient
 
 from agent.slack import webhook as service
+from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.client import SlackChannelContext
 from agent.slack.failures import (
     SlackRequestError,
@@ -41,6 +43,11 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
 
 router = APIRouter()
+
+
+class DuplicateIncidentResponse(TypedDict):
+    status: Literal["duplicate"]
+
 
 _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
 _MEMBERSHIP_SUBTYPES = frozenset(
@@ -248,7 +255,7 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
 @router.post("/webhooks/slack")
 async def slack_webhook(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> WebhookResponse | ChallengeResponse:
+) -> WebhookResponse | ChallengeResponse | DuplicateIncidentResponse:
     """Handle Slack Event API webhooks for app mentions."""
     body = await request.body()
     _verify_signature(request, body, "events")
@@ -271,6 +278,12 @@ async def slack_webhook(
     raw_event = payload.get("event")
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
+
+    from agent.incidents import channels as incidents
+
+    incident_response = await incidents.handle_slack_event(payload, background_tasks)
+    if incident_response is not None:
+        return cast(WebhookResponse | DuplicateIncidentResponse, incident_response)
 
     event_id = envelope.event_id
     team_id = envelope.team_id or event.team
@@ -365,9 +378,30 @@ async def slack_webhook(
     user_id = updated_message.user if isinstance(updated_message.user, str) else ""
     text = updated_message.text
     attachments = updated_message.attachments
-    if not (channel_id and event_ts and original_message_ts and thread_ts and user_id) or (
-        text is None
-    ):
+    allowed_bot = None
+    if event.is_from_bot or updated_message.is_from_bot:
+        if (
+            is_message_update
+            or event.type not in {"message", "app_mention"}
+            or event.subtype not in {"", "bot_message"}
+            or text is None
+            or not bot_user_id
+            or f"<@{bot_user_id}>" not in text
+            or user_id == bot_user_id
+            or (event.app_id and event.app_id == envelope.api_app_id)
+        ):
+            return ignored("Event from a bot")
+        allowed_bot = await resolve_allowed_slack_bot(
+            team_id,
+            updated_message.bot_id,
+            user_id=user_id,
+            app_id=updated_message.app_id,
+        )
+        if allowed_bot is None:
+            return ignored("Event from a bot")
+    if not (
+        channel_id and event_ts and original_message_ts and thread_ts and (user_id or allowed_bot)
+    ) or (text is None):
         return ignored("Missing channel/message fields")
     if is_message_update:
         previous_message = event.previous_message
@@ -393,7 +427,12 @@ async def slack_webhook(
 
     is_direct_message = not is_message_update and event.channel_type == "im" and bool(user_id)
     is_untagged_two_party_reply = False
-    if event.type != "app_mention" and not is_message_update and not in_code_channel:
+    if (
+        event.type != "app_mention"
+        and not is_message_update
+        and not in_code_channel
+        and allowed_bot is None
+    ):
         has_username_mention = bool(
             common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text
         )
@@ -429,9 +468,6 @@ async def slack_webhook(
         )
         if not should_handle_message:
             return ignored("Not an app mention, DM, or plan reply")
-
-    if event.is_from_bot or updated_message.is_from_bot:
-        return ignored("Event from a bot")
 
     if {event.subtype, updated_message.subtype} & _MEMBERSHIP_SUBTYPES:
         if in_code_channel and await common.claim_slack_event(event_id, channel_id, event_ts):
@@ -506,6 +542,8 @@ async def slack_webhook(
                     code_channel=in_code_channel,
                     reply_thread_ts=reply_thread_ts if in_code_channel else "",
                     team_id=team_id,
+                    triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
+                    triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
                 ),
                 repo,
             )

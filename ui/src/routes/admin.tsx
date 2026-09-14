@@ -2,6 +2,7 @@ import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
+import type { ReactNode } from "react"
 
 import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
@@ -28,9 +29,11 @@ import {
   slackManifestPlaceholdersRemain,
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
+import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { useRepos } from "@/lib/profile"
+import { IncidentSettings } from "@/features/incidents/IncidentSettings"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -65,16 +68,22 @@ function AdminPage() {
         )}
       />
 
-      <SlackIntegrationSection backendUrl={session.data.api_base_url} />
+      <SlackIntegrationSection
+        backendUrl={session.data.slack_base_url ?? session.data.api_base_url}
+      >
+        <AllowedSlackBotsSection />
+      </SlackIntegrationSection>
       <MCPConnectionsSection scope="workspace" />
 
       <LLMGatewaySection />
 
-      <DictationSection />
-
       <FableSection />
 
       <TriggerReviewSection />
+
+      <div id="incidents" className="scroll-mt-8">
+        <IncidentSettings />
+      </div>
 
       <RunningAgentsSection />
 
@@ -106,8 +115,10 @@ const SLACK_CODE_CHANNELS_STORAGE_KEY =
 
 export function SlackIntegrationSection({
   backendUrl,
+  children,
 }: {
   backendUrl?: string
+  children?: ReactNode
 }) {
   const [enabled, setEnabled] = useState(false)
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
@@ -149,7 +160,7 @@ export function SlackIntegrationSection({
   return (
     <SettingsSection
       title="Slack integration"
-      description="Select the Slack app manifest for this installation. This browser-only setting does not change backend behavior."
+      description="Configure Slack and choose which bots can start Open SWE runs."
     >
       <SettingsRow
         htmlFor="slack-code-channels"
@@ -186,6 +197,7 @@ export function SlackIntegrationSection({
               : "Copy manifest"}
         </Button>
       </div>
+      {children}
     </SettingsSection>
   )
 }
@@ -516,7 +528,7 @@ export function LLMGatewaySection() {
           label="LangSmith Gateway override"
           description={
             configuration.data
-              ? `Inherit currently resolves to ${configuration.data.override_enabled ? "enabled" : "disabled"} because ${configuration.data.resolution_reason}. Changes apply automatically to new model clients, usually within 60 seconds; environment changes require a backend restart.`
+              ? `Inherit currently resolves to ${configuration.data.inherited_override_enabled ? "enabled" : "disabled"} because ${configuration.data.inherited_resolution_reason}. Changes apply automatically to new model clients, usually within 60 seconds; environment changes require a backend restart.`
               : "Loading the effective deployment configuration…"
           }
           control={
@@ -585,96 +597,6 @@ export function LLMGatewaySection() {
           </p>
         </div>
       </details>
-      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
-    </SettingsSection>
-  )
-}
-
-const TRANSCRIPTION_MODELS = [
-  { value: "gpt-transcribe", label: "GPT Transcribe (recommended)" },
-  { value: "gpt-4o-transcribe", label: "GPT-4o Transcribe (legacy)" },
-  { value: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe (legacy)" },
-]
-
-function DictationSection() {
-  const qc = useQueryClient()
-  const settings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
-  })
-  const [error, setError] = useState<string | null>(null)
-  const [customModel, setCustomModel] = useState<string | null>(null)
-  const selectedModel = settings.data?.transcription_model ?? "gpt-transcribe"
-  const preset = TRANSCRIPTION_MODELS.some(
-    (model) => model.value === selectedModel
-  )
-  const save = useMutation({
-    mutationFn: api.saveTranscriptionModel,
-    onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved)
-      setError(null)
-    },
-    onError: (e: Error) => setError(e.message),
-  })
-
-  return (
-    <SettingsSection
-      title="Voice dictation"
-      description="Configure speech-to-text for the web and desktop message composer. Uses the same OpenAI API key and base URL as OpenAI LLMs."
-    >
-      <SettingsRow
-        label="Transcription model"
-        description="GPT Transcribe is OpenAI's recommended model for recorded speech."
-        control={
-          <Select
-            value={preset && customModel === null ? selectedModel : "custom"}
-            onValueChange={(model) => {
-              if (model === null) return
-              if (model === "custom")
-                setCustomModel(preset ? "" : selectedModel)
-              else {
-                setCustomModel(null)
-                save.mutate(model)
-              }
-            }}
-            disabled={!settings.data || save.isPending}
-          >
-            <SelectTrigger className="w-56">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TRANSCRIPTION_MODELS.map((model) => (
-                <SelectItem key={model.value} value={model.value}>
-                  {model.label}
-                </SelectItem>
-              ))}
-              <SelectItem value="custom">Custom model</SelectItem>
-            </SelectContent>
-          </Select>
-        }
-      />
-      {(!preset || customModel !== null) && (
-        <SettingsRow
-          label="Custom model ID"
-          control={
-            <div className="flex items-center gap-2">
-              <Input
-                className="w-56"
-                value={customModel ?? selectedModel}
-                onChange={(event) => setCustomModel(event.target.value)}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!customModel?.trim() || save.isPending}
-                onClick={() => customModel && save.mutate(customModel.trim())}
-              >
-                Save
-              </Button>
-            </div>
-          }
-        />
-      )}
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )

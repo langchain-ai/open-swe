@@ -26,7 +26,9 @@ describe("LLMGatewaySection", () => {
     vi.spyOn(api, "getGatewayConfiguration").mockResolvedValue({
       model_id: "openai:gpt-5.6-sol",
       override_enabled: false,
-      resolution_reason: "LANGSMITH_GATEWAY_ENABLED",
+      resolution_reason: "workspace setting",
+      inherited_override_enabled: true,
+      inherited_resolution_reason: "LANGSMITH_GATEWAY_ENABLED",
       endpoint_kind: "custom_endpoint",
       endpoint: "https://proxy.example/v1",
       credential_sources: ["OPENAI_API_KEY"],
@@ -43,7 +45,7 @@ describe("LLMGatewaySection", () => {
     )
 
     expect(
-      await screen.findByText(/Inherit currently resolves to disabled/)
+      await screen.findByText(/Inherit currently resolves to enabled/)
     ).toBeTruthy()
     expect(
       screen.getByText(/Custom endpoint — https:\/\/proxy.example\/v1/)

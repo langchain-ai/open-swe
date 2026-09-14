@@ -11,7 +11,7 @@ the agent itself is stateless.
 import hashlib
 import logging
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -45,6 +45,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from agent.analytics.usage import record_agent_invocation_usage
 from agent.credential_scope import private_credential_login
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
@@ -55,7 +56,6 @@ from agent.dashboard.agent_overrides import (
     profile_model_routing_enabled,
     resolve_github_login,
 )
-from agent.dashboard.agent_usage import record_agent_invocation_usage
 from agent.dashboard.environments import (
     resolve_environment,
 )
@@ -74,7 +74,9 @@ from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
+    get_team_fast_alt_probability,
     get_team_model_routing_enabled,
+    get_team_settings,
 )
 from agent.dashboard.user_mappings import email_for_login
 from agent.dashboard.user_mcps import user_mcp_source
@@ -110,6 +112,7 @@ from agent.middleware import (
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
+    ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
@@ -120,6 +123,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.model_selection import ModelSelectionState
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
@@ -150,7 +154,6 @@ from agent.sandboxes.state import (
 )
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
-from agent.tool_loaders.stagehand_browser import load_browser_tools
 from agent.tools import (
     approve_plan,
     background_execute,
@@ -171,6 +174,7 @@ from agent.tools import (
     list_threads,
     manage_baby_sit,
     manage_code_channel,
+    manage_incident,
     manage_thread,
     mark_question_answered,
     notify_automation_channel,
@@ -194,6 +198,7 @@ from agent.tools import (
     slack_read_thread_messages,
     slack_start_new_thread,
     slack_thread_reply,
+    submit_thread_feedback,
     trigger_automation,
     update_automation,
     web_search,
@@ -338,10 +343,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
-        "browser_act",
-        "browser_extract",
-        "browser_navigate",
-        "browser_observe",
         "create_sandbox_service_url",
         "http_request",
         "manage_baby_sit",
@@ -361,6 +362,21 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "update_automation",
         "trigger_automation",
         "delete_automation",
+    }
+)
+
+# Automatic incident turns are triggered by whatever lands in a public channel, so the
+# prompt cannot be the only boundary: they get the plan-mode research toolset and no
+# Slack posting, PR, HTTP, delegation, or incident-control tools. record_incident_report
+# posts for them.
+# An authorized responder's explicit request restores the normal toolset.
+INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = PLAN_MODE_EXCLUDED_TOOLS | frozenset(
+    {
+        "manage_code_channel",
+        "manage_incident",
+        "slack_add_reaction",
+        "slack_attach_html",
+        "slack_thread_reply",
     }
 )
 
@@ -398,10 +414,14 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
     return name.startswith("slack_") or name in {
         "get_thread",
         "manage_code_channel",
+        "manage_incident",
         "list_threads",
         "manage_thread",
         "notify_automation_channel",
+        "read_incident",
         "read_user_settings",
+        "record_incident_report",
+        "search_incidents",
     }
 
 
@@ -414,6 +434,7 @@ def _general_purpose_subagent(
     sandbox_file_downloads: bool = False,
     offloading: ConversationOffloadingMiddleware | None = None,
     workspace_skills: WorkspaceSkillsMiddleware | None = None,
+    incident_middleware: AgentMiddleware | None = None,
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -432,6 +453,7 @@ def _general_purpose_subagent(
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),
                 *([offloading] if offloading else []),
@@ -540,6 +562,10 @@ async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     )
 
 
+async def _cached_team_settings() -> dict[str, Any]:
+    return await ttl_cache.cached("team:settings", 60, get_team_settings)
+
+
 async def _cached_agent_routing_models() -> dict[str, tuple[str, str]]:
     return await ttl_cache.cached(
         "team:agent-routing-models",
@@ -599,7 +625,7 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
     """Return whether the run has trusted Slack source context."""
-    if cfg.source not in {"slack", "schedule"} or cfg.slack_thread is None:
+    if cfg.source not in {"slack", "schedule", "incidents_agent"} or cfg.slack_thread is None:
         return False
     return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
 
@@ -635,6 +661,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         draft_prs: bool,
         plan_mode: bool,
         admin_environments: bool,
+        model_selection: ModelSelectionMiddleware | None = None,
+        routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
     ) -> None:
         self._thread_id = thread_id
@@ -652,6 +680,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
         self._admin_environments = admin_environments
+        self._model_selection = model_selection
+        self._routing_defaults = dict(routing_defaults or {})
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
@@ -668,7 +698,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     @staticmethod
-    def _sender_context_messages(state: PrepareRunState, sender_context: str) -> list[Any]:
+    def _sender_context_messages(
+        state: PrepareRunState, sender_context: str, *, sender_id: str | None = None
+    ) -> list[Any]:
         """Sender context as its own message, appended after the run's input.
 
         Splicing it into the triggering message rewrote history: that message is
@@ -681,15 +713,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
         ):
             return []
-        sender_id = next(
-            (
-                sender_id
-                for candidate in reversed(state.get("messages") or [])
-                if isinstance(candidate, HumanMessage)
-                and (sender_id := message_sender_id(candidate.content, kind="human")) is not None
-            ),
-            None,
-        )
+        if sender_id is None:
+            sender_id = next(
+                (
+                    candidate_id
+                    for candidate in reversed(state.get("messages") or [])
+                    if isinstance(candidate, HumanMessage)
+                    and (candidate_id := message_sender_id(candidate.content, kind="human"))
+                    is not None
+                ),
+                None,
+            )
         if sender_id is None:
             return []
         identity: SystemIdentity = {
@@ -776,27 +810,43 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 _resolve_user_custom_instructions(self._credential_login),
                 _thread_participant_identities(self._thread_id),
             )
+            attribution_model_id = self._model_id
+            attribution_effort = self._effort
+            attribution_route = None
+            if self._model_selection is not None:
+                attribution_route = await self._model_selection.select_route(
+                    cast(ModelSelectionState, state), plan_mode=self._plan_mode
+                )
+                attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
             sender_context = construct_sender_context(
                 triggering_user_identity,
                 user_custom_instructions=sender_instructions,
                 draft_prs=self._draft_prs,
                 thread_url=dashboard_thread_url(self._thread_id),
-                model_id=self._model_id,
-                reasoning_effort=self._effort,
+                model_id=attribution_model_id,
+                reasoning_effort=attribution_effort,
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
                 participant_identities=participant_identities,
             )
-        sender_messages = self._sender_context_messages(state, sender_context)
+        bot_id = (
+            cfg.slack_thread.triggering_bot_id
+            if self._source == "slack" and cfg.slack_thread
+            else ""
+        )
+        sender_messages = self._sender_context_messages(
+            state, sender_context, sender_id=f"system:slack-bot-{bot_id}" if bot_id else None
+        )
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
                     thread_id=self._thread_id,
                     metadata={
                         "agent_kind": "agent",
-                        "model": self._model_id,
-                        "effort": self._effort,
+                        "model": attribution_model_id,
+                        "effort": attribution_effort,
                         "source": self._source,
                         "plan_mode": self._plan_mode,
+                        **({"model_route": attribution_route} if attribution_route else {}),
                     },
                 )
                 if cfg.invocation_id:
@@ -804,10 +854,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         invocation_id=cfg.invocation_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
+                        github_user_id=cfg.github_user_id,
                         user_email=self._user_email,
                         model_id=self._model_id,
                         effort=self._effort,
                         source=self._source,
+                        repository=cfg.repo_full_name or None,
                     )
         except Exception:
             logger.debug(
@@ -817,6 +869,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             **({"messages": sender_messages} if sender_messages else {}),
+            **(
+                {"model_route": attribution_route}
+                if attribution_route and not self._plan_mode
+                else {}
+            ),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),
@@ -856,6 +913,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(bindable_config(config))
 
+    from agent.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
+
+    incident_session: IncidentSession | None = None
+    if cfg.source == "incidents_agent":
+        incident_session = await load_incident_session(config)
+        cfg.slack_thread = incident_session.slack_thread
+        configurable["slack_thread"] = cfg.slack_thread.dump()
     profile_login = resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
@@ -900,6 +964,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             "balanced": default_model_pair(),
             "performance": default_model_pair(),
         }
+        fast_alt_probability = 0.0
         title_defaults = team_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
@@ -921,6 +986,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
                 _cached_fable_enabled(),
             )
+            fast_alt_probability = get_team_fast_alt_probability(await _cached_team_settings())
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
@@ -1105,6 +1171,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     slack_tools = [
         manage_code_channel,
+        manage_incident,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
@@ -1142,12 +1209,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         report_platform_issue,
         schedule_thread_wakeup,
         manage_code_channel,
+        manage_incident,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
+        submit_thread_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
     ]
     if credential_login is None:
@@ -1160,6 +1229,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    incident_automatic = incident_session is not None and incident_session.explicit_request is None
+    if incident_session is not None:
+        static_tools.extend(incident_session.tools)
+    if incident_automatic:
+        static_tools = [
+            tool
+            for tool in static_tools
+            if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+        ]
     static_tools = apply_tool_descriptions(static_tools)
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
@@ -1171,10 +1249,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "MCPs": mcp_tools,
         "Notion": notion_tools,
     }
-    if not stop_summary_mode and not local_run:
-        browser_tools = load_browser_tools()
-        if browser_tools:
-            integration_tool_groups["Browser"] = browser_tools
     if integration_tool_groups:
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
@@ -1210,7 +1284,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-    model_selection_middleware: list[Any] = []
+    model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
         routing_models = {
             route: _make_model_or_defer(
@@ -1224,11 +1298,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             )
             for route, (routed_model_id, effort) in routing_defaults.items()
         }
-        model_selection_middleware.append(
-            ModelSelectionMiddleware(
-                routing_models,
-                routing_models["fast"],
-            )
+        model_selection = ModelSelectionMiddleware(
+            routing_models,
+            routing_models["fast"],
+            route_model_ids={
+                route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
+            },
+            fast_alt_probability=fast_alt_probability,
+            thread_id=thread_id,
         )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
@@ -1238,7 +1315,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     subagent_tools = [
         tool
         for tool in static_tools
-        if tool is not background_execute and tool is not background_task
+        if tool is not background_execute
+        and tool is not background_task
+        and tool is not submit_thread_feedback
     ]
     title_model = _make_model_or_defer(
         title_model_id,
@@ -1263,6 +1342,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
                 offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
+                incident_middleware=IncidentMiddleware(incident_session)
+                if incident_session is not None
+                else None,
             ),
         ],
         skills=skill_sources,
@@ -1290,16 +1372,27 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
                     admin_environments=admin_thread,
+                    model_selection=model_selection,
+                    routing_defaults=routing_defaults,
                 ),
+                *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
                 *([workspace_skills] if workspace_skills else []),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
-                ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
+                ValidateImageReadsMiddleware(),
+                ModelCallLimitMiddleware(
+                    run_limit=incident_session.policy.max_model_calls
+                    if incident_session is not None
+                    else MODEL_CALL_RECURSION_LIMIT,
+                    exit_behavior="end",
+                ),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(
                     excluded=(
                         STOP_SUMMARY_EXCLUDED_TOOLS
                         if stop_summary_mode
+                        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+                        if incident_automatic
                         else DEEP_AGENT_EXCLUDED_TOOLS
                     )
                 ),
@@ -1319,7 +1412,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 TimeoutWrapupMiddleware(),
                 notify_step_limit_reached,
                 record_run_usage,
-                *model_selection_middleware,
+                *([model_selection] if model_selection else []),
                 *fallback_middleware,
                 PlanModeMiddleware(
                     excluded=PLAN_MODE_EXCLUDED_TOOLS | frozenset(tool.name for tool in mcp_tools),

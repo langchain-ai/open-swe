@@ -87,7 +87,6 @@ export function AgentsHome({
     persistModelSelection(next, session.data?.login ?? "")
   }
   const [planMode, setPlanMode] = useState(false)
-  const [adminThread, setAdminThread] = useState(false)
   const cloudEnabled = Boolean(session.data)
   const preferences = useQuery({
     queryKey: ["myPreferences"],
@@ -454,7 +453,6 @@ export function AgentsHome({
     if (repoOverride === null) configurable.repo_explicitly_none = true
     configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
-    if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
 
     const handleCloudSubmitError = (error: unknown) => {
@@ -580,12 +578,6 @@ export function AgentsHome({
             onEnvironmentChange={
               !optimisticDraftThread && runTarget === "cloud"
                 ? setEnvironmentOverride
-                : undefined
-            }
-            adminThread={adminThread}
-            onAdminThreadChange={
-              runTarget === "cloud" && session.data?.is_admin
-                ? setAdminThread
                 : undefined
             }
             skills={skills.data}
