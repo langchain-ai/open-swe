@@ -1,8 +1,9 @@
-const LEGACY_BOT_SCOPES = [
+const BASE_BOT_SCOPES = [
   "reactions:write",
   "app_mentions:read",
   "channels:history",
   "channels:read",
+  "channels:join",
   "chat:write",
   "files:write",
   "groups:history",
@@ -17,7 +18,15 @@ const LEGACY_BOT_SCOPES = [
   "users:read.email",
 ]
 
-const LEGACY_BOT_EVENTS = ["app_mention", "message.im", "message.mpim"]
+const BASE_BOT_EVENTS = [
+  "app_mention",
+  "message.im",
+  "message.mpim",
+  "message.channels",
+  "channel_created",
+  "channel_rename",
+  "channel_archive",
+]
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
 
@@ -65,14 +74,14 @@ export function slackAppManifest(
       scopes: {
         bot: codeChannelsEnabled
           ? [
-              ...LEGACY_BOT_SCOPES,
+              ...BASE_BOT_SCOPES,
               "code_channels:manage",
               "files:read",
               // conversations.invite, for public and private channels.
               "channels:manage",
               "groups:write",
             ]
-          : LEGACY_BOT_SCOPES,
+          : BASE_BOT_SCOPES,
       },
     },
     settings: {
@@ -80,15 +89,12 @@ export function slackAppManifest(
         request_url: `${backendUrl}/webhooks/slack`,
         bot_events: codeChannelsEnabled
           ? [
-              "app_mention",
+              ...BASE_BOT_EVENTS,
               "agent_session_stopped",
               "code_channel_action",
-              "message.channels",
               "message.groups",
-              "message.im",
-              "message.mpim",
             ]
-          : LEGACY_BOT_EVENTS,
+          : BASE_BOT_EVENTS,
       },
       interactivity: {
         is_enabled: true,

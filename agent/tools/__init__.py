@@ -24,6 +24,7 @@ _TOOL_MODULES = {
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
     "manage_code_channel": "agent.slack.tools.manage_code_channel",
+    "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
     "mark_question_answered": ".mark_question_answered",
     "notify_automation_channel": ".notify_automation_channel",
@@ -83,6 +84,7 @@ __all__ = [
     "list_threads",
     "manage_baby_sit",
     "manage_code_channel",
+    "manage_incident",
     "manage_thread",
     "mark_question_answered",
     "notify_automation_channel",
@@ -123,6 +125,7 @@ __all__ = [
 if TYPE_CHECKING:
     from agent.github.tools.read_repo_file import read_repo_file
     from agent.github.tools.search_repo_code import search_repo_code
+    from agent.incidents.tools import manage_incident
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel
