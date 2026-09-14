@@ -19,6 +19,7 @@ from agent.dashboard.agent_overrides import resolve_login_from_email_async
 from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.plan_store import get_plan_content, list_plan_comments
+from agent.dashboard.schedules import authorized_admin_schedule, get_agent_schedule
 from agent.dashboard.threads.api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -38,6 +39,7 @@ from agent.dashboard.workflow_approval import (
 )
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
+from agent.run_config import RunConfig
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.utils.dashboard_links import (
@@ -90,6 +92,7 @@ class _Actor:
     login: str
     email: str | None
     name: str
+    admin_override: bool | None = None
 
     @property
     def session(self) -> dict[str, Any]:
@@ -97,6 +100,8 @@ class _Actor:
 
     @property
     def admin(self) -> bool:
+        if self.admin_override is not None:
+            return self.admin_override
         return is_admin(self.email, login=self.login)
 
 
@@ -108,9 +113,43 @@ def _config() -> dict[str, Any]:
     return as_json_object(config)
 
 
+async def _schedule_actor(configurable: Mapping[str, Any]) -> _Actor | None:
+    """Resolve a scheduled run's actor to the automation's saved creator.
+
+    Scheduled runs intentionally carry no personal identity in their config —
+    they execute with workspace credentials — so the schedule record's
+    ``created_by`` login is the only verified actor available.
+    """
+    schedule_id = configurable.get("schedule_id")
+    if (
+        configurable.get("source") != "schedule"
+        or not isinstance(schedule_id, str)
+        or not schedule_id
+    ):
+        return None
+    record = await get_agent_schedule(schedule_id)
+    if not record:
+        return None
+    login = record.get("created_by")
+    if not isinstance(login, str) or not login.strip():
+        return None
+    login = login.strip()
+    email_value = record.get("user_email")
+    email = email_value.strip() if isinstance(email_value, str) and email_value.strip() else None
+    try:
+        await enforce_github_login_gate(login)
+    except HTTPException:
+        return None
+    admin = await authorized_admin_schedule(RunConfig.parse(configurable)) is not None
+    return _Actor(login=login, email=email, name=login, admin_override=admin)
+
+
 async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     config = _config()
     configurable = as_json_object(config.get("configurable"))
+    schedule_actor = await _schedule_actor(configurable)
+    if schedule_actor is not None:
+        return schedule_actor
     email_value = configurable.get("user_email")
     email = email_value.strip() if isinstance(email_value, str) and email_value.strip() else None
     login_value = configurable.get("github_login")
