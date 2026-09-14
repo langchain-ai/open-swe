@@ -97,7 +97,6 @@ export function UsageAnalytics({
 
   return (
     <>
-      <AnalyticsCoverage reports={metadata} />
       <PRMergeRateSection report={report} />
 
       <SettingsSection
@@ -182,11 +181,7 @@ export function UsageAnalytics({
           </div>
         )}
       </SettingsSection>
-      {!leaderboard.isError && leaderboard.data?.generated_at_ms ? (
-        <p className="text-right text-xs text-muted-foreground">
-          Updated {formatTime(leaderboard.data.generated_at_ms)}
-        </p>
-      ) : null}
+      <AnalyticsCoverage reports={metadata} />
     </>
   )
 }
@@ -194,31 +189,72 @@ export function UsageAnalytics({
 function AnalyticsCoverage({ reports }: { reports: AnalyticsMetadata[] }) {
   if (!reports.length) return null
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
+  const hasPendingEvents = reports.some((data) => data.has_pending_events)
+  const hasFailedEvents = reports.some((data) => data.has_failed_events)
+  const status = hasFailedEvents
+    ? {
+        label: "Analytics need attention",
+        description:
+          "Some events could not be processed. Reports may be incomplete.",
+        color: "bg-destructive",
+      }
+    : hasPendingEvents
+      ? {
+          label: "Analytics are updating",
+          description:
+            "New activity is still being processed. No action needed.",
+          color: "bg-amber-500",
+        }
+      : {
+          label: "Analytics are up to date",
+          description: latest.last_processed_at
+            ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}.`
+            : "No events have been processed yet.",
+          color: "bg-emerald-500",
+        }
+
   return (
     <div
-      className="space-y-1 text-xs text-muted-foreground"
+      className="mt-6 border-t border-border pt-4 text-xs text-muted-foreground"
       role="status"
       aria-label="Analytics coverage"
     >
-      <p>
-        Reporting since{" "}
-        <time dateTime={latest.reporting_cutover_at}>
-          {new Date(latest.reporting_cutover_at).toLocaleString()}
-        </time>
-        .
-      </p>
-      <p>
-        {latest.last_processed_at
-          ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}. `
-          : "No events have been processed yet. "}
-        {reports.some((data) => data.has_pending_events)
-          ? "Some captured events are still waiting to be processed. "
-          : ""}
-        {reports.some((data) => data.has_failed_events)
-          ? "Some events could not be processed. Reports may be incomplete. "
-          : ""}
-        Reports checked {new Date(latest.as_of).toLocaleString()}.
-      </p>
+      <div className="flex items-start gap-2">
+        <span
+          aria-hidden="true"
+          className={`mt-1.5 size-2 shrink-0 rounded-full ${status.color}`}
+        />
+        <div className="min-w-0">
+          <p className="font-medium text-foreground">{status.label}</p>
+          <p className="mt-0.5">{status.description}</p>
+          <details className="mt-2">
+            <summary className="cursor-pointer rounded-sm text-foreground underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+              View coverage details
+            </summary>
+            <div className="mt-2 space-y-1">
+              <p>
+                Reporting since{" "}
+                <time dateTime={latest.reporting_cutover_at}>
+                  {new Date(latest.reporting_cutover_at).toLocaleString()}
+                </time>
+                .
+              </p>
+              <p>
+                {latest.last_processed_at
+                  ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}. `
+                  : "No events have been processed yet. "}
+                {hasPendingEvents
+                  ? "Some captured events are still waiting to be processed. "
+                  : ""}
+                {hasFailedEvents
+                  ? "Some events could not be processed. Reports may be incomplete. "
+                  : ""}
+                Reports checked {new Date(latest.as_of).toLocaleString()}.
+              </p>
+            </div>
+          </details>
+        </div>
+      </div>
     </div>
   )
 }
@@ -602,13 +638,6 @@ function initialsFor(name: string): string {
   const second = parts[1]
   if (!second) return first.slice(0, 2).toUpperCase()
   return `${first[0] ?? ""}${second[0] ?? ""}`.toUpperCase()
-}
-
-function formatTime(value: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(value)
 }
 
 function formatNumber(value: number): string {

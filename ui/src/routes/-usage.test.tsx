@@ -97,6 +97,8 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   const query = vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
   const client = mountReport()
   expect(await screen.findByText(/No PRs have been recorded/)).toBeTruthy()
+  expect(screen.getByText("Analytics are updating")).toBeTruthy()
+  fireEvent.click(screen.getByText("View coverage details"))
   expect(screen.getByText(/still waiting to be processed/)).toBeTruthy()
   expect(screen.getByText(/Reporting since/)).toBeTruthy()
   expect(
@@ -129,8 +131,11 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   })
   await act(() => client.invalidateQueries())
   expect(await screen.findByText("example-model")).toBeTruthy()
-  expect(screen.queryByText(/still waiting to be processed/)).toBeNull()
-  expect(screen.getByText(/Last event processed/)).toBeTruthy()
+  expect(screen.getByText("Analytics are up to date")).toBeTruthy()
+  expect(
+    screen.getByLabelText("Analytics coverage").querySelector("details")?.open
+  ).toBe(true)
+  expect(screen.getAllByText(/Last event processed/).length).toBeGreaterThan(0)
   client.clear()
 })
 
@@ -143,7 +148,9 @@ it("offers recovery from unavailability without claiming an empty or suppressed 
   expect(
     screen.queryByText(/No PRs have been recorded|too small to show/)
   ).toBeNull()
-  expect(screen.getAllByLabelText("Analytics coverage")).toHaveLength(1)
+  expect(
+    screen.queryByRole("status", { name: "Analytics coverage" })
+  ).toBeTruthy()
 
   query.mockResolvedValue({
     ...captured,
@@ -171,7 +178,10 @@ it("keeps failed delivery visible when all PR groups are suppressed", async () =
   })
   const client = mountReport()
   expect(await screen.findByText(/too small to show/)).toBeTruthy()
-  expect(screen.getByText(/Some events could not be processed/)).toBeTruthy()
+  expect(screen.getByText("Analytics need attention")).toBeTruthy()
+  expect(
+    screen.getAllByText(/Some events could not be processed/).length
+  ).toBeGreaterThan(0)
   expect(screen.queryByRole("table")).toBeNull()
   expect(screen.queryByText(/No PRs have been recorded/)).toBeNull()
   client.clear()
@@ -200,7 +210,9 @@ it("distinguishes unavailable usage from empty usage and recovers without duplic
   })
   fireEvent.click(screen.getByRole("button", { name: "Retry usage analytics" }))
   expect(await screen.findByText(/No Open SWE Agent usage/)).toBeTruthy()
-  expect(screen.getAllByLabelText("Analytics coverage")).toHaveLength(1)
+  expect(screen.getByLabelText("Analytics coverage")).toBeTruthy()
+  expect(screen.getByText("Analytics are updating")).toBeTruthy()
+  fireEvent.click(screen.getByText("View coverage details"))
   expect(screen.getByText(/Reporting since/)).toBeTruthy()
   expect(screen.getByText(/still waiting to be processed/)).toBeTruthy()
   expect(screen.getByText("Reviewed PRs")).toBeTruthy()
