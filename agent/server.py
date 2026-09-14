@@ -74,7 +74,9 @@ from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
+    get_team_fast_alt_probability,
     get_team_model_routing_enabled,
+    get_team_settings,
 )
 from agent.dashboard.user_mappings import email_for_login
 from agent.dashboard.user_mcps import user_mcp_source
@@ -560,6 +562,10 @@ async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     )
 
 
+async def _cached_team_settings() -> dict[str, Any]:
+    return await ttl_cache.cached("team:settings", 60, get_team_settings)
+
+
 async def _cached_agent_routing_models() -> dict[str, tuple[str, str]]:
     return await ttl_cache.cached(
         "team:agent-routing-models",
@@ -958,6 +964,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             "balanced": default_model_pair(),
             "performance": default_model_pair(),
         }
+        fast_alt_probability = 0.0
         title_defaults = team_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
@@ -979,6 +986,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
                 _cached_fable_enabled(),
             )
+            fast_alt_probability = get_team_fast_alt_probability(await _cached_team_settings())
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
@@ -1296,6 +1304,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             route_model_ids={
                 route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
             },
+            fast_alt_probability=fast_alt_probability,
+            thread_id=thread_id,
         )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
