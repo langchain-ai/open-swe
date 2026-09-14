@@ -8,7 +8,7 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote, urlparse
 
 import httpx2
@@ -20,7 +20,11 @@ from starlette.requests import HTTPConnection
 from agent.config import ENV
 from agent.github.org_membership import is_user_active_org_member
 from agent.github.token_auth import bearer_github_token
-from agent.utils.dashboard_links import dashboard_base_url
+from agent.utils.dashboard_links import (
+    dashboard_api_base_url,
+    dashboard_base_url,
+    dashboard_is_same_origin,
+)
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -543,3 +547,25 @@ async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | No
                 if primary:
                     email = primary.get("email")
     return user, email
+
+
+def frontend_base_url() -> str:
+    v = dashboard_base_url()
+    if not v:
+        raise HTTPException(500, "DASHBOARD_BASE_URL not configured")
+    return v
+
+
+def cookie_security() -> tuple[bool, Literal["lax", "none"]]:
+    """Cookie ``secure``/``samesite`` flags derived from where the dashboard is served.
+
+    On the API's own origin (the bundled dashboard, or local dev) the session
+    cookie is ``SameSite=Lax``, ``Secure`` only over HTTPS since ``Secure``
+    cookies are rejected on ``http://localhost``. A dashboard on another origin
+    (the split deployment) needs ``Secure; SameSite=None`` for the browser to
+    send the cookie cross-site.
+    """
+    secure = dashboard_api_base_url().startswith("https://")
+    if not secure or dashboard_is_same_origin():
+        return secure, "lax"
+    return True, "none"
