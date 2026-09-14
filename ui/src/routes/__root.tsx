@@ -13,6 +13,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 
 import appCss from "../styles.css?url"
 import type { QueryClient } from "@tanstack/react-query"
+import { DebugSnapshotHotkey } from "@/components/DebugSnapshotHotkey"
 import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { ThemeSync } from "@/lib/ThemeSync"
@@ -88,6 +89,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <ThemeSync />
         <QueryClientProvider client={queryClient}>
           <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+          <DebugSnapshotHotkey />
           {import.meta.env.VITE_DEVTOOLS !== "false" && (
             <>
               <TanStackDevtools
