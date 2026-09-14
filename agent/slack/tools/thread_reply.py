@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Mapping
 from typing import Annotated, Any
 
@@ -22,6 +23,8 @@ from agent.slack.orphan import (
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
+
+logger = logging.getLogger(__name__)
 
 
 async def slack_thread_reply(
@@ -116,6 +119,9 @@ async def _already_moved_to_dashboard(client: LangGraphClient, thread_id: str | 
     try:
         thread = await client.threads.get(thread_id)
     except Exception:
+        logger.exception(
+            "Could not check whether the thread left Slack", extra={"agent_thread_id": thread_id}
+        )
         return False
     return slack_thread_detached(thread_metadata(thread))
 

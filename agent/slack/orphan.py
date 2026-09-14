@@ -6,7 +6,6 @@ dashboard so the rest of the conversation has somewhere to go.
 """
 
 import logging
-from collections.abc import Mapping
 
 from langgraph_sdk.client import LangGraphClient
 
@@ -19,15 +18,13 @@ from agent.slack.client import (
 from agent.source_context import SourceContext
 from agent.store import now_iso
 from agent.utils.dashboard_links import dashboard_thread_url
-from agent.utils.json_types import thread_metadata
+from agent.utils.json_types import JsonObject, thread_metadata
 
 logger = logging.getLogger(__name__)
 
 
-def slack_thread_detached(metadata: Mapping[str, object] | None) -> bool:
+def slack_thread_detached(metadata: JsonObject) -> bool:
     """Whether this thread has already been moved off Slack."""
-    if not isinstance(metadata, Mapping):
-        return False
     return bool(metadata.get(SLACK_DETACHED_AT_KEY)) and (
         SourceContext.from_metadata(metadata).slack_thread is None
     )
