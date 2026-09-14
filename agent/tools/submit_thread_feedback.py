@@ -39,17 +39,17 @@ async def submit_thread_feedback(
         record.rating = rating
         record.comment = normalized_comment
         await feedback_store().put(cfg.thread_id, record)
-    exported = await create_langsmith_thread_feedback(
-        cfg.thread_id,
-        "rating",
-        score=1.0 if rating == "good" else 0.0,
-        comment=normalized_comment or None,
-        source_info={
-            "source": "agent_thread_feedback_tool",
-            "run_id": run_id,
-            **({"model_route": route} if route else {}),
-        },
-    )
+        exported = await create_langsmith_thread_feedback(
+            cfg.thread_id,
+            "rating",
+            score=1.0 if rating == "good" else 0.0,
+            comment=normalized_comment or None,
+            source_info={
+                "source": "agent_thread_feedback_tool",
+                "run_id": run_id,
+                **({"model_route": route} if route else {}),
+            },
+        )
     return ThreadFeedbackResult(
         status="completed",
         rating=rating,
