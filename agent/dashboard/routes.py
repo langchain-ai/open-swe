@@ -1600,8 +1600,7 @@ async def api_my_pull_request_details(
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     async with github_client(token=token) as client:
         return await load_open_pull_request(
-            client,
-            {"repository_url": f"https://api.github.com/repos/{owner}/{repo}", "number": number},
+            client, {"repo_full_name": f"{owner}/{repo}", "number": number}
         )
 
 

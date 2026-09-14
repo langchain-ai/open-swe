@@ -479,11 +479,13 @@ async def load_open_pull_request(
         return None
     repository_url = item.get("repository_url")
     prefix = f"{GITHUB_API_BASE}/repos/"
-    full_name = (
-        repository_url.removeprefix(prefix)
-        if isinstance(repository_url, str) and repository_url.startswith(prefix)
-        else ""
-    )
+    full_name = item.get("repo_full_name")
+    if not isinstance(full_name, str):
+        full_name = (
+            repository_url.removeprefix(prefix)
+            if isinstance(repository_url, str) and repository_url.startswith(prefix)
+            else ""
+        )
     identity = pull_request_identity({"repo_full_name": full_name, "number": item.get("number")})
     if identity is None:
         return None
