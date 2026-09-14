@@ -140,9 +140,7 @@ describe("My PRs", () => {
     )
     mount()
     const row = (await screen.findByText("Change 1")).closest("tr")!
-    fireEvent.click(
-      within(row).getByRole("button", { name: "Open SWE Thread" })
-    )
+    fireEvent.click(within(row).getByRole("button", { name: "Agent" }))
     const opening = await within(row).findByRole("button", {
       name: "Opening thread…",
     })
@@ -164,9 +162,7 @@ describe("My PRs", () => {
     )
     mount()
     const row = (await screen.findByText("Change 1")).closest("tr")!
-    fireEvent.click(
-      within(row).getByRole("button", { name: "Open SWE Thread" })
-    )
+    fireEvent.click(within(row).getByRole("button", { name: "Agent" }))
     expect(await within(row).findByRole("alert")).toHaveProperty(
       "textContent",
       "Thread backend unavailable"
@@ -174,7 +170,7 @@ describe("My PRs", () => {
     expect(
       (
         within(row).getByRole("button", {
-          name: "Open SWE Thread",
+          name: "Agent",
         }) as HTMLButtonElement
       ).disabled
     ).toBe(false)
@@ -258,9 +254,7 @@ describe("My PRs", () => {
       within(row).getByRole("link", { name: "GitHub" }).getAttribute("href")
     ).toBe("https://github.com/acme/app/pull/1")
     expect(
-      within(row)
-        .getByRole("link", { name: "Review Mode" })
-        .getAttribute("href")
+      within(row).getByRole("link", { name: "Reviewer" }).getAttribute("href")
     ).toBe("/agents/reviews/acme/app/1")
   })
   it("shows pending checks as Pending, preserving draft and conflict priority", async () => {

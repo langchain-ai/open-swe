@@ -19,7 +19,25 @@ export function PullRequestLinks({
   })
   return (
     <div className="mt-1 text-xs text-muted-foreground">
-      Open in:{" "}
+      Open:{" "}
+      <button
+        type="button"
+        className="hover:underline disabled:opacity-50"
+        disabled={thread.isPending || thread.isSuccess}
+        aria-live="polite"
+        onClick={() => thread.mutate()}
+      >
+        {thread.isPending ? "Opening thread…" : "Agent"}
+      </button>
+      ,{" "}
+      <Link
+        className="hover:underline"
+        to="/agents/reviews/$owner/$repo/$number"
+        params={{ owner: owner!, repo: name!, number: String(number) }}
+      >
+        Reviewer
+      </Link>
+      ,{" "}
       <a
         className="hover:underline"
         href={`https://github.com/${repo}/pull/${number}`}
@@ -28,24 +46,6 @@ export function PullRequestLinks({
       >
         GitHub
       </a>
-      ,{" "}
-      <Link
-        className="hover:underline"
-        to="/agents/reviews/$owner/$repo/$number"
-        params={{ owner: owner!, repo: name!, number: String(number) }}
-      >
-        Review Mode
-      </Link>
-      ,{" "}
-      <button
-        type="button"
-        className="hover:underline disabled:opacity-50"
-        disabled={thread.isPending || thread.isSuccess}
-        aria-live="polite"
-        onClick={() => thread.mutate()}
-      >
-        {thread.isPending ? "Opening thread…" : "Open SWE Thread"}
-      </button>
       {thread.error && (
         <p role="alert" className="mt-1 text-destructive">
           {thread.error.message}
