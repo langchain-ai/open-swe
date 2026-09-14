@@ -572,6 +572,7 @@ function CounterList({
 
 function UserCell({ row }: { row: UsageLeaderboardRow }) {
   const initials = initialsFor(row.user.name)
+  const detail = row.user.email ?? row.user.github_login ?? "unknown"
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <Avatar>
@@ -584,9 +585,11 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
         <span className="truncate font-medium text-foreground">
           {row.user.name}
         </span>
-        <span className="truncate text-xs text-muted-foreground">
-          {row.user.email ?? row.user.github_login ?? "unknown"}
-        </span>
+        {detail !== row.user.name ? (
+          <span className="truncate text-xs text-muted-foreground">
+            {detail}
+          </span>
+        ) : null}
       </div>
     </div>
   )
