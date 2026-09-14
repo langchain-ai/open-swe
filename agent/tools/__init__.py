@@ -17,7 +17,6 @@ _TOOL_MODULES = {
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
     "http_request": ".http_request",
-    "linear_comment": "agent.linear.tools.comment",
     "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
@@ -25,6 +24,7 @@ _TOOL_MODULES = {
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
     "manage_code_channel": "agent.slack.tools.manage_code_channel",
+    "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
     "mark_question_answered": ".mark_question_answered",
     "notify_automation_channel": ".notify_automation_channel",
@@ -55,6 +55,7 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
     "slack_thread_reply": "agent.slack.tools.thread_reply",
+    "submit_thread_feedback": ".submit_thread_feedback",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
@@ -76,7 +77,6 @@ __all__ = [
     "fetch_url",
     "get_thread",
     "http_request",
-    "linear_comment",
     "list_automations",
     "list_environments",
     "list_findings",
@@ -84,6 +84,7 @@ __all__ = [
     "list_threads",
     "manage_baby_sit",
     "manage_code_channel",
+    "manage_incident",
     "manage_thread",
     "mark_question_answered",
     "notify_automation_channel",
@@ -114,6 +115,7 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_thread_reply",
+    "submit_thread_feedback",
     "trigger_automation",
     "update_automation",
     "update_finding",
@@ -123,7 +125,7 @@ __all__ = [
 if TYPE_CHECKING:
     from agent.github.tools.read_repo_file import read_repo_file
     from agent.github.tools.search_repo_code import search_repo_code
-    from agent.linear.tools.comment import linear_comment
+    from agent.incidents.tools import manage_incident
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel
@@ -173,6 +175,7 @@ if TYPE_CHECKING:
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
+    from agent.tools.submit_thread_feedback import submit_thread_feedback
     from agent.tools.threads import get_thread, list_threads, manage_thread
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill

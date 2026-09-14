@@ -29,8 +29,7 @@ def apply() -> None:
 
     from agent import server
     from agent.github import token as auth
-    from agent.slack import client as slack_utils
-    from agent.slack import code_channels as slack_code_channels
+    from agent.slack import http as slack_http
     from agent.utils import authorship
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
@@ -65,8 +64,7 @@ def apply() -> None:
 
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
-    slack_utils.SLACK_API_BASE_URL = FAKE_SLACK_API
-    slack_code_channels.SLACK_API_BASE_URL = FAKE_SLACK_API
+    slack_http.SLACK_API_BASE_URL = FAKE_SLACK_API
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.
@@ -82,8 +80,11 @@ def apply() -> None:
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
         return "dummy-user-oauth-token"
 
+    from agent.webhooks import common as webhook_common
+
     profiles.get_valid_access_token = _dummy_user_token
     thread_access.get_valid_access_token = _dummy_user_token
+    webhook_common.get_valid_access_token = _dummy_user_token
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"

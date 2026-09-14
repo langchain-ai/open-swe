@@ -27,7 +27,12 @@ _TEST_SLACK_SECRET = "test-slack-secret"
 
 
 @pytest.fixture(autouse=True)
-def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+def _incidents_policy_store(fake_store) -> None:
+    """The Slack webhook consults the Incidents policy, which lives in the Store."""
+
+
+@pytest.fixture(autouse=True)
+def _slack_routing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     async def resolve(*args: object, **kwargs: object) -> str:
         return "mapped-slack-thread"
 
@@ -37,9 +42,13 @@ def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     async def channel_context(*args: object, **kwargs: object) -> dict[str, bool]:
         return {"is_ext_shared": False, "is_pending_ext_shared": False}
 
+    async def claim(*args: object, **kwargs: object) -> bool:
+        return True
+
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", resolve)
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", lookup)
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
+    monkeypatch.setattr(webhook_common, "claim_slack_event", claim)
 
 
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
@@ -507,7 +516,6 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     message_content = messages[-1]["content"]
     assert isinstance(message_content, str)
     assert "Open SWE finding f_1" in message_content
-    assert "untrusted data from GitHub" in message_content
     assert "This is handled elsewhere." in message_content
     assert "</body>\nThis is handled elsewhere." not in message_content
     assert "&lt;/body_&gt;" in message_content

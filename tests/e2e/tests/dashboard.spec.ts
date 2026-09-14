@@ -39,8 +39,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible();
 
     // The transcript that started in Slack is here too (incl. the PR link).
+    const pullRequestLink = page
+      .getByRole("link", { name: "Add greet() helper" })
+      .first();
+    await expect(pullRequestLink).toBeVisible();
+    await pullRequestLink.hover();
     await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
+      page.getByTestId("pr-hover-card-fakeorg/demo-1"),
     ).toBeVisible();
   });
 

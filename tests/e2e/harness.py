@@ -37,7 +37,11 @@ from e2e_env import (  # noqa: E402
     BOT_USER_ID,
     DEMO_CHANNEL,
     HUMAN_USER,
+    OWNER,
+    REPO,
     REPO_ROOT,
+    SECOND_OWNER,
+    SECOND_REPO,
     TEST_USERS,
 )
 from fastapi import HTTPException, Request  # noqa: E402
@@ -169,8 +173,27 @@ async def control_queued(thread_id: str = "") -> JSONResponse:
     return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
 
 
+_MAPPINGS_SEEDED = False
+
+
+async def _seed_test_user_mappings() -> None:
+    """Link each named test user's Slack id to their dashboard login, as the real
+    Slack-link flow would, so the webhook's account gate lets them through."""
+    global _MAPPINGS_SEEDED
+    if _MAPPINGS_SEEDED:
+        return
+    from agent.dashboard.user_mappings import upsert_mapping
+
+    for user in TEST_USERS:
+        await upsert_mapping(
+            github_login=user["login"], work_email=user["email"], slack_user_id=user["slack_id"]
+        )
+    _MAPPINGS_SEEDED = True
+
+
 async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> httpx2.Response:
     """POST a signed Events-API delivery to the real /webhooks/slack route."""
+    await _seed_test_user_mappings()
     raw = json.dumps(payload).encode()
     req_ts = str(int(time.time()))
     base = f"v0:{req_ts}:{raw.decode()}".encode()
@@ -577,6 +600,18 @@ async def mock_github_pr(owner: str, repo: str, number: int) -> HTMLResponse:  #
 
 
 # --- fake GitHub REST API (open_pull_request hits this) --------------------
+@app.get("/fake-gh/installation/repositories")
+async def gh_installation_repositories() -> JSONResponse:
+    return JSONResponse(
+        {
+            "repositories": [
+                {"full_name": "fakeorg/demo"},
+                {"full_name": "anotherorg/companion"},
+            ]
+        }
+    )
+
+
 def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
     return {
         "number": pr["number"],
@@ -599,6 +634,15 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "changed_files": len(pr["files"]),
         "created_at": pr["created_at"],
     }
+
+
+@app.get("/fake-gh/installation/repositories")
+async def gh_list_installation_repositories() -> JSONResponse:
+    repositories = [
+        {"full_name": f"{OWNER}/{REPO}"},
+        {"full_name": f"{SECOND_OWNER}/{SECOND_REPO}"},
+    ]
+    return JSONResponse({"total_count": len(repositories), "repositories": repositories})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}")

@@ -33,6 +33,7 @@ class SchedulerState(BaseModel):
     thread_id: str | None = None
     agent_thread_id: str | None = None
     run_id: str | None = None
+    invocation_id: str | None = None
     prepare_run_id: str | None = None
     channel_id: str | None = None
     thread_ts: str | None = None
@@ -61,11 +62,11 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         kind = "update" if state.refresh_kind == "update" else "full"
         return {"result": await run_environment_refresh_tick(slug or None, kind)}
     if task == "session_cost":
-        return {"result": await run_session_cost_refresh(state.model_dump())}
+        return {"result": await run_session_cost_refresh(state.model_dump(exclude_none=True))}
     if task == "thread_feedback":
         return {"result": await run_feedback_prompt(state.model_dump(exclude_none=True))}
     if task == "agent_cost":
-        return {"result": await run_agent_cost_refresh(state.model_dump())}
+        return {"result": await run_agent_cost_refresh(state.model_dump(exclude_none=True))}
     schedule_id = state.schedule_id or cfg.schedule_id
     if not schedule_id:
         logger.warning("Scheduled agent tick missing schedule_id")
