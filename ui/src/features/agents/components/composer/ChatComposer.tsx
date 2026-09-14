@@ -1,11 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  ImagePlus,
-  Map as MapIcon,
-  Plus,
-  ServerCog as ServerCogIcon,
-  X,
-} from "lucide-react"
+import { ImagePlus, Map as MapIcon, Plus, X } from "lucide-react"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl"
@@ -127,9 +121,6 @@ export interface ChatComposerProps {
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
-  /** Admins only: when provided, an Admin toggle is shown. Admin threads can manage environments. */
-  adminThread?: boolean
-  onAdminThreadChange?: (next: boolean) => void
   /** Environments a new thread can boot from. The picker appears only when there are several. */
   environments?: Array<EnvironmentOption>
   selectedEnvironment?: string | null
@@ -254,8 +245,6 @@ export const ChatComposer = memo(function ChatComposer({
   onSelectLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
-  adminThread = false,
-  onAdminThreadChange,
   environments = [],
   selectedEnvironment = null,
   onEnvironmentChange,
@@ -822,32 +811,6 @@ export const ChatComposer = memo(function ChatComposer({
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
               />
-            )}
-
-            {onAdminThreadChange && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ComposerControl
-                      aria-label="Admin mode"
-                      aria-pressed={adminThread}
-                      className={cn(
-                        adminThread &&
-                          "bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive"
-                      )}
-                      disabled={disabled}
-                      onClick={() => onAdminThreadChange(!adminThread)}
-                      type="button"
-                    />
-                  }
-                >
-                  <ComposerControlIcon icon={ServerCogIcon} />
-                  <span>Admin</span>
-                </TooltipTrigger>
-                <TooltipPopup side="top">
-                  {adminThread ? "Disable admin mode" : "Enable admin mode"}
-                </TooltipPopup>
-              </Tooltip>
             )}
 
             {planMode && onPlanModeChange && (
