@@ -288,7 +288,6 @@ async def get_langsmith_thread_cost(
         raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
     try:
         matched_roots: dict[str, datetime] = {}
-        # LangSmith rejects OR across different metadata fields.
         for field in ("invocation_id", "prepare_run_id"):
             roots = client.list_runs(
                 project_id=project_id,
@@ -302,6 +301,8 @@ async def get_langsmith_thread_cost(
                 if root_id and end_time is not None:
                     key = str(root_id)
                     matched_roots[key] = max(end_time, matched_roots.get(key, end_time))
+            if matched_roots:
+                break
         if not matched_roots:
             return None
         stats_kwargs: dict[str, Any] = {
