@@ -84,7 +84,7 @@ const payload = {
     }),
     pull(1),
   ],
-  truncated: false,
+  nextPage: null,
   incomplete: false,
   updatedAt: "2026-09-12T12:00:00Z",
 }
@@ -343,21 +343,26 @@ describe("My PRs", () => {
   it("offers only global date sorting and passes it to the server", async () => {
     mount()
     await screen.findByText("Change 1")
-    expect(api.myPullRequests).toHaveBeenCalledWith("", "updatedAt", "desc")
+    expect(api.myPullRequests).toHaveBeenCalledWith("", "updatedAt", "desc", 1)
     for (const name of ["PR", "Pull request", "Diffstat"]) {
       expect(screen.queryByRole("button", { name })).toBeNull()
     }
     fireEvent.click(screen.getByRole("button", { name: /Created/ }))
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenCalledWith("", "createdAt", "asc")
+      expect(api.myPullRequests).toHaveBeenCalledWith("", "createdAt", "asc", 1)
     )
     fireEvent.click(screen.getByRole("button", { name: /Created/ }))
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenCalledWith("", "createdAt", "desc")
+      expect(api.myPullRequests).toHaveBeenCalledWith(
+        "",
+        "createdAt",
+        "desc",
+        1
+      )
     )
     fireEvent.click(screen.getByRole("button", { name: /Last updated/ }))
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenCalledWith("", "updatedAt", "asc")
+      expect(api.myPullRequests).toHaveBeenCalledWith("", "updatedAt", "asc", 1)
     )
   })
 
@@ -395,6 +400,33 @@ describe("My PRs", () => {
         screen.getByLabelText("12 lines added, 3 lines deleted")
       ).toBeTruthy()
     )
+  })
+
+  it("loads the next GitHub page when paging past the loaded rows", async () => {
+    vi.mocked(api.myPullRequests).mockImplementation(
+      async (_repo, _sort, _direction, page = 1) => ({
+        ...payload,
+        pullRequests: Array.from({ length: 10 }, (_, index) =>
+          pull((page - 1) * 10 + index + 1)
+        ),
+        nextPage: page === 1 ? 2 : null,
+      })
+    )
+    mount()
+    await screen.findByText("Change 10")
+    await waitFor(() =>
+      expect(api.myPullRequests).toHaveBeenLastCalledWith(
+        "",
+        "updatedAt",
+        "desc",
+        2
+      )
+    )
+    await screen.findByText(/10 of 20 PRs/)
+    fireEvent.click(screen.getByRole("button", { name: "Next" }))
+    await screen.findByText("Change 11")
+    expect(screen.queryByText("Change 1")).toBeNull()
+    expect(api.myPullRequests).toHaveBeenCalledTimes(2)
   })
 
   it("rediscovers a reopened PR on manual refresh", async () => {
@@ -444,7 +476,8 @@ describe("My PRs", () => {
       expect(api.myPullRequests).toHaveBeenLastCalledWith(
         "acme/other",
         "updatedAt",
-        "desc"
+        "desc",
+        1
       )
     )
     fireEvent.click(
@@ -454,7 +487,8 @@ describe("My PRs", () => {
       expect(api.myPullRequests).toHaveBeenLastCalledWith(
         "acme/other,acme/app",
         "updatedAt",
-        "desc"
+        "desc",
+        1
       )
     )
   })

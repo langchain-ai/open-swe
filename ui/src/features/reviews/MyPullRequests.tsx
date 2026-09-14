@@ -1,11 +1,13 @@
 import {
+  type InfiniteData,
+  useInfiniteQuery,
   useMutation,
   useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
 import { BugBeetleIcon, FlagIcon } from "@phosphor-icons/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -23,6 +25,26 @@ import { PullRequestLinks } from "./PullRequestLinks"
 
 const control =
   "rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
+const pageSize = 10
+
+function useOpenPullRequests(
+  login: string,
+  repo: string[],
+  sort: ReviewSort,
+  direction: "asc" | "desc"
+) {
+  return useInfiniteQuery({
+    queryKey: ["my-pull-requests", login, repo, sort, direction],
+    queryFn: ({ pageParam }) =>
+      api.myPullRequests(repo.join(","), sort, direction, pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (last) => last.nextPage ?? undefined,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  })
+}
 
 function overallStatus(pr: OpenPullRequest) {
   if (pr.detailsLoading) return "Loading…"
@@ -278,23 +300,18 @@ export function MyPullRequests({
       direction: sort === next && direction === "asc" ? "desc" : "asc",
     })
   const queryClient = useQueryClient()
-  const query = useQuery({
-    queryKey: ["my-pull-requests", login, repo, sort, direction],
-    queryFn: () => api.myPullRequests(repo.join(","), sort, direction),
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
-  })
-  const repos = useQuery({
-    queryKey: ["my-pull-requests", login, [], "updatedAt", "desc"],
-    queryFn: () => api.myPullRequests(""),
-    retry: false,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  })
-  const rows = query.data?.pullRequests ?? []
+  const query = useOpenPullRequests(login, repo, sort, direction)
+  const repos = useOpenPullRequests(login, [], "updatedAt", "desc")
+  const pages = query.data?.pages ?? []
+  const latest = pages.at(-1)
+  const rows = pages.flatMap((loaded) => loaded.pullRequests)
+  const { fetchNextPage, isFetching } = query
+  const needsMorePages =
+    query.hasNextPage &&
+    (Boolean(filter?.length) || (page + 1) * pageSize >= rows.length)
+  useEffect(() => {
+    if (needsMorePages && !isFetching) void fetchNextPage()
+  }, [needsMorePages, isFetching, fetchNextPage])
   const matchingRows = rows
     .filter(
       (pr) =>
@@ -312,7 +329,7 @@ export function MyPullRequests({
     )
   const requestedRows = filter?.length
     ? matchingRows
-    : matchingRows.slice(page * 10, (page + 1) * 10)
+    : matchingRows.slice(page * pageSize, (page + 1) * pageSize)
   const detailQueries = useQueries({
     queries: requestedRows.map((pr) => ({
       queryKey: ["my-pr-details", login, pr.repo, pr.number],
@@ -354,8 +371,9 @@ export function MyPullRequests({
     (pr) =>
       !filter?.length || filter.some((status) => overallStatus(pr) === status)
   )
-  const visible = filtered.slice(page * 10, (page + 1) * 10)
+  const visible = filtered.slice(page * pageSize, (page + 1) * pageSize)
   const detailsLoading = detailQueries.some((detail) => detail.isFetching)
+  const refreshing = query.isFetching && !query.isFetchingNextPage
   const reviewRefs = visible.map((pr) => ({ repo: pr.repo, number: pr.number }))
   const reviews = useQuery({
     queryKey: ["my-pr-review-summaries", login, reviewRefs],
@@ -369,7 +387,9 @@ export function MyPullRequests({
   const repoNames = [
     ...new Set([
       ...all.map((pr) => pr.repo),
-      ...(repos.data?.pullRequests ?? []).map((pr) => pr.repo),
+      ...(repos.data?.pages ?? []).flatMap((loaded) =>
+        loaded.pullRequests.map((pr) => pr.repo)
+      ),
     ]),
   ].sort()
 
@@ -377,10 +397,10 @@ export function MyPullRequests({
     <section className="mt-5 space-y-4" aria-label="My open pull requests">
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
         <span aria-live="polite">
-          {query.isFetching
+          {refreshing
             ? "Refreshing from GitHub…"
-            : query.data
-              ? `Refreshed ${dateLabel(query.data.updatedAt)}`
+            : latest
+              ? `Refreshed ${dateLabel(latest.updatedAt)}`
               : "Live open pull requests from GitHub"}
         </span>
         <Button
@@ -437,23 +457,22 @@ export function MyPullRequests({
       </div>
       {query.error && (
         <p role="alert" className="text-sm text-destructive">
-          {query.data && "Refresh failed; showing the previous snapshot. "}
+          {latest &&
+            (query.isFetchNextPageError
+              ? "Could not load more PRs; showing the pages loaded so far. "
+              : "Refresh failed; showing the previous snapshot. ")}
           {query.error.message}
         </p>
       )}
-      {(query.data?.truncated || query.data?.incomplete) && (
+      {pages.some((loaded) => loaded.incomplete) && (
         <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
-          {query.data.truncated
-            ? "Showing the first 100 matching open PRs in the selected order. Filter by repository to narrow the list. "
-            : ""}
-          {query.data.incomplete &&
-            "GitHub returned incomplete search results. Refresh to try again."}
+          GitHub returned incomplete search results. Refresh to try again.
         </p>
       )}
       {query.isLoading ? (
         <Skeleton className="h-56 w-full" />
       ) : (
-        query.data && (
+        latest && (
           <>
             <div className="overflow-x-auto rounded-lg border border-border bg-card">
               <table className="w-full text-left text-xs">
@@ -599,17 +618,23 @@ export function MyPullRequests({
                                 ["my-pr-details", login, pr.repo, pr.number],
                                 null
                               )
-                              queryClient.setQueriesData<OpenPullRequestsPayload>(
+                              queryClient.setQueriesData<
+                                InfiniteData<OpenPullRequestsPayload>
+                              >(
                                 { queryKey: ["my-pull-requests", login] },
                                 (data) =>
                                   data
                                     ? {
                                         ...data,
-                                        pullRequests: data.pullRequests.filter(
-                                          (row) =>
-                                            row.repo !== pr.repo ||
-                                            row.number !== pr.number
-                                        ),
+                                        pages: data.pages.map((loaded) => ({
+                                          ...loaded,
+                                          pullRequests:
+                                            loaded.pullRequests.filter(
+                                              (row) =>
+                                                row.repo !== pr.repo ||
+                                                row.number !== pr.number
+                                            ),
+                                        })),
                                       }
                                     : data
                               )
@@ -672,7 +697,7 @@ export function MyPullRequests({
                         colSpan={reviews.isError ? 7 : 8}
                         className="px-4 py-12 text-center text-muted-foreground"
                       >
-                        {detailsLoading
+                        {detailsLoading || query.isFetchingNextPage
                           ? "Loading matching PRs…"
                           : all.length
                             ? "No PRs match these filters."
@@ -687,7 +712,7 @@ export function MyPullRequests({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={page === 0 || query.isFetching}
+                disabled={page === 0 || refreshing}
                 onClick={() => onFiltersChange({ page: page - 1 || undefined })}
               >
                 Prev
@@ -697,17 +722,24 @@ export function MyPullRequests({
                 size="sm"
                 variant="outline"
                 disabled={
-                  (page + 1) * 10 >= filtered.length || query.isFetching
+                  ((page + 1) * pageSize >= filtered.length &&
+                    !query.hasNextPage) ||
+                  query.isFetching
                 }
                 onClick={() => onFiltersChange({ page: page + 1 })}
               >
                 Next
               </Button>
-              {detailsLoading && <span role="status">Loading PR details…</span>}
+              {query.isFetchingNextPage ? (
+                <span role="status">Loading more PRs from GitHub…</span>
+              ) : (
+                detailsLoading && <span role="status">Loading PR details…</span>
+              )}
             </div>
             <p className="text-xs text-muted-foreground">
-              {visible.length} of {filtered.length} PRs · Added/deleted lines
-              include tests and docs. PRs with checks still running are Pending.
+              {visible.length} of {filtered.length}
+              {query.hasNextPage ? "+" : ""} PRs · Added/deleted lines include
+              tests and docs. PRs with checks still running are Pending.
             </p>
           </>
         )

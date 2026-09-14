@@ -1557,13 +1557,20 @@ async def api_list_my_pull_requests(
     lightweight: bool = False,
     sort: Literal["created", "updated"] = "updated",
     direction: Literal["asc", "desc"] = "desc",
+    page: int = Query(1, ge=1, le=10),
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     token = await get_valid_access_token(session["sub"])
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     return await list_open_pull_requests(
-        session["sub"], token, repo, lightweight=lightweight, sort=sort, direction=direction
+        session["sub"],
+        token,
+        repo,
+        lightweight=lightweight,
+        sort=sort,
+        direction=direction,
+        page=page,
     )
 
 

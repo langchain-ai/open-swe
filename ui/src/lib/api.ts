@@ -593,7 +593,7 @@ export interface OpenPullRequest {
 
 export interface OpenPullRequestsPayload {
   pullRequests: OpenPullRequest[]
-  truncated: boolean
+  nextPage: number | null
   incomplete: boolean
   updatedAt: string
 }
@@ -948,10 +948,11 @@ export const api = {
   myPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",
-    direction: "asc" | "desc" = "desc"
+    direction: "asc" | "desc" = "desc",
+    page = 1
   ) =>
     request<OpenPullRequestsPayload>(
-      `/my-pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}`
+      `/my-pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}`
     ),
   myPullRequestDetails: (repo: string, number: number) =>
     loadPrDetails(repo, number),

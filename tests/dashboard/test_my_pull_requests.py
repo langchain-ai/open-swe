@@ -142,23 +142,24 @@ async def test_search_failure_is_not_an_empty_success(monkeypatch):
     assert error.value.status_code == 502
 
 
-async def test_search_reports_incomplete_and_truncated_results(monkeypatch):
+async def test_search_pages_through_results_and_reports_incomplete(monkeypatch):
     monkeypatch.setattr(prs, "github_client", client)
-    monkeypatch.setattr(
-        prs,
-        "github_request",
-        AsyncMock(
-            return_value=response(
-                {
-                    "items": [],
-                    "total_count": 101,
-                    "incomplete_results": True,
-                }
-            )
-        ),
+    search = AsyncMock(
+        return_value=response({"items": [], "total_count": 250, "incomplete_results": True})
     )
+    monkeypatch.setattr(prs, "github_request", search)
     result = await prs.list_open_pull_requests("octocat", "user-token")
-    assert result["truncated"] is True and result["incomplete"] is True
+    assert search.await_args.kwargs["params"]["page"] == "1"
+    assert result["nextPage"] == 2 and result["incomplete"] is True
+    result = await prs.list_open_pull_requests("octocat", "user-token", page=3)
+    assert search.await_args.kwargs["params"]["page"] == "3"
+    assert result["nextPage"] is None
+    search.return_value = response({"items": [], "total_count": 5000})
+    result = await prs.list_open_pull_requests("octocat", "user-token", page=10)
+    assert result["nextPage"] is None
+    with pytest.raises(HTTPException) as error:
+        await prs.list_open_pull_requests("octocat", "user-token", page=11)
+    assert error.value.status_code == 422
 
 
 async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypatch):
@@ -168,7 +169,13 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     monkeypatch.setattr(routes, "list_open_pull_requests", listing)
     await routes.api_list_my_pull_requests(repo="acme/app", session={"sub": "octocat"})
     listing.assert_awaited_once_with(
-        "octocat", "user-token", "acme/app", lightweight=False, sort="updated", direction="desc"
+        "octocat",
+        "user-token",
+        "acme/app",
+        lightweight=False,
+        sort="updated",
+        direction="desc",
+        page=1,
     )
     token.return_value = None
     with pytest.raises(HTTPException) as error:

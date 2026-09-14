@@ -18,6 +18,9 @@ from agent.github.http import (
 
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
+_SEARCH_PAGE_SIZE = 100
+# GitHub search returns at most 1000 results per query.
+_SEARCH_MAX_PAGES = 10
 _SHA_PATTERN = re.compile(r"[0-9a-fA-F]{40,64}")
 _FAILING_CHECK_CONCLUSIONS = frozenset(
     {"failure", "timed_out", "action_required", "startup_failure"}
@@ -412,10 +415,13 @@ async def list_open_pull_requests(
     lightweight: bool = False,
     sort: str = "updated",
     direction: str = "desc",
+    page: int = 1,
 ) -> dict[str, Any]:
     """Read the caller's open PRs and current-head checks using their own token."""
     if not _OWNER_PATTERN.fullmatch(login):
         raise HTTPException(422, "invalid GitHub login")
+    if not 1 <= page <= _SEARCH_MAX_PAGES:
+        raise HTTPException(422, "invalid PR page")
     repositories = list(dict.fromkeys(repo.split(","))) if repo else []
     if any(
         pull_request_identity({"repo_full_name": name, "number": 1}) is None
@@ -433,7 +439,13 @@ async def list_open_pull_requests(
                 client,
                 "GET",
                 f"{GITHUB_API_BASE}/search/issues",
-                params={"q": query, "per_page": "100", "sort": sort, "order": direction},
+                params={
+                    "q": query,
+                    "per_page": str(_SEARCH_PAGE_SIZE),
+                    "page": str(page),
+                    "sort": sort,
+                    "order": direction,
+                },
             )
             response.raise_for_status()
             payload = response.json()
@@ -447,10 +459,14 @@ async def list_open_pull_requests(
             async with semaphore:
                 return await load_open_pull_request(client, item, details=not lightweight)
 
-        items = await asyncio.gather(*(load(item) for item in payload["items"][:100]))
+        items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
+    total = payload.get("total_count")
+    has_more = (
+        isinstance(total, int) and page * _SEARCH_PAGE_SIZE < total and page < _SEARCH_MAX_PAGES
+    )
     return {
         "pullRequests": [item for item in items if item is not None],
-        "truncated": payload.get("total_count", 0) > 100,
+        "nextPage": page + 1 if has_more else None,
         "incomplete": payload.get("incomplete_results") is True,
         "updatedAt": datetime.now(UTC).isoformat(),
     }
