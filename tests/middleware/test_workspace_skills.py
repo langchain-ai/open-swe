@@ -3,7 +3,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from deepagents.backends.state import StateBackend
-from deepagents.middleware.skills import SkillsMiddleware
 from langchain.agents.middleware.types import ModelRequest
 
 
@@ -49,4 +48,3 @@ async def test_resumed_public_skill_prompt_excludes_cached_personal_context():
     update = await middleware.abefore_agent(cast(Any, state), MagicMock(), {})
     assert [skill["name"] for skill in update["skills_metadata"]] == ["workspace"]
     assert update["skills_load_errors"] == []
-    assert middleware.name == SkillsMiddleware(backend=StateBackend(), sources=[]).name

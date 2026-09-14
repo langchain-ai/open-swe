@@ -262,6 +262,15 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     monkeypatch.setattr(guard, "post_slack_thread_reply_with_ts", fake_post)
     monkeypatch.setattr(guard, "mark_workflow_push_notified", fake_notified)
 
+    class _NoThreadsClient:
+        async def get(self, thread_id: str) -> dict[str, str]:
+            raise KeyError(thread_id)
+
+    class _NoClient:
+        threads = _NoThreadsClient()
+
+    monkeypatch.setattr(guard, "get_client", lambda url: _NoClient())
+
     called = False
 
     async def handler(_request: Any) -> ToolMessage:

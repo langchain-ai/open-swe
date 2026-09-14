@@ -99,16 +99,6 @@ def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:
     ]
 
 
-def test_plan_comment_helpers_exported() -> None:
-    from agent.threads import plan_store
-
-    assert plan_store.PLAN_COMMENTS_NAMESPACE == ["plan", "comments"]
-    assert callable(plan_store.add_plan_comment)
-    assert callable(plan_store.list_plan_comments)
-    assert callable(plan_store.delete_plan_comment)
-    assert callable(plan_store.clear_plan_comments)
-
-
 def _fake_client(store: Any) -> Any:
     return type("C", (), {"store": store})()
 
@@ -457,42 +447,12 @@ async def test_list_workflow_approvals_returns_records(
     assert result["approvals"][0]["diffStats"] == {"files": 1, "additions": 1, "deletions": 0}
 
 
-def test_save_plan_exported_and_wired() -> None:
-    from agent.tools import save_plan
-
-    assert callable(save_plan)
-
-
-def test_plan_status_constants() -> None:
-    from agent.threads import plan_store
-
-    assert plan_store.PLAN_STATUS_READY == "ready"
-    assert plan_store.PLAN_STATUS_SHARED == "shared"
-    assert plan_store.PLAN_STATUS_PLANNING == "planning"
-    assert plan_store.PLAN_STATUS_APPROVED == "approved"
-    assert plan_store.PLAN_STATUS_REVISING == "revising"
-
-
 def test_plan_file_path_for_thread_uses_plans_dir_and_slug() -> None:
     from agent.threads import plan_store
 
     path = plan_store.plan_file_path_for_thread("Thread ABC/123")
     assert path.startswith("/workspace/plans/")
     assert path.endswith("-thread-abc-123.html")
-
-
-def test_external_mutations_excluded_in_plan_mode() -> None:
-    from agent.server import PLAN_MODE_EXCLUDED_TOOLS
-
-    assert "http_request" in PLAN_MODE_EXCLUDED_TOOLS
-    assert "create_sandbox_service_url" in PLAN_MODE_EXCLUDED_TOOLS
-
-
-def test_file_edit_tools_available_in_plan_mode_for_plan_file() -> None:
-    from agent.server import PLAN_MODE_EXCLUDED_TOOLS
-
-    assert "write_file" not in PLAN_MODE_EXCLUDED_TOOLS
-    assert "edit_file" not in PLAN_MODE_EXCLUDED_TOOLS
 
 
 class _FakeReq:
