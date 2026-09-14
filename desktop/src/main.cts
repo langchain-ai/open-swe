@@ -125,6 +125,8 @@ let updateChannel: DesktopUpdateChannel = "stable";
 let autoUpdaterConfigured = false;
 let updateCheckGeneration = 0;
 let updateCancellationToken: { cancel: () => void } | undefined;
+let updateDownload: Promise<void> | null = null;
+let updateChannelChange: Promise<void> | null = null;
 let lastUpdateCheck = 0;
 let updateCheck: ReturnType<typeof autoUpdater.checkForUpdates> | null = null;
 const DESKTOP_RELEASES_API =
@@ -174,15 +176,26 @@ function setUpdateState(
 }
 
 function checkForUpdates() {
-  const generation = updateCheckGeneration;
   lastUpdateCheck = Date.now();
-  updateCheck ??= autoUpdater
-    .checkForUpdates()
-    .then((result) => {
+  updateCheck ??= (updateChannelChange ?? Promise.resolve())
+    .then(() => configureUpdateFeed(updateChannel))
+    .then(async () => {
+      const generation = updateCheckGeneration;
+      const result = await autoUpdater.checkForUpdates();
       if (generation !== updateCheckGeneration) {
         result?.cancellationToken?.cancel();
       } else {
         updateCancellationToken = result?.cancellationToken;
+      }
+      const download = result?.downloadPromise;
+      if (download) {
+        const trackedDownload = download
+          .then(() => undefined)
+          .catch(() => undefined)
+          .finally(() => {
+            if (updateDownload === trackedDownload) updateDownload = null;
+          });
+        updateDownload = trackedDownload;
       }
       return result;
     })
@@ -197,6 +210,7 @@ async function cancelDesktopUpdateCheck() {
   updateCancellationToken?.cancel();
   updateCancellationToken = undefined;
   await updateCheck?.catch(() => undefined);
+  await updateDownload;
   lastUpdateCheck = 0;
   if (updateState.status === "downloading") setUpdateState("idle");
 }
@@ -517,23 +531,40 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:set-update-channel", async (event, channel) => {
     requireTrustedDesktopIpc(event);
     if (!isUpdateChannel(channel)) throw new Error("Invalid update channel");
-    if (channel === updateChannel) return updateChannel;
-    if (updateState.status === "ready" || updateState.status === "installing") {
-      throw new Error(
-        "Install the pending desktop update before switching channels",
-      );
+    const previousChange = updateChannelChange;
+    const change = (async () => {
+      await previousChange;
+      if (channel === updateChannel) return updateChannel;
+      if (
+        updateState.status === "ready" ||
+        updateState.status === "installing"
+      ) {
+        throw new Error(
+          "Install the pending desktop update before switching channels",
+        );
+      }
+      await cancelDesktopUpdateCheck();
+      if ((updateState as DesktopUpdateState).status === "ready") {
+        throw new Error(
+          "Install the pending desktop update before switching channels",
+        );
+      }
+      await configureUpdateFeed(channel);
+      writeUpdateChannel(updateChannelPath(), channel);
+      updateChannel = channel;
+      return updateChannel;
+    })();
+    const trackedChange = change.then(
+      () => undefined,
+      () => undefined,
+    );
+    updateChannelChange = trackedChange;
+    try {
+      return await change;
+    } finally {
+      if (updateChannelChange === trackedChange) updateChannelChange = null;
+      checkForUpdatesInBackground();
     }
-    await cancelDesktopUpdateCheck();
-    if ((updateState as DesktopUpdateState).status === "ready") {
-      throw new Error(
-        "Install the pending desktop update before switching channels",
-      );
-    }
-    await configureUpdateFeed(channel);
-    writeUpdateChannel(updateChannelPath(), channel);
-    updateChannel = channel;
-    checkForUpdatesInBackground();
-    return updateChannel;
   });
   ipcMain.handle("desktop:update-state", (event) => {
     requireTrustedDesktopIpc(event);
