@@ -4,9 +4,9 @@ from typing import Any
 import pytest
 
 from agent import server
-from agent.dashboard.threads import runs as thread_runs
-from agent.dashboard.threads import summary as thread_summary
 from agent.prompt import construct_system_prompt
+from agent.threads import runs as thread_runs
+from agent.threads import summary as thread_summary
 from tests.conftest import patch_thread_module
 
 

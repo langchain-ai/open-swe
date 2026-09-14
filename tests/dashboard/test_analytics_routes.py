@@ -5,7 +5,8 @@ import pytest
 from fastapi import FastAPI
 
 from agent.analytics import queries
-from agent.dashboard import routes
+from agent.analytics import routes as analytics_routes
+from agent.dashboard import oauth, routes
 from agent.database import analytics as database
 
 
@@ -23,11 +24,11 @@ async def test_analytics_readiness_requires_admin(monkeypatch) -> None:
         anonymous = await client.get("/dashboard/api/analytics/readiness")
         assert anonymous.status_code == 401
 
-        app.dependency_overrides[routes.require_session] = lambda: {"sub": "user"}
+        app.dependency_overrides[oauth.require_session] = lambda: {"sub": "user"}
         non_admin = await client.get("/dashboard/api/analytics/readiness")
         assert non_admin.status_code == 403
 
-        app.dependency_overrides[routes.require_session] = lambda: {"sub": "admin"}
+        app.dependency_overrides[oauth.require_session] = lambda: {"sub": "admin"}
         admin = await client.get("/dashboard/api/analytics/readiness")
         assert admin.status_code == 200
         assert admin.json() == {"configured": True, "ready": True}
@@ -40,7 +41,7 @@ async def test_analytics_readiness_requires_admin(monkeypatch) -> None:
 async def test_pr_report_unavailability_is_distinct_from_empty_data(monkeypatch, failure, report):
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[routes.require_session] = lambda: {"sub": "user"}
+    app.dependency_overrides[oauth.require_session] = lambda: {"sub": "user"}
     if failure == "disabled":
         monkeypatch.delenv("POSTGRES_URI", raising=False)
     else:
@@ -53,7 +54,7 @@ async def test_pr_report_unavailability_is_distinct_from_empty_data(monkeypatch,
         else RuntimeError("not migrated")
     )
     monkeypatch.setattr(
-        queries if report == "pr" else routes,
+        queries if report == "pr" else analytics_routes,
         "pr_merge_rate_by_model" if report == "pr" else "usage_leaderboard",
         AsyncMock(side_effect=error),
     )

@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.dashboard import plan_api
 from agent.run_config import Repo
 from agent.slack import failures as slack_failures
 from agent.slack import webhook as slack_webhook
 from agent.slack.request import SlackRequest
+from agent.threads import plan_api
 
 
 class _FakeThreads:

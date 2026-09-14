@@ -4,7 +4,7 @@ import pytest
 
 from agent import store as agent_store
 from agent.dashboard import user_mappings as um
-from agent.dashboard.threads import access as thread_access
+from agent.threads import access as thread_access
 
 
 class _FakeStore:

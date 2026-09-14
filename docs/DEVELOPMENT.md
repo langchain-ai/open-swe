@@ -63,7 +63,7 @@ LANGSMITH_API_KEY=""            # LangSmith → Settings → API Keys; also used
 LANGSMITH_TRACING="true"        # trace runs to LangSmith
 LANGSMITH_PROJECT=""            # optional project for traces and "View trace" links; default "default"
 
-ANTHROPIC_API_KEY=""            # any provider key, or LANGSMITH_GATEWAY_API_KEY for the LLM Gateway; see the installation guide
+ANTHROPIC_API_KEY=""            # any provider key; not needed if you use an LLM gateway (e.g. LangSmith Gateway; see the installation guide)
 
 GITHUB_APP_ID=""                # step 2
 GITHUB_APP_CLIENT_ID=""
@@ -84,7 +84,7 @@ DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session co
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
 ```
 
-`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. Provider keys, the LLM Gateway, and how the running model is chosen are in [Model providers and API keys](INSTALLATION.md#4-model-providers-and-api-keys). Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
+`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys). How the running model is chosen is covered in the same section. Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
 ## 6. Run
 

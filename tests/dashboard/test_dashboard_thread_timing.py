@@ -4,8 +4,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from agent.dashboard import routes
-from agent.dashboard.threads import api as thread_api
+from agent.threads import handlers as thread_api
+from agent.threads import routes
 
 
 async def test_get_thread_reports_server_timing_phases(monkeypatch) -> None:

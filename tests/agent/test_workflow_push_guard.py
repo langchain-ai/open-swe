@@ -170,7 +170,7 @@ async def test_workflow_change_does_not_misattribute_preexisting_workflows() -> 
 
 
 def test_workflow_approval_response_serializes_review_fields() -> None:
-    from agent.dashboard.workflow_approval import workflow_push_approval_response
+    from agent.threads.workflow_approval import workflow_push_approval_response
 
     response = workflow_push_approval_response(
         {

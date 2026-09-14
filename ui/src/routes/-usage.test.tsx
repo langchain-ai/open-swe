@@ -177,6 +177,52 @@ it("keeps failed delivery visible when all PR groups are suppressed", async () =
   client.clear()
 })
 
+it("resets leaderboard pagination when the period changes outside the selector", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockImplementation(
+    async (period, _limit, cursor) => ({
+      ...emptyUsage,
+      period: period ?? "30d",
+      total_members: 11,
+      next_cursor: cursor ? null : "next-page",
+      rows: [{ ...costRow, rank: cursor ? 11 : 1 }],
+    })
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <UsageAnalytics
+          period="30d"
+          login="reader"
+          isAdmin={false}
+          onPeriodChange={() => {}}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  fireEvent.click(await screen.findByRole("button", { name: "Next" }))
+  expect(await screen.findByText("Page 2 of 2")).toBeTruthy()
+
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <UsageAnalytics
+          period="7d"
+          login="reader"
+          isAdmin={false}
+          onPeriodChange={() => {}}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
+  expect(api.usageLeaderboard).toHaveBeenLastCalledWith("7d", 10, undefined)
+  client.clear()
+})
+
 it("distinguishes unavailable usage from empty usage and recovers without duplicate coverage notices", async () => {
   vi.mocked(api.usageLeaderboard).mockRejectedValue(
     new ApiError(503, "unavailable")
@@ -257,6 +303,35 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
   expect(screen.queryByText("Example Reader")).toBeNull()
   expect(screen.queryByText(/Updated /)).toBeNull()
   expect(screen.queryByText("7 human replies tracked")).toBeNull()
+  client.clear()
+})
+
+it("hides a GitHub login when it duplicates the user name", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      {
+        rank: 1,
+        user: { name: "reader", github_login: "reader", email: null },
+        favorite_model: "configured-model",
+        invocations: 1,
+        prs_opened: 0,
+        merged_prs: 0,
+        agent_loc: 0,
+        additions: 0,
+        deletions: 0,
+        total_tokens: 100,
+        total_cost_usd: 0,
+        invocations_without_cost: 1,
+        invocations_with_partial_cost: 0,
+        avg_invocation_seconds: 30,
+      },
+    ],
+  })
+  const client = mountReport()
+  expect(await screen.findAllByText("reader")).toHaveLength(1)
   client.clear()
 })
 
@@ -380,7 +455,7 @@ it("explains incomplete coverage on focus and removes the indicator when costs r
   act(() => trigger.focus())
   const tooltip = await screen.findByText(/Recorded cost so far/)
   expect(tooltip.textContent).toContain(
-    "Costs are missing for 1 of 2 invocations."
+    "Costs are missing for 1 of 2 invocations (50%)."
   )
   expect(tooltip.textContent).toContain(
     "Costs are partial for 1 of 2 invocations."

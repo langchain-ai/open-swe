@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from agent.dashboard import routes
 from agent.dashboard.oauth import COOKIE_NAME, issue_session
+from agent.slack import connect
 from agent.slack.oauth import SlackIdentity
 
 _VERIFIER = "desktop-connect-verifier"
@@ -52,16 +53,16 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     async def fake_upsert_mapping(**kwargs: Any) -> None:
         collected.append(kwargs)
 
-    monkeypatch.setattr(routes, "slack_oauth_configured", lambda: True)
+    monkeypatch.setattr(connect, "slack_oauth_configured", lambda: True)
     monkeypatch.setattr(
-        routes,
+        connect,
         "build_authorize_url",
         lambda *, redirect_uri, state: f"https://slack.example/authorize?state={state}",
     )
-    monkeypatch.setattr(routes, "exchange_slack_code", fake_exchange)
-    monkeypatch.setattr(routes, "fetch_slack_identity", fake_identity)
-    monkeypatch.setattr(routes, "verify_team", lambda identity: None)
-    monkeypatch.setattr(routes, "upsert_mapping", fake_upsert_mapping)
+    monkeypatch.setattr(connect, "exchange_slack_code", fake_exchange)
+    monkeypatch.setattr(connect, "fetch_slack_identity", fake_identity)
+    monkeypatch.setattr(connect, "verify_team", lambda identity: None)
+    monkeypatch.setattr(connect, "upsert_mapping", fake_upsert_mapping)
     return collected
 
 

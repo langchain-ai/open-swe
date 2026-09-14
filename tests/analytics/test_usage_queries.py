@@ -116,7 +116,7 @@ async def test_empty_report_exposes_collection_progress(usage_db):
 
 
 async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
-    alice = await person("alice", "alice@example.com")
+    alice = await person("alice", "alice@example.com", display_name="Alice Example")
     bob = await person("bob", "bob@example.com")
     carol = await person("carol", "carol@example.com")
     stale = await person("stale")
@@ -150,12 +150,17 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     await run(outsider, workspace_id=foreign)
     await pr(outsider, state="merged", additions=10000, workspace_id=foreign)
 
-    result = await report(limit=1, current_login=" ALICE ")
+    result = await report(limit=2, current_login=" ALICE ")
     assert result["total_members"] == 3
     assert result["current_user_rank"] == 2
     assert [r["rank"] for r in result["rows"]] == [1, 2]
     row = result["rows"][1]
-    assert row["user"] == {"name": "alice", "github_login": "alice", "email": "alice@example.com"}
+    assert row["user"] == {
+        "name": "Alice Example",
+        "github_login": "alice",
+        "email": "alice@example.com",
+        "avatar_url": "https://github.com/alice.png?size=80",
+    }
     assert row["invocations"] == row["agent_runs"] == 4
     assert row["avg_invocation_seconds"] == row["avg_run_seconds"] == 90
     assert row["favorite_model"] == "model-a"
@@ -172,6 +177,7 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     assert result["rows"][0]["user"]["email"] is None
     assert result["rows"][0]["user"]["github_login"] is None
     assert (await report(limit=0))["rows"][0]["rank"] == 1
+    assert [row["rank"] for row in (await report(limit=1, offset=1))["rows"]] == [2]
 
 
 async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
@@ -191,6 +197,7 @@ async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
         "name": "Open SWE user",
         "github_login": None,
         "email": None,
+        "avatar_url": None,
     }
     own = await report(limit=1, current_email=" PRIVATE@EXAMPLE.COM ")
     assert own["current_user_rank"] == 2
