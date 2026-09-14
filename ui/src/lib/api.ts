@@ -907,9 +907,13 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
-  usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
+  usageLeaderboard: (
+    period: UsageLeaderboardPeriod = "30d",
+    limit = 10,
+    offset = 0
+  ) =>
     request<UsageLeaderboardPayload>(
-      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}&offset=${offset}`
     ).then((payload) => ({
       ...payload,
       rows: payload.rows.map((row) => ({

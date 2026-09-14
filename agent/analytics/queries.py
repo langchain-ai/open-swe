@@ -213,7 +213,7 @@ WITH runs AS (
             'invocations_without_cost', invocations_without_cost,
             'invocations_with_partial_cost', invocations_with_partial_cost
         ) AS row
-    FROM ranked WHERE rank <= :limit OR is_current
+    FROM ranked WHERE rank > :offset AND rank <= :offset + :limit
 )
 SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY rank), '[]'::jsonb) FROM selected) AS rows,
     count(*) AS total_members,
@@ -266,6 +266,7 @@ async def usage_leaderboard(
     limit: int,
     current_login: str | None,
     current_email: str | None,
+    offset: int = 0,
     admin: bool = False,
 ) -> dict[str, Any]:
     """Read usage and review cohorts from one bounded PostgreSQL snapshot."""
@@ -276,6 +277,7 @@ async def usage_leaderboard(
         "workspace_id": workspace_id(),
         "as_of": as_of,
         "limit": min(max(limit, 1), 100),
+        "offset": max(offset, 0),
         "current_login": (current_login or "").strip().lower(),
         "current_email": (current_email or "").strip().lower(),
         "admin": admin,
