@@ -260,6 +260,35 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
   client.clear()
 })
 
+it("hides a GitHub login when it duplicates the user name", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      {
+        rank: 1,
+        user: { name: "reader", github_login: "reader", email: null },
+        favorite_model: "configured-model",
+        invocations: 1,
+        prs_opened: 0,
+        merged_prs: 0,
+        agent_loc: 0,
+        additions: 0,
+        deletions: 0,
+        total_tokens: 100,
+        total_cost_usd: 0,
+        invocations_without_cost: 1,
+        invocations_with_partial_cost: 0,
+        avg_invocation_seconds: 30,
+      },
+    ],
+  })
+  const client = mountReport()
+  expect(await screen.findAllByText("reader")).toHaveLength(1)
+  client.clear()
+})
+
 const costRow: UsageLeaderboardRow = {
   rank: 1,
   user: { name: "Cost Reader", github_login: "reader", email: null },
@@ -380,7 +409,7 @@ it("explains incomplete coverage on focus and removes the indicator when costs r
   act(() => trigger.focus())
   const tooltip = await screen.findByText(/Recorded cost so far/)
   expect(tooltip.textContent).toContain(
-    "Costs are missing for 1 of 2 invocations."
+    "Costs are missing for 1 of 2 invocations (50%)."
   )
   expect(tooltip.textContent).toContain(
     "Costs are partial for 1 of 2 invocations."
