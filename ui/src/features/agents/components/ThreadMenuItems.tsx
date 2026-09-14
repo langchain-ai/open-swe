@@ -38,37 +38,26 @@ export function ThreadMenuItems({
   return (
     <>
       {thread?.traceUrl && (
-        <>
-          <Menu.LinkItem
-            href={thread.traceUrl}
-            target="_blank"
-            rel="noreferrer"
-            closeOnClick
-            className={menuItemClassName}
-          >
-            <TreeStructureIcon className="size-3.5" />
-            Open trace
-          </Menu.LinkItem>
-          <Menu.Item
-            onClick={() => {
-              void navigator.clipboard.writeText(thread.traceUrl!)
-            }}
-            className={menuItemClassName}
-          >
-            <CopyIcon className="size-3.5" />
-            Copy trace URL
-          </Menu.Item>
-        </>
+        <Menu.LinkItem
+          href={thread.traceUrl}
+          target="_blank"
+          rel="noreferrer"
+          closeOnClick
+          className={menuItemClassName}
+        >
+          <TreeStructureIcon className="size-3.5" />
+          Open trace
+        </Menu.LinkItem>
       )}
       {localThread && (
         <Menu.Item
           onClick={() => {
-            void window.openSweDesktop?.copyLocalTrace(localThread.id)
+            void window.openSweDesktop?.openLocalTrace(localThread.id)
           }}
           className={menuItemClassName}
         >
-          <CopyIcon className="size-3.5" />
-          Copy trace URL
+          <TreeStructureIcon className="size-3.5" />
+          Open trace
         </Menu.Item>
       )}
       {thread?.sourceUrl && (
@@ -81,10 +70,7 @@ export function ThreadMenuItems({
           Open in Slack
         </Menu.LinkItem>
       )}
-      <Menu.Item
-        onClick={onTogglePin}
-        className={menuItemClassName}
-      >
+      <Menu.Item onClick={onTogglePin} className={menuItemClassName}>
         {pinned ? (
           <PushPinSlashIcon className="size-3.5" />
         ) : (
@@ -118,10 +104,7 @@ export function ThreadMenuItems({
           Copy thread ID
         </Menu.Item>
       )}
-      <Menu.Item
-        onClick={onToggleArchived}
-        className={menuItemClassName}
-      >
+      <Menu.Item onClick={onToggleArchived} className={menuItemClassName}>
         {archived ? (
           <ArrowCounterClockwiseIcon className="size-3.5" />
         ) : (
