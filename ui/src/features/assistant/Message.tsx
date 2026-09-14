@@ -164,14 +164,29 @@ export const toolkit = {
   write_file: { type: "backend", render: FileEditTool },
 } satisfies Toolkit
 
-const groupByType = groupPartByType({
+type ActivityGroup = "group-activity" | `group-${"read" | "edit"}:${string}`
+
+const groupByType = groupPartByType<ActivityGroup>({
   reasoning: ["group-activity"],
   "tool-call": ["group-activity"],
   "standalone-tool-call": [],
 })
 
-const groupActivity: typeof groupByType = (part, context) =>
-  part.type === "tool-call" && part.isError ? [] : groupByType(part, context)
+const groupActivity: typeof groupByType = (part, context) => {
+  if (part.type === "tool-call" && part.isError) return []
+  const groups = groupByType(part, context)
+  if (
+    part.type !== "tool-call" ||
+    groups.length === 0 ||
+    (part.toolName !== "read_file" && part.toolName !== "edit_file")
+  ) {
+    return groups
+  }
+  const path = part.args.file_path ?? part.args.path ?? part.args.target_file
+  if (typeof path !== "string" || !path.trim()) return groups
+  const operation = part.toolName === "read_file" ? "read" : "edit"
+  return [...groups, `group-${operation}:${path}`]
+}
 
 export function AssistantMessage() {
   const role = useAuiState((state) => state.message.role)
@@ -183,6 +198,25 @@ export function AssistantMessage() {
     >
       <MessagePrimitive.GroupedParts groupBy={groupActivity}>
         {({ part, children }) => {
+          if ("indices" in part && part.type !== "group-activity") {
+            if (part.indices.length < 2) return children
+            const reading = part.type.startsWith("group-read:")
+            const path = part.type.slice(part.type.indexOf(":") + 1)
+            return (
+              <details className="my-2 rounded-xl border border-border p-3 text-sm">
+                <summary className="cursor-pointer font-medium break-all">
+                  {reading ? "Read" : "Edit"} {path} · {part.indices.length}{" "}
+                  calls
+                  {part.status.type === "running" && (
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      Running
+                    </span>
+                  )}
+                </summary>
+                <div className="mt-3 space-y-3">{children}</div>
+              </details>
+            )
+          }
           switch (part.type) {
             case "group-activity":
               return (

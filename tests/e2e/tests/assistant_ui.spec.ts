@@ -65,6 +65,88 @@ test.afterEach(async ({ page }) => {
   await setExperimentalMode(page, false);
 });
 
+test("groups file reads and edits with expandable original calls", async ({
+  page,
+}) => {
+  const id = await startSlackThread(page, "Add a greet() helper and open a PR");
+  await waitForThreadIdle(page, id);
+  await waitForThreadNotBusy(page, id);
+  const calls = [
+    ...Array.from({ length: 10 }, (_, index) => ({
+      id: `read-${index}`,
+      name: "read_file",
+      args: { file_path: "src/service.ts", offset: index * 20, limit: 20 },
+    })),
+    ...Array.from({ length: 3 }, (_, index) => ({
+      id: `edit-${index}`,
+      name: "edit_file",
+      args: {
+        file_path: "src/service.ts",
+        old_string: `const value${index} = false;`,
+        new_string: `const value${index} = true;`,
+      },
+    })),
+  ];
+  await page.route(`**/dashboard/api/threads/${id}/state`, async (route) => {
+    const response = await route.fetch();
+    const state: { values: Record<string, unknown> } = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...state,
+        values: {
+          ...state.values,
+          messages: [
+            {
+              id: "request",
+              type: "human",
+              content: "Inspect and edit the file",
+            },
+            { id: "calls", type: "ai", content: "", tool_calls: calls },
+            ...calls.map((call) => ({
+              id: `result-${call.id}`,
+              type: "tool",
+              tool_call_id: call.id,
+              name: call.name,
+              content: `Result ${call.id}`,
+            })),
+            { id: "answer", type: "ai", content: "File updated." },
+          ],
+        },
+      },
+    });
+  });
+
+  await page.goto(`/assistant/${id}`);
+  const transcript = conversation(page);
+  await transcript.getByText("Show activity", { exact: true }).click();
+  for (const [label, count, name, result] of [
+    ["Read", 10, "read_file", "Result read-0"],
+    ["Edit", 3, "edit_file", "Result edit-0"],
+  ] as const) {
+    const summary = transcript.getByText(
+      `${label} src/service.ts · ${count} calls`,
+      {
+        exact: true,
+      },
+    );
+    await expect(summary).toBeVisible();
+    const group = summary.locator("..");
+    await expect(
+      group.locator("summary").filter({ hasText: name }),
+    ).toHaveCount(count);
+    await expect(group.getByText(result, { exact: true })).toBeHidden();
+    await summary.click();
+    await group.locator("summary").filter({ hasText: name }).first().click();
+    await expect(group.getByText(result, { exact: true })).toBeVisible();
+    await summary.click();
+    await expect(group.getByText(result, { exact: true })).toBeHidden();
+  }
+  await expect(
+    transcript.getByText("File updated.", { exact: true }),
+  ).toBeVisible();
+});
+
 test("restores sidebar navigation, pins, view controls, and search", async ({
   page,
 }) => {
