@@ -2,25 +2,22 @@ import posixpath
 import shlex
 from typing import Any, Literal
 
-from langgraph.config import get_config
+from agent.run_config import RunConfig
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
-from ..integrations.langsmith import get_async_sandbox_client
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
-from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
 
-
-async def _resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
+async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
     if not isinstance(file_path, str) or not file_path.strip() or "\x00" in file_path:
         raise ValueError("file_path must be a non-empty sandbox path")
 
-    config = get_config()
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise ValueError("no thread_id in run config")
 
     backend_proxy = await get_sandbox_backend(thread_id)
-    work_dir = posixpath.normpath(await aresolve_sandbox_work_dir(backend_proxy))
+    work_dir = posixpath.normpath(await resolve_sandbox_work_dir(backend_proxy))
     path = posixpath.normpath(
         file_path.strip()
         if file_path.strip().startswith("/")
@@ -43,14 +40,7 @@ async def create_sandbox_file_download_url(
     content_type: str | None = None,
     content_disposition: Literal["attachment", "inline"] = "attachment",
 ) -> dict[str, Any]:
-    """Create a bearer download URL for one file in the active LangSmith sandbox.
-
-    Use this to share large binary artifacts such as videos, images, archives, or PDFs instead of
-    pasting their contents into a response. Anyone with the URL can download the file, so never use
-    it for secrets or credentials. Links do not expire by default; pass `expires_in_seconds` only
-    when a link should stop working after a set time. Set `content_disposition` to `inline` and
-    provide an appropriate `content_type` when the browser should preview an image, video, or PDF.
-    """
+    """Implement the `create_sandbox_file_download_url` tool."""
     if expires_in_seconds is not None and expires_in_seconds < 1:
         raise ValueError("expires_in_seconds must be positive or null")
     if content_type is not None:
@@ -58,7 +48,7 @@ async def create_sandbox_file_download_url(
         if not content_type or "\r" in content_type or "\n" in content_type:
             raise ValueError("content_type must be a valid non-empty media type")
 
-    backend_proxy, path, _ = await _resolve_sandbox_file(file_path)
+    backend_proxy, path, _ = await resolve_sandbox_file(file_path)
     backend = unwrap_sandbox_backend(backend_proxy)
     async with get_async_sandbox_client() as client:
         download = await client.generate_download_url(

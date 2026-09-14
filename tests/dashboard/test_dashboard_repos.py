@@ -1,7 +1,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
+import httpx2
 import pytest
 from fastapi import HTTPException
 
@@ -18,13 +18,13 @@ def _no_repo_cache(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_paginate_converts_github_timeout_to_503() -> None:
-    request = httpx.Request("GET", "https://api.github.com/user/installations")
+    request = httpx2.Request("GET", "https://api.github.com/user/installations")
 
-    async def handler(_request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectTimeout("connect timed out", request=request)
+    async def handler(_request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectTimeout("connect timed out", request=request)
 
-    transport = httpx.MockTransport(handler)
-    async with httpx.AsyncClient(transport=transport) as client:
+    transport = httpx2.MockTransport(handler)
+    async with httpx2.AsyncClient(transport=transport) as client:
         with pytest.raises(HTTPException) as exc:
             await routes._paginate(
                 client,
@@ -39,11 +39,11 @@ async def test_paginate_converts_github_timeout_to_503() -> None:
 
 @pytest.mark.asyncio
 async def test_paginate_converts_github_status_error_to_502() -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, request=request, json={"message": "server error"})
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(500, request=request, json={"message": "server error"})
 
-    transport = httpx.MockTransport(handler)
-    async with httpx.AsyncClient(transport=transport) as client:
+    transport = httpx2.MockTransport(handler)
+    async with httpx2.AsyncClient(transport=transport) as client:
         with pytest.raises(HTTPException) as exc:
             await routes._paginate(
                 client,

@@ -24,8 +24,8 @@ const MODELS: Array<ModelOption> = [
     context_window: 272_000,
   },
   {
-    id: "google_genai:gemini-3.7-flash",
-    label: "Gemini 3.7 Flash",
+    id: "google_genai:gemini-3.8-flash",
+    label: "Gemini 3.8 Flash",
     efforts: ["minimal", "low", "medium", "high"],
     default_effort: "medium",
     supports_images: true,
@@ -60,6 +60,27 @@ function openModelPane() {
 }
 
 describe("ModelPicker", () => {
+  it("reaches Auto and models with the keyboard while routing automatically", () => {
+    const { onSelectionChange, panel } = openPicker({ selection: null })
+
+    fireEvent.keyDown(panel, { key: "ArrowRight" })
+    fireEvent.keyDown(panel, { key: "ArrowDown" })
+    fireEvent.keyDown(panel, { key: "Enter" })
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      modelId: "openai:gpt-5.6-sol",
+      effort: "xhigh",
+    })
+
+    fireEvent.click(screen.getByRole("button", { expanded: false }))
+    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
+      key: "ArrowRight",
+    })
+    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
+      key: "Enter",
+    })
+    expect(onSelectionChange).toHaveBeenLastCalledWith(null)
+  })
+
   it("labels the trigger with the selected model and effort", () => {
     render(
       <ModelPicker
@@ -90,7 +111,7 @@ describe("ModelPicker", () => {
 
   it("omits the context section for models without a context window", () => {
     openPicker({
-      selection: { modelId: "google_genai:gemini-3.7-flash", effort: "medium" },
+      selection: { modelId: "google_genai:gemini-3.8-flash", effort: "medium" },
     })
 
     expect(screen.getByTestId("model-picker-panel").textContent).not.toContain(
@@ -123,7 +144,12 @@ describe("ModelPicker", () => {
       within(models)
         .getAllByRole("option")
         .map((option) => option.textContent)
-    ).toEqual(["GPT-5.6 Sol High", "Gemini 3.7 Flash Medium", "Kimi K3 High"])
+    ).toEqual([
+      "Auto",
+      "GPT-5.6 Sol High",
+      "Gemini 3.8 Flash Medium",
+      "Kimi K3 High",
+    ])
 
     fireEvent.change(screen.getByLabelText("Search models"), {
       target: { value: "kimi" },

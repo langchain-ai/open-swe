@@ -13,18 +13,19 @@ updates in place instead of duplicating.
 
 import asyncio
 import logging
-import os
 import uuid
 from typing import Any
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 
-from ..review.findings import Finding
-from .langsmith import async_langsmith_client, sync_langsmith_client
+from agent.config import ENV
+from agent.review.findings import Finding
+from agent.run_config import RunConfig
+from agent.utils.langsmith import async_langsmith_client, sync_langsmith_client
 
 logger = logging.getLogger(__name__)
 
-OUTCOMES_DATASET_NAME = os.environ.get("REVIEWER_OUTCOMES_DATASET", "openswe-reviewer-outcomes")
+OUTCOMES_DATASET_NAME = ENV.REVIEWER_OUTCOMES_DATASET.get()
 
 TRUE_POSITIVE = "true_positive"
 FALSE_POSITIVE = "false_positive"
@@ -64,16 +65,10 @@ def outcome_from_score(score: float | None, *, source: str) -> tuple[str, str] |
 
 def _outcomes_credentials() -> tuple[str, str] | None:
     """Resolve the outcomes-dataset credentials, preferring the prod tenant."""
-    prod_key = os.environ.get("LANGSMITH_API_KEY_PROD")
-    if prod_key:
-        api_url = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
-            "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
-        )
-        return prod_key, api_url
-    api_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
+    api_key = ENV.LANGSMITH_API_KEY.optional()
     if not api_key:
         return None
-    return api_key, os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    return api_key, ENV.LANGSMITH_ENDPOINT.get()
 
 
 async def _find_dataset(client: AsyncLangSmithClient) -> Any:
@@ -253,44 +248,35 @@ async def upsert_run_outcome(
         return False
 
 
-def repo_full_name_from_config(configurable: dict[str, Any]) -> str:
-    repo = configurable.get("repo") if isinstance(configurable, dict) else None
-    if isinstance(repo, dict) and repo.get("owner") and repo.get("name"):
-        return f"{repo['owner']}/{repo['name']}"
-    return ""
-
-
 async def emit_finding_status_outcome(
     finding: Finding,
     status: str,
     *,
-    configurable: dict[str, Any],
+    cfg: RunConfig,
     thread_id: str | None = None,
 ) -> bool:
     """Map a resolve/dismiss transition to an outcome example and upsert it.
 
-    Reads repo / PR / SHA context from the reviewer run ``configurable``.
+    Reads repo / PR / SHA context from the reviewer run config.
     Best-effort: a no-op when the status isn't terminal or repo is unknown.
     """
-    head_sha = str(configurable.get("head_sha") or "")
+    head_sha = cfg.head_sha or ""
     mapping = outcome_from_status(
         status, first_seen_sha=finding.get("first_seen_sha"), head_sha=head_sha
     )
     if mapping is None:
         return False
-    repo = repo_full_name_from_config(configurable)
-    if not repo:
+    if not cfg.repo_full_name:
         return False
     label, label_source = mapping
-    pr_number = configurable.get("pr_number")
     return await upsert_finding_outcome(
         finding,
         label=label,
         label_source=label_source,
-        repo=repo,
-        pr_number=pr_number if isinstance(pr_number, int) else None,
-        pr_url=str(configurable.get("pr_url") or ""),
-        base_sha=str(configurable.get("base_sha") or ""),
+        repo=cfg.repo_full_name,
+        pr_number=cfg.pr_number,
+        pr_url=cfg.pr_url or "",
+        base_sha=cfg.base_sha or "",
         head_sha=head_sha,
         thread_id=thread_id,
     )

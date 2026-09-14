@@ -109,7 +109,7 @@ async def write_plan_to_sandbox(
     """
     path = plan_file_path or plan_file_path_for_thread(thread_id)
     try:
-        from ..utils.sandbox_state import get_sandbox_backend
+        from agent.sandboxes.state import get_sandbox_backend
 
         backend = await get_sandbox_backend(thread_id)
         await backend.awrite(path, content)

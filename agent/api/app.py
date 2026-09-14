@@ -1,20 +1,24 @@
 """FastAPI application composition."""
 
-import os
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ..dashboard import router as dashboard_router
-from ..dashboard.plan_api import plan_router
-from ..dashboard.workflow_approval_api import workflow_approval_router
-from ..utils.event_loop import pin_single_event_loop
-from ..webhooks.github_routes import router as github_webhook_router
-from ..webhooks.linear_routes import router as linear_webhook_router
-from ..webhooks.slack_routes import router as slack_webhook_router
-from .health import router as health_router
+from agent.api.health import router as health_router
+from agent.config import ENV
+from agent.dashboard import router as dashboard_router
+from agent.dashboard.plan_api import plan_router
+from agent.dashboard.workflow_approval_api import workflow_approval_router
+from agent.github.routes import router as github_webhook_router
+from agent.linear.routes import router as linear_webhook_router
+from agent.slack.routes import router as slack_webhook_router
+from agent.utils.dashboard_ui import mount_dashboard_ui
+from agent.utils.event_loop import pin_single_event_loop
+
+logger = logging.getLogger(__name__)
 
 # Before the queue starts: it reads this when it builds its workers, and Open SWE
 # cannot survive them landing on different loops.
@@ -23,15 +27,27 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    from ..utils.model import close_cached_models, validate_local_dev_llm_config
-    from ..utils.sandbox import validate_sandbox_startup_config
+    from agent.analytics.worker import start_worker, stop_worker
+    from agent.dashboard.oauth import validate_github_login_allowlist
+    from agent.database.analytics import close as close_analytics
+    from agent.database.analytics import migrate as migrate_analytics
+    from agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from agent.utils.model import close_cached_models, validate_local_dev_llm_config
 
     pin_single_event_loop()
+    validate_github_login_allowlist()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
     try:
+        await migrate_analytics()
+        await start_worker()
+    except Exception:  # noqa: BLE001
+        logger.warning("Analytics startup failed", exc_info=True)
+    try:
         yield
     finally:
+        await stop_worker()
+        await close_analytics()
         await close_cached_models()
 
 
@@ -39,7 +55,7 @@ def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     allowed_origins = [
         origin.strip()
-        for origin in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",")
+        for origin in ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(",")
         if origin.strip()
     ]
     if "*" in allowed_origins:
@@ -61,6 +77,7 @@ def create_app() -> FastAPI:
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
     app.include_router(github_webhook_router)
+    mount_dashboard_ui(app)
     return app
 
 

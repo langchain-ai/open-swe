@@ -9,7 +9,6 @@ from agent.input_messages import (
     human_input,
     person_introduction,
     visible_dynamic_context_hashes,
-    wrap_system_prompt,
 )
 
 
@@ -90,20 +89,6 @@ def test_first_seen_introductions_are_practical_and_mutate_registry() -> None:
     assert topic is not None
     assert topic.attrib["trust"] == "untrusted"
     assert channel.findtext("topic") == "a < b"
-
-
-def test_system_prompt_wrapping_is_idempotent_and_additions_are_distinct() -> None:
-    wrapped = wrap_system_prompt("Follow <rules> & finish")
-    assert wrap_system_prompt(wrapped) == wrapped
-    augmented = wrap_system_prompt(wrapped, additions=["Wrap up now"])
-
-    root = _parse(augmented)
-    assert root.tag == "system-instructions"
-    messages = root.findall("input-message")
-    assert [message.findtext("content") for message in messages] == [
-        "Follow <rules> & finish",
-        "Wrap up now",
-    ]
 
 
 def test_run_input_preserves_files() -> None:

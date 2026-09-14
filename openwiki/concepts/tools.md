@@ -1,179 +1,153 @@
 ---
-type: concept
-title: Agent Tools (Curated Toolset)
-description: Authoritative map of Open SWE's curated tools, Deep Agents built-ins, graph-specific tool surfaces, dynamic integrations, and tool-level safety boundaries.
-tags: [tools, agent, reviewer, analyzer, deepagents, integrations, plan-mode, authorization]
+type: tool catalog and authorization model
+title: Tool Catalog and Authorization
+description: How Open SWE exports curated tools, wires graph-specific and deferred tool surfaces, and enforces authorization and plan-mode controls. Use this page when safely adding or changing an agent capability.
+tags: [tools, agent, authorization, integrations, plan-mode, automation, reviewer]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-08-28T11:53:01.759Z
+    at: 2026-09-08T08:15:30.533Z
 sources:
   - id: openwiki-source-63ebc853556c1b852ed80aff
     resource: repo://agent/analyzer.py
   - id: openwiki-source-921ec88ab63280d28b3dddb5
     resource: repo://agent/chat.py
-  - id: openwiki-source-049148e9c970ff263c957b04
-    resource: repo://agent/dashboard/review_chat_api.py
   - id: openwiki-source-9103280889fa6c4d9c5bb0df
     resource: repo://agent/middleware/dynamic_tools.py
+  - id: openwiki-source-f26d060fb4408e89b50964a5
+    resource: repo://agent/middleware/plan_mode.py
   - id: openwiki-source-276ab38291eb5741b4c2141c
     resource: repo://agent/reviewer.py
   - id: openwiki-source-856ade03ef31ac38e1347f7c
     resource: repo://agent/server.py
+  - id: openwiki-source-e4901f6a09c372487ff11987
+    resource: repo://agent/tool_loaders/corridor_mcp.py
+  - id: openwiki-source-6de9e7b7779ea6aada343f2a
+    resource: repo://agent/tool_loaders/langsmith.py
+  - id: openwiki-source-2cd7e2018ae35c5972204803
+    resource: repo://agent/tool_loaders/notion_mcp.py
   - id: openwiki-source-a46a7cd7d143369055b05580
     resource: repo://agent/tools/__init__.py
-  - id: openwiki-source-d8298c1a08304a86bd1da991
-    resource: repo://agent/tools/approve_plan.py
-  - id: openwiki-source-d9bf67d6a09bd54eb3e306cf
-    resource: repo://agent/tools/background_execute.py
-  - id: openwiki-source-e89cf8ceb9792c1cbeb7569e
-    resource: repo://agent/tools/enter_plan_mode.py
-  - id: openwiki-source-b5e769b43720e69b4e5eab75
-    resource: repo://agent/tools/environments.py
-  - id: openwiki-source-69330a855dafd7cace0820b0
-    resource: repo://agent/tools/fetch_review_diff.py
-  - id: openwiki-source-400c7123b7a35e5547f18d86
-    resource: repo://agent/tools/http_request.py
-  - id: openwiki-source-c3b12b5693b6aa5458b6b53a
-    resource: repo://agent/tools/manage_baby_sit.py
-  - id: openwiki-source-ba666a428b107356ed2aa395
-    resource: repo://agent/tools/manage_code_channel.py
-  - id: openwiki-source-d9f2a513cf28971a9676bf89
-    resource: repo://agent/tools/open_pull_request.py
-  - id: openwiki-source-2381c11d698eab667b973058
-    resource: repo://agent/tools/read_repo_file.py
-  - id: openwiki-source-9a9aaf4b265831fa9c7e3bd2
-    resource: repo://agent/tools/schedule_thread_wakeup.py
-  - id: openwiki-source-c631f720f8d212e6d3b82c53
-    resource: repo://agent/tools/search_repo_code.py
-  - id: openwiki-source-f04e398bd4e627fb9faff701
-    resource: repo://agent/tools/threads.py
-  - id: openwiki-source-8037e2358a2c4f9b2c722a11
-    resource: repo://AGENTS.md
-  - id: openwiki-source-23775c3de52f3ab95a13cb8b
-    resource: repo://README.md
+  - id: openwiki-source-9bef6ead94fcf55bf6db8787
+    resource: repo://agent/tools/admin_gate.py
+  - id: openwiki-source-74fafd9666607114e1ad0431
+    resource: repo://agent/tools/automations.py
+  - id: openwiki-source-dcf576fc340e5f1a2bc3f5f4
+    resource: repo://agent/tools/read_user_settings.py
   - id: openwiki-source-fef236c0a2029fbda76955d6
     resource: repo://tests/agent/test_plan_mode.py
-  - id: openwiki-source-3b6e8359d52d6e7ed5a50ef0
-    resource: repo://tests/tools/test_background_execute.py
-  - id: openwiki-source-66160b6a3ab0caa3aa64bf3e
-    resource: repo://tests/tools/test_http_security.py
-  - id: openwiki-source-749071bb736ba933e244501a
-    resource: repo://tests/tools/test_manage_baby_sit.py
-  - id: openwiki-source-7416596e0d9fc9b802355ff6
-    resource: repo://tests/tools/test_schedule_thread_wakeup.py
-  - id: openwiki-source-432efb2a605cb424bc404a25
-    resource: repo://tests/tools/test_threads.py
-generated: { by: "openwiki/0.4.2", at: "2026-08-28T11:53:01.759Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
 ---
 
-# Agent Tools (Curated Toolset)
+# Tool Catalog and Authorization
 
-Open SWE deliberately keeps its first-class tool surface small. Repository work normally uses `gh` and shell commands in the sandbox, rather than adding a specialized tool for every GitHub action; similarly, code search normally uses shell tooling. Curated tools exist where a capability needs application state, dashboard parity, an integration boundary, or safety and authorization logic that shell access cannot provide.
+Open SWE does not treat the tools package as a universal capability grant. A tool must be exported, deliberately wired into a particular graph, and—where appropriate—protected again at its own boundary. This separation keeps credentials, administrative actions, and graph-specific operations out of tool surfaces that do not need them.
 
-## Tool package and composition model
+## Catalog versus executable surface
 
-Curated tools are flat modules in `agent/tools/`. `agent.tools` is a lazy export facade: `_TOOL_MODULES` maps public names to modules; `_load_export` imports and caches a tool only when it is accessed; and `_LazyToolsModule` ensures a same-named imported submodule does not shadow the public function. A module may therefore provide several exports, such as `background_execute` and `background_task`, or the four environment-management operations.
+`agent.tools` is the curated export facade. `_TOOL_MODULES` maps public names to their implementation modules; access lazily imports and caches the export. Its module subclass deliberately prefers a public export over an identically named submodule that `importlib` placed on the package. Several names can share an implementation, such as the two background-task aliases and the automation operations.
 
-A graph factory passes curated tools to `deepagents.create_deep_agent`. Deep Agents separately supplies its filesystem, shell, and delegation capabilities: `read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `grep`, `execute`, and `task`. `DEEP_AGENT_TOOL_NAMES` reserves these names, so a dynamic or curated tool must not collide with them. The main agent hides `grep`; stop-summary mode also hides the mutating built-ins `delete`, `edit_file`, `execute`, `task`, and `write_file`.
+The facade includes local curated modules as well as selected GitHub, Linear, and Slack tools. Exporting a name only makes it importable: each graph factory supplies its own list to `create_deep_agent`.
+
+Deep Agents separately supplies filesystem and delegation tools: `read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `grep`, `execute`, and `task`. `DEEP_AGENT_TOOL_NAMES` reserves these names, preventing static or dynamic integrations from colliding with them. The main graph hides `grep`; stop-summary mode additionally hides the mutating filesystem, shell, and delegation built-ins.
 
 ```mermaid
 flowchart TD
-    Package["agent/tools lazy curated exports"]
-    Builtins["Deep Agents built-ins"]
+    Catalog["agent.tools lazy catalog"]
     Main["Main coding graph"]
-    Reviewer["PR reviewer graph"]
-    Analyzer["Review-style analyzer graph"]
-    Chat["PR chat graph"]
-    Static["Static curated tools"]
-    Dynamic["On-demand integration tools"]
+    Reviewer["Reviewer graph"]
+    Analyzer["Analyzer graph"]
+    Chat["Read-only PR chat graph"]
+    Builtins["Deep Agents built-ins"]
+    Deferred["Deferred integration groups"]
 
-    Package --> Static
-    Static --> Main
-    Dynamic --> Main
-    Package --> Reviewer
-    Package --> Analyzer
-    Package --> Chat
+    Catalog --> Main
+    Catalog --> Reviewer
+    Catalog --> Analyzer
+    Catalog --> Chat
     Builtins --> Main
     Builtins --> Reviewer
     Builtins --> Analyzer
     Builtins --> Chat
+    Deferred --> Main
 ```
 
-Curated exports are selected by each graph factory, while `create_deep_agent` adds its own built-in capabilities to every executing graph.
+This diagram distinguishes the import catalog from the graph-specific execution surfaces; deferred integrations are attached only to eligible main-agent runs.
 
-## Main coding agent: static and conditional tools
+## Main coding agent assembly
 
-`agent.server:get_agent` builds the main graph's `static_tools` list. It includes:
+`agent.server:get_agent` constructs the normal `static_tools` list. It includes web access; plan lifecycle; background execution; user instructions and skills; Linear; dashboard thread, notification, and baby-sit operations; PR creation and review request; sandbox recovery; scheduling; safe user-settings lookup; platform-issue reporting; and Slack tools. Signed sandbox download/service helpers are included only when the run configuration enables them.
 
-- **Web and research:** `http_request`, `fetch_url`, and `web_search`.
-- **Planning and personal configuration:** `enter_plan_mode`, `save_plan`, `approve_plan`, `save_user_instructions`, `save_user_skill`, and `delete_user_skill`.
-- **Sandbox and work tracking:** `background_execute`, `background_task`, `recreate_sandbox`, `schedule_thread_wakeup`, and `report_platform_issue`.
-- **Project systems and threads:** the Linear tools; `list_threads`, `get_thread`, `manage_thread`; `manage_baby_sit`; `notify_automation_channel`; `open_pull_request`; and `request_pr_review`.
-- **Slack:** `manage_code_channel` and the Slack message, reaction, attachment, and move tools.
+The final list depends on trusted run context:
 
-The factory then changes this surface for the run context. An admin thread adds `sandbox_reset`, environment administration (`list_environments`, `save_environment`, `capture_environment_snapshot`, and `delete_environment`), and organization-skill administration. Sandbox download support conditionally adds `output_iframe`, `create_sandbox_file_download_url`, and `create_sandbox_service_url`. Slack tools are removed when Slack is disabled. `local_run` is intentionally only the three web tools; `stop_summary` is only Slack thread read/reply before Slack disabling is applied.
+- An `admin_thread` receives `ADMIN_TOOLS`: sandbox reset, automation management, environment management, and organization-skill mutations. The factory accepts the flag only after checking the triggering identity against the configured administrators, so metadata cannot transfer admin capability to a later participant.
+- A desktop `local_run` receives only `http_request`, `fetch_url`, and `web_search`. A `stop_summary` run initially receives only Slack thread reading and reply. In both cases, integration groups are not collected.
+- Slack operations are removed unless trusted Slack context enables them. This filtering occurs after the mode-specific list is chosen.
+- The general-purpose subagent gets the applicable static list except `background_execute` and `background_task`; separately compiled subagent graphs do not inherit parent middleware. Dynamic integration middleware is explicitly passed to it.
 
-The main graph also creates a general-purpose subagent. It receives the static tools except the two background-execution aliases. Parent-context-dependent tools are excluded from subagents, including Slack, thread management, `manage_code_channel`, `notify_automation_channel`, and user-settings access; the parent agent must relay those interactions.
+## Deferred integration tools
 
-### On-demand integration groups
+Eligible normal runs construct candidate groups for Observability, Currents, Notion, and browser tools; a configured Corridor group advertises its fixed allowlist and postpones its MCP connection. `DynamicToolMiddleware` presents one loader, `load_integration_tools`, with the catalog of group-qualified tool names rather than placing all operational schemas on the first model call.
 
-When the run is neither local nor stop-summary, the server gathers browser tools plus Observability, Currents, and Notion integration tools. If configured, Corridor is represented by a static name catalog with a deferred MCP loader. These integration groups are mediated by `DynamicToolMiddleware`, not appended directly to the initial static list:
+```mermaid
+sequenceDiagram
+    participant Model
+    participant Middleware as Dynamic tool middleware
+    participant Loader as Integration loader
+    participant Service as Integration or MCP service
 
-1. The model initially sees `load_integration_tools` and a catalog of group-qualified names.
-2. It must request exact names with that loader.
-3. The middleware builds the required group once, under a per-group lock, stores the successfully resolved tools, and records loaded names in graph state.
-4. Later model calls receive only the requested resolved tools. Calling an integration tool before loading it, or requesting one unavailable after loading, returns an error tool message and tells the agent to continue without it.
+    Model->>Middleware: load_integration_tools with names
+    Middleware->>Loader: build requested groups
+    Loader->>Service: obtain credentials or MCP tools
+    Service-->>Loader: resolved tools or failure
+    Loader-->>Middleware: cached group result
+    Middleware-->>Model: schemas available next turn or error
+    Model->>Middleware: call loaded tool
+    Middleware-->>Model: dispatch resolved tool
+```
 
-The middleware rejects duplicate names across groups and collisions with the built-in/static reserved names. This defers expensive MCP handshakes and credential reads until a tool is actually wanted, rather than putting them on the first model-call critical path.
+This is the deferred loading path: a successful loader call updates run state, so the requested schema becomes available on the next model turn.
 
-## Specialist graphs
+Names must be unique across groups and must not collide with the loader, built-ins, or static tools. The middleware resets `loaded_integration_tools` at the start of each run. It uses one lock and one cached resolution per group; loading failures become an empty group and a tool error instructing the model to continue. Direct integration calls before loading receive the same kind of recoverable error.
 
-The factories deliberately give specialist graphs different curated surfaces; their Deep Agents built-ins still come from `create_deep_agent` unless middleware removes them.
+Integration loading is also a credential boundary. Corridor accepts only its configured HTTPS endpoint and allowlisted tool names, puts its bearer token on the server-side MCP connection, and degrades to no tools when configuration or the service fails. Notion schemas require an `on_behalf_of` thread participant; each invocation resolves that participant and refreshes that participant's token rather than retaining one in the sandbox. LangSmith tools similarly resolve a participant credential at call time, can use team credentials only where allowed, and are read-only. Observability availability is selected only for an explicitly authorized/admin triggering identity.
 
-| Graph | Curated tools and operational boundary |
+## Specialist surfaces
+
+| Graph | Curated tools and intent |
 | --- | --- |
-| Main (`get_agent`) | The configurable surface described above, plus Deep Agents built-ins and optional integrations. |
-| Reviewer (`get_reviewer_agent`) | `fetch_review_diff`, finding lifecycle tools (`add_finding`, `update_finding`, `list_findings`, `publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`), and `web_search`, `fetch_url`, `http_request`. It does not wire `open_pull_request` as a curated tool, but it is still a Deep Agents graph with a reviewer sandbox; do not equate the curated list alone with a complete capability/security boundary. |
-| Analyzer (`get_analyzer`) | `save_review_style_prompt` and `read_finding_outcomes`, used to produce/refine a per-repository review-style prompt. |
-| PR chat (`get_chat_agent`) | `read_repo_file`, `search_repo_code`, `list_review_findings`, `web_search`, and `fetch_url`. It has no sandbox backend; middleware excludes `execute`, `write_file`, `edit_file`, and `delete`, and its delegated subagent allowlists only `read_file`, `ls`, `glob`, and `grep`. |
+| Main | Context-dependent static tools, eligible dynamic groups, and applicable Deep Agents built-ins. |
+| Reviewer | `fetch_review_diff`; finding creation, update, listing, publication, resolution, and reply; plus `web_search`, `fetch_url`, and `http_request`. It does not receive `open_pull_request`. |
+| Analyzer | Only `save_review_style_prompt` and `read_finding_outcomes`, supporting repository review-style guidance. |
+| PR chat | `read_repo_file`, `search_repo_code`, `list_review_findings`, `web_search`, and `fetch_url`, with a read-only virtual-file surface. |
 
-The dashboard review-chat backend mints private chat threads scoped to a viewer, repository, and PR. On the first run it seeds virtual `/pr/overview.md`, `/pr/diff.patch`, and `/pr/findings.md` files (truncating a diff at 400,000 characters). It validates this ownership/scope on every proxied thread access. `PrepareChatRunMiddleware` acquires a GitHub App installation token and supplies it as `chat_github_token`; the chat read tools use that token with the Contents and code-search APIs. `read_repo_file` defaults to the PR head and caps returned file bytes; `search_repo_code` is explicitly default-branch indexed, so it locates symbols but cannot search an arbitrary PR ref.
+PR chat intentionally has no sandbox. It excludes shell and write built-ins, and its delegated subagent allowlists only `read_file`, `ls`, `glob`, and `grep`. The chat preparation middleware acquires a repository-scoped GitHub App installation token for the GitHub-backed read tools; PR overview, diff, and findings are supplied as virtual `/pr/` files by the review-chat API.
 
-## High-value tool behaviors
+## Tool-side authorization and safe responses
 
-- **Outbound HTTP:** `http_request` allows arbitrary methods but uses safe redirect handling. It treats returned web data as untrusted and offloads a serialized response larger than 100,000 characters to sandbox JSONL, returning a path and size instead of inlining it. Its contract tells agents to use sandbox `gh`, not this tool, for GitHub API calls.
-- **Background commands:** `background_execute`/`background_task` launch non-blocking shell work tracked below `/tmp/open-swe-background-tasks`. The runner bounds active tasks to four, output to 1 MiB, and timeout to at most 24 hours; task state and output are durable sandbox files with a one-week TTL.
-- **PR opening:** `open_pull_request` is for a new already-pushed branch. For dashboard, Slack, and Linear triggers it prefers the triggering user's OAuth token so the PR is attributed to that user, falling back to the GitHub App token. It returns an existing branch PR rather than duplicating it; ordinary PR updates remain `gh` work.
-- **Review diff:** `fetch_review_diff` materializes the selected review range in the reviewer sandbox and returns a path plus bounded changed-file metadata. The reviewer can inspect the local artifact using built-ins rather than placing the full diff in a tool result.
-- **Wakeups and CI watching:** `schedule_thread_wakeup` creates a one-shot LangGraph cron after 1–1,440 minutes, persists a generation/count budget, and refuses more than ten system wakeups between human messages. `manage_baby_sit` starts/stops a durable PR watch or records a flaky retry; it verifies a canonical PR URL, executable thread, repository match, open PR/head information, and GitHub App installation before starting a watch.
+Graph wiring is a convenience and least-privilege measure, not the sole authorization control. `read_user_settings` takes no caller-provided user, thread, or source identifier. It derives verified participants from runtime configuration and returns mapped profile settings, instructions, connection status metadata, and an unresolved count—never connection tokens or credentials.
 
-## Parent-only authorization and dashboard parity
+Automation operations repeat their authorization with `require_admin`, which checks the runtime identity. They wrap the dashboard schedule service and return structured `{ok: false, error: ...}` responses for authorization and service failures. Creation records the verified admin identity; update preserves omitted fields while rejecting simultaneous clear/set values for repository or Slack destination; test triggering is allowed for paused automations. The delete tool's contract requires user confirmation before permanent removal.
 
-`list_threads`, `get_thread`, and `manage_thread` implement dashboard-equivalent operations, not trust in caller-provided thread metadata. They derive an actor from trusted run configuration (with the current state identity able to supersede it), enforce allowed-organization membership, then call dashboard operations that apply owner/participant/admin rules. Cross-user listing and `admin_cancel` require an admin; destructive deletion requires `confirm=true`. These tools are also excluded from the general-purpose subagent because they depend on parent source context.
+This pattern is required for tools with sensitive side effects: validate trusted runtime identity and resource scope inside the tool, do not rely on model arguments or thread metadata, and turn anticipated operational failures into actionable tool results.
 
-This is an example of the agent/UI parity principle: a dashboard feature should normally have a curated agent interface, but it must preserve the same authorization and confirmation boundaries rather than exposing a raw backend primitive.
+## Plan mode is stateful tool gating
 
-## Plan-mode safety and lifecycle
+Plan mode is a deliberately partial safety control, not simply a different prompt. `PlanModeMiddleware` is installed on every main graph and resets `plan_mode` to the run's configured initial value before execution; this prevents a persisted state from a previous run from silently affecting a later one. It recalculates the tool list on every model call, so an in-run `enter_plan_mode` command takes effect on the next turn.
 
-Plan mode is stateful. `enter_plan_mode` persists `planning` status when it has a thread ID and returns a LangGraph `Command` setting `plan_mode=True`; `approve_plan` requires active mode and a non-shared plan, persists approval with approver identity, and returns a command setting it false. `PlanModeMiddleware` is always installed and reads state, so it applies when the tool turns plan mode on mid-run as well as when a later run starts with configuration carrying the flag.
+When active, `PLAN_MODE_EXCLUDED_TOOLS` removes side-effecting external and administrative tools: delegation, background execution, browser interaction, mutable HTTP requests, baby-sit and thread mutation, PR actions, sandbox reset/recreation, user skills, mutable Linear actions, Slack moves/new threads, environment mutation, and automation mutation. Read-only thread lookup, plan approval, and `read_file`, `write_file`, `edit_file`, and `execute` remain available. The latter filesystem and shell capabilities are constrained by planning instructions to plan artifacts outside cloned repositories, rather than being technically prevented from changing files; `task` is excluded precisely because its independent subagent would bypass the parent gate.
 
-`PLAN_MODE_EXCLUDED_TOOLS` removes delegation and explicit side effects: `task`, background execution, `create_sandbox_service_url`, `http_request`, baby-sit, thread mutation, PR opening/review request, sandbox reset/recreation, user-skill mutation, Slack moves/new threads, mutating Linear actions, and environment mutations. Read-only thread lookup remains available, as do `approve_plan`, `read_file`, `write_file`, `edit_file`, and `execute`.
+## Safely extending a tool
 
-That final distinction is important: plan mode's no-repository-mutation rule for shell and file built-ins is **prompt discipline**, not a complete technical prohibition. `task` is removed because its separately compiled subagent would otherwise bypass the parent exclusion. Safety-sensitive changes must preserve both the middleware exclusion list and the plan-mode prompt guidance.
-
-## Adding or changing a tool
-
-1. Add an async implementation under `agent/tools/`.
-2. Add its module mapping, public export, and type-checking import in `agent/tools/__init__.py`.
-3. Wire it into the appropriate graph factory—usually `get_agent`, but reviewer, analyzer, and chat have intentionally separate surfaces.
-4. Decide whether it is static, conditionally exposed, parent-only, plan-mode-excluded, or an on-demand integration. Reserve names to avoid collisions with Deep Agents and existing tools.
-5. Add focused tests. The existing suite exercises HTTP redirect safety, background task limits/lifecycle, wakeup scheduling/budgets, thread authorization/actions, baby-sit validation, reviewer findings/diff behavior, PR chat ownership and read access, plan-mode transitions/exclusions, and factory tool-loading concurrency.
+1. Implement an async tool in `agent/tools/`, map it in `_TOOL_MODULES`, and add its type-checking export.
+2. Wire it only into the graph(s) that need it. Decide whether desktop, stop-summary, Slack, admin-thread, or subagent filtering applies.
+3. Reserve the name against Deep Agents built-ins and static/dynamic integration names. For expensive or credentialed integrations, use an `IntegrationGroup` and make loading failure recoverable.
+4. Put authorization and scope checks at the tool boundary; derive actor and resource identity from trusted runtime context where possible. Keep secrets server-side and return redacted status/error data.
+5. Add focused behavior tests: catalog/graph composition and mode filtering, authorization denial, credential/scope handling, success and failure results, and plan-mode exclusion for each new mutation. Run only the relevant pytest target, as repository guidance requires.
 
 ## Related pages
 
 - [Agent graph](../architecture/agent-graph.md) — graph factories and runtime assembly.
-- [Middleware stack](../architecture/middleware-stack.md) — enforcement order and graph middleware.
-- [Authorization and security](auth-and-security.md) — user and organization authorization boundaries.
+- [Reviewer and analyzer](../architecture/reviewer-and-analyzer.md) — specialist graph responsibilities.
+- [Authorization and security](auth-and-security.md) — trust boundaries and credentials.
 - [Observability and MCP](../integrations/observability-and-mcp.md) — integration configuration.
-- [PR creation](../workflows/pr-creation.md), [PR review](../workflows/pr-review.md), and [scheduling and baby-sit](../workflows/scheduling-and-baby-sit.md) — user-facing workflows.
-- [Testing overview](../testing/overview.md) — test-suite organization.
+- [PR creation](../workflows/pr-creation.md) — PR workflow behavior.

@@ -1,13 +1,27 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import langgraph_sdk
 import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import get_agent
 
 
+@pytest.fixture(autouse=True, params=["public", "private"])
+def saved_thread_scope(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(
+                return_value={"metadata": {"visibility": request.param, "owner_login": "octocat"}}
+            )
+        )
+    )
+    monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
+
+
 class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> "_DummyAgent":
+    def with_config(self, config: RunnableConfig) -> _DummyAgent:
         self.config = config
         return self
 
@@ -43,7 +57,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -116,7 +130,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -181,7 +195,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -195,7 +209,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
             "agent.server.load_profile",
             new_callable=AsyncMock,
             return_value={
-                "default_model": "anthropic:claude-fable-5",
+                "default_model": "anthropic:claude-fable-5-1",
                 "reasoning_effort": "high",
             },
         ),

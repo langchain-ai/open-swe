@@ -26,6 +26,8 @@ const THREAD_IDS = {
   dailyScheduled: "73000000-0000-4000-8000-000000000001",
   dailyTest: "73000000-0000-4000-8000-000000000002",
   weeklyRunning: "73000000-0000-4000-8000-000000000003",
+  noProject: "74000000-0000-4000-8000-000000000001",
+  pinnedProject: "74000000-0000-4000-8000-000000000002",
 } as const;
 
 const TITLES = {
@@ -39,6 +41,8 @@ const TITLES = {
   dailyScheduled: "E2E Workspace Daily health scheduled run",
   dailyTest: "E2E Workspace Daily health test run",
   weeklyRunning: "E2E Workspace Weekly cleanup running",
+  noProject: "E2E Workspace No project chat",
+  pinnedProject: "E2E Workspace Pinned project chat",
 } as const;
 
 const SCHEDULE_IDS = {
@@ -413,8 +417,11 @@ function boardColumn(main: Locator, name: string): Locator {
   return main.locator(`section:has(h2:text-is("${name}"))`);
 }
 
-function sidebarGroup(sidebar: Locator, name: string): Locator {
-  return sidebar.locator(`div:has(> button > span:text-is("${name}"))`);
+function sidebarSection(sidebar: Locator, name: string): Locator {
+  return sidebar
+    .getByRole("button", { name, exact: true })
+    .locator("..")
+    .locator("..");
 }
 
 function sourceFilter(main: Locator): Locator {
@@ -463,22 +470,17 @@ test.describe("threads workspace", () => {
 
     const row = page.getByRole("link", { name: TITLES.shared }).first();
     await expect(row).toBeVisible();
-    await row.click({ button: "right" });
-    await page.getByText("Pin thread", { exact: true }).click();
+    await row.hover();
+    await row.getByRole("button", { name: "Pin thread" }).click();
 
-    const pinned = sidebarGroup(page.locator("aside"), "Pinned");
-    await expect(
-      pinned.getByRole("link", { name: TITLES.shared }),
-    ).toBeVisible();
+    const pinned = sidebarSection(page.locator("aside"), "Pinned");
+    const pinnedRow = pinned.getByRole("link", { name: TITLES.shared });
+    await expect(pinnedRow).toBeVisible();
     await page.getByRole("link", { name: "Kanban" }).click();
-    await expect(
-      pinned.getByRole("link", { name: TITLES.shared }),
-    ).toBeVisible();
+    await expect(pinnedRow).toBeVisible();
 
-    await pinned
-      .getByRole("link", { name: TITLES.shared })
-      .click({ button: "right" });
-    await page.getByText("Unpin thread", { exact: true }).click();
+    await pinnedRow.press("Shift+F10");
+    await page.getByRole("menuitem", { name: "Unpin thread" }).click();
     await expect(pinned).toHaveCount(0);
   });
 
@@ -522,7 +524,7 @@ test.describe("threads workspace", () => {
 
     await page.goto("/agents");
     await expect(
-      page.getByText("Ask Open SWE to build, fix bugs, explore"),
+      page.getByRole("heading", { name: "What should we build?" }),
     ).toBeVisible();
     await profileStarted.promise;
 
@@ -719,7 +721,7 @@ test.describe("threads workspace", () => {
     await expect(main).not.toContainText(TITLES.running);
   });
 
-  test("shows the board focus groups in the sidebar", async ({
+  test("shows a recency-sorted project list in the sidebar", async ({
     page,
     request,
   }, testInfo) => {
@@ -732,46 +734,157 @@ test.describe("threads workspace", () => {
     await page.goto("/agents/threads");
 
     const sidebar = page.locator("[data-sidebar-frame]");
-    await sidebar
-      .getByRole("button", { name: "Group and filter threads" })
-      .click();
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
     await page
-      .getByRole("menuitemradio", { name: "Focus", exact: true })
-      .click();
-    await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-    await page
-      .getByRole("menuitemcheckbox", { name: "Include resolved", exact: true })
+      .getByRole("menuitemradio", { name: "Last updated", exact: true })
       .click();
     await page.keyboard.press("Escape");
-    await page.keyboard.press("Escape");
+    const workspaceLinks = sidebar.locator(
+      `a[href^="/agents/"]:has-text("${WORKSPACE_QUERY}")`,
+    );
 
-    const attention = sidebarGroup(sidebar, "Needs attention");
-    const progress = sidebarGroup(sidebar, "In progress");
-    const ready = sidebarGroup(sidebar, "Ready");
-    const done = sidebarGroup(sidebar, "Done");
+    await expect
+      .poll(() =>
+        workspaceLinks.evaluateAll((links) =>
+          links.map((link) => link.getAttribute("href")),
+        ),
+      )
+      .toEqual([
+        `/agents/${THREAD_IDS.attention}`,
+        `/agents/${THREAD_IDS.error}`,
+        `/agents/${THREAD_IDS.interrupted}`,
+        `/agents/${THREAD_IDS.running}`,
+        `/agents/${THREAD_IDS.ready}`,
+      ]);
 
-    await expect(attention).toContainText(TITLES.attention);
-    await expect(attention).toContainText(TITLES.error);
-    await expect(attention).toContainText(TITLES.interrupted);
-    await expect(attention.locator("> button > span").last()).toHaveText("3");
-    await expect(progress).toContainText(TITLES.running);
-    await expect(progress.locator("> button > span").last()).toHaveText("1");
-    await expect(ready).toContainText(TITLES.ready);
-    await expect(ready.locator("> button > span").last()).toHaveText("1");
-    await expect(done).toContainText("E2E Workspace Resolved overflow 01");
-    await expect(done.locator("> button > span").last()).toHaveText("10+");
-    const loadMore = sidebar.getByRole("button", {
-      name: "Load more resolved threads",
+    const alphaGroup = sidebar
+      .getByRole("button", { name: "alpha", exact: true })
+      .locator("..")
+      .locator("..");
+    const betaGroup = sidebar.getByRole("button", {
+      name: "beta",
+      exact: true,
     });
-    await loadMore.click();
-    await expect(done.locator("> button > span").last()).toHaveText("20+");
-    await loadMore.click();
-    await expect(done.locator("> button > span").last()).toHaveText("22");
-    await expect(loadMore).toHaveCount(0);
+    await expect(
+      sidebar.getByRole("button", { name: "alpha", exact: true }),
+    ).toBeVisible();
+    await expect(betaGroup).toBeVisible();
+    await expect(sidebar.getByText("acme/alpha", { exact: true })).toHaveCount(
+      0,
+    );
 
-    const screenshotPath = testInfo.outputPath("focus-grouping-sidebar.png");
+    // Collapsing a project hides only that project's threads.
+    await betaGroup.click();
+    await expect(betaGroup).toHaveAttribute("aria-expanded", "false");
+    await expect(workspaceLinks).toHaveCount(4);
+    await expect(
+      workspaceLinks.filter({ hasText: TITLES.running }),
+    ).toHaveCount(0);
+    await betaGroup.click();
+    await expect(workspaceLinks).toHaveCount(5);
+
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await page
+      .getByRole("menuitemcheckbox", { name: "Show archived", exact: true })
+      .click();
+    await page.keyboard.press("Escape");
+
+    for (const group of ["Needs attention", "In progress", "Ready", "Done"]) {
+      await expect(
+        sidebar.getByRole("button", { name: group, exact: true }),
+      ).toHaveCount(0);
+    }
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 01");
+    const showMore = alphaGroup.getByRole("button", {
+      name: "Show more",
+      exact: true,
+    });
+    await showMore.click();
+    await showMore.click();
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 19");
+    await showMore.click();
+    await expect(sidebar).toContainText("E2E Workspace Resolved overflow 21");
+    await expect(sidebar).toContainText(TITLES.done);
+    await expect(showMore).toHaveCount(0);
+
+    const screenshotPath = testInfo.outputPath("unified-thread-sidebar.png");
     await sidebar.screenshot({ path: screenshotPath });
-    await testInfo.attach("focus-grouping-sidebar", {
+    await testInfo.attach("unified-thread-sidebar", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+  });
+
+  test("groups unprojected chats in a pinnable No project folder", async ({
+    page,
+    request,
+  }, testInfo) => {
+    const now = Date.now();
+    await seedThreads(request, [
+      {
+        id: THREAD_IDS.noProject,
+        metadata: baseMetadata(now, TITLES.noProject, 1_000, {
+          participant_logins: { [ADMIN_USER.login]: true },
+          repo_owner: "",
+          repo_name: "",
+        }),
+      },
+      {
+        id: THREAD_IDS.pinnedProject,
+        metadata: baseMetadata(now, TITLES.pinnedProject, 2_000, {
+          participant_logins: { [ADMIN_USER.login]: true },
+        }),
+      },
+    ]);
+    const loginResponse = await page.request.post("/control/login", {
+      data: ADMIN_USER,
+    });
+    expect(loginResponse.ok()).toBeTruthy();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/agents/threads");
+
+    const sidebar = page.locator("[data-sidebar-frame]");
+    const noProject = sidebar.getByRole("button", {
+      name: "No project",
+      exact: true,
+    });
+    await expect(noProject).toBeVisible();
+    await expect(sidebar).toContainText(TITLES.noProject);
+
+    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await expect(
+      page.getByRole("menuitemradio", { name: "Created", exact: true }),
+    ).toBeChecked();
+    const sortScreenshotPath = testInfo.outputPath("sort-by-created.png");
+    await page.screenshot({ path: sortScreenshotPath });
+    await testInfo.attach("sort-by-created", {
+      path: sortScreenshotPath,
+      contentType: "image/png",
+    });
+    await page.keyboard.press("Escape");
+
+    await noProject.hover();
+    await sidebar.getByRole("button", { name: "Pin No project" }).click();
+    await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
+    await expect(
+      sidebar.getByRole("button", { name: "No project", exact: true }),
+    ).toBeVisible();
+
+    await page.reload();
+    const pinnedNoProject = sidebar.getByRole("button", {
+      name: "No project",
+      exact: true,
+    });
+    await expect(pinnedNoProject).toBeVisible();
+    await pinnedNoProject.hover();
+    await expect(
+      sidebar.getByRole("button", { name: "Unpin No project" }),
+    ).toBeVisible();
+    await expect(sidebar).toContainText(TITLES.noProject);
+
+    const screenshotPath = testInfo.outputPath("pinned-no-project.png");
+    await sidebar.screenshot({ path: screenshotPath });
+    await testInfo.attach("pinned-no-project", {
       path: screenshotPath,
       contentType: "image/png",
     });
@@ -795,6 +908,9 @@ test.describe("threads workspace", () => {
 
     const main = page.getByRole("main").last();
     await main.getByRole("button", { name: "List" }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("layout"))
+      .toBe("list");
     await main.getByLabel("Group by").selectOption("source");
     await expect
       .poll(() => {
@@ -824,6 +940,7 @@ test.describe("threads workspace", () => {
     await expect
       .poll(() => new URL(page.url()).searchParams.get("layout"))
       .toBe("board");
+    await expect(main.locator("article").first()).toBeVisible();
     await main.getByLabel("Group by").selectOption("focus");
     await expect
       .poll(() => new URL(page.url()).searchParams.get("group"))

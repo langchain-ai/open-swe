@@ -7,13 +7,15 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from deepagents.backends.composite import CompositeBackend
+from deepagents.backends.protocol import ExecuteResponse
 from langsmith.sandbox import (
     CommandTimeoutError,
     SandboxConnectionError,
     SandboxRetryableConnectionError,
 )
 
-from agent.integrations.langsmith import TimeoutLangSmithSandbox
+from agent.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 
 
 class _FakeHandle:
@@ -100,7 +102,9 @@ def _patch_base_execute(monkeypatch: pytest.MonkeyPatch, sink: dict[str, Any]) -
         sink["timeout"] = timeout
         return SimpleNamespace(output="via-http", exit_code=0, truncated=False)
 
-    monkeypatch.setattr("agent.integrations.langsmith.LangSmithSandbox.aexecute", fake_base_execute)
+    monkeypatch.setattr(
+        "agent.sandboxes.providers.langsmith.LangSmithSandbox.aexecute", fake_base_execute
+    )
 
 
 async def test_aexecute_ws_connect_failure_falls_back_to_base(
@@ -143,6 +147,27 @@ def test_execute_is_async_only() -> None:
         _backend(_FakeHandle()).execute("echo hi", timeout=5)
 
 
+async def test_composite_backend_deletes_through_async_langsmith_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sb = _backend(_FakeHandle())
+    commands: list[str] = []
+
+    async def execute(command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        commands.append(command)
+        return ExecuteResponse(output="", exit_code=0)
+
+    monkeypatch.setattr(sb, "aexecute", execute)
+    result = await CompositeBackend(default=sb, routes={}).adelete("/workspace/repo/obsolete.txt")
+
+    assert result.path == "/workspace/repo/obsolete.txt"
+    assert result.error is None
+    assert commands == [
+        "test -e /workspace/repo/obsolete.txt || test -L /workspace/repo/obsolete.txt",
+        "rm -rf /workspace/repo/obsolete.txt",
+    ]
+
+
 async def test_aexecute_retries_a_transient_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 503 on the WebSocket upgrade is a blip, not a dead sandbox.
 
@@ -164,10 +189,10 @@ async def test_aexecute_retries_a_transient_rejection(monkeypatch: pytest.Monkey
         raise SandboxRetryableConnectionError("WebSocket upgrade temporarily rejected (503)")
 
     monkeypatch.setattr(
-        "agent.integrations.langsmith.LangSmithSandbox.aexecute", failing_base_execute
+        "agent.sandboxes.providers.langsmith.LangSmithSandbox.aexecute", failing_base_execute
     )
     monkeypatch.setattr(sandbox, "run", flaky_run)
-    monkeypatch.setattr("agent.utils.sandbox_retry.asyncio.sleep", AsyncMock(), raising=True)
+    monkeypatch.setattr("agent.sandboxes.retry.asyncio.sleep", AsyncMock(), raising=True)
 
     resp = await sb.aexecute("git status", timeout=5)
 

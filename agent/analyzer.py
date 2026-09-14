@@ -8,16 +8,17 @@ Uses the same sandbox + ``gh`` pattern as the reviewer agent. The dashboard
 user's OAuth token is injected into the LangSmith GitHub proxy so ``gh`` works
 on public repos even when the GitHub App is not installed on them.
 """
-# ruff: noqa: E402
 
+# ruff: noqa: E402
 import logging
-import os
 import warnings
 from typing import Any, cast
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+
+from agent.config import ENV
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -30,9 +31,9 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from .dashboard.team_settings import get_effective_gateway_enabled
-from .integrations.langsmith import _configure_github_proxy
-from .middleware import (
+from agent.dashboard.team_settings import get_effective_gateway_enabled
+from agent.github.app import get_github_app_installation_token
+from agent.middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
     SanitizeOpenAIResponsesMiddleware,
@@ -40,25 +41,27 @@ from .middleware import (
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
-from .review.style_guidance import REVIEWER_STYLE_THEMES
-from .runtime import (
+from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.review.style_guidance import REVIEWER_STYLE_THEMES
+from agent.run_config import RunConfig
+from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL_ID,
     DEFAULT_RECURSION_LIMIT,
+    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
-from .tools.read_finding_outcomes import read_finding_outcomes
-from .tools.save_review_style import save_review_style_prompt
-from .utils import ttl_cache
-from .utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
-from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token
-from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import unwrap_sandbox_backend
-from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
+from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.providers.langsmith import configure_github_proxy
+from agent.sandboxes.state import unwrap_sandbox_backend
+from agent.tools.read_finding_outcomes import read_finding_outcomes
+from agent.tools.save_review_style import save_review_style_prompt
+from agent.utils import ttl_cache
+from agent.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
+from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -66,37 +69,17 @@ STYLE_ANALYZER_MODEL_CALL_LIMIT = 80
 
 # The per-mode procedure lives in the bundled SKILL.md playbooks (agent/skills/).
 # This base prompt only orients the agent and points it at the right skill.
-STYLE_ANALYZER_PROMPT = """You are a code-review style analyst for `{repo_owner}/{repo_name}`.
-
-Sandbox: `{working_dir}`. Use the shell (``execute``) to run GitHub commands.
-`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
-
-Your job is to produce/refine the per-repo review-style prompt and persist it with
-`save_review_style_prompt`.
-
-# Run mode: {mode}
-
-Read and follow the playbook for this mode, then proceed:
-
-    read_file("{skill_path}", limit=1000)
-
-Do not improvise the procedure — the skill is authoritative for how to gather
-evidence and what to save.
-
-# Alignment with our reviewer agent
-
-{reviewer_themes}
-"""
+STYLE_ANALYZER_PROMPT = load_prompt("analyzer/main.md")
 
 
 async def _configure_sandbox_github_proxy(
     sandbox_backend: SandboxBackendProtocol,
     github_token: str,
 ) -> None:
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
         return
     backend = unwrap_sandbox_backend(sandbox_backend)
-    await _configure_github_proxy(backend.id, github_token)
+    await configure_github_proxy(backend.id, github_token)
 
 
 async def _cached_gateway_enabled() -> bool:
@@ -121,32 +104,29 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         self._config = config
 
     def _prepare_config_fingerprint(self) -> object:
-        configurable = self._config.get("configurable", {})
+        cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": configurable.get("prepare_run_id")
-            if isinstance(configurable, dict)
-            else None,
+            "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
-            "full_name": configurable.get("review_style_full_name")
-            if isinstance(configurable, dict)
-            else None,
-            "mode": configurable.get("analyzer_mode") if isinstance(configurable, dict) else None,
+            "full_name": cfg.review_style_full_name,
+            "mode": cfg.analyzer_mode,
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
-        configurable = self._config.get("configurable") or {}
-        full_name = str(configurable.get("review_style_full_name") or "owner/repo")
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+        cfg = RunConfig.from_config(self._config)
+        full_name = cfg.review_style_full_name or "owner/repo"
         owner, _, name = full_name.partition("/")
-        samples_text = str(configurable.get("review_style_samples_text") or "")
-        mode = str(configurable.get("analyzer_mode") or "bootstrap")
-        github_token = configurable.get("review_style_github_token")
-        if not (isinstance(github_token, str) and github_token):
+        samples_text = cfg.review_style_samples_text or ""
+        mode = cfg.analyzer_mode or "bootstrap"
+        github_token = cfg.review_style_github_token
+        if not github_token:
             github_token = await get_github_app_installation_token()
         if isinstance(github_token, str) and github_token:
             await _configure_sandbox_github_proxy(sandbox_backend, github_token)
-        system_prompt = STYLE_ANALYZER_PROMPT.format(
+        system_prompt = render_prompt(
+            "analyzer/main.md",
             repo_owner=owner or "<owner>",
             repo_name=name or "<repo>",
             working_dir=work_dir,
@@ -162,12 +142,11 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
 
 
 async def get_analyzer(config: RunnableConfig) -> Pregel:
-    configurable = config.get("configurable") or {}
-    thread_id = configurable.get("thread_id")
+    thread_id = RunConfig.from_config(config).thread_id
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
     async def reconnect_backend(_thread_id: str = thread_id):
         return await ensure_sandbox_for_thread(_thread_id)
@@ -187,7 +166,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt="",
-        tools=[save_review_style_prompt, read_finding_outcomes],
+        tools=apply_tool_descriptions([save_review_style_prompt, read_finding_outcomes]),
         backend=backend,
         skills=[SKILLS_ROUTE],
         middleware=cast(
@@ -204,7 +183,8 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                 SanitizeOpenAIResponsesMiddleware(),
             ],
         ),
-    ).with_config(config)
+    ).with_config(bindable_config(config))
 
 
-traced_analyzer = traced_graph_factory(get_analyzer, REVIEW_TRACING_PROJECT)
+# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
+traced_analyzer = get_analyzer

@@ -9,6 +9,8 @@ export function getRouter() {
   const router = createTanStackRouter({
     routeTree,
     context: { queryClient },
+    // Vite's `base`, so a build made for a mount prefix routes under it.
+    basepath: import.meta.env.BASE_URL,
 
     scrollRestoration: true,
     defaultPreload: "intent",

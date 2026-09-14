@@ -52,7 +52,7 @@ export function showRunNotification(
   try {
     const n = new Notification(title, {
       body,
-      icon: "/logo-mark.png",
+      icon: `${import.meta.env.BASE_URL}logo-mark.png`,
       tag: `run-${thread.id}`,
     })
     n.onclick = () => {

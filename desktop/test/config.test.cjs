@@ -8,6 +8,8 @@ const {
   backendRequestUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  connectExchangeUrl,
+  connectLoginUrl,
   isAppLoginUrl,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
@@ -118,20 +120,7 @@ test("only grants expected permissions to the bundled app", () => {
     isTrustedPermissionRequest("notifications", `${APP_URL}settings`),
     true,
   );
-  assert.equal(
-    isTrustedPermissionRequest("media", APP_URL, { mediaTypes: ["audio"] }),
-    true,
-  );
-  assert.equal(
-    isTrustedPermissionRequest("media", APP_URL, { mediaType: "audio" }),
-    true,
-  );
-  assert.equal(
-    isTrustedPermissionRequest("media", APP_URL, {
-      mediaTypes: ["audio", "video"],
-    }),
-    false,
-  );
+  assert.equal(isTrustedPermissionRequest("media", APP_URL), false);
   assert.equal(isTrustedPermissionRequest("camera", APP_URL), false);
   assert.equal(
     isTrustedPermissionRequest("notifications", "https://dashboard.example"),
@@ -167,11 +156,22 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
       challenge: "abc",
       port: 51234,
     }),
-    "https://backend.example/dashboard/api/auth/login?desktop_handoff=abc&desktop_port=51234",
+    "https://backend.example/dashboard/api/auth/login?desktop=true&desktop_handoff=abc&desktop_port=51234",
   );
   assert.equal(
     desktopExchangeUrl("https://backend.example/base/"),
     "https://backend.example/dashboard/api/auth/desktop/exchange",
+  );
+  assert.equal(
+    connectLoginUrl("https://backend.example", "slack", {
+      challenge: "abc",
+      port: 51234,
+    }),
+    "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
+  );
+  assert.equal(
+    connectExchangeUrl("https://backend.example", "notion"),
+    "https://backend.example/dashboard/api/notion/desktop/exchange",
   );
 });
 

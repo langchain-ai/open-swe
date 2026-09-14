@@ -1,24 +1,15 @@
-"""Per-graph LangSmith tracing-project routing for langgraph.json entrypoints."""
+"""Where runs are traced: the LangSmith SDK's own project setting."""
 
-import contextlib
-from collections.abc import AsyncIterator, Awaitable, Callable
-
-import langsmith as ls
-from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
-
-AGENT_TRACING_PROJECT = "open-swe-agent"
-REVIEW_TRACING_PROJECT = "open-swe-review"
+from agent.config import ENV
 
 
-def traced_graph_factory(
-    factory: Callable[[RunnableConfig], Awaitable[Pregel]],
-    project_name: str,
-) -> Callable[[RunnableConfig], contextlib.AbstractAsyncContextManager[Pregel]]:
-    @contextlib.asynccontextmanager
-    async def entrypoint(config: RunnableConfig) -> AsyncIterator[Pregel]:
-        graph = await factory(config)
-        with ls.tracing_context(project_name=project_name):
-            yield graph
+def tracing_project() -> str:
+    """LangSmith project every run traces into and trace links point at.
 
-    return entrypoint
+    Read the way the SDK's tracer reads it, ``LANGSMITH_PROJECT`` with the legacy
+    ``LANGCHAIN_PROJECT`` as fallback (the registry aliases), else ``default``, so
+    links, cost lookups, and feedback query the project the runs actually went to.
+    LangGraph Platform sets both names to the deployment name. The SDK's own
+    helper is not used because it caches the first value it sees.
+    """
+    return ENV.LANGSMITH_PROJECT.get()

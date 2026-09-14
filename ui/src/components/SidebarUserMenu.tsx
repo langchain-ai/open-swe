@@ -82,11 +82,15 @@ export function SidebarUserMenu({
 
   const copyDatadogSessionLink = async () => {
     const currentLink = getDatadogSessionLink()
-    if (!currentLink || !navigator.clipboard) {
+    if (!currentLink) {
       setDatadogCopyStatus("error")
     } else {
       try {
-        await navigator.clipboard.writeText(currentLink)
+        if (window.openSweDesktop) {
+          await window.openSweDesktop.writeClipboard(currentLink)
+        } else {
+          await navigator.clipboard.writeText(currentLink)
+        }
         setDatadogCopyStatus("copied")
       } catch {
         setDatadogCopyStatus("error")

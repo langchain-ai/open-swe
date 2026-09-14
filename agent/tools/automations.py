@@ -5,19 +5,23 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from ..dashboard import schedules
-from .admin_gate import configurable, require_admin
+from agent.dashboard import schedules
+from agent.tools.admin_gate import configurable, require_admin
 
 logger = logging.getLogger(__name__)
 
 
-def _identity() -> tuple[str, str | None] | None:
-    values = configurable()
-    login = values.get("github_login")
-    email = values.get("user_email")
-    if not isinstance(login, str) or not login:
+async def _identity() -> tuple[str, str | None] | None:
+    cfg = configurable()
+    if cfg.source == "schedule":
+        record = await schedules.authorized_admin_schedule(cfg)
+        if not record:
+            return None
+        login = record.get("created_by") or f"system:schedule:{record['id']}"
+        return login, record.get("user_email") or None
+    if not cfg.github_login:
         return None
-    return login, email if isinstance(email, str) and email else None
+    return cfg.github_login, cfg.user_email or None
 
 
 def _error(exc: Exception) -> dict[str, Any]:
@@ -28,8 +32,8 @@ def _error(exc: Exception) -> dict[str, Any]:
 
 
 async def list_automations() -> dict[str, Any]:
-    """List every workspace automation and its current run state."""
-    if error := require_admin("manage workspace automations"):
+    """Implement the `list_automations` tool."""
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     return {"ok": True, "automations": await schedules.list_agent_schedules()}
 
@@ -45,22 +49,10 @@ async def create_automation(
     slack_notification_mode: schedules.SlackNotificationMode = "always",
     admin_thread: bool = False,
 ) -> dict[str, Any]:
-    """Create a workspace automation.
-
-    Args:
-        prompt: Complete instructions for every run.
-        schedule: Five-field UTC cron expression.
-        name: Short display name.
-        repo: Optional ``owner/repo`` the configuring admin can access.
-        model_id: Optional supported model ID.
-        effort: Optional reasoning effort for the model.
-        slack_channel_id: Optional Slack channel ID starting with C or G.
-        slack_notification_mode: Post every run or only when the run takes action.
-        admin_thread: Give runs workspace-admin capabilities while the creator remains an admin.
-    """
-    if error := require_admin("manage workspace automations"):
+    """Implement the `create_automation` tool."""
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
-    identity = _identity()
+    identity = await _identity()
     if identity is None:
         return {"ok": False, "error": "No GitHub identity is available for this admin thread."}
     login, email = identity
@@ -80,6 +72,7 @@ async def create_automation(
             ),
             email=email,
             allow_admin_thread=True,
+            use_workspace_credentials=configurable().source == "schedule",
         )
     except Exception as exc:
         return _error(exc)
@@ -101,13 +94,10 @@ async def update_automation(
     slack_notification_mode: schedules.SlackNotificationMode | None = None,
     admin_thread: bool | None = None,
 ) -> dict[str, Any]:
-    """Update a workspace automation, preserving omitted fields.
-
-    Use ``clear_repo`` or ``clear_slack_channel`` to remove those destinations.
-    """
-    if error := require_admin("manage workspace automations"):
+    """Implement the `update_automation` tool."""
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
-    identity = _identity()
+    identity = await _identity()
     if identity is None:
         return {"ok": False, "error": "No GitHub identity is available for this admin thread."}
     if clear_repo and repo is not None:
@@ -139,6 +129,7 @@ async def update_automation(
             schedules.ScheduleUpdateBody(**values),
             email=identity[1],
             allow_admin_thread=True,
+            use_workspace_credentials=configurable().source == "schedule",
         )
     except Exception as exc:
         return _error(exc)
@@ -146,8 +137,8 @@ async def update_automation(
 
 
 async def trigger_automation(automation_id: str) -> dict[str, Any]:
-    """Start a test run for a workspace automation, including a paused one."""
-    if error := require_admin("manage workspace automations"):
+    """Implement the `trigger_automation` tool."""
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     try:
         result = await schedules.trigger_agent_schedule(automation_id)
@@ -157,8 +148,8 @@ async def trigger_automation(automation_id: str) -> dict[str, Any]:
 
 
 async def delete_automation(automation_id: str) -> dict[str, Any]:
-    """Permanently delete a workspace automation after the user confirms."""
-    if error := require_admin("manage workspace automations"):
+    """Implement the `delete_automation` tool."""
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     try:
         await schedules.delete_agent_schedule(automation_id)

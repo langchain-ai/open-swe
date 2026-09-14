@@ -12,6 +12,7 @@ import {
 
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
+import type { TerminalSplitDirection } from "@/features/agents/lib/terminalState"
 import { MAX_TERMINALS_PER_GROUP } from "@/features/agents/lib/terminalState"
 import { cn } from "@/lib/utils"
 import { useAttachedTerminal } from "@/features/agents/lib/terminalSession"
@@ -44,16 +45,16 @@ function terminalTheme() {
   const dark = document.documentElement.classList.contains("dark")
   return dark
     ? {
-        background: { r: 28, g: 28, b: 28 },
-        foreground: { r: 229, g: 231, b: 235 },
-        cursor: { r: 229, g: 231, b: 235 },
-        selectionBackground: "rgba(147, 197, 253, 0.25)",
+        background: { r: 10, g: 10, b: 10 },
+        foreground: { r: 245, g: 245, b: 245 },
+        cursor: { r: 180, g: 203, b: 255 },
+        selectionBackground: "rgba(180, 203, 255, 0.25)",
       }
     : {
-        background: { r: 255, g: 255, b: 255 },
-        foreground: { r: 31, g: 41, b: 55 },
-        cursor: { r: 31, g: 41, b: 55 },
-        selectionBackground: "rgba(37, 99, 235, 0.2)",
+        background: { r: 253, g: 253, b: 253 },
+        foreground: { r: 39, g: 39, b: 42 },
+        cursor: { r: 38, g: 56, b: 78 },
+        selectionBackground: "rgba(37, 63, 99, 0.2)",
       }
 }
 
@@ -86,6 +87,14 @@ function TerminalViewport({
   useEffect(() => {
     latestStateRef.current = state
   }, [state])
+  // Read through refs: naming these as dependencies would tear down and
+  // recreate the surface whenever the parent re-renders.
+  const onOpenFileRef = useRef(onOpenFile)
+  const activeRef = useRef(active)
+  useEffect(() => {
+    onOpenFileRef.current = onOpenFile
+    activeRef.current = active
+  }, [onOpenFile, active])
 
   useEffect(() => {
     const mount = mountRef.current
@@ -124,12 +133,13 @@ function TerminalViewport({
           else window.open(text, "_blank", "noopener,noreferrer")
           return
         }
-        if (target.kind !== "local" || !onOpenFile) return
+        const openFile = onOpenFileRef.current
+        if (target.kind !== "local" || !openFile) return
         const path = text.replace(/:\d+(?::\d+)?$/, "")
         void window.openSweDesktop
-          ?.resolveLocalProjectPath({ localSessionId: target.sessionId, path })
+          ?.resolveLocalProjectPath({ localSessionId: targetId, path })
           .then((relativePath) => {
-            if (relativePath) onOpenFile(relativePath)
+            if (relativePath) openFile(relativePath)
           })
           .catch(() => {})
       },
@@ -147,7 +157,7 @@ function TerminalViewport({
           version: latestState.version,
         }
         if (latestState.buffer) created.resetAndWrite(latestState.buffer)
-        if (active) created.focus()
+        if (activeRef.current) created.focus()
       })
       .catch((cause: unknown) => {
         if (!disposed) {
@@ -195,7 +205,7 @@ function TerminalViewport({
 
   return (
     <div
-      className="relative h-full min-h-0 min-w-0 bg-[#1c1c1c] dark:bg-[#1c1c1c]"
+      className="relative h-full min-h-0 min-w-0 bg-background"
       onMouseDown={onFocus}
     >
       <div ref={mountRef} className="h-full w-full overflow-hidden" />
@@ -269,6 +279,69 @@ function ActionButton({
   )
 }
 
+export function TerminalActions({
+  groupId,
+  terminals,
+}: {
+  groupId: string
+  terminals: TerminalGroupsController
+}) {
+  const terminalIds =
+    terminals.state.terminalGroups.find((group) => group.id === groupId)
+      ?.terminalIds ?? []
+  const activeTerminalId = terminalIds.includes(
+    terminals.state.activeTerminalId
+  )
+    ? terminals.state.activeTerminalId
+    : (terminalIds[0] ?? "")
+  const atSplitLimit = terminalIds.length >= MAX_TERMINALS_PER_GROUP
+
+  // Splits follow the focused group, which can differ from the visible tab.
+  const split = (direction: TerminalSplitDirection) => {
+    if (activeTerminalId) terminals.focus(activeTerminalId)
+    terminals.split(direction)
+  }
+
+  return (
+    <div className="flex shrink-0 items-center">
+      <ActionButton
+        label={`Split horizontally${atSplitLimit ? " (maximum 4)" : ""}`}
+        disabled={atSplitLimit}
+        onClick={() => split("horizontal")}
+      >
+        <SquareSplitHorizontal className="size-3.5" />
+      </ActionButton>
+      <ActionButton
+        label={`Split vertically${atSplitLimit ? " (maximum 4)" : ""}`}
+        disabled={atSplitLimit}
+        onClick={() => split("vertical")}
+      >
+        <SquareSplitVertical className="size-3.5" />
+      </ActionButton>
+      <ActionButton
+        label="Clear terminal"
+        onClick={() => terminals.clear(activeTerminalId)}
+      >
+        <Trash2 className="size-3.5" />
+      </ActionButton>
+      <ActionButton
+        label="Restart terminal"
+        onClick={() => terminals.restart(activeTerminalId)}
+      >
+        <RefreshCw className="size-3.5" />
+      </ActionButton>
+      {terminalIds.length > 1 ? (
+        <ActionButton
+          label="Close terminal"
+          onClick={() => terminals.closeTerminal(activeTerminalId)}
+        >
+          <X className="size-3.5" />
+        </ActionButton>
+      ) : null}
+    </div>
+  )
+}
+
 export function TerminalPanel({
   target,
   cwd,
@@ -287,50 +360,12 @@ export function TerminalPanel({
   )
     ? terminals.state.activeTerminalId
     : (terminalIds[0] ?? "")
-  const atSplitLimit = terminalIds.length >= MAX_TERMINALS_PER_GROUP
 
   return (
     <div
-      className="group/terminal relative flex h-full min-h-0 flex-col"
+      className="relative flex h-full min-h-0 flex-col"
       data-hotkeys="ignore"
     >
-      <div className="absolute top-1 right-2 z-10 flex items-center rounded-md border border-border bg-background/95 opacity-0 shadow-sm transition-opacity group-hover/terminal:opacity-100 focus-within:opacity-100">
-        <ActionButton
-          label={`Split horizontally${atSplitLimit ? " (maximum 4)" : ""}`}
-          disabled={atSplitLimit}
-          onClick={() => terminals.split("horizontal")}
-        >
-          <SquareSplitHorizontal className="size-3.5" />
-        </ActionButton>
-        <ActionButton
-          label={`Split vertically${atSplitLimit ? " (maximum 4)" : ""}`}
-          disabled={atSplitLimit}
-          onClick={() => terminals.split("vertical")}
-        >
-          <SquareSplitVertical className="size-3.5" />
-        </ActionButton>
-        <ActionButton
-          label="Clear terminal"
-          onClick={() => terminals.clear(activeTerminalId)}
-        >
-          <Trash2 className="size-3.5" />
-        </ActionButton>
-        <ActionButton
-          label="Restart terminal"
-          onClick={() => terminals.restart(activeTerminalId)}
-        >
-          <RefreshCw className="size-3.5" />
-        </ActionButton>
-        {terminalIds.length > 1 && (
-          <ActionButton
-            label="Close terminal"
-            onClick={() => terminals.closeTerminal(activeTerminalId)}
-          >
-            <X className="size-3.5" />
-          </ActionButton>
-        )}
-      </div>
-
       {terminals.error && (
         <div className="absolute inset-x-2 top-2 z-10 rounded-md border border-destructive/40 bg-background/95 px-3 py-2 text-xs text-destructive shadow-sm">
           {terminals.error}

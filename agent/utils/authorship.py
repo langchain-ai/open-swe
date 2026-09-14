@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
+import httpx2
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,22 @@ PR_ATTRIBUTION_DEFAULT_URL = "https://openswe.vercel.app"
 PR_ATTRIBUTION_FOOTER = f"{PR_ATTRIBUTION_TEXT}({PR_ATTRIBUTION_DEFAULT_URL})"
 
 
-def build_pr_attribution_footer(thread_url: str | None = None) -> str:
-    """Build the Open SWE PR footer, linking the run's thread when available."""
+def build_pr_attribution_footer(
+    thread_url: str | None = None,
+    *,
+    model_id: str | None = None,
+    reasoning_effort: str | None = None,
+) -> str:
+    """Build the Open SWE PR footer with the run's model details."""
     url = thread_url.strip() if isinstance(thread_url, str) and thread_url.strip() else ""
-    return f"{PR_ATTRIBUTION_TEXT}({url or PR_ATTRIBUTION_DEFAULT_URL})"
+    footer = f"{PR_ATTRIBUTION_TEXT}({url or PR_ATTRIBUTION_DEFAULT_URL})"
+    model = _normalize_text(model_id).replace("`", "")
+    effort = _normalize_text(reasoning_effort).replace("`", "")
+    if model:
+        footer += f" · {model}"
+        if effort:
+            footer += f" ({effort})"
+    return footer
 
 
 @dataclass(frozen=True)
@@ -64,7 +76,7 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
         return None
 
     try:
-        response = httpx.get(
+        response = httpx2.get(
             "https://api.github.com/user",
             headers={
                 "Authorization": f"Bearer {github_token}",
@@ -93,7 +105,7 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
             commit_email=commit_email,
             github_login=login,
         )
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         logger.debug("Failed to resolve GitHub user identity from token", exc_info=True)
         return None
 
@@ -112,7 +124,7 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
     github_login = _normalize_text(configurable.get("github_login"))
     if github_login:
         github_user_id = configurable.get("github_user_id")
-        from ..dashboard.user_mappings import cached_email_for_login
+        from agent.dashboard.user_mappings import cached_email_for_login
 
         commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
             cached_email_for_login(github_login)
@@ -153,7 +165,7 @@ def resolve_triggering_user_identity(
 
 async def resolve_participant_identities(logins: Iterable[str]) -> list[CollaboratorIdentity]:
     """Git identities for thread participants the agent may author commits as."""
-    from ..dashboard.user_mappings import email_for_login
+    from agent.dashboard.user_mappings import email_for_login
 
     unique = sorted({login.strip() for login in logins if isinstance(login, str) and login.strip()})
     emails = await asyncio.gather(*(email_for_login(login) for login in unique))

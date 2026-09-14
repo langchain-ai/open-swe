@@ -119,3 +119,37 @@ test("retains checkpoint refs until deletion", (t) => {
   );
   assert.equal(restored.get(thread.id), null);
 });
+
+test("persists archived state without reordering the thread", (t) => {
+  const fixture = temporaryStore(t);
+  const store = fixture.create();
+  const thread = store.create({
+    cwd: path.resolve("/tmp/project"),
+    prompt: "work",
+  });
+  assert.equal(thread.archived, false);
+
+  const archived = store.update(thread.id, { archived: true });
+  assert.equal(archived.archived, true);
+  // Archiving is not an edit, so it must not bump the sidebar's sort key.
+  assert.equal(archived.updatedAt, thread.updatedAt);
+
+  const restored = fixture.create();
+  assert.equal(restored.get(thread.id).archived, true);
+  assert.equal(restored.update(thread.id, { archived: false }).archived, false);
+});
+
+test("remembers a created worktree after the thread moves off it", (t) => {
+  const fixture = temporaryStore(t);
+  const store = fixture.create();
+  const thread = store.create({
+    cwd: path.resolve("/tmp/project"),
+    prompt: "x",
+  });
+  const worktree = path.resolve("/tmp/worktrees/project-abcd1234");
+  store.setWorktree(thread.id, worktree, true);
+  store.setWorktree(thread.id, null);
+  const reloaded = fixture.create().get(thread.id);
+  assert.equal(reloaded.worktreePath, null);
+  assert.deepEqual(reloaded.ownedWorktrees, [worktree]);
+});
