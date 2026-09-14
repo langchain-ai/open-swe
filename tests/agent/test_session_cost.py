@@ -49,6 +49,7 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
     assert result is not None
     assert result.total_cost == 1.234
     assert client.list_kwargs["is_root"] is True
+    assert "invocation_id" in client.list_kwargs["filter"]
     assert "prepare_run_id" in client.list_kwargs["filter"]
     assert client.list_kwargs["select"] == ["id", "end_time"]
     assert "limit" not in client.list_kwargs

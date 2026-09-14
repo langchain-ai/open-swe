@@ -38,7 +38,7 @@ def test_summarize_run_usage_uses_only_latest_human_turn() -> None:
     assert summary.output_tokens == 300
 
 
-def test_summarize_run_usage_uses_run_id_across_human_messages() -> None:
+def test_summarize_run_usage_reads_legacy_metadata_across_human_messages() -> None:
     first = _message(model="model-a", input_tokens=100, output_tokens=10)
     first.response_metadata["open_swe_run_id"] = "run-1"
     second = _message(model="model-a", input_tokens=200, output_tokens=20)
@@ -56,12 +56,21 @@ def test_summarize_run_usage_uses_run_id_across_human_messages() -> None:
                 other_run,
             ]
         },
-        run_id="run-1",
+        invocation_id="run-1",
     )
 
     assert summary is not None
     assert summary.models == ("model-a",)
     assert summary.total_tokens == 330
+
+
+def test_summarize_run_usage_rejects_conflicting_message_identifiers() -> None:
+    message = _message(model="model-a", input_tokens=100, output_tokens=10)
+    message.response_metadata.update(
+        {"open_swe_invocation_id": "inv-1", "open_swe_run_id": "inv-2"}
+    )
+
+    assert summarize_run_usage({"messages": [message]}, invocation_id="inv-1") is None
 
 
 def test_summarize_run_usage_excludes_cached_input_tokens() -> None:

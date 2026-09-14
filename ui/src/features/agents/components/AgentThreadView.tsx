@@ -19,6 +19,7 @@ import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeade
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
+import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import {
@@ -47,7 +48,6 @@ import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
-import { useReconcileStream } from "@/features/agents/lib/stream/useReconcileStream"
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -90,7 +90,6 @@ export function AgentThreadView({
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentStream()
-  useReconcileStream(thread.id, thread.status === "running")
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -115,7 +114,17 @@ export function AgentThreadView({
     return { modelId: thread.model, effort: thread.effort }
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
-  const activeSelection = selection ?? threadSelection ?? defaultSelection
+  const [autoSelected, setAutoSelected] = useState(false)
+  const activeSelection = autoSelected
+    ? null
+    : (selection ??
+      (thread.modelSelection === "auto"
+        ? null
+        : (threadSelection ?? defaultSelection)))
+  const handleSelectionChange = (next: ModelSelection | null) => {
+    setAutoSelected(next === null)
+    setSelection(next)
+  }
   const [planMode, setPlanMode] = useState<boolean | null>(null)
   const [planFeedbackPending, setPlanFeedbackPending] =
     useState(autoFocusComposer)
@@ -306,53 +315,61 @@ export function AgentThreadView({
               />
             </div>
           ) : (
-            <Messages
-              messages={visibleMessages}
-              threadId={thread.id}
-              scrollKey={thread.id}
-              showPlanArtifact={
-                thread.planStatus === "ready" || thread.planStatus === "shared"
-              }
-              emptyState={
-                <div className="flex min-h-60 items-center justify-center">
-                  {hydrationFailed ? (
-                    <Alert variant="error" className="max-w-3xl">
-                      <CircleAlertIcon />
-                      <AlertDescription>
-                        <span>
-                          This thread&apos;s messages could not be loaded.
-                          Reload to try again.
-                        </span>
-                      </AlertDescription>
-                    </Alert>
-                  ) : (
-                    <p className="text-xs text-muted-foreground/70">
-                      This thread has no messages yet.
-                    </p>
-                  )}
-                </div>
-              }
-              onOpenFile={handleOpenFile}
-              queuedMessages={queuedMessages}
-              isStreaming={isStreaming}
-              streamIsLoading={stream.isLoading}
-              scrollControlRef={scrollControlRef}
-              isThinking={isThinking}
-              settingUpSandbox={settingUpSandbox}
-              pollWorkflowApprovalsWhileActive={isStreaming}
-              contentWidthClass="max-w-3xl"
-              footer={
-                !isStreaming &&
-                !sendMessage.isPending &&
-                queuedMessages.length === 0 && (
-                  <ThreadFeedbackCard
-                    key={`${thread.id}:${session.data?.login ?? ""}`}
-                    threadId={thread.id}
-                    login={session.data?.login ?? null}
-                  />
-                )
-              }
-            />
+            <PullRequestPreviewProvider
+              pullRequests={thread.pullRequests ?? []}
+              health={pullRequestHealth}
+              healthUnavailable={pullRequestStatus.isError}
+            >
+              <Messages
+                messages={visibleMessages}
+                threadId={thread.id}
+                scrollKey={thread.id}
+                showPlanArtifact={
+                  thread.planStatus === "ready" ||
+                  thread.planStatus === "shared"
+                }
+                emptyState={
+                  <div className="flex min-h-60 items-center justify-center">
+                    {hydrationFailed ? (
+                      <Alert variant="error" className="max-w-3xl">
+                        <CircleAlertIcon />
+                        <AlertDescription>
+                          <span>
+                            This thread&apos;s messages could not be loaded.
+                            Reload to try again.
+                          </span>
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <p className="text-xs text-muted-foreground/70">
+                        This thread has no messages yet.
+                      </p>
+                    )}
+                  </div>
+                }
+                onOpenFile={handleOpenFile}
+                queuedMessages={queuedMessages}
+                isStreaming={isStreaming}
+                streamIsLoading={stream.isLoading}
+                scrollControlRef={scrollControlRef}
+                isThinking={isThinking}
+                isOffloading={stream.isOffloading}
+                settingUpSandbox={settingUpSandbox}
+                pollWorkflowApprovalsWhileActive={isStreaming}
+                contentWidthClass="max-w-3xl"
+                footer={
+                  !isStreaming &&
+                  !sendMessage.isPending &&
+                  queuedMessages.length === 0 && (
+                    <ThreadFeedbackCard
+                      key={`${thread.id}:${session.data?.login ?? ""}`}
+                      threadId={thread.id}
+                      login={session.data?.login ?? null}
+                    />
+                  )
+                }
+              />
+            </PullRequestPreviewProvider>
           )}
           {!isHydrating && (
             <AgentComposerDock>
@@ -373,6 +390,7 @@ export function AgentThreadView({
                     : "Only workspace admins can send messages in this thread"
                 }
                 autoFocus={autoFocusComposer}
+                canOffload={!isStreaming}
                 compact
                 disabled={!canPost}
                 busy={isStreaming}
@@ -380,7 +398,7 @@ export function AgentThreadView({
                 onSubmit={submitMessage}
                 models={models}
                 selection={activeSelection}
-                onSelectionChange={setSelection}
+                onSelectionChange={handleSelectionChange}
                 planMode={activePlanMode}
                 onPlanModeChange={setPlanMode}
                 mentionPaths={mentionPaths}

@@ -3,7 +3,8 @@
   "python_version": "3.14",
   "dependencies": ["."],
   "graphs": {
-    "agent": "./tests/e2e/agent_entrypoint.py:traced_agent"
+    "agent": "./tests/e2e/agent_entrypoint.py:traced_agent",
+    "scheduler": "./tests/e2e/scheduler_entrypoint.py:get_scheduler"
   },
   "http": {
     "app": "./tests/e2e/harness.py:app"

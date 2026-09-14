@@ -6,8 +6,7 @@ _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
     "background_execute": ".background_execute",
-    "background_task": ".background_execute",
-    "capture_environment_snapshot": ".environments",
+    "background_task": ".background_task",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "create_sandbox_service_url": ".create_sandbox_service_url",
@@ -18,7 +17,6 @@ _TOOL_MODULES = {
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
     "http_request": ".http_request",
-    "linear_comment": "agent.linear.tools.comment",
     "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
@@ -35,12 +33,13 @@ _TOOL_MODULES = {
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
+    "refresh_environment_start": ".environments",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
-    "save_environment": ".environments",
+    "publish_environment": ".environments",
     "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
     "sandbox_reset": ".sandbox_reset",
@@ -55,6 +54,7 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
     "slack_thread_reply": "agent.slack.tools.thread_reply",
+    "submit_thread_feedback": ".submit_thread_feedback",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
@@ -66,7 +66,6 @@ __all__ = [
     "approve_plan",
     "background_execute",
     "background_task",
-    "capture_environment_snapshot",
     "create_automation",
     "create_sandbox_file_download_url",
     "create_sandbox_service_url",
@@ -77,7 +76,6 @@ __all__ = [
     "fetch_url",
     "get_thread",
     "http_request",
-    "linear_comment",
     "list_automations",
     "list_environments",
     "list_findings",
@@ -94,11 +92,12 @@ __all__ = [
     "read_repo_file",
     "read_user_settings",
     "recreate_sandbox",
+    "refresh_environment_start",
     "report_platform_issue",
     "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
-    "save_environment",
+    "publish_environment",
     "save_organization_skill",
     "delete_organization_skill",
     "save_plan",
@@ -114,6 +113,7 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_thread_reply",
+    "submit_thread_feedback",
     "trigger_automation",
     "update_automation",
     "update_finding",
@@ -123,7 +123,6 @@ __all__ = [
 if TYPE_CHECKING:
     from agent.github.tools.read_repo_file import read_repo_file
     from agent.github.tools.search_repo_code import search_repo_code
-    from agent.linear.tools.comment import linear_comment
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel
@@ -141,15 +140,16 @@ if TYPE_CHECKING:
         trigger_automation,
         update_automation,
     )
-    from agent.tools.background_execute import background_execute, background_task
+    from agent.tools.background_execute import background_execute
+    from agent.tools.background_task import background_task
     from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from agent.tools.create_sandbox_service_url import create_sandbox_service_url
     from agent.tools.enter_plan_mode import enter_plan_mode
     from agent.tools.environments import (
-        capture_environment_snapshot,
         delete_environment,
         list_environments,
-        save_environment,
+        publish_environment,
+        refresh_environment_start,
     )
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url
@@ -172,6 +172,7 @@ if TYPE_CHECKING:
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
+    from agent.tools.submit_thread_feedback import submit_thread_feedback
     from agent.tools.threads import get_thread, list_threads, manage_thread
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill

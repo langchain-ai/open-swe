@@ -6,7 +6,6 @@ configuration in one place. Per-repo style prompts live in
 """
 
 import logging
-import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
@@ -39,30 +38,18 @@ DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
 # Titles are a one-shot classification; no extended thinking needed.
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
-DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
-TRANSCRIPTION_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
 
-class TranscriptionSettingsUpdate(BaseModel):
-    transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
-
-    @field_validator("transcription_model")
-    @classmethod
-    def _validate_transcription_model(cls, value: str) -> str:
-        value = value.strip()
-        if not TRANSCRIPTION_MODEL_RE.fullmatch(value):
-            raise ValueError("invalid transcription model")
-        return value
-
-
-class TeamSettingsUpdate(TranscriptionSettingsUpdate):
+class TeamSettingsUpdate(BaseModel):
     review_draft_prs: bool = False
     pr_summaries: bool = True
     review_trace_links: bool = True
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
+    # Tri-state adaptive model routing toggle: True/False is authoritative,
+    # None is off (routing is opt-in until an admin enables it org-wide).
+    model_routing_enabled: bool | None = None
     gateway_enabled: bool | None = None
-    transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
     fable_enabled: bool = False
     org_guidelines: str | None = None
     default_agent_model: str | None = None
@@ -304,8 +291,8 @@ def _default_settings() -> dict[str, Any]:
         "review_draft_prs": False,
         "pr_summaries": True,
         "review_trace_links": True,
+        "model_routing_enabled": None,
         "gateway_enabled": None,
-        "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
         "fable_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -362,6 +349,7 @@ async def get_team_settings() -> dict[str, Any]:
         "autofix_enabled",
         "review_author_context_enabled",
         "review_tracing_project",
+        "transcription_model",
     ):
         merged.pop(stale_field, None)
     return normalize_team_settings_for_response(merged)
@@ -372,8 +360,8 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
+        "model_routing_enabled": update.model_routing_enabled,
         "gateway_enabled": update.gateway_enabled,
-        "transcription_model": update.transcription_model,
         "fable_enabled": update.fable_enabled,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
@@ -555,22 +543,11 @@ async def get_team_review_trace_links_enabled() -> bool:
     return bool(settings.get("review_trace_links", True))
 
 
-async def get_team_transcription_model() -> str:
-    value = (await get_team_settings()).get("transcription_model")
-    return (
-        value
-        if isinstance(value, str) and TRANSCRIPTION_MODEL_RE.fullmatch(value)
-        else DEFAULT_TRANSCRIPTION_MODEL
-    )
-
-
-async def update_team_transcription_model(model: str) -> dict[str, Any]:
+async def get_team_model_routing_enabled() -> bool:
+    """Return whether adaptive model routing is enabled org-wide."""
     settings = await get_team_settings()
-    settings["transcription_model"] = TranscriptionSettingsUpdate(
-        transcription_model=model
-    ).transcription_model
-    settings.pop("updated_at", None)
-    return await upsert_team_settings(TeamSettingsUpdate.model_validate(settings))
+    value = settings.get("model_routing_enabled")
+    return value if isinstance(value, bool) else False
 
 
 async def get_team_gateway_enabled() -> bool | None:
