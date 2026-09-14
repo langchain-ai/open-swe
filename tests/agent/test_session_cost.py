@@ -25,10 +25,10 @@ class _LangSmithClient:
     def __init__(self, roots: list[Any] | dict[str, list[Any]], stats: Any) -> None:
         self._roots = roots
         self.threads = _LangSmithThreads(stats)
-        self.list_kwargs: dict[str, Any] = {}
+        self.list_calls: list[dict[str, Any]] = []
 
     async def list_runs(self, **kwargs: Any):
-        self.list_kwargs = kwargs
+        self.list_calls.append(kwargs)
         if kwargs["filter"].startswith("or("):
             raise ValueError("OR across metadata fields is not supported by LangSmith")
         field = "invocation_id" if '"invocation_id"' in kwargs["filter"] else "prepare_run_id"
@@ -54,6 +54,8 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
 
     assert result is not None
     assert result.total_cost == 1.234
+    assert len(client.list_calls) == 1
+    assert '"invocation_id"' in client.list_calls[0]["filter"]
     assert client.threads.calls == [
         {
             "thread_id": "thread-1",
@@ -121,14 +123,15 @@ async def test_cost_lookup_accepts_either_invocation_metadata_field(monkeypatch,
     result = await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1", run_only=True)
     assert result is not None
     assert result.total_cost == 0.0
+    assert len(client.list_calls) == (1 if field == "invocation_id" else 2)
 
 
-async def test_cost_lookup_combines_metadata_matches_without_duplicate_traces(monkeypatch):
+async def test_cost_lookup_combines_legacy_metadata_matches(monkeypatch):
     root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
-    shared = SimpleNamespace(id="trace-1", end_time=root_end)
+    earlier = SimpleNamespace(id="trace-1", end_time=root_end)
     later = SimpleNamespace(id="trace-2", end_time=root_end + timedelta(seconds=1))
     client = _LangSmithClient(
-        {"invocation_id": [shared], "prepare_run_id": [shared, later]},
+        {"prepare_run_id": [earlier, later]},
         SimpleNamespace(total_cost=0.5, last_end_time=later.end_time),
     )
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
@@ -139,6 +142,7 @@ async def test_cost_lookup_combines_metadata_matches_without_duplicate_traces(mo
     assert result is not None
     assert result.total_cost == 0.5
     assert result.target_end_time == later.end_time
+    assert len(client.list_calls) == 2
     assert client.threads.calls[0]["filter"] == (
         'or(eq(trace_id, "trace-1"), eq(trace_id, "trace-2"))'
     )
