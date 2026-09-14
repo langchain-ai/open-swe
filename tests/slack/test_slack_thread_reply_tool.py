@@ -14,12 +14,13 @@ slack_reply_tool = importlib.import_module("agent.slack.tools.thread_reply")
 
 
 @pytest.fixture(autouse=True)
-def _patch_mutation_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_slack_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     @asynccontextmanager
     async def mutation_lock(*_args: Any):
         yield
 
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
+    monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", AsyncMock())
 
 
 def _config() -> dict[str, Any]:
@@ -280,6 +281,23 @@ async def test_slack_thread_reply_passes_executing_run_id(
     assert result == {"success": True}
     assert captured["run_id"] == "12345678-1234-5678-1234-567812345678"
     assert captured["triggering_user_id"] == "active-user"
+
+
+async def test_slack_thread_reply_restores_thinking_status_after_interim_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = UUID("12345678-1234-5678-1234-567812345678")
+    config = _config()
+    config["run_id"] = run_id
+    restore_status = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(
+        slack_reply_tool, "_post_and_store_mapping", AsyncMock(return_value=("2.0", None))
+    )
+    monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", restore_status)
+
+    assert await slack_reply_tool.slack_thread_reply("Still working") == {"success": True}
+    restore_status.assert_awaited_once_with("C1", "1.0")
 
 
 async def test_slack_thread_reply_posts_plain_text_without_options(

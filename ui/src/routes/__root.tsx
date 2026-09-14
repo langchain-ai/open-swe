@@ -78,6 +78,13 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        {typeof window !== "undefined" &&
+          window.openSweDesktop && (
+            // Rendered first so later no-drag elements carve out of it; the
+            // desktop preload styles it. Preload-injected DOM would be cleared
+            // when React takes over the document, so it lives here instead.
+            <div aria-hidden data-desktop-drag-strip="" />
+          )}
         <ThemeSync />
         <QueryClientProvider client={queryClient}>
           <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>

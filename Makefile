@@ -8,7 +8,7 @@ all: help
 ######################
 
 dev:
-	uv run langgraph dev --no-browser --port 2024
+	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
 
 # UI development in one terminal: Vite (`make web`) and the backend fronting it, so
 # http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two

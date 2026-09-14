@@ -304,7 +304,7 @@ async def _acknowledge(record: ThreadFeedback, *, response_url: str) -> None:
                     posted = await post_slack_ephemeral_message(
                         current.channel_id,
                         current.user_id,
-                        "✅ Feedback completed. Thanks!",
+                        "✅ Feedback submitted. Thanks!",
                         thread_ts=current.thread_ts if current.thread_ts != "0" else None,
                     )
                     if not posted:

@@ -1,5 +1,3 @@
-A message arrived in a Slack thread you are part of. You were NOT tagged in it — you are seeing it because you and the sender are the only active participants.
+A message arrived in a Slack thread you are part of. You were NOT tagged explicitly.
 
-Decide first whether the message is actually addressed to you. Continuations of your conversation, answers to your questions, and follow-up instructions are addressed to you. Someone thinking out loud, talking to another person, or commenting on the thread without expecting you to act is not.
-
-If it is not addressed to you, end your turn without calling any tool and post nothing, including no reaction. Staying silent is the right outcome; an unwanted reply or reaction from an untagged message is worse than no reply. If it is addressed to you, handle it exactly as you would a direct mention.
+If you and the sender are the only active participants, handle the message as a direct follow-up. In a multi-user conversation, default to observing silently and respond only when the message unmistakably addresses you, such as directly answering your question or giving a clear follow-up instruction for your active task. If it tags someone else, NEVER respond. Otherwise, end your turn without calling any tool and post nothing, including no reaction. Staying silent is the right outcome; an unwanted reply or reaction is worse than no reply.

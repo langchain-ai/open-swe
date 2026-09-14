@@ -117,14 +117,16 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     ]
     assert created["stream_subgraphs"] is True
     assert created["config"]["configurable"]["__event_streaming_v2"] is True
-    prepare_run_id = created["config"]["configurable"]["prepare_run_id"]
+    invocation_id = created["config"]["configurable"]["invocation_id"]
     assert created["config"]["metadata"] == {
         "kind": "test",
-        "prepare_run_id": prepare_run_id,
+        "invocation_id": invocation_id,
+        "prepare_run_id": invocation_id,
     }
     assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
-    assert isinstance(prepare_run_id, str)
+    assert created["config"]["configurable"]["prepare_run_id"] == invocation_id
+    assert isinstance(invocation_id, str)
 
 
 @pytest.mark.asyncio
@@ -147,8 +149,22 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_op
     created = client.runs.created[0]
     assert "webhook" not in created
     assert created["stream_resumable"] is False
+    assert created["config"]["configurable"]["invocation_id"] == "existing"
     assert created["config"]["configurable"]["prepare_run_id"] == "existing"
     assert created["config"]["configurable"]["__event_streaming_v2"] is True
+
+
+def test_prepare_run_config_rejects_conflicting_invocation_ids() -> None:
+    with pytest.raises(ValueError, match="conflicts"):
+        dispatch.prepare_run_config(
+            {
+                "configurable": {
+                    "invocation_id": "invocation-1",
+                    "prepare_run_id": "invocation-2",
+                }
+            },
+            None,
+        )
 
 
 def test_prepare_run_config_marks_every_run_as_protocol_v3() -> None:

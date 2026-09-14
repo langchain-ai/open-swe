@@ -275,11 +275,11 @@ def _langsmith_trace_filter(trace_ids: list[str]) -> str:
 
 async def get_langsmith_thread_cost(
     thread_id: str,
-    prepare_run_id: str,
+    invocation_id: str,
     *,
     run_only: bool = False,
 ) -> LangSmithThreadCost | None:
-    """Return a fresh thread or run cost correlated to a completed agent run."""
+    """Return fresh trace cost correlated to one completed invocation."""
     client = _build_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
@@ -287,18 +287,21 @@ async def get_langsmith_thread_cost(
     if not project_id:
         raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
     try:
-        roots = client.list_runs(
-            project_id=project_id,
-            is_root=True,
-            filter=_langsmith_metadata_filter("prepare_run_id", prepare_run_id),
-            select=["id", "end_time"],
-        )
-        matched_roots = [
-            (str(root_id), parsed)
-            async for run in roots
-            if (root_id := _langsmith_value(run, "id"))
-            and (parsed := _parse_langsmith_time(_langsmith_value(run, "end_time"))) is not None
-        ]
+        matched_roots: dict[str, datetime] = {}
+        # LangSmith rejects OR across different metadata fields.
+        for field in ("invocation_id", "prepare_run_id"):
+            roots = client.list_runs(
+                project_id=project_id,
+                is_root=True,
+                filter=_langsmith_metadata_filter(field, invocation_id),
+                select=["id", "end_time"],
+            )
+            async for run in roots:
+                root_id = _langsmith_value(run, "id")
+                end_time = _parse_langsmith_time(_langsmith_value(run, "end_time"))
+                if root_id and end_time is not None:
+                    key = str(root_id)
+                    matched_roots[key] = max(end_time, matched_roots.get(key, end_time))
         if not matched_roots:
             return None
         stats_kwargs: dict[str, Any] = {
@@ -306,17 +309,34 @@ async def get_langsmith_thread_cost(
             "selects": ["TOTAL_COST", "LAST_END_TIME"],
         }
         if run_only:
-            stats_kwargs["filter"] = _langsmith_trace_filter(
-                [trace_id for trace_id, _ in matched_roots]
-            )
+            stats_kwargs["filter"] = _langsmith_trace_filter(list(matched_roots))
         stats = await client.threads.stats(thread_id, **stats_kwargs)
     except LangSmithNotFoundError as exc:
         raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
     except Exception as exc:  # noqa: BLE001
-        status_code = getattr(exc, "status_code", None)
-        if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
-            raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
-        logger.debug("Could not load LangSmith cost for thread %s", thread_id, exc_info=True)
+        status_code = None
+        cause: BaseException | None = exc
+        seen: set[int] = set()
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            status_code = getattr(cause, "status_code", None) or getattr(
+                getattr(cause, "response", None), "status_code", None
+            )
+            if isinstance(status_code, int):
+                break
+            cause = cause.__cause__
+        if (
+            isinstance(status_code, int)
+            and 400 <= status_code < 500
+            and status_code not in {408, 429}
+        ):
+            raise LangSmithCostUnavailable(
+                f"LangSmith cost lookup rejected (HTTP {status_code})"
+            ) from exc
+        logger.warning(
+            "LangSmith cost lookup failed",
+            extra={"cost_error_type": type(exc).__name__, "cost_http_status": status_code},
+        )
         return None
 
     raw_cost = _langsmith_value(stats, "total_cost")
@@ -327,7 +347,7 @@ async def get_langsmith_thread_cost(
     except TypeError, ValueError:
         return None
     last_end_time = _parse_langsmith_time(_langsmith_value(stats, "last_end_time"))
-    target_end_time = max(end_time for _, end_time in matched_roots)
+    target_end_time = max(matched_roots.values())
     if (
         not math.isfinite(total_cost)
         or total_cost < 0
