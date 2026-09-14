@@ -1260,7 +1260,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     subagent_tools = [
         tool
         for tool in static_tools
-        if tool not in {background_execute, background_task, submit_thread_feedback}
+        if tool is not background_execute
+        and tool is not background_task
+        and tool is not submit_thread_feedback
     ]
     title_model = _make_model_or_defer(
         title_model_id,
