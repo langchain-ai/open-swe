@@ -13,6 +13,10 @@ const HOST = "127.0.0.1";
 const JOBS_PER_WORKER = "10";
 const START_TIMEOUT_MS = 60_000;
 const STOP_TIMEOUT_MS = 5_000;
+// Records the backend's pid under the app's own state directory, so a backend
+// left behind by a crash or relaunch is reaped before a new one starts and no
+// other installation's backend is ever touched.
+const PID_FILE = "backend.pid";
 const THREAD_STATUS = { busy: "running", error: "error" };
 const PROVIDER_KEYS = {
   anthropic: ["ANTHROPIC_API_KEY"],
@@ -101,6 +105,45 @@ function reservePort(host = HOST) {
   });
 }
 
+/** `uv run` wraps the python server, so signal the whole process group. */
+function killProcessTree(pid, signal) {
+  if (process.platform === "win32") {
+    execFileSyncProcess("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+    });
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    process.kill(pid, signal);
+  }
+}
+
+function terminate(child, signal) {
+  if (typeof child.pid === "number") {
+    try {
+      killProcessTree(child.pid, signal);
+      return;
+    } catch {}
+  }
+  child.kill(signal);
+}
+
+function isLangGraphProcess(pid) {
+  if (process.platform === "win32") return true;
+  try {
+    return /langgraph/.test(
+      execFileSyncProcess("ps", ["-o", "command=", "-p", String(pid)], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }),
+    );
+  } catch {
+    return false;
+  }
+}
+
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -176,8 +219,28 @@ class BackendSupervisor {
     return this.gatewayEnv;
   }
 
+  pidFile() {
+    return this.options.stateDir
+      ? path.join(this.options.stateDir, PID_FILE)
+      : null;
+  }
+
+  reapStaleBackend() {
+    const file = this.pidFile();
+    if (!file) return;
+    try {
+      const pid = Number.parseInt(fs.readFileSync(file, "utf8"), 10);
+      if (Number.isInteger(pid) && pid > 0 && isLangGraphProcess(pid)) {
+        killProcessTree(pid, "SIGTERM");
+      }
+    } catch {}
+    try {
+      fs.unlinkSync(file);
+    } catch {}
+  }
+
   start() {
-    if (this.ready && this.child && !this.failure) return this.ready;
+    if (this.ready && !this.failure) return this.ready;
     this.ready = this.startOnce().catch((error) => {
       this.ready = null;
       throw error;
@@ -197,8 +260,10 @@ class BackendSupervisor {
     if (!this.options.worktreesDir)
       throw new Error("Local worktree directory is not configured");
     fs.mkdirSync(this.options.worktreesDir, { recursive: true });
-    if (this.options.stateDir)
+    if (this.options.stateDir) {
       fs.mkdirSync(this.options.stateDir, { recursive: true });
+      this.reapStaleBackend();
+    }
     if (this.options.isPackaged && !fs.existsSync(target.command)) {
       throw new Error(`Bundled local backend is missing: ${target.command}`);
     }
@@ -225,8 +290,15 @@ class BackendSupervisor {
       },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      detached: process.platform !== "win32",
     });
     this.child = child;
+    const pidFile = this.pidFile();
+    if (pidFile && typeof child.pid === "number") {
+      try {
+        fs.writeFileSync(pidFile, `${child.pid}\n`);
+      } catch {}
+    }
     const append = (chunk) => {
       this.logs = `${this.logs}${chunk.toString("utf8")}`.slice(-16_000);
     };
@@ -235,9 +307,16 @@ class BackendSupervisor {
 
     let startupError = null;
     const exited = new Promise((resolve) => {
+      // A child that was already replaced must not disturb its successor.
+      const fail = (error) => {
+        if (this.child === child && !this.closing) {
+          this.failure = error;
+          this.child = null;
+        }
+      };
       child.once("error", (error) => {
         startupError = error;
-        if (!this.closing) this.failure = error;
+        fail(error);
         resolve();
       });
       child.once("exit", (code, signal) => {
@@ -247,7 +326,7 @@ class BackendSupervisor {
             `Local LangGraph backend stopped with ${reason}`,
           );
         }
-        if (!this.closing) this.failure = startupError;
+        fail(startupError);
         resolve();
       });
     });
@@ -391,20 +470,38 @@ class BackendSupervisor {
     );
   }
 
+  /** Last resort for exit paths that cannot wait: signal and move on. */
+  killSync() {
+    const child = this.child;
+    this.child = null;
+    this.ready = null;
+    const pidFile = this.pidFile();
+    if (pidFile) {
+      try {
+        fs.unlinkSync(pidFile);
+      } catch {}
+    }
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    try {
+      terminate(child, "SIGTERM");
+    } catch {}
+  }
+
   async close() {
     if (this.closing) return;
     this.closing = true;
     const child = this.child;
-    this.child = null;
     this.port = null;
     this.token = null;
-    this.ready = null;
     this.failure = null;
-    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    if (!child || child.exitCode !== null || child.signalCode !== null) {
+      this.killSync();
+      return;
+    }
     await new Promise((resolve) => {
       const timer = setTimeout(() => {
         try {
-          child.kill("SIGKILL");
+          terminate(child, "SIGKILL");
         } catch {}
         resolve();
       }, this.options.stopTimeoutMs || STOP_TIMEOUT_MS);
@@ -413,12 +510,7 @@ class BackendSupervisor {
         clearTimeout(timer);
         resolve();
       });
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        clearTimeout(timer);
-        resolve();
-      }
+      this.killSync();
     });
   }
 }

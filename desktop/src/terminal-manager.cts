@@ -1017,8 +1017,11 @@ function createTerminalManager(options) {
   async function close(input) {
     if (!isRecord(input)) throw new Error("Invalid terminal request");
     const localSessionId = cleanId(input.localSessionId, "local session ID");
-    if (!getSessionRoot(localSessionId))
+    if (!getSessionRoot(localSessionId)) {
+      // A thread whose project is gone still has to be deletable.
+      if (input.terminalId === undefined) return;
       throw new Error("Local thread not found");
+    }
     if (input.terminalId !== undefined) {
       const terminalId = cleanId(input.terminalId, "terminal ID");
       return locked(localSessionId, () =>
