@@ -9,7 +9,8 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from agent import store as agent_store
-from agent.dashboard import repo_access, schedules
+from agent.dashboard import repo_access
+from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
 
 

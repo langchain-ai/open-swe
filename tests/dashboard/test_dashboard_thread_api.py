@@ -9,7 +9,7 @@ from xml.etree import ElementTree
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import deps, options_api, profiles, routes
+from agent.dashboard import deps, options_routes, profiles
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 from agent.dashboard.ttft import AssistantTextObservation
@@ -2630,7 +2630,7 @@ async def test_options_omits_fable_when_disabled() -> None:
             return_value=_PAIR,
         ),
     ):
-        payload = await options_api.options()
+        payload = await options_routes.options()
     assert _FABLE not in [m["id"] for m in payload["models"]]
 
 
@@ -2653,7 +2653,7 @@ async def test_options_includes_fable_when_enabled() -> None:
             return_value=_PAIR,
         ),
     ):
-        payload = await options_api.options()
+        payload = await options_routes.options()
     assert _FABLE in [m["id"] for m in payload["models"]]
     openai_model = next(m for m in payload["models"] if m["id"] == _VISION_MODEL)
     assert openai_model["context_window"] == 272_000
@@ -2682,7 +2682,7 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
             return_value=fable_pair,
         ),
     ):
-        payload = await options_api.options()
+        payload = await options_routes.options()
     model_ids = [m["id"] for m in payload["models"]]
     assert _FABLE not in model_ids
     assert payload["default_agent_model"] != _FABLE
@@ -2969,7 +2969,7 @@ async def test_admin_cancel_dashboard_thread_does_not_update_on_cancel_failure(m
 
 async def test_admin_cancel_thread_route_preserves_actor_identity(monkeypatch) -> None:
     cancel = AsyncMock(return_value={"id": "thread-1", "status": "interrupted"})
-    monkeypatch.setattr(routes, "admin_cancel_dashboard_thread", cancel)
+    monkeypatch.setattr(thread_routes, "admin_cancel_dashboard_thread", cancel)
 
     result = await thread_routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
 

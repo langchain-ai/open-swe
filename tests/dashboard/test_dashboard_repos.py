@@ -108,7 +108,7 @@ async def test_list_repos_serves_fresh_cache_without_calling_github(monkeypatch)
     fetch = AsyncMock(return_value=([], []))
     monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
     schedule = MagicMock()
-    monkeypatch.setattr(repos, "schedule_repo_cache_refresh", schedule)
+    monkeypatch.setattr(dashboard_routes, "schedule_repo_cache_refresh", schedule)
 
     result = await dashboard_routes.list_repos(session={"sub": "octocat"})
 
@@ -121,14 +121,14 @@ async def test_list_repos_serves_fresh_cache_without_calling_github(monkeypatch)
 async def test_list_repos_serves_stale_cache_and_schedules_refresh(monkeypatch) -> None:
     cached = {"installations": [], "repositories": [{"full_name": "acme/api", "private": True}]}
     monkeypatch.setattr(
-        repos,
+        dashboard_routes,
         "read_cached_repos",
-        AsyncMock(return_value=(cached, repos.REPO_LIST_FRESH_MS + 1)),
+        AsyncMock(return_value=(cached, dashboard_routes.REPO_LIST_FRESH_MS + 1)),
     )
     fetch = AsyncMock(return_value=([], []))
     monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
     schedule = MagicMock()
-    monkeypatch.setattr(repos, "schedule_repo_cache_refresh", schedule)
+    monkeypatch.setattr(dashboard_routes, "schedule_repo_cache_refresh", schedule)
 
     result = await dashboard_routes.list_repos(session={"sub": "octocat"})
 

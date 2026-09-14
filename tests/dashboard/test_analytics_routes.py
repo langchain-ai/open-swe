@@ -5,6 +5,7 @@ import pytest
 from fastapi import FastAPI
 
 from agent.analytics import queries
+from agent.analytics import routes as analytics_routes
 from agent.dashboard import oauth, routes
 from agent.database import analytics as database
 
@@ -53,7 +54,7 @@ async def test_pr_report_unavailability_is_distinct_from_empty_data(monkeypatch,
         else RuntimeError("not migrated")
     )
     monkeypatch.setattr(
-        queries if report == "pr" else routes,
+        queries if report == "pr" else analytics_routes,
         "pr_merge_rate_by_model" if report == "pr" else "usage_leaderboard",
         AsyncMock(side_effect=error),
     )
