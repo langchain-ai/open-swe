@@ -10,6 +10,8 @@ from agent.middleware.model_selection import ModelSelectionMiddleware, RouteDeci
 
 def _middleware(
     route: Literal["fast", "balanced", "performance"] = "fast",
+    *,
+    route_model_ids: dict[str, str] | None = None,
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
     models = {profile: MagicMock(name=profile) for profile in ("fast", "balanced", "performance")}
     structured = AsyncMock(return_value=RouteDecision(model_route=route))
@@ -20,6 +22,7 @@ def _middleware(
     middleware = ModelSelectionMiddleware(
         cast(Any, models),
         classifier,
+        route_model_ids=route_model_ids,
     )
     classifier.model_copy.assert_called_once_with(update={"tags": ["nostream"]})
     tagged.with_structured_output.assert_called_once_with(
@@ -149,6 +152,83 @@ async def test_classifier_failure_falls_back_to_balanced_route() -> None:
 
     assert state["model_route"] == "balanced"
     assert (await _invoke(middleware, state)).model is models["balanced"]
+
+
+@pytest.mark.asyncio
+async def test_routed_model_id_is_streamed_for_the_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agent.middleware.model_selection.get_stream_writer",
+        lambda: events.append,
+    )
+    middleware, _, _ = _middleware(route_model_ids={"fast": "openai:gpt-5.6-sol"})
+    state = {"messages": [HumanMessage(content="Update the README")]}
+
+    await middleware.abefore_model(cast(Any, state), MagicMock())
+
+    assert events == [
+        {
+            "type": "model_routed",
+            "route": "fast",
+            "model_id": "openai:gpt-5.6-sol",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_routed_model_event_omitted_without_a_known_model_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agent.middleware.model_selection.get_stream_writer",
+        lambda: events.append,
+    )
+    middleware, _, _ = _middleware()
+    state = {"messages": [HumanMessage(content="Update the README")]}
+
+    await middleware.abefore_model(cast(Any, state), MagicMock())
+
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_streams_the_overriding_performance_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agent.middleware.model_selection.get_stream_writer",
+        lambda: events.append,
+    )
+    middleware, models, classifier = _middleware(
+        route_model_ids={
+            "fast": "openai:gpt-5.6-sol",
+            "performance": "anthropic:claude-opus-5",
+        }
+    )
+    entered_plan_mode = {
+        "messages": [HumanMessage(content="Plan the next change")],
+        "model_route": "fast",
+        "plan_mode": True,
+    }
+    started_in_plan_mode = {
+        "messages": [HumanMessage(content="Plan the next change")],
+        "plan_mode": True,
+    }
+
+    assert await middleware.abefore_model(cast(Any, entered_plan_mode), MagicMock()) == {}
+    assert await middleware.abefore_model(cast(Any, started_in_plan_mode), MagicMock()) == {}
+
+    performance = {
+        "type": "model_routed",
+        "route": "performance",
+        "model_id": "anthropic:claude-opus-5",
+    }
+    assert events == [performance, performance]
+    classifier.assert_not_awaited()
+    assert (await _invoke(middleware, entered_plan_mode)).model is models["performance"]
+    assert (await _invoke(middleware, started_in_plan_mode)).model is models["performance"]
 
 
 _HUMAN_ENVELOPE = (
