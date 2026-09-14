@@ -1,9 +1,18 @@
 import type { RumInitConfiguration } from "@datadog/browser-rum"
 
 type PublicEnv = Record<string, string | boolean | undefined>
-type RumClient = {
+export interface RumDurationVital {
+  /** Epoch milliseconds. */
+  startTime: number
+  duration: number
+  context?: Record<string, string | number | boolean | null>
+}
+/** The slice of the RUM SDK the dashboard uses; test doubles may omit the optional parts. */
+export type RumClient = {
   init: (configuration: RumInitConfiguration) => void
   getInternalContext: () => { session_id?: string } | undefined
+  addDurationVital?: (name: string, options: RumDurationVital) => void
+  setGlobalContextProperty?: (key: string, value: string) => void
 }
 type RumLoader = () => Promise<RumClient>
 
@@ -44,6 +53,10 @@ export function getDatadogSessionLink(): string | undefined {
 
 export function isDatadogRumInitialized(): boolean {
   return initializedRum !== undefined
+}
+
+export function getDatadogRum(): RumClient | undefined {
+  return initializedRum
 }
 
 export function subscribeToDatadogInitialization(

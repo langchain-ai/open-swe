@@ -1,8 +1,11 @@
 import { Client } from "@langchain/langgraph-sdk"
 
+import { withRequestTiming } from "@/lib/perf/fetchTiming"
+
 /** Streams and client reads must carry the session cookie across origins. */
-export const dashboardFetch: typeof fetch = (input, init) =>
+export const dashboardFetch: typeof fetch = withRequestTiming((input, init) =>
   fetch(input, { ...init, credentials: "include" })
+)
 
 const withCredentials = (_url: URL, init: RequestInit): RequestInit => ({
   ...init,

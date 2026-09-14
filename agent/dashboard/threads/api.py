@@ -169,14 +169,21 @@ async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[s
 
 
 async def get_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    mark_viewed: bool = True,
+    timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
+    record = timings if timings is not None else {}
     client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Thread lookup failed for %s", thread_id, exc_info=True)
-        raise HTTPException(404, "thread not found") from exc
+    with phase(record, "thread_get"):
+        try:
+            thread = await client.threads.get(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Thread lookup failed for %s", thread_id, exc_info=True)
+            raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
     _assert_thread_readable(metadata, login, email)
@@ -184,7 +191,9 @@ async def get_dashboard_thread(
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
     # `GET …/state` → `stream.messages`), so the detail endpoint returns
     # metadata only — no server-side message conversion.
-    thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
+    thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
+        client, thread, timings=record
+    )
     metadata = thread_metadata(thread)
     status = _run_status_to_agent_status(
         thread.get("status") if isinstance(thread.get("status"), str) else "idle",
@@ -196,21 +205,24 @@ async def get_dashboard_thread(
         ),
     )
     if mark_viewed and status != "running":
-        metadata = await _mark_thread_viewed(
-            client,
-            thread_id,
-            metadata,
-            latest_run_id=latest_run_id,
-        )
+        with phase(record, "mark_viewed"):
+            metadata = await _mark_thread_viewed(
+                client,
+                thread_id,
+                metadata,
+                latest_run_id=latest_run_id,
+            )
         thread = {**as_thread_dict(thread), "metadata": metadata}
 
-    summary = await _thread_summary(
-        thread,
-        latest_run_status=latest_run_status,
-        latest_run_id=latest_run_id,
-    )
+    with phase(record, "summary"):
+        summary = await _thread_summary(
+            thread,
+            latest_run_status=latest_run_status,
+            latest_run_id=latest_run_id,
+        )
     if status == "running":
-        summary["queuedMessages"] = await _queued_dashboard_messages(client, thread_id)
+        with phase(record, "queued"):
+            summary["queuedMessages"] = await _queued_dashboard_messages(client, thread_id)
     return summary
 
 

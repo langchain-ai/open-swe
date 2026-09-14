@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Profiler,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
@@ -48,6 +56,25 @@ import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import {
+  runTranscriptBuilt,
+  runTranscriptCommitted,
+} from "@/lib/perf/streaming"
+import {
+  threadHydrated,
+  threadHydrationFailed,
+  threadTranscriptBuilt,
+  threadTranscriptPainted,
+} from "@/lib/perf/threadLoad"
+import { perfNow } from "@/lib/perf/trace"
+
+function onTranscriptRender(
+  _id: string,
+  _phase: "mount" | "update" | "nested-update",
+  actualDuration: number
+): void {
+  runTranscriptCommitted(actualDuration)
+}
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -194,15 +221,18 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
-  const baseMessages = useMemo<Array<Message>>(
-    () =>
-      streamMessagesToUi(
-        stream.messages,
-        stream.toolCalls,
-        messageArrivalTimestamp
-      ),
-    [stream.messages, stream.toolCalls]
-  )
+  const baseMessages = useMemo<Array<Message>>(() => {
+    const started = perfNow()
+    const built = streamMessagesToUi(
+      stream.messages,
+      stream.toolCalls,
+      messageArrivalTimestamp
+    )
+    const elapsed = perfNow() - started
+    threadTranscriptBuilt(thread.id, elapsed)
+    runTranscriptBuilt(elapsed)
+    return built
+  }, [stream.messages, stream.toolCalls, thread.id])
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(
@@ -240,13 +270,39 @@ export function AgentThreadView({
     // oxlint-disable-next-line react/set-state-in-effect
     setHydrateRejected(false)
     stream.hydrationPromise.catch(() => {
-      if (active) setHydrateRejected(true)
+      if (!active) return
+      setHydrateRejected(true)
+      threadHydrationFailed(thread.id)
     })
     return () => {
       active = false
     }
-  }, [stream.hydrationPromise])
+  }, [stream.hydrationPromise, thread.id])
   const hydrationFailed = !isHydrating && !hasMessages && hydrateRejected
+
+  const hydratedMessageCount = stream.messages.length
+  useEffect(() => {
+    if (!stream.isThreadLoading)
+      threadHydrated(thread.id, { messages: hydratedMessageCount })
+  }, [hydratedMessageCount, stream.isThreadLoading, thread.id])
+
+  // The transcript's first frame: one rAF after the commit that replaced the
+  // hydration placeholder. Approximates paint closely enough to compare builds.
+  const transcriptChunkCount = useMemo(
+    () => visibleMessages.reduce((sum, m) => sum + m.chunks.length, 0),
+    [visibleMessages]
+  )
+  const paintedThreadId = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (isHydrating || paintedThreadId.current === thread.id) return
+    paintedThreadId.current = thread.id
+    const messages = visibleMessages.length
+    const chunks = transcriptChunkCount
+    const frame = requestAnimationFrame(() =>
+      threadTranscriptPainted(thread.id, { messages, chunks })
+    )
+    return () => cancelAnimationFrame(frame)
+  }, [isHydrating, thread.id, transcriptChunkCount, visibleMessages.length])
 
   return (
     <div className="flex min-w-0 flex-1">
@@ -321,55 +377,57 @@ export function AgentThreadView({
               health={pullRequestHealth}
               healthUnavailable={pullRequestStatus.isError}
             >
-              <Messages
-                messages={visibleMessages}
-                threadId={thread.id}
-                scrollKey={thread.id}
-                showPlanArtifact={
-                  thread.planStatus === "ready" ||
-                  thread.planStatus === "shared"
-                }
-                emptyState={
-                  <div className="flex min-h-60 items-center justify-center">
-                    {hydrationFailed ? (
-                      <Alert variant="error" className="max-w-3xl">
-                        <CircleAlertIcon />
-                        <AlertDescription>
-                          <span>
-                            This thread&apos;s messages could not be loaded.
-                            Reload to try again.
-                          </span>
-                        </AlertDescription>
-                      </Alert>
-                    ) : (
-                      <p className="text-xs text-muted-foreground/70">
-                        This thread has no messages yet.
-                      </p>
-                    )}
-                  </div>
-                }
-                onOpenFile={handleOpenFile}
-                queuedMessages={queuedMessages}
-                isStreaming={isStreaming}
-                streamIsLoading={stream.isLoading}
-                scrollControlRef={scrollControlRef}
-                isThinking={isThinking}
-                isOffloading={stream.isOffloading}
-                settingUpSandbox={settingUpSandbox}
-                pollWorkflowApprovalsWhileActive={isStreaming}
-                contentWidthClass="max-w-3xl"
-                footer={
-                  !isStreaming &&
-                  !sendMessage.isPending &&
-                  queuedMessages.length === 0 && (
-                    <ThreadFeedbackCard
-                      key={`${thread.id}:${session.data?.login ?? ""}`}
-                      threadId={thread.id}
-                      login={session.data?.login ?? null}
-                    />
-                  )
-                }
-              />
+              <Profiler id="transcript" onRender={onTranscriptRender}>
+                <Messages
+                  messages={visibleMessages}
+                  threadId={thread.id}
+                  scrollKey={thread.id}
+                  showPlanArtifact={
+                    thread.planStatus === "ready" ||
+                    thread.planStatus === "shared"
+                  }
+                  emptyState={
+                    <div className="flex min-h-60 items-center justify-center">
+                      {hydrationFailed ? (
+                        <Alert variant="error" className="max-w-3xl">
+                          <CircleAlertIcon />
+                          <AlertDescription>
+                            <span>
+                              This thread&apos;s messages could not be loaded.
+                              Reload to try again.
+                            </span>
+                          </AlertDescription>
+                        </Alert>
+                      ) : (
+                        <p className="text-xs text-muted-foreground/70">
+                          This thread has no messages yet.
+                        </p>
+                      )}
+                    </div>
+                  }
+                  onOpenFile={handleOpenFile}
+                  queuedMessages={queuedMessages}
+                  isStreaming={isStreaming}
+                  streamIsLoading={stream.isLoading}
+                  scrollControlRef={scrollControlRef}
+                  isThinking={isThinking}
+                  isOffloading={stream.isOffloading}
+                  settingUpSandbox={settingUpSandbox}
+                  pollWorkflowApprovalsWhileActive={isStreaming}
+                  contentWidthClass="max-w-3xl"
+                  footer={
+                    !isStreaming &&
+                    !sendMessage.isPending &&
+                    queuedMessages.length === 0 && (
+                      <ThreadFeedbackCard
+                        key={`${thread.id}:${session.data?.login ?? ""}`}
+                        threadId={thread.id}
+                        login={session.data?.login ?? null}
+                      />
+                    )
+                  }
+                />
+              </Profiler>
             </PullRequestPreviewProvider>
           )}
           {!isHydrating && (

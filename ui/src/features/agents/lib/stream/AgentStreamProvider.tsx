@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -19,6 +20,7 @@ import {
   createLocalGraphClient,
   dashboardFetch,
 } from "@/lib/langgraph-client"
+import { createRunTracker } from "@/lib/perf/streaming"
 import { selectStreamFor, useStreamPool } from "./streamPool"
 import type { ReactNode } from "react"
 import type {
@@ -52,6 +54,11 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [cloud]
   )
   const pool = useStreamPool.getState
+  const runTracker = useMemo(
+    () => createRunTracker({ transport: entry.transport }),
+    [entry.transport]
+  )
+  useEffect(() => () => runTracker.dispose(), [runTracker])
   const [isOffloading, setIsOffloading] = useState(false)
   const [routed, setRouted] = useState<{
     route?: string
@@ -65,11 +72,13 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     fetch: dashboardFetch,
     onThreadId: (threadId) => pool().rekey(entry.id, threadId),
     onCreated: () => {
+      runTracker.created()
       setIsOffloading(false)
       pool().runAccepted(entry.id)
       if (cloud) invalidateAgentThreadLists(queryClient)
     },
-    onCompleted: () => {
+    onCompleted: (info) => {
+      runTracker.completed(info.reason)
       setIsOffloading(false)
       if (!cloud) return
       const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
@@ -100,10 +109,24 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     onError: () => setIsOffloading(false),
   })
 
+  useChannelEffect(stream, ["lifecycle", "messages"], {
+    onEvent: (event) => runTracker.event(event),
+  })
+
+  // Every send goes through the published handle, so timing it here covers
+  // the composer, the home page and the local queue alike.
+  const submit = useCallback<AgentStream["submit"]>(
+    (...args) => {
+      runTracker.submitted()
+      return stream.submit(...args)
+    },
+    [runTracker, stream]
+  )
+
   const publish = useStreamPool((state) => state.publish)
   useLayoutEffect(
-    () => publish(entry.id, { ...stream, isOffloading, routed }),
-    [entry.id, publish, stream, isOffloading, routed]
+    () => publish(entry.id, { ...stream, submit, isOffloading, routed }),
+    [entry.id, publish, stream, submit, isOffloading, routed]
   )
 
   return null
