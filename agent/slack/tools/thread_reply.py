@@ -1,6 +1,6 @@
 import json
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
@@ -19,6 +19,7 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 async def slack_thread_reply(
     message: str,
+    response_type: Literal["progress", "final"],
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,

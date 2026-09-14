@@ -532,6 +532,7 @@ async def test_dashboard_agent_excludes_slack_tools() -> None:
             "slack_read_thread_messages",
             "slack_start_new_thread",
             "slack_thread_reply",
+            "no_slack_response_needed",
         }
     )
 
@@ -561,7 +562,11 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
         "slack_read_thread_messages",
         "slack_start_new_thread",
         "slack_thread_reply",
+        "no_slack_response_needed",
     } <= tool_names
+    middleware = captured["middleware"]
+    assert isinstance(middleware, list)
+    assert any(type(item).__name__ == "SlackResponseDispositionMiddleware" for item in middleware)
 
 
 @pytest.mark.asyncio
@@ -606,6 +611,7 @@ async def test_stop_summary_agent_is_read_only_and_slack_only() -> None:
     assert tool_names == {"slack_read_thread_messages", "slack_thread_reply"}
     middleware_names = {type(item).__name__ for item in middleware}
     assert "ExcludeToolsMiddleware" in middleware_names
+    assert "SlackResponseDispositionMiddleware" in middleware_names
     assert "check_message_queue_before_model" not in middleware_names
 
 
@@ -652,6 +658,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     slack_names = {
         "manage_code_channel",
         "notify_automation_channel",
+        "no_slack_response_needed",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",

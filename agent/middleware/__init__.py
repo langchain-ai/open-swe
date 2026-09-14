@@ -23,6 +23,7 @@ _MIDDLEWARE_MODULES = {
     "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
     "SanitizeToolInputsMiddleware": ".sanitize_tool_inputs",
+    "SlackResponseDispositionMiddleware": ".slack_response_disposition",
     "StableToolResultOrderMiddleware": ".stable_tool_order",
     "settle_review_check_on_exit": ".settle_review_check",
     "SubdirAgentsReadMiddleware": ".subdir_agents",
@@ -52,6 +53,7 @@ __all__ = [
     "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
+    "SlackResponseDispositionMiddleware",
     "StableToolResultOrderMiddleware",
     "SubdirAgentsReadMiddleware",
     "ToolErrorMiddleware",
@@ -88,6 +90,7 @@ if TYPE_CHECKING:
     from agent.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from agent.middleware.sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from agent.middleware.settle_review_check import settle_review_check_on_exit
+    from agent.middleware.slack_response_disposition import SlackResponseDispositionMiddleware
     from agent.middleware.stable_tool_order import StableToolResultOrderMiddleware
     from agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
     from agent.middleware.task_retry import task_on_failure, task_retry_on

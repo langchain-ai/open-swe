@@ -1,1 +1,1 @@
-This is an automated re-trigger of this thread. The agent scheduled this wakeup to poll for updates. Check the current state of whatever you were waiting on and continue from there.
+This is an automated re-trigger of this thread. The agent scheduled this wakeup to poll for updates. Check the current state of whatever you were waiting on and continue from there. For a Slack-triggered wakeup where nothing changed and no user-facing update is needed, call `no_slack_response_needed` with the reason instead of posting a redundant Slack reply.
