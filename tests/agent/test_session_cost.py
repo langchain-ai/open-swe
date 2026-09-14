@@ -21,20 +21,27 @@ class _LangSmithThreads:
         return self._stats
 
 
-class _LangSmithClient:
-    def __init__(self, roots: list[Any] | dict[str, list[Any]], stats: Any) -> None:
+class _LangSmithRuns:
+    def __init__(self, roots: list[Any] | dict[str, list[Any]]) -> None:
         self._roots = roots
-        self.threads = _LangSmithThreads(stats)
-        self.list_calls: list[dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
-    async def list_runs(self, **kwargs: Any):
-        self.list_calls.append(kwargs)
-        if kwargs["filter"].startswith("or("):
-            raise ValueError("OR across metadata fields is not supported by LangSmith")
+    async def query(self, **kwargs: Any):
+        self.calls.append(kwargs)
         field = "invocation_id" if '"invocation_id"' in kwargs["filter"] else "prepare_run_id"
         roots = self._roots.get(field, []) if isinstance(self._roots, dict) else self._roots
         for root in roots:
             yield root
+
+
+class _LangSmithClient:
+    def __init__(self, roots: list[Any] | dict[str, list[Any]], stats: Any) -> None:
+        self.runs = _LangSmithRuns(roots)
+        self.threads = _LangSmithThreads(stats)
+        self.project = SimpleNamespace(start_time=datetime(2025, 1, 1, tzinfo=UTC))
+
+    async def read_project(self, **kwargs: Any) -> Any:
+        return self.project
 
 
 async def test_langsmith_cost_requires_correlated_fresh_aggregate(
@@ -54,8 +61,11 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
 
     assert result is not None
     assert result.total_cost == 1.234
-    assert len(client.list_calls) == 1
-    assert '"invocation_id"' in client.list_calls[0]["filter"]
+    assert len(client.runs.calls) == 1
+    assert '"invocation_id"' in client.runs.calls[0]["filter"]
+    assert client.runs.calls[0]["project_ids"] == ["project-id"]
+    assert client.runs.calls[0]["selects"] == ["ID", "END_TIME"]
+    assert client.runs.calls[0]["min_start_time"] == client.project.start_time
     assert client.threads.calls == [
         {
             "thread_id": "thread-1",
@@ -123,7 +133,27 @@ async def test_cost_lookup_accepts_either_invocation_metadata_field(monkeypatch,
     result = await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1", run_only=True)
     assert result is not None
     assert result.total_cost == 0.0
-    assert len(client.list_calls) == (1 if field == "invocation_id" else 2)
+    assert len(client.runs.calls) == (1 if field == "invocation_id" else 2)
+
+
+async def test_cost_lookup_uses_explicit_invocation_start(monkeypatch):
+    root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
+    invocation_start = root_end - timedelta(days=3)
+    client = _LangSmithClient(
+        [SimpleNamespace(id="trace-1", end_time=root_end)],
+        SimpleNamespace(total_cost=0.5, last_end_time=root_end),
+    )
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
+    monkeypatch.setattr(
+        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
+    )
+
+    result = await ls_utils.get_langsmith_thread_cost(
+        "thread-1", "prepare-1", lookup_start=invocation_start
+    )
+
+    assert result is not None
+    assert client.runs.calls[0]["min_start_time"] == invocation_start
 
 
 async def test_cost_lookup_combines_legacy_metadata_matches(monkeypatch):
@@ -142,7 +172,7 @@ async def test_cost_lookup_combines_legacy_metadata_matches(monkeypatch):
     assert result is not None
     assert result.total_cost == 0.5
     assert result.target_end_time == later.end_time
-    assert len(client.list_calls) == 2
+    assert len(client.runs.calls) == 2
     assert client.threads.calls[0]["filter"] == (
         'or(eq(trace_id, "trace-1"), eq(trace_id, "trace-2"))'
     )
