@@ -22,6 +22,7 @@ from agent.utils.json_types import (
     thread_metadata,
 )
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.thread_filters import is_automation_thread
 from agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
@@ -230,11 +231,7 @@ def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
 
 
 def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
-    return (
-        _metadata_string(metadata, "thread_category") == "automation"
-        or thread_source(metadata) == "schedule"
-        or _metadata_string(metadata, "schedule_id") is not None
-    )
+    return is_automation_thread(metadata)
 
 
 def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
