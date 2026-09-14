@@ -24,6 +24,7 @@ vi.mock("@/lib/api", () => ({
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
     fixPullRequest: vi.fn(),
+    pullRequestThreadStatus: vi.fn(),
     mergePullRequest: vi.fn(),
     openPullRequestThread: vi.fn(),
   },
@@ -117,6 +118,7 @@ const titles = () =>
     .map((row) => within(row).getByText(/^Change/).textContent)
 
 beforeEach(() => {
+  vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: false })
   vi.mocked(api.reviewSummaries).mockResolvedValue({})
   vi.mocked(api.myPullRequests).mockResolvedValue(payload)
   vi.mocked(api.repos).mockResolvedValue({
@@ -130,6 +132,18 @@ afterEach(() => {
 })
 
 describe("My PRs", () => {
+  it("does not offer a fix while the associated thread is running", async () => {
+    vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
+    mount()
+    const button = await screen.findByRole("button", {
+      name: "Fix in progress",
+    })
+    expect((button as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByRole("button", { name: "Fix" })).toBeNull()
+    fireEvent.click(button)
+    expect(api.fixPullRequest).not.toHaveBeenCalled()
+  })
+
   it("opens the associated coding thread with immediate loading feedback", async () => {
     let finish!: (result: { thread_id: string }) => void
     vi.mocked(api.openPullRequestThread).mockImplementation(
@@ -304,15 +318,9 @@ describe("My PRs", () => {
       expect(
         within(row).getAllByRole("cell")[4]?.firstElementChild?.textContent
       ).toBe("Draft")
-    expect(
-      within(rows[0]!).getByRole("button", { name: "Fix in Open SWE" })
-    ).toBeTruthy()
-    expect(
-      within(rows[1]!).getByRole("button", { name: "Fix in Open SWE" })
-    ).toBeTruthy()
-    expect(
-      within(rows[2]!).queryByRole("button", { name: "Fix in Open SWE" })
-    ).toBeNull()
+    expect(within(rows[0]!).getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(within(rows[1]!).getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(within(rows[2]!).queryByRole("button", { name: "Fix" })).toBeNull()
   })
 
   it("hides the review issues column and banner when the review backend is unavailable", async () => {
@@ -564,9 +572,7 @@ describe("My PRs", () => {
         })
     )
     mount()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Fix in Open SWE" })
-    )
+    fireEvent.click(await screen.findByRole("button", { name: "Fix" }))
     expect(
       (
         (await screen.findByRole("button", {

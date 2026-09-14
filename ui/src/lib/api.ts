@@ -956,9 +956,13 @@ export const api = {
   myPullRequestDetails: (repo: string, number: number) =>
     loadPrDetails(repo, number),
   fixPullRequest: (pr: OpenPullRequest) =>
-    request<{ thread_id: string }>(
+    request<{ thread_id: string; already_running?: boolean }>(
       `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/fix`,
       { method: "POST", body: JSON.stringify(pr) }
+    ),
+  pullRequestThreadStatus: (repo: string, number: number) =>
+    request<{ running: boolean }>(
+      `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/thread-status`
     ),
   openPullRequestThread: (repo: string, number: number, title: string) =>
     request<{ thread_id: string }>(

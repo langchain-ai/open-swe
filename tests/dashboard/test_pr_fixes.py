@@ -159,3 +159,37 @@ async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypat
     assert configurable["pr_number"] == 12
     assert configurable["repo"] == {"owner": "acme", "name": "app"}
     pr_fixes.dispatch_agent_run.assert_not_awaited()
+
+
+async def test_running_slack_thread_is_reported_and_not_sent_another_fix(setup):
+    busy = {
+        "thread_id": "slack-thread",
+        "status": "busy",
+        "metadata": {"source": "slack", "graph_id": "agent"},
+    }
+    idle = {
+        "thread_id": "duplicate",
+        "status": "idle",
+        "updated_at": "2099-01-01",
+        "metadata": {"source": "dashboard"},
+    }
+    setup.threads.search.return_value = [idle, busy]
+    setup.threads.get.return_value = busy
+    assert await pr_fixes.pull_request_thread_running("acme", "app", 12, "alice") == {
+        "running": True
+    }
+    assert await pr_fixes.fix_pull_request("acme", "app", 12, "alice") == {
+        "thread_id": "slack-thread",
+        "already_running": True,
+    }
+    pr_fixes.dispatch_agent_run.assert_not_awaited()
+    pr_fixes._create_dashboard_thread_record.assert_not_awaited()
+    setup.threads.update.assert_not_awaited()
+
+
+async def test_no_associated_thread_status_does_not_create_one(setup):
+    setup.threads.search.return_value = []
+    assert await pr_fixes.pull_request_thread_running("acme", "app", 12, "alice") == {
+        "running": False
+    }
+    pr_fixes._create_dashboard_thread_record.assert_not_awaited()

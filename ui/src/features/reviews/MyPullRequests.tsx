@@ -110,10 +110,21 @@ function MergePullRequest({
   )
 }
 
-function FixPullRequest({ pr }: { pr: OpenPullRequest }) {
+function FixPullRequest({ pr, login }: { pr: OpenPullRequest; login: string }) {
+  const thread = useQuery({
+    queryKey: ["pr-thread-status", login, pr.repo, pr.number],
+    queryFn: () => api.pullRequestThreadStatus(pr.repo, pr.number),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  })
   const fix = useMutation({
     mutationFn: () => api.fixPullRequest(pr),
-    onSuccess: () => toast.success(`Fix queued for ${pr.repo}#${pr.number}`),
+    onSuccess: (result) =>
+      toast.success(
+        `${result.already_running ? "Fix already in progress for" : "Fix queued for"} ${pr.repo}#${pr.number}`
+      ),
     onError: (error) =>
       toast.error(`Could not queue fix for ${pr.repo}#${pr.number}`, {
         description: error.message,
@@ -124,18 +135,35 @@ function FixPullRequest({ pr }: { pr: OpenPullRequest }) {
       <Button
         size="sm"
         variant="outline"
-        disabled={fix.isPending || fix.isSuccess}
+        disabled={
+          thread.isPending ||
+          thread.isError ||
+          thread.data?.running ||
+          fix.isPending ||
+          fix.isSuccess
+        }
         aria-live="polite"
         onClick={() => fix.mutate()}
       >
-        {fix.isPending
-          ? "Queuing fix…"
-          : fix.isSuccess
-            ? "Fix queued"
-            : fix.isError
-              ? "Retry fix"
-              : "Fix in Open SWE"}
+        {thread.data?.running || fix.data?.already_running
+          ? "Fix in progress"
+          : thread.isPending
+            ? "Checking…"
+            : thread.isError
+              ? "Fix unavailable"
+              : fix.isPending
+                ? "Queuing fix…"
+                : fix.isSuccess
+                  ? "Fix queued"
+                  : fix.isError
+                    ? "Retry fix"
+                    : "Fix"}
       </Button>
+      {thread.error && (
+        <p role="alert" className="mt-1 text-destructive">
+          {thread.error.message}
+        </p>
+      )}
       {fix.error && (
         <p role="alert" className="mt-1 text-destructive">
           {fix.error.message}
@@ -369,6 +397,9 @@ export function MyPullRequests({
             void queryClient.invalidateQueries({
               queryKey: ["my-pr-details", login],
             })
+            void queryClient.invalidateQueries({
+              queryKey: ["pr-thread-status", login],
+            })
             if (reviewRefs.length) void reviews.refetch()
           }}
         >
@@ -557,7 +588,9 @@ export function MyPullRequests({
                         )}
                         {(pr.mergeable === false ||
                           pr.mergeState === "dirty" ||
-                          pr.ci === "failing") && <FixPullRequest pr={pr} />}
+                          pr.ci === "failing") && (
+                          <FixPullRequest pr={pr} login={login} />
+                        )}
                         {overallStatus(pr) === "Approved" && (
                           <MergePullRequest
                             pr={pr}

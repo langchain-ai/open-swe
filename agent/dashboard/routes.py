@@ -201,6 +201,7 @@ from agent.dashboard.threads.pr_fixes import (
     PullRequestFixContext,
     fix_pull_request,
     open_pull_request_thread,
+    pull_request_thread_running,
 )
 from agent.dashboard.threads.proxy import (
     proxy_dashboard_thread_commands,
@@ -1618,6 +1619,15 @@ async def api_list_reviews(
     return {"reviews": reviews, "page": page, "has_more": has_more}
 
 
+@router.get("/reviews/{owner}/{repo}/{pr_number}/thread-status")
+async def api_pull_request_thread_status(
+    owner: str, repo: str, pr_number: int, session: dict[str, str] = _SESSION_DEP
+) -> dict[str, bool]:
+    return await pull_request_thread_running(
+        owner, repo, pr_number, session["sub"], session.get("email")
+    )
+
+
 @router.post("/reviews/{owner}/{repo}/{pr_number}/thread")
 async def api_open_pull_request_thread(
     owner: str,
@@ -1638,7 +1648,7 @@ async def api_fix_pull_request(
     pr_number: int,
     context: PullRequestFixContext,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, str]:
+) -> dict[str, str | bool]:
     return await fix_pull_request(
         owner, repo, pr_number, session["sub"], session.get("email"), context=context
     )

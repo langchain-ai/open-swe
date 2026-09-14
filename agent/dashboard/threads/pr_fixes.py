@@ -4,6 +4,7 @@ import uuid
 from typing import Literal
 
 from fastapi import HTTPException
+from langgraph_sdk.schema import Thread
 from pydantic import BaseModel, Field
 
 from agent.dashboard.repo_access import require_repo_access_for_user
@@ -38,19 +39,12 @@ class PullRequestFixContext(BaseModel):
     reviewDecision: Literal["approved", "changes_requested", "none"] | None
 
 
-async def _find_or_create_pr_thread(
-    owner: str,
-    repo: str,
-    number: int,
-    login: str,
-    email: str | None,
-    *,
-    prompt: str,
-    title: str,
-) -> str:
+async def _find_pr_threads(
+    owner: str, repo: str, number: int, login: str, email: str | None
+) -> list[Thread]:
     client = langgraph_client()
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
-    candidates: dict[str, str] = {}
+    candidates: dict[str, Thread] = {}
     for query in ({"pr_url": url}, {"pr_urls": [url]}):
         offset = 0
         while True:
@@ -63,12 +57,32 @@ async def _find_or_create_pr_thread(
                     _assert_thread_postable(metadata, login, email)
                 except HTTPException:
                     continue
-                candidates[thread["thread_id"]] = str(thread.get("updated_at", ""))
+                candidates[thread["thread_id"]] = thread
             if len(page) < 50:
                 break
             offset += 50
+    return sorted(
+        candidates.values(),
+        key=lambda thread: (thread.get("status") == "busy", str(thread.get("updated_at", ""))),
+        reverse=True,
+    )
+
+
+async def _find_or_create_pr_thread(
+    owner: str,
+    repo: str,
+    number: int,
+    login: str,
+    email: str | None,
+    *,
+    prompt: str,
+    title: str,
+) -> str:
+    client = langgraph_client()
+    url = f"https://github.com/{owner}/{repo}/pull/{number}"
+    candidates = await _find_pr_threads(owner, repo, number, login, email)
     if candidates:
-        return max(candidates, key=lambda thread_id: candidates[thread_id])
+        return candidates[0]["thread_id"]
     else:
         thread = await _create_dashboard_thread_record(
             str(uuid.uuid4()),
@@ -83,6 +97,16 @@ async def _find_or_create_pr_thread(
             metadata={"pr_url": url, "pr_number": number, "source_context": {"pr_number": number}},
         )
     return str(thread["thread_id"])
+
+
+async def pull_request_thread_running(
+    owner: str, repo: str, number: int, login: str, email: str | None = None
+) -> dict[str, bool]:
+    if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
+        raise HTTPException(422, "invalid pull request")
+    await require_repo_access_for_user(login, f"{owner}/{repo}")
+    threads = await _find_pr_threads(owner, repo, number, login, email)
+    return {"running": any(thread.get("status") == "busy" for thread in threads)}
 
 
 async def open_pull_request_thread(
@@ -124,7 +148,7 @@ async def fix_pull_request(
     email: str | None = None,
     *,
     context: PullRequestFixContext | None = None,
-) -> dict[str, str]:
+) -> dict[str, str | bool]:
     full_name = f"{owner}/{repo}"
     if pull_request_identity({"repo_full_name": full_name, "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
@@ -154,6 +178,10 @@ async def fix_pull_request(
             prompt=prompt,
             title=f"Fix {full_name}#{number}",
         )
+        current = await client.threads.get(thread_id)
+        _assert_thread_postable(thread_metadata(current), login, email)
+        if current.get("status") == "busy":
+            return {"thread_id": thread_id, "already_running": True}
         async with agent_thread_pr_state_lock(client, thread_id):
             await client.threads.update(
                 thread_id=thread_id,
