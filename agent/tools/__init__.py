@@ -27,6 +27,7 @@ _TOOL_MODULES = {
     "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
     "mark_question_answered": ".mark_question_answered",
+    "no_slack_response_needed": ".no_slack_response_needed",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
@@ -87,6 +88,7 @@ __all__ = [
     "manage_incident",
     "manage_thread",
     "mark_question_answered",
+    "no_slack_response_needed",
     "notify_automation_channel",
     "open_pull_request",
     "output_iframe",
@@ -161,6 +163,7 @@ if TYPE_CHECKING:
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit
     from agent.tools.mark_question_answered import mark_question_answered
+    from agent.tools.no_slack_response_needed import no_slack_response_needed
     from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill

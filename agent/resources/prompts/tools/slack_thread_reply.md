@@ -1,7 +1,10 @@
 Post a message to the current Slack thread and the Web UI.
 
 Use this for clarifying questions, essential progress updates, and the final
-answer or outcome. For Slack-triggered information-only requests, put the
+answer or outcome. Set `response_type="progress"` for acknowledgements, progress,
+clarifying questions, plans, approval requests, blockers, and partial answers. Set
+`response_type="final"` only for the invocation's final answer or outcome. For
+Slack-triggered information-only requests, put the
 complete answer in `message`, not merely a summary, and do not repeat it in
 the final assistant response. Make `message` as concise as possible: default
 to one sentence with only the outcome/status and link, or one blocking

@@ -348,7 +348,13 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
     return AIMessage(
         content="Replying in the Slack thread with the PR link.",
-        tool_calls=[{"name": "slack_thread_reply", "args": {"message": text}, "id": "call-reply"}],
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {"message": text, "response_type": "final"},
+                "id": "call-reply",
+            }
+        ],
         response_metadata={"model_name": "fake-scripted-model"},
         usage_metadata={
             "input_tokens": 12_000,
@@ -366,10 +372,11 @@ def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
             {
                 "name": "slack_thread_reply",
                 "args": {
+                    "response_type": "final",
                     "message": (
                         f"Opened pull requests in `{OWNER}/{REPO}` and "
                         f"`{SECOND_OWNER}/{SECOND_REPO}`; latest: <{url}|{SECOND_PR_TITLE}>."
-                    )
+                    ),
                 },
                 "id": "call-multi-pr-reply",
             }
@@ -467,7 +474,8 @@ def _plan_link_step(messages: list[BaseMessage]) -> AIMessage:
             {
                 "name": "slack_thread_reply",
                 "args": {
-                    "message": f"I'm putting together a plan. Follow along and review it here: <{url}|plan review>"
+                    "response_type": "progress",
+                    "message": f"I'm putting together a plan. Follow along and review it here: <{url}|plan review>",
                 },
                 "id": "call-plan-link",
             }
@@ -518,6 +526,7 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
             {
                 "name": "slack_thread_reply",
                 "args": {
+                    "response_type": "final",
                     "message": f"✅ The plan is ready for review: <{url}|open the plan>. "
                     "Take a look, leave comments, and choose what to do next.",
                     "options": ["Approve & implement", "Request changes"],
@@ -711,7 +720,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "Continuing the task in its dedicated code channel.",
             "slack_thread_reply",
             {
-                "message": "I created this code channel for the investigation. All updates and follow-ups stay in this one Open SWE session."
+                "message": "I created this code channel for the investigation. All updates and follow-ups stay in this one Open SWE session.",
+                "response_type": "final",
             },
             "call-code-channel-reply",
         ),
@@ -727,7 +737,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "Replying to the unmentioned code-channel follow-up.",
             "slack_thread_reply",
             {
-                "message": "Status: the investigation is active, and this unmentioned follow-up reached the same Open SWE session."
+                "message": "Status: the investigation is active, and this unmentioned follow-up reached the same Open SWE session.",
+                "response_type": "final",
             },
             "call-code-channel-followup",
         ),
@@ -736,7 +747,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Acknowledging the iframe preview request.",
             "slack_thread_reply",
-            {"message": "Preparing the iframe preview now."},
+            {"message": "Preparing the iframe preview now.", "response_type": "progress"},
             "call-iframe-ack",
         ),
         _tool_step(
@@ -769,7 +780,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Acknowledging the Slack request before starting work.",
             "slack_thread_reply",
-            {"message": "On it!"},
+            {"message": "On it!", "response_type": "progress"},
             "call-order-ack",
         ),
         _tool_step(
@@ -784,7 +795,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Acknowledging the Slack request before delegating work.",
             "slack_thread_reply",
-            {"message": "On it!"},
+            {"message": "On it!", "response_type": "progress"},
             "call-grouped-order-ack",
         ),
         _tool_step(
@@ -804,7 +815,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Acknowledging the Slack request before starting work.",
             "slack_thread_reply",
-            {"message": "On it!"},
+            {"message": "On it!", "response_type": "progress"},
             "call-ack",
         ),
         _tool_step(
@@ -849,7 +860,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Acknowledging the cross-repository request before starting work.",
             "slack_thread_reply",
-            {"message": "On it!"},
+            {"message": "On it!", "response_type": "progress"},
             "call-multi-ack",
         ),
         _tool_step(
@@ -892,7 +903,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Acknowledging the Slack request before starting work.",
             "slack_thread_reply",
-            {"message": "On it!"},
+            {"message": "On it!", "response_type": "progress"},
             "call-ack",
         ),
         _tool_step(
@@ -930,7 +941,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Confirming the breakout thread was started.",
             "slack_thread_reply",
-            {"message": "I started a separate Open SWE thread for that aspect."},
+            {
+                "message": "I started a separate Open SWE thread for that aspect.",
+                "response_type": "final",
+            },
             "call-breakout-reply",
         ),
     ),

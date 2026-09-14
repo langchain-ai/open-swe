@@ -108,6 +108,7 @@ from agent.middleware import (
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
+    SlackResponseDispositionMiddleware,
     StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
@@ -177,6 +178,7 @@ from agent.tools import (
     manage_incident,
     manage_thread,
     mark_question_answered,
+    no_slack_response_needed,
     notify_automation_channel,
     open_pull_request,
     output_iframe,
@@ -418,6 +420,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "list_threads",
         "manage_thread",
         "notify_automation_channel",
+        "no_slack_response_needed",
         "read_incident",
         "read_user_settings",
         "record_incident_report",
@@ -1178,6 +1181,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
+        no_slack_response_needed,
     ]
     static_tools = [
         http_request,
@@ -1196,6 +1200,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_thread,
         manage_baby_sit,
         mark_question_answered,
+        no_slack_response_needed,
         notify_automation_channel,
         open_pull_request,
         *(
@@ -1356,6 +1361,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ConversationOffloadingMiddleware(
                     main_model, agent_backend, manual=cfg.offload_conversation is True
                 ),
+                SlackResponseDispositionMiddleware(),
                 PrepareAgentRunMiddleware(
                     credential_login=credential_login,
                     thread_id=thread_id,
