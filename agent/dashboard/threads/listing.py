@@ -104,7 +104,7 @@ async def _scan_thread_pages(
     *,
     scan_cap: int,
     sort_by: _ThreadSortBy,
-) -> AsyncGenerator[list[ThreadLike], None]:
+) -> AsyncGenerator[list[ThreadLike]]:
     """Search results in page groups that widen as the scan goes deeper.
 
     Filters that containment cannot express are applied by the caller, so a scan
