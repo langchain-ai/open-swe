@@ -9,6 +9,10 @@
  * server's event timestamp and receipt (clock skew included, so read it as a
  * trend rather than an absolute), and, in development builds, accumulates React
  * commit time for the transcript while the run streams.
+ *
+ * The stream pool keeps background runs alive, so request and transcript
+ * timings are matched to a tracker by thread id and never charged to a
+ * neighbour. The id stays internal; it is not part of the exported span.
  */
 
 import { subscribeRequestTimings } from "./fetchTiming"
@@ -20,6 +24,8 @@ export type RunTransport = "cloud" | "local"
 export type RunEndReason = "success" | "error" | "interrupt" | "stopped"
 
 export interface RunTracker {
+  /** The thread this stream serves; `null` until a lazily created thread has an id. */
+  bindThread(threadId: string | null): void
   /** The user pressed send on this stream. */
   submitted(): void
   /** The server accepted the run. */
@@ -63,25 +69,33 @@ function subscribeRequestTimingsOnce(): void {
   subscribeRequestTimings(onRequestTiming)
 }
 
+function openRunsFor(threadId: string): Array<RunTrackerImpl> {
+  const key = threadId.toLowerCase()
+  return [...openRuns].filter((run) => run.threadId === key)
+}
+
 function onRequestTiming(timing: RequestTiming): void {
-  if (timing.kind === "command") {
-    for (const run of openRuns) {
+  for (const run of openRunsFor(timing.threadId)) {
+    if (timing.kind === "command") {
       run.state?.span.set({ command_ttfb_ms: Math.round(timing.ttfbMs) })
+    } else if (timing.kind === "stream_events") {
+      run.state?.span.mark("stream_open", {
+        stream_ttfb_ms: Math.round(timing.ttfbMs),
+      })
     }
-    return
-  }
-  if (timing.kind !== "stream_events") return
-  for (const run of openRuns) {
-    run.state?.span.mark("stream_open", {
-      stream_ttfb_ms: Math.round(timing.ttfbMs),
-    })
   }
 }
 
 class RunTrackerImpl implements RunTracker {
   state: RunState | null = null
+  threadId: string | null
 
-  constructor(private readonly attributes: PerfAttributes) {}
+  constructor(
+    private readonly attributes: PerfAttributes,
+    threadId: string | null
+  ) {
+    this.threadId = threadId?.toLowerCase() ?? null
+  }
 
   private begin(extra: PerfAttributes): void {
     if (this.state && !this.state.span.ended) {
@@ -102,6 +116,10 @@ class RunTrackerImpl implements RunTracker {
       commitMaxMs: 0,
     }
     openRuns.add(this)
+  }
+
+  bindThread(threadId: string | null): void {
+    this.threadId = threadId?.toLowerCase() ?? null
   }
 
   submitted(): void {
@@ -200,24 +218,24 @@ class RunTrackerImpl implements RunTracker {
   }
 }
 
-export function createRunTracker(attributes: {
+export function createRunTracker(options: {
   transport: RunTransport
+  threadId: string | null
 }): RunTracker {
-  return new RunTrackerImpl({ transport: attributes.transport })
+  return new RunTrackerImpl({ transport: options.transport }, options.threadId)
 }
 
-/**
- * Transcript work while a run streams. There is normally one visible run, so
- * every open run is charged; a background run in the pool inflates its own
- * numbers only while another thread is on screen.
- */
-export function runTranscriptBuilt(durationMs: number): void {
-  for (const run of openRuns) run.transcriptBuilt(durationMs)
+/** Transcript work for a thread while its run streams. */
+export function runTranscriptBuilt(threadId: string, durationMs: number): void {
+  for (const run of openRunsFor(threadId)) run.transcriptBuilt(durationMs)
 }
 
 /** React `Profiler` commit durations; only fires in development builds. */
-export function runTranscriptCommitted(durationMs: number): void {
-  for (const run of openRuns) run.transcriptCommitted(durationMs)
+export function runTranscriptCommitted(
+  threadId: string,
+  durationMs: number
+): void {
+  for (const run of openRunsFor(threadId)) run.transcriptCommitted(durationMs)
 }
 
 export function hasOpenRuns(): boolean {

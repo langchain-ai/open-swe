@@ -30,22 +30,24 @@ describe("parseServerTiming", () => {
 
 describe("classifyDashboardRequest", () => {
   it("recognises the thread requests that gate a thread view", () => {
-    expect(classifyDashboardRequest(`/dashboard/api/threads/${THREAD}`)).toBe(
-      "thread_detail"
-    )
+    expect(
+      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}`)
+    ).toEqual({ kind: "thread_detail", threadId: THREAD })
     expect(
       classifyDashboardRequest(
-        `https://example.com/dashboard/api/threads/${THREAD}?mark_viewed=false`
+        `https://example.com/dashboard/api/threads/${THREAD.toUpperCase()}?mark_viewed=false`
       )
-    ).toBe("thread_detail")
+    ).toEqual({ kind: "thread_detail", threadId: THREAD })
     expect(
-      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/state`)
+      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/state`)?.kind
     ).toBe("thread_state")
     expect(
       classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/stream/events`)
+        ?.kind
     ).toBe("stream_events")
     expect(
-      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/commands`)
+      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/commands/`)
+        ?.kind
     ).toBe("command")
     expect(
       classifyDashboardRequest("/dashboard/api/threads/page?limit=10")
@@ -79,6 +81,7 @@ describe("withRequestTiming", () => {
     expect(timings).toHaveLength(1)
     expect(timings[0]).toMatchObject({
       kind: "thread_detail",
+      threadId: THREAD,
       status: 200,
       serverTiming: [
         { name: "thread_get", duration: 5 },

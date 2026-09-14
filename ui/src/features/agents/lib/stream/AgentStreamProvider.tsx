@@ -55,8 +55,18 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
   )
   const pool = useStreamPool.getState
   const runTracker = useMemo(
-    () => createRunTracker({ transport: entry.transport }),
+    () =>
+      createRunTracker({
+        transport: entry.transport,
+        threadId: entry.threadId,
+      }),
+    // A lazily created thread gets its id through `onThreadId` below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [entry.transport]
+  )
+  useEffect(
+    () => runTracker.bindThread(entry.threadId),
+    [entry.threadId, runTracker]
   )
   useEffect(() => () => runTracker.dispose(), [runTracker])
   const [isOffloading, setIsOffloading] = useState(false)
@@ -70,7 +80,10 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
-    onThreadId: (threadId) => pool().rekey(entry.id, threadId),
+    onThreadId: (threadId) => {
+      runTracker.bindThread(threadId)
+      pool().rekey(entry.id, threadId)
+    },
     onCreated: () => {
       runTracker.created()
       setIsOffloading(false)

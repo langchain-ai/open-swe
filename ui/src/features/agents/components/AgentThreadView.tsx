@@ -68,14 +68,6 @@ import {
 } from "@/lib/perf/threadLoad"
 import { perfNow } from "@/lib/perf/trace"
 
-function onTranscriptRender(
-  _id: string,
-  _phase: "mount" | "update" | "nested-update",
-  actualDuration: number
-): void {
-  runTranscriptCommitted(actualDuration)
-}
-
 interface AgentThreadViewProps {
   thread: AgentThread
   autoFocusComposer?: boolean
@@ -230,9 +222,17 @@ export function AgentThreadView({
     )
     const elapsed = perfNow() - started
     threadTranscriptBuilt(thread.id, elapsed)
-    runTranscriptBuilt(elapsed)
+    runTranscriptBuilt(thread.id, elapsed)
     return built
   }, [stream.messages, stream.toolCalls, thread.id])
+  const onTranscriptRender = useCallback(
+    (
+      _id: string,
+      _phase: "mount" | "update" | "nested-update",
+      actualDuration: number
+    ) => runTranscriptCommitted(thread.id, actualDuration),
+    [thread.id]
+  )
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(

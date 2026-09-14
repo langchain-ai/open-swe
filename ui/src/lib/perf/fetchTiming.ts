@@ -17,8 +17,13 @@ export type TimedRequestKind =
   | "stream_events"
   | "command"
 
-export interface RequestTiming {
+export interface ClassifiedRequest {
   kind: TimedRequestKind
+  /** Lower-cased thread id from the path, so timings reach the right stream. */
+  threadId: string
+}
+
+export interface RequestTiming extends ClassifiedRequest {
   status: number
   /** Milliseconds from request start to response headers. */
   ttfbMs: number
@@ -29,25 +34,25 @@ type RequestTimingListener = (timing: RequestTiming) => void
 
 const listeners = new Set<RequestTimingListener>()
 
-const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-const THREAD_DETAIL_RE = new RegExp(`/dashboard/api/threads/${UUID}/?$`, "i")
-const THREAD_STATE_RE = new RegExp(
-  `/dashboard/api/threads/${UUID}/state/?$`,
-  "i"
-)
-const STREAM_EVENTS_RE = new RegExp(
-  `/dashboard/api/threads/${UUID}/stream/events/?$`,
-  "i"
-)
-const COMMAND_RE = new RegExp(`/dashboard/api/threads/${UUID}/commands/?$`, "i")
+const THREAD_REQUEST_RE =
+  /\/dashboard\/api\/threads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\/[^?#]*)?$/i
 
-export function classifyDashboardRequest(url: string): TimedRequestKind | null {
+const KINDS_BY_SUFFIX: Record<string, TimedRequestKind> = {
+  "": "thread_detail",
+  "/state": "thread_state",
+  "/stream/events": "stream_events",
+  "/commands": "command",
+}
+
+export function classifyDashboardRequest(
+  url: string
+): ClassifiedRequest | null {
   const pathname = url.split(/[?#]/, 1)[0] ?? ""
-  if (THREAD_STATE_RE.test(pathname)) return "thread_state"
-  if (STREAM_EVENTS_RE.test(pathname)) return "stream_events"
-  if (COMMAND_RE.test(pathname)) return "command"
-  if (THREAD_DETAIL_RE.test(pathname)) return "thread_detail"
-  return null
+  const match = THREAD_REQUEST_RE.exec(pathname)
+  if (!match?.[1]) return null
+  const suffix = (match[2] ?? "").replace(/\/$/, "")
+  const kind = KINDS_BY_SUFFIX[suffix]
+  return kind ? { kind, threadId: match[1].toLowerCase() } : null
 }
 
 /** Parse a `Server-Timing` header (RFC 9209 style `name;dur=1.2;desc=x, ...`). */
@@ -104,15 +109,15 @@ function requestUrl(input: RequestInfo | URL): string {
  */
 export function withRequestTiming(fetchImpl: typeof fetch): typeof fetch {
   return async (input, init) => {
-    const kind =
+    const classified =
       typeof window === "undefined"
         ? null
         : classifyDashboardRequest(requestUrl(input))
-    if (!kind) return fetchImpl(input, init)
+    if (!classified) return fetchImpl(input, init)
     const started = performance.now()
     const response = await fetchImpl(input, init)
     recordRequestTiming({
-      kind,
+      ...classified,
       status: response.status,
       ttfbMs: performance.now() - started,
       serverTiming: parseServerTiming(response.headers.get("server-timing")),

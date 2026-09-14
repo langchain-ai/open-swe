@@ -51,6 +51,7 @@ function subscribeRequestTimingsOnce(): void {
 
 function onRequestTiming(timing: RequestTiming): void {
   if (!active || active.span.ended) return
+  if (active.threadId.toLowerCase() !== timing.threadId) return
   if (timing.kind !== "thread_detail" && timing.kind !== "thread_state") return
   const prefix = timing.kind === "thread_detail" ? "detail" : "state"
   const attributes: PerfAttributes = {

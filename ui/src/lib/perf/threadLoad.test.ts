@@ -30,6 +30,7 @@ describe("thread load span", () => {
     threadDetailResolved(THREAD_A, { cached: true })
     recordRequestTiming({
       kind: "thread_state",
+      threadId: THREAD_A,
       status: 200,
       ttfbMs: 41.2,
       serverTiming: [{ name: "get_state", duration: 30.6, description: null }],

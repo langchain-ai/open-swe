@@ -33,6 +33,9 @@ function textDelta(text: string, timestamp: number) {
   }
 }
 
+const THREAD_A = "0d5a5a4e-1b2c-4d3e-8f90-123456789abc"
+const THREAD_B = "1e6b6b5f-2c3d-4e4f-9a01-23456789abcd"
+
 afterEach(() => {
   clearPerfSpans()
   vi.restoreAllMocks()
@@ -41,11 +44,12 @@ afterEach(() => {
 describe("agent run span", () => {
   it("tracks a submitted run from send to completion", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
-    const tracker = createRunTracker({ transport: "cloud" })
+    const tracker = createRunTracker({ transport: "cloud", threadId: THREAD_A })
 
     tracker.submitted()
     recordRequestTiming({
       kind: "command",
+      threadId: THREAD_A,
       status: 200,
       ttfbMs: 88,
       serverTiming: [],
@@ -53,6 +57,7 @@ describe("agent run span", () => {
     tracker.created()
     recordRequestTiming({
       kind: "stream_events",
+      threadId: THREAD_A,
       status: 200,
       ttfbMs: 120,
       serverTiming: [],
@@ -70,9 +75,9 @@ describe("agent run span", () => {
     tracker.event(textDelta("", 9_960))
     tracker.event(textDelta("Hello", 9_970))
     tracker.event(textDelta(" world", 9_980))
-    runTranscriptBuilt(2.5)
-    runTranscriptCommitted(4)
-    runTranscriptCommitted(9)
+    runTranscriptBuilt(THREAD_A, 2.5)
+    runTranscriptCommitted(THREAD_A, 4)
+    runTranscriptCommitted(THREAD_A, 9)
     expect(hasOpenRuns()).toBe(true)
     tracker.completed("success")
 
@@ -104,7 +109,7 @@ describe("agent run span", () => {
   })
 
   it("opens a joined span when a run starts that this client did not submit", () => {
-    const tracker = createRunTracker({ transport: "local" })
+    const tracker = createRunTracker({ transport: "local", threadId: THREAD_A })
 
     tracker.event(lifecycle("running", Date.now()))
     tracker.completed("interrupt")
@@ -121,8 +126,48 @@ describe("agent run span", () => {
     ])
   })
 
+  it("keeps request and transcript timings on the stream that owns the thread", () => {
+    const runA = createRunTracker({ transport: "cloud", threadId: THREAD_A })
+    const runB = createRunTracker({ transport: "cloud", threadId: null })
+    runA.submitted()
+    runB.bindThread(THREAD_B.toUpperCase())
+    runB.submitted()
+
+    recordRequestTiming({
+      kind: "command",
+      threadId: THREAD_B,
+      status: 200,
+      ttfbMs: 50,
+      serverTiming: [],
+    })
+    recordRequestTiming({
+      kind: "stream_events",
+      threadId: THREAD_B,
+      status: 200,
+      ttfbMs: 70,
+      serverTiming: [],
+    })
+    runTranscriptBuilt(THREAD_B, 5)
+    runTranscriptCommitted(THREAD_B, 8)
+    runA.completed("success")
+    runB.completed("success")
+
+    const [spanA, spanB] = getPerfSpans()
+    expect(spanA?.attributes).not.toHaveProperty("command_ttfb_ms")
+    expect(spanA?.steps.map((step) => step.name)).toEqual([])
+    expect(spanA?.attributes).toMatchObject({ builds: 0, build_ms: 0 })
+    expect(spanA?.attributes).not.toHaveProperty("commits")
+    expect(spanB?.attributes).toMatchObject({
+      command_ttfb_ms: 50,
+      stream_ttfb_ms: 70,
+      builds: 1,
+      build_ms: 5,
+      commits: 1,
+    })
+  })
+
   it("abandons an in-flight run when the stream unmounts", () => {
-    const tracker = createRunTracker({ transport: "cloud" })
+    const tracker = createRunTracker({ transport: "cloud", threadId: THREAD_A })
     tracker.submitted()
     tracker.dispose()
 
@@ -131,7 +176,7 @@ describe("agent run span", () => {
   })
 
   it("ignores events with no run open and malformed events", () => {
-    const tracker = createRunTracker({ transport: "cloud" })
+    const tracker = createRunTracker({ transport: "cloud", threadId: THREAD_A })
     tracker.event(textDelta("stray", Date.now()))
     tracker.event(null)
     tracker.event({ method: "messages" })
