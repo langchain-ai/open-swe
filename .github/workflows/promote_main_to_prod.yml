@@ -42,3 +42,24 @@ jobs:
       - name: Force-push the typechecked commit to prod
         run: |
           git push --force origin HEAD:refs/heads/prod
+      - name: Tag and dispatch desktop patch release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest_tag=$(git tag --list 'desktop-v*' | grep -E '^desktop-v[0-9]+\\.[0-9]+\\.[0-9]+$' | sort -V | tail -n 1 || true)
+          if [ -n "$latest_tag" ]; then
+            IFS=. read -r major minor patch <<< "${latest_tag#desktop-v}"
+          else
+            major=0
+            minor=0
+            patch=0
+          fi
+          patch=$((patch + 1))
+          tag="desktop-v${major}.${minor}.${patch}"
+          while git rev-parse "refs/tags/$tag" >/dev/null 2>&1; do
+            patch=$((patch + 1))
+            tag="desktop-v${major}.${minor}.${patch}"
+          done
+          git tag "$tag"
+          git push origin "refs/tags/$tag"
+          gh workflow run desktop-release.yml --ref "$tag" -f "tag=$tag"
