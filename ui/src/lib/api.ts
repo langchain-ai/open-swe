@@ -591,6 +591,8 @@ export interface OpenPullRequest {
   pendingChecks: string[]
 }
 
+export type MergeMethod = "squash" | "merge" | "rebase"
+
 export interface OpenPullRequestsPayload {
   pullRequests: OpenPullRequest[]
   nextPage: number | null
@@ -970,16 +972,22 @@ export const api = {
       `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/thread`,
       { method: "POST", body: JSON.stringify({ title }) }
     ),
-  mergePullRequest: (
-    pr: OpenPullRequest,
-    method: "squash" | "merge" | "rebase"
-  ) =>
+  mergePullRequest: (pr: OpenPullRequest, method: MergeMethod) =>
     request<{ merged: boolean }>(
       `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/merge`,
       {
         method: "POST",
         body: JSON.stringify({ sha: pr.headSha, merge_method: method }),
       }
+    ),
+  closePullRequest: (pr: OpenPullRequest) =>
+    request<{ closed: boolean }>(
+      `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/close`,
+      { method: "POST" }
+    ),
+  repoMergeMethods: (repo: string) =>
+    request<{ mergeMethods: MergeMethod[] }>(
+      `/my-pull-requests/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`
     ),
   reviewSummaries: (pullRequests: Array<{ repo: string; number: number }>) =>
     request<Record<string, ReviewSummary | null>>("/reviews/summaries", {

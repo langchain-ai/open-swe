@@ -1,5 +1,6 @@
 import {
   type InfiniteData,
+  type QueryClient,
   useInfiniteQuery,
   useMutation,
   useQueries,
@@ -10,11 +11,30 @@ import { BugBeetleIcon, FlagIcon } from "@phosphor-icons/react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { MultiSelect } from "@/components/ui/multi-select"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   api,
+  type MergeMethod,
   type OpenPullRequest,
   type OpenPullRequestsPayload,
   type ReviewSummary,
@@ -26,6 +46,76 @@ import { PullRequestLinks } from "./PullRequestLinks"
 const control =
   "rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
 const pageSize = 10
+const mergeMethods: readonly MergeMethod[] = ["squash", "merge", "rebase"]
+const mergeMethodLabels: Record<MergeMethod, string> = {
+  squash: "Squash merge",
+  merge: "Merge commit",
+  rebase: "Rebase merge",
+}
+
+type BulkAction = "close" | "fix" | "merge"
+
+interface BulkRequest {
+  action: BulkAction
+  pullRequests: OpenPullRequest[]
+  method?: MergeMethod
+}
+
+interface BulkOutcome {
+  action: BulkAction
+  succeeded: OpenPullRequest[]
+  failures: Array<{ key: string; message: string }>
+}
+
+function pullRequestKey(pr: { repo: string; number: number }) {
+  return `${pr.repo}#${pr.number}`
+}
+
+function isFixable(pr: OpenPullRequest) {
+  return (
+    pr.mergeable === false || pr.mergeState === "dirty" || pr.ci === "failing"
+  )
+}
+
+async function runBulkAction(
+  action: BulkAction,
+  pr: OpenPullRequest,
+  method: MergeMethod | undefined
+) {
+  if (action === "close") {
+    const result = await api.closePullRequest(pr)
+    if (!result.closed) throw new Error("GitHub did not confirm the close.")
+  } else if (action === "merge") {
+    if (!method) throw new Error("Choose a merge method.")
+    const result = await api.mergePullRequest(pr, method)
+    if (!result.merged) throw new Error("GitHub did not confirm the merge.")
+  } else {
+    await api.fixPullRequest(pr)
+  }
+}
+
+function forgetPullRequest(
+  queryClient: QueryClient,
+  login: string,
+  pr: { repo: string; number: number }
+) {
+  queryClient.setQueryData(["my-pr-details", login, pr.repo, pr.number], null)
+  queryClient.setQueriesData<InfiniteData<OpenPullRequestsPayload>>(
+    { queryKey: ["my-pull-requests", login] },
+    (data) =>
+      data
+        ? {
+            ...data,
+            pages: data.pages.map((loaded) => ({
+              ...loaded,
+              pullRequests: loaded.pullRequests.filter(
+                (row) => row.repo !== pr.repo || row.number !== pr.number
+              ),
+            })),
+          }
+        : data
+  )
+}
 
 function useOpenPullRequests(
   login: string,
@@ -195,6 +285,279 @@ function FixPullRequest({ pr, login }: { pr: OpenPullRequest; login: string }) {
   )
 }
 
+function BulkCloseDialog({
+  pullRequests,
+  onCancel,
+  onConfirm,
+}: {
+  pullRequests: OpenPullRequest[]
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const listed = pullRequests.slice(0, 10)
+  return (
+    <AlertDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel()
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            Close {pullRequests.length} pull request
+            {pullRequests.length === 1 ? "" : "s"}?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            GitHub closes them without merging.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <ul className="max-h-48 overflow-y-auto font-mono text-xs">
+          {listed.map((pr) => (
+            <li key={pullRequestKey(pr)}>{pullRequestKey(pr)}</li>
+          ))}
+          {pullRequests.length > listed.length && (
+            <li>+{pullRequests.length - listed.length} more</li>
+          )}
+        </ul>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>
+            Close pull requests
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+function BulkMergeDialog({
+  pullRequests,
+  onCancel,
+  onConfirm,
+}: {
+  pullRequests: OpenPullRequest[]
+  onCancel: () => void
+  onConfirm: (method: MergeMethod) => void
+}) {
+  const [choice, setChoice] = useState<MergeMethod | "">("")
+  const repos = [...new Set(pullRequests.map((pr) => pr.repo))]
+  const settings = useQueries({
+    queries: repos.map((repo) => ({
+      queryKey: ["repo-merge-methods", repo],
+      queryFn: () => api.repoMergeMethods(repo),
+      staleTime: Infinity,
+      retry: false,
+    })),
+  })
+  const loading = settings.some((setting) => setting.isPending)
+  const failure = settings.find((setting) => setting.error)?.error
+  const shared = mergeMethods.filter((method) =>
+    settings.every((setting) => setting.data?.mergeMethods.includes(method))
+  )
+  const only = shared.length === 1 ? shared[0] : undefined
+  const method = only ?? (choice || undefined)
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel()
+      }}
+    >
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>
+            Merge {pullRequests.length} pull request
+            {pullRequests.length === 1 ? "" : "s"}?
+          </DialogTitle>
+          <DialogDescription>
+            {pullRequests.map(pullRequestKey).join(", ")}
+          </DialogDescription>
+        </DialogHeader>
+        {loading ? (
+          <p role="status">Loading merge settings…</p>
+        ) : failure ? (
+          <p role="alert" className="text-destructive">
+            {failure.message}
+          </p>
+        ) : shared.length === 0 ? (
+          <p role="alert">The selected repositories share no merge method.</p>
+        ) : only ? (
+          <p>Merge method: {mergeMethodLabels[only]}</p>
+        ) : (
+          <select
+            className={control}
+            aria-label="Merge method"
+            value={choice}
+            onChange={(event) => {
+              const value = event.target.value
+              if (mergeMethods.some((option) => option === value))
+                setChoice(value as MergeMethod)
+            }}
+          >
+            <option value="" disabled>
+              Choose a merge method
+            </option>
+            {shared.map((option) => (
+              <option key={option} value={option}>
+                {mergeMethodLabels[option]}
+              </option>
+            ))}
+          </select>
+        )}
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={!method}
+            onClick={() => {
+              if (method) onConfirm(method)
+            }}
+          >
+            Merge pull requests
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function BulkActions({
+  selected,
+  login,
+  onClear,
+  onSettled,
+}: {
+  selected: OpenPullRequest[]
+  login: string
+  onClear: () => void
+  onSettled: (succeeded: OpenPullRequest[]) => void
+}) {
+  const queryClient = useQueryClient()
+  const [prompt, setPrompt] = useState<"close" | "merge" | null>(null)
+  const bulk = useMutation({
+    mutationFn: async ({
+      action,
+      pullRequests,
+      method,
+    }: BulkRequest): Promise<BulkOutcome> => {
+      const succeeded: OpenPullRequest[] = []
+      const failures: BulkOutcome["failures"] = []
+      for (const pr of pullRequests) {
+        try {
+          await runBulkAction(action, pr, method)
+          succeeded.push(pr)
+        } catch (error) {
+          failures.push({
+            key: pullRequestKey(pr),
+            message: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+      return { action, succeeded, failures }
+    },
+    onSuccess: ({ action, succeeded, failures }) => {
+      if (action === "fix")
+        void queryClient.invalidateQueries({
+          queryKey: ["pr-thread-status", login],
+        })
+      else for (const pr of succeeded) forgetPullRequest(queryClient, login, pr)
+      onSettled(succeeded)
+      const verb =
+        action === "close"
+          ? "Closed"
+          : action === "merge"
+            ? "Merged"
+            : "Queued fixes for"
+      const total = succeeded.length + failures.length
+      const noun = `pull request${total === 1 ? "" : "s"}`
+      if (failures.length === 0) toast.success(`${verb} ${total} ${noun}`)
+      else
+        toast.error(`${verb} ${succeeded.length} of ${total} ${noun}`, {
+          description: failures
+            .map((failure) => `${failure.key}: ${failure.message}`)
+            .join("\n"),
+        })
+    },
+    retry: false,
+  })
+  const active = bulk.isPending ? bulk.variables.action : null
+  const fixable = selected.every((pr) => isFixable(pr) && !pr.detailsLoading)
+  const mergeable = selected.every(
+    (pr) => overallStatus(pr) === "Approved" && Boolean(pr.headSha)
+  )
+  return (
+    <div
+      role="group"
+      aria-label="Bulk pull request actions"
+      className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs"
+    >
+      <span aria-live="polite" className="font-medium">
+        {selected.length} selected
+      </span>
+      <Button size="sm" variant="ghost" onClick={onClear}>
+        Clear selection
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={bulk.isPending}
+        onClick={() => setPrompt("close")}
+      >
+        {active === "close" ? "Closing…" : "Close"}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={bulk.isPending || !fixable}
+        title={
+          fixable
+            ? undefined
+            : "Every selected PR must be conflicted or failing"
+        }
+        onClick={() => bulk.mutate({ action: "fix", pullRequests: selected })}
+      >
+        {active === "fix" ? "Queuing fixes…" : "Fix"}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={bulk.isPending || !mergeable}
+        title={
+          mergeable
+            ? undefined
+            : "Every selected PR must be approved and passing"
+        }
+        onClick={() => setPrompt("merge")}
+      >
+        {active === "merge" ? "Merging…" : "Merge"}
+      </Button>
+      {prompt === "close" && (
+        <BulkCloseDialog
+          pullRequests={selected}
+          onCancel={() => setPrompt(null)}
+          onConfirm={() => {
+            setPrompt(null)
+            bulk.mutate({ action: "close", pullRequests: selected })
+          }}
+        />
+      )}
+      {prompt === "merge" && (
+        <BulkMergeDialog
+          pullRequests={selected}
+          onCancel={() => setPrompt(null)}
+          onConfirm={(method) => {
+            setPrompt(null)
+            bulk.mutate({ action: "merge", pullRequests: selected, method })
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
 function ReviewIndicators({ review }: { review: ReviewSummary }) {
   return (
     <a
@@ -300,6 +663,7 @@ export function MyPullRequests({
       direction: sort === next && direction === "asc" ? "desc" : "asc",
     })
   const queryClient = useQueryClient()
+  const [selection, setSelection] = useState<Set<string>>(new Set())
   const query = useOpenPullRequests(login, repo, sort, direction)
   const repos = useOpenPullRequests(login, [], "updatedAt", "desc")
   const pages = query.data?.pages ?? []
@@ -372,6 +736,19 @@ export function MyPullRequests({
       !filter?.length || filter.some((status) => overallStatus(pr) === status)
   )
   const visible = filtered.slice(page * pageSize, (page + 1) * pageSize)
+  const selected = all.filter((pr) => selection.has(pullRequestKey(pr)))
+  const selectedOnPage = visible.filter((pr) =>
+    selection.has(pullRequestKey(pr))
+  ).length
+  const toggleSelection = (keys: string[], include: boolean) =>
+    setSelection((current) => {
+      const next = new Set(current)
+      for (const key of keys) {
+        if (include) next.add(key)
+        else next.delete(key)
+      }
+      return next
+    })
   const detailsLoading = detailQueries.some((detail) => detail.isFetching)
   const refreshing = query.isFetching && !query.isFetchingNextPage
   const reviewRefs = visible.map((pr) => ({ repo: pr.repo, number: pr.number }))
@@ -432,8 +809,8 @@ export function MyPullRequests({
           placeholder="All repositories"
           options={repoNames}
           value={repo}
-          onValueChange={(selected) =>
-            onFiltersChange({ repo: selected.length ? selected : undefined })
+          onValueChange={(chosen) =>
+            onFiltersChange({ repo: chosen.length ? chosen : undefined })
           }
         />
         <input
@@ -474,10 +851,42 @@ export function MyPullRequests({
       ) : (
         latest && (
           <>
+            {selected.length > 0 && (
+              <BulkActions
+                selected={selected}
+                login={login}
+                onClear={() => setSelection(new Set())}
+                onSettled={(succeeded) =>
+                  toggleSelection(succeeded.map(pullRequestKey), false)
+                }
+              />
+            )}
             <div className="overflow-x-auto rounded-lg border border-border bg-card">
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-border bg-muted/30 text-muted-foreground">
                   <tr>
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all PRs on this page"
+                        checked={
+                          visible.length > 0 &&
+                          selectedOnPage === visible.length
+                        }
+                        ref={(node) => {
+                          if (node)
+                            node.indeterminate =
+                              selectedOnPage > 0 &&
+                              selectedOnPage < visible.length
+                        }}
+                        onChange={(event) =>
+                          toggleSelection(
+                            visible.map(pullRequestKey),
+                            event.target.checked
+                          )
+                        }
+                      />
+                    </th>
                     {(
                       [
                         ["PR", null],
@@ -537,6 +946,19 @@ export function MyPullRequests({
                       key={`${pr.repo}#${pr.number}`}
                       className="align-top hover:bg-muted/20"
                     >
+                      <td className="px-4 py-4">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select PR #${pr.number} in ${pr.repo}`}
+                          checked={selection.has(pullRequestKey(pr))}
+                          onChange={(event) =>
+                            toggleSelection(
+                              [pullRequestKey(pr)],
+                              event.target.checked
+                            )
+                          }
+                        />
+                      </td>
                       <td className="px-4 py-4 font-mono tabular-nums">
                         #{pr.number}
                       </td>
@@ -614,30 +1036,7 @@ export function MyPullRequests({
                           <MergePullRequest
                             pr={pr}
                             onMerged={() => {
-                              queryClient.setQueryData(
-                                ["my-pr-details", login, pr.repo, pr.number],
-                                null
-                              )
-                              queryClient.setQueriesData<
-                                InfiniteData<OpenPullRequestsPayload>
-                              >(
-                                { queryKey: ["my-pull-requests", login] },
-                                (data) =>
-                                  data
-                                    ? {
-                                        ...data,
-                                        pages: data.pages.map((loaded) => ({
-                                          ...loaded,
-                                          pullRequests:
-                                            loaded.pullRequests.filter(
-                                              (row) =>
-                                                row.repo !== pr.repo ||
-                                                row.number !== pr.number
-                                            ),
-                                        })),
-                                      }
-                                    : data
-                              )
+                              forgetPullRequest(queryClient, login, pr)
                               if (visible.length === 1 && page > 0)
                                 onFiltersChange(
                                   { page: page - 1 || undefined },
@@ -694,7 +1093,7 @@ export function MyPullRequests({
                   {visible.length === 0 && (
                     <tr>
                       <td
-                        colSpan={reviews.isError ? 7 : 8}
+                        colSpan={reviews.isError ? 8 : 9}
                         className="px-4 py-12 text-center text-muted-foreground"
                       >
                         {detailsLoading || query.isFetchingNextPage

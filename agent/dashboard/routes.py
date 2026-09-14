@@ -250,8 +250,13 @@ from agent.dashboard.workspace_mcps import (
     list_workspace_mcps,
     save_workspace_mcp,
 )
+from agent.github.close_pull_request import close_pull_request
 from agent.github.http import github_client
-from agent.github.merge_pull_request import MergePullRequestRequest, merge_pull_request
+from agent.github.merge_pull_request import (
+    MergePullRequestRequest,
+    merge_pull_request,
+    repository_merge_methods,
+)
 from agent.github.pull_request_checks import PullRequestState
 from agent.github.pull_request_status import (
     list_open_pull_requests,
@@ -1557,7 +1562,7 @@ async def api_list_my_pull_requests(
     lightweight: bool = False,
     sort: Literal["created", "updated"] = "updated",
     direction: Literal["asc", "desc"] = "desc",
-    page: int = Query(1, ge=1, le=10),
+    page: int = 1,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     token = await get_valid_access_token(session["sub"])
@@ -1572,6 +1577,16 @@ async def api_list_my_pull_requests(
         direction=direction,
         page=page,
     )
+
+
+@router.get("/my-pull-requests/{owner}/{repo}/merge-methods")
+async def api_my_pull_request_merge_methods(
+    owner: str, repo: str, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, list[str]]:
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await repository_merge_methods(owner, repo, token)
 
 
 @router.get("/my-pull-requests/{owner}/{repo}/{number}")
@@ -1602,6 +1617,16 @@ async def api_merge_my_pull_request(
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     return await merge_pull_request(owner, repo, number, body, token)
+
+
+@router.post("/my-pull-requests/{owner}/{repo}/{number}/close")
+async def api_close_my_pull_request(
+    owner: str, repo: str, number: int, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, bool]:
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await close_pull_request(owner, repo, number, token)
 
 
 @router.get("/reviews")
