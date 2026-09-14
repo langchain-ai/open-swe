@@ -721,7 +721,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_thread_reply",
             {
                 "message": "I created this code channel for the investigation. All updates and follow-ups stay in this one Open SWE session.",
-                "response_type": "progress",
+                "response_type": "final",
             },
             "call-code-channel-reply",
         ),

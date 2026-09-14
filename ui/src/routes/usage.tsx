@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 
 import type {
+  AnalyticsMetadata,
+  PRMergeRateCohort,
   ReviewerStatsPayload,
   UsageLeaderboardPeriod,
   UsageLeaderboardRow,
@@ -16,7 +18,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { api, ApiError } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
@@ -44,14 +47,6 @@ function UsagePage() {
     ? period
     : "30d"
 
-  const leaderboard = useQuery({
-    queryKey: ["usageLeaderboard", activePeriod],
-    queryFn: () => api.usageLeaderboard(activePeriod, 10),
-    enabled: !!session.data,
-    staleTime: 60 * 1000,
-    refetchInterval: 60 * 1000,
-  })
-
   if (session.isLoading) {
     return (
       <main className="p-6">
@@ -63,17 +58,56 @@ function UsagePage() {
 
   return (
     <AppShell user={session.data} title="Usage" className="max-w-5xl">
+      <UsageAnalytics
+        period={activePeriod}
+        login={session.data.login}
+        isAdmin={session.data.is_admin}
+        onPeriodChange={(value) =>
+          navigate({ to: "/usage", search: { period: value } })
+        }
+      />
+    </AppShell>
+  )
+}
+
+export function UsageAnalytics({
+  period: activePeriod,
+  login,
+  isAdmin,
+  onPeriodChange,
+}: {
+  period: UsageLeaderboardPeriod
+  login: string
+  isAdmin: boolean
+  onPeriodChange: (period: UsageLeaderboardPeriod) => void
+}) {
+  const leaderboard = useQuery({
+    queryKey: ["usageLeaderboard", activePeriod, login, isAdmin],
+    queryFn: () => api.usageLeaderboard(activePeriod, 10),
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 503) && count < 2,
+  })
+  const report = usePRMergeRateReport(activePeriod, login, isAdmin)
+  const metadata = [
+    leaderboard.isError ? undefined : leaderboard.data,
+    report.isError ? undefined : report.data,
+  ].filter((data): data is NonNullable<typeof data> => data != null)
+
+  return (
+    <>
+      <AnalyticsCoverage reports={metadata} />
+      <PRMergeRateSection report={report} />
+
       <SettingsSection
         title="Agent leaderboard"
-        description="Ranked by merged PRs, then agent lines of code, PRs opened, and invocations. A thread can contain multiple invocations."
+        description="Ranked by merged PRs, then agent lines of code, PRs opened, and invocations."
         action={
           <Select
             value={activePeriod}
             onValueChange={(value) =>
-              navigate({
-                to: "/usage",
-                search: { period: value as UsageLeaderboardPeriod },
-              })
+              onPeriodChange(value as UsageLeaderboardPeriod)
             }
           >
             <SelectTrigger className="w-36">
@@ -96,9 +130,21 @@ function UsagePage() {
             <Skeleton className="h-12 w-full" />
           </div>
         ) : leaderboard.isError ? (
-          <p className="p-4 text-xs text-destructive">
-            Failed to load usage data: {leaderboard.error.message}
-          </p>
+          <div className="space-y-2 p-4 text-xs" role="alert">
+            <p className="text-destructive">
+              {leaderboard.error instanceof ApiError &&
+              leaderboard.error.status === 503
+                ? "Usage analytics is unavailable on this deployment."
+                : "Could not load usage analytics. Try again."}
+            </p>
+            <button
+              type="button"
+              className="underline"
+              onClick={() => leaderboard.refetch()}
+            >
+              Retry usage analytics
+            </button>
+          </div>
         ) : !leaderboard.data?.rows.length ? (
           <div className="p-6 text-center text-xs text-muted-foreground">
             No Open SWE Agent usage has been recorded for{" "}
@@ -125,7 +171,7 @@ function UsagePage() {
           </div>
         ) : leaderboard.isError ? (
           <p className="p-4 text-xs text-destructive">
-            Failed to load reviewer stats: {leaderboard.error.message}
+            Reviewer stats are unavailable. Retry usage analytics above.
           </p>
         ) : leaderboard.data?.reviewer_stats ? (
           <ReviewerStats stats={leaderboard.data.reviewer_stats} />
@@ -136,12 +182,218 @@ function UsagePage() {
           </div>
         )}
       </SettingsSection>
-      {leaderboard.data?.generated_at_ms ? (
+      {!leaderboard.isError && leaderboard.data?.generated_at_ms ? (
         <p className="text-right text-xs text-muted-foreground">
           Updated {formatTime(leaderboard.data.generated_at_ms)}
         </p>
       ) : null}
-    </AppShell>
+    </>
+  )
+}
+
+function AnalyticsCoverage({ reports }: { reports: AnalyticsMetadata[] }) {
+  if (!reports.length) return null
+  const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
+  return (
+    <div
+      className="space-y-1 text-xs text-muted-foreground"
+      role="status"
+      aria-label="Analytics coverage"
+    >
+      <p>
+        Reporting since{" "}
+        <time dateTime={latest.reporting_cutover_at}>
+          {new Date(latest.reporting_cutover_at).toLocaleString()}
+        </time>
+        .
+      </p>
+      <p>
+        {latest.last_processed_at
+          ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}. `
+          : "No events have been processed yet. "}
+        {reports.some((data) => data.has_pending_events)
+          ? "Some captured events are still waiting to be processed. "
+          : ""}
+        {reports.some((data) => data.has_failed_events)
+          ? "Some events could not be processed. Reports may be incomplete. "
+          : ""}
+        Reports checked {new Date(latest.as_of).toLocaleString()}.
+      </p>
+    </div>
+  )
+}
+
+function usePRMergeRateReport(
+  period: UsageLeaderboardPeriod,
+  login: string,
+  isAdmin: boolean
+) {
+  return useQuery({
+    queryKey: ["prMergeRateByModel", period, login, isAdmin],
+    queryFn: () => api.prMergeRateByModel(period),
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status === 503) && count < 2,
+  })
+}
+
+function PRMergeRateSection({
+  report,
+}: {
+  report: ReturnType<typeof usePRMergeRateReport>
+}) {
+  const data = report.isError ? undefined : report.data
+  const emptyMessage =
+    data?.status === "not_started"
+      ? "No analytics records have been captured since the reporting cutover yet."
+      : data?.status === "suppressed"
+        ? "PR groups in this period are too small to show under the privacy threshold."
+        : "No PRs have been recorded for this period yet."
+
+  return (
+    <SettingsSection
+      title="PR outcomes"
+      description="Outcomes for PRs opened during the selected period."
+    >
+      {report.isPending ? (
+        <div
+          className="space-y-2 p-4"
+          role="status"
+          aria-label="Loading PR outcomes"
+        >
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+        </div>
+      ) : report.isError ? (
+        <div className="space-y-2 p-4 text-xs" role="alert">
+          <p className="text-destructive">
+            {report.error instanceof ApiError && report.error.status === 503
+              ? "PR analytics is unavailable on this deployment."
+              : "Could not load PR outcomes. Try again."}
+          </p>
+          <button
+            type="button"
+            className="underline"
+            onClick={() => report.refetch()}
+          >
+            Retry
+          </button>
+        </div>
+      ) : data?.status === "ready" ? (
+        <PRMergeRateTable cohorts={data.cohorts} />
+      ) : (
+        <p
+          className="p-6 text-center text-xs text-muted-foreground"
+          role="status"
+        >
+          {emptyMessage}
+        </p>
+      )}
+      {data ? (
+        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+            How these numbers work
+          </summary>
+          <div className="mt-3 space-y-3">
+            <ul className="list-disc space-y-1 pl-4">
+              <li>
+                <strong>Waiting:</strong> still open and less than{" "}
+                {data.maturity_days} days old. These PRs are excluded from both
+                rates.
+              </li>
+              <li>
+                <strong>Mature pending:</strong> still open and at least{" "}
+                {data.maturity_days} days old. They have no final outcome yet.
+              </li>
+              <li>
+                <strong>Decided rate:</strong> the percentage of merged or
+                closed PRs that were merged. Open PRs are excluded.
+              </li>
+              <li>
+                <strong>Mature share:</strong> the percentage merged among
+                merged, closed, and mature pending PRs.
+              </li>
+            </ul>
+            <p>
+              For example, 3 merged PRs, 1 closed without merging, and 1 mature
+              pending PR give a decided rate of 75% (3 of 4) and a mature share
+              of 60% (3 of 5). Waiting PRs do not change either rate.
+            </p>
+            <p>
+              PRs are grouped by the model configured for the run that opened
+              them. Other models may contribute through routing, fallback,
+              subagents, or later runs, so these rates do not measure one
+              model's independent success.
+            </p>
+            {data.suppression_threshold > 1 ? (
+              <p>
+                Groups with fewer than {data.suppression_threshold} PRs are
+                hidden for privacy.
+              </p>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+    </SettingsSection>
+  )
+}
+
+function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] text-xs">
+        <thead className="border-b border-border text-muted-foreground">
+          <tr>
+            <th className="px-4 py-3 text-left font-normal">
+              Opening configured model
+            </th>
+            <th className="px-2 py-3 text-right font-normal">Merged</th>
+            <th className="px-2 py-3 text-right font-normal">Closed</th>
+            <th className="px-2 py-3 text-right font-normal">Mature pending</th>
+            <th className="px-2 py-3 text-right font-normal">Waiting</th>
+            <th className="px-2 py-3 text-right font-normal">Decided rate</th>
+            <th className="px-4 py-3 text-right font-normal">Mature share</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {cohorts.map((cohort) => (
+            <tr key={`${cohort.model_id}-${cohort.model_attribution_quality}`}>
+              <td className="px-4 py-3">
+                <div className="font-medium">
+                  {cohort.model_id ?? "Unavailable"}
+                </div>
+                <div className="text-muted-foreground">
+                  {cohort.model_attribution_quality} attribution
+                </div>
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.merged}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.closed_without_merge}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.mature_pending}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.waiting}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.decided_merge_rate == null
+                  ? "—"
+                  : formatPercent(cohort.decided_merge_rate)}
+              </td>
+              <td className="px-4 py-3 text-right tabular-nums">
+                {cohort.mature_cohort_merge_share == null
+                  ? "—"
+                  : formatPercent(cohort.mature_cohort_merge_share)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -190,7 +442,7 @@ function UsageTable({
                 {formatNumber(row.total_tokens)}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
-                {formatCurrency(row.total_cost_usd)}
+                <UsageCost row={row} />
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatDuration(row.avg_invocation_seconds)}
@@ -355,6 +607,50 @@ function formatTime(value: number): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value)
+}
+
+function UsageCost({ row }: { row: UsageLeaderboardRow }) {
+  if (row.invocations === 0) return <span>—</span>
+
+  const missing = row.invocations_without_cost
+  const partial = row.invocations_with_partial_cost
+  const coverageKnown = missing != null && partial != null
+  if (coverageKnown && missing === 0 && partial === 0) {
+    return <span>{formatCurrency(row.total_cost_usd)}</span>
+  }
+
+  const unavailable = coverageKnown
+    ? missing >= row.invocations
+    : row.total_cost_usd === 0
+  const label = unavailable ? "Unavailable" : "Incomplete"
+  const explanation = coverageKnown
+    ? [
+        unavailable ? "No costs have been recorded." : "Recorded cost so far.",
+        missing > 0
+          ? `Costs are missing for ${missing} of ${row.invocations} invocations.`
+          : "",
+        partial > 0
+          ? `Costs are partial for ${partial} of ${row.invocations} invocations.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : "Cost coverage is unavailable for these invocations."
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <span>{unavailable ? "—" : formatCurrency(row.total_cost_usd)}</span>
+      <Tooltip>
+        <TooltipTrigger
+          aria-label={`Cost ${label.toLowerCase()}`}
+          className="cursor-help rounded-sm text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          {label}
+        </TooltipTrigger>
+        <TooltipPopup className="max-w-xs">{explanation}</TooltipPopup>
+      </Tooltip>
+    </div>
+  )
 }
 
 function formatCurrency(value: number): string {
