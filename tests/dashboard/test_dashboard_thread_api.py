@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
@@ -2082,6 +2083,73 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert all(item["resolved"] is False for item in result["items"])
     assert page_size in offsets
     assert run_list_calls == 0
+
+
+async def test_deep_thread_scan_overlaps_its_searches(monkeypatch) -> None:
+    """A filter the search cannot express walks many pages; walking them one at a
+    time is what made the sidebar take half a minute."""
+    page_size = thread_listing._THREADS_SEARCH_PAGE
+    threads = _make_threads(page_size * 20, resolved_before=0)
+    for index, thread in enumerate(threads):
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata["latest_run_status"] = "success"
+        if index < page_size * 19:
+            metadata.update({"repo_owner": "langchain-ai", "repo_name": "open-swe"})
+    in_flight = 0
+    peak_in_flight = 0
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            nonlocal in_flight, peak_in_flight
+            in_flight += 1
+            peak_in_flight = max(peak_in_flight, in_flight)
+            try:
+                await asyncio.sleep(0)
+                return threads[offset : offset + limit]
+            finally:
+                in_flight -= 1
+
+    patch_thread_module(
+        monkeypatch,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+
+    result = await thread_listing.list_dashboard_threads_page(
+        "octocat", email=None, limit=10, ownerless=True
+    )
+
+    assert [item["id"] for item in result["items"]] == [
+        f"t{index}" for index in range(page_size * 19, page_size * 19 + 10)
+    ]
+    assert peak_in_flight > 1
+
+
+async def test_list_dashboard_thread_projects_stops_at_the_scan_cap(monkeypatch) -> None:
+    threads = _make_threads(thread_listing._PROJECTS_SCAN_CAP + 500, resolved_before=0)
+    cast(dict[str, object], threads[0]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "open-swe", "updated_at_ms": 10}
+    )
+    cast(dict[str, object], threads[-1]["metadata"]).update(
+        {"repo_owner": "langchain-ai", "repo_name": "too-old", "updated_at_ms": 1}
+    )
+    offsets: list[int] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            offsets.append(offset)
+            return threads[offset : offset + limit]
+
+    patch_thread_module(
+        monkeypatch,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+
+    result = await thread_listing.list_dashboard_thread_projects("octocat")
+
+    assert [project["repoFullName"] for project in result] == ["langchain-ai/open-swe"]
+    assert max(offsets) < thread_listing._PROJECTS_SCAN_CAP
 
 
 async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -> None:

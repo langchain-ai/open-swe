@@ -2,7 +2,8 @@
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
+from contextlib import aclosing
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -34,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 _THREADS_SEARCH_PAGE = 50
 _THREADS_PAGE_SCAN_CAP = 5000
+# The project list only names repos, so the most recent threads answer it; scanning
+# every thread a person has ever touched cost tens of seconds for no extra project.
+_PROJECTS_SCAN_CAP = 1000
+_SCAN_PAGE_CONCURRENCY = 8
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
@@ -91,6 +96,51 @@ async def _search_threads_batch(
         select=_THREAD_LIST_SELECT,
     )
     return [thread for thread in batch or [] if isinstance(thread, Mapping)]
+
+
+async def _scan_thread_pages(
+    client: Any,
+    metadata: JsonObject,
+    *,
+    scan_cap: int,
+    sort_by: _ThreadSortBy,
+) -> AsyncGenerator[list[ThreadLike], None]:
+    """Search results in page groups that widen as the scan goes deeper.
+
+    Filters that containment cannot express are applied by the caller, so a scan
+    can run to the cap; one 50-thread page at a time made that hundreds of serial
+    round trips. The first group is a single page, so the common case of a filter
+    satisfied immediately still costs one search.
+    """
+    offset = 0
+    width = 1
+    while offset < scan_cap:
+        offsets = list(
+            range(
+                offset,
+                min(offset + _THREADS_SEARCH_PAGE * width, scan_cap),
+                _THREADS_SEARCH_PAGE,
+            )
+        )
+        pages = await asyncio.gather(
+            *(
+                _search_threads_batch(
+                    client,
+                    metadata,
+                    limit=_THREADS_SEARCH_PAGE,
+                    offset=page_offset,
+                    sort_by=sort_by,
+                )
+                for page_offset in offsets
+            )
+        )
+        threads = [thread for page in pages for thread in page]
+        if threads:
+            yield threads
+        if any(len(page) < _THREADS_SEARCH_PAGE for page in pages):
+            return
+        offset += _THREADS_SEARCH_PAGE * len(offsets)
+        width = min(width * 2, _SCAN_PAGE_CONCURRENCY)
 
 
 def _search_matches(values: Sequence[object], query: str) -> bool:
@@ -263,11 +313,11 @@ async def _collect_thread_candidates(
     target_per_search: int | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
+    scan_cap: int = _THREADS_PAGE_SCAN_CAP,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for search_filter in searches:
         matched_for_search = 0
-        offset = 0
         metadata_filter = _search_metadata_filter(
             search_filter,
             resolved=resolved,
@@ -275,47 +325,43 @@ async def _collect_thread_candidates(
             automation_id=automation_id,
             admin_threads=admin_threads,
         )
-        while offset < _THREADS_PAGE_SCAN_CAP:
-            batch = await _search_threads_batch(
+        async with aclosing(
+            _scan_thread_pages(
                 client,
                 metadata_filter,
-                limit=_THREADS_SEARCH_PAGE,
-                offset=offset,
+                scan_cap=scan_cap,
                 sort_by=sort_by,
             )
-            if not batch:
-                break
-            for thread in batch:
-                metadata = _thread_metadata(thread)
-                if metadata.get("visibility", "public") != "public" and (
-                    not include_private
-                    or not thread_is_readable(metadata, viewer_login, viewer_email)
-                ):
-                    continue
-                if surfaced_only and thread_source(metadata) not in _SURFACED_SOURCES:
-                    continue
-                if not _metadata_matches_filters(
-                    metadata,
-                    resolved=resolved,
-                    source=source,
-                    query=query,
-                    scope=scope,
-                    automation_id=automation_id,
-                    repo=repo,
-                    ownerless=ownerless,
-                    admin_threads=admin_threads,
-                ):
-                    continue
-                thread_id = _thread_id(thread)
-                if not thread_id:
-                    continue
-                matched_for_search += 1
-                seen.setdefault(thread_id, thread)
-            if len(batch) < _THREADS_SEARCH_PAGE:
-                break
-            if target_per_search is not None and matched_for_search >= target_per_search:
-                break
-            offset += _THREADS_SEARCH_PAGE
+        ) as pages:
+            async for batch in pages:
+                for thread in batch:
+                    metadata = _thread_metadata(thread)
+                    if metadata.get("visibility", "public") != "public" and (
+                        not include_private
+                        or not thread_is_readable(metadata, viewer_login, viewer_email)
+                    ):
+                        continue
+                    if surfaced_only and thread_source(metadata) not in _SURFACED_SOURCES:
+                        continue
+                    if not _metadata_matches_filters(
+                        metadata,
+                        resolved=resolved,
+                        source=source,
+                        query=query,
+                        scope=scope,
+                        automation_id=automation_id,
+                        repo=repo,
+                        ownerless=ownerless,
+                        admin_threads=admin_threads,
+                    ):
+                        continue
+                    thread_id = _thread_id(thread)
+                    if not thread_id:
+                        continue
+                    matched_for_search += 1
+                    seen.setdefault(thread_id, thread)
+                if target_per_search is not None and matched_for_search >= target_per_search:
+                    break
     return sorted(
         seen.values(), key=lambda thread: _thread_timestamp_ms(thread, sort_by), reverse=True
     )
@@ -404,6 +450,7 @@ async def list_dashboard_thread_projects(
         viewer_email=email,
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
+        scan_cap=_PROJECTS_SCAN_CAP,
     )
     projects: dict[str, dict[str, Any]] = {}
     for thread in candidates:
