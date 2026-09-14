@@ -4,11 +4,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
-from agent.incidents import api as incidents_api
 from agent.incidents import documents
+from agent.incidents import routes as incidents_routes
 
 router = APIRouter(tags=["incidents"])
-Responder = Annotated[dict[str, Any], Depends(incidents_api.responder)]
+Responder = Annotated[dict[str, Any], Depends(incidents_routes.responder)]
 
 
 @router.get("/history")

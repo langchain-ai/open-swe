@@ -80,7 +80,7 @@ async def test_list_reviews_applies_accessibility_and_has_more(monkeypatch) -> N
 @pytest.mark.asyncio
 async def test_accessible_repo_full_names_lowercases(monkeypatch) -> None:
     fetch = AsyncMock(return_value=([], [{"full_name": "Acme/Repo"}, {"full_name": "Acme/Other"}]))
-    monkeypatch.setattr(repos, "_fetch_user_installations_and_repos", fetch)
+    monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
 
     names = await repos.accessible_repo_full_names("octocat")
 
@@ -97,7 +97,7 @@ async def test_accessible_repo_full_names_resolves_fresh_each_call(monkeypatch) 
             ([], []),
         ]
     )
-    monkeypatch.setattr(repos, "_fetch_user_installations_and_repos", fetch)
+    monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
 
     first = await repos.accessible_repo_full_names("octocat")
     second = await repos.accessible_repo_full_names("octocat")

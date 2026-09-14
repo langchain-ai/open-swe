@@ -8,11 +8,11 @@ from typing import Any
 import pytest
 
 from agent import store as agent_store
-from agent.threads import access, api, diffs, listing, proxy, runs, summary
+from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
 
-_THREAD_MODULES: tuple[ModuleType, ...] = (access, api, diffs, listing, proxy, runs, summary)
+_THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 
 
 def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) -> None:

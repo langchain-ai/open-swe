@@ -1,6 +1,6 @@
 from typing import Any
 
-from agent.threads import api as thread_api
+from agent.threads import handlers as thread_api
 from agent.threads import listing as thread_listing
 from tests.conftest import patch_thread_module
 

@@ -6,14 +6,14 @@ import pytest
 from fastapi import HTTPException
 
 from agent import store
-from agent.github import repo_cache, repos
+from agent.github import dashboard_routes, repo_cache, repos
 
 
 @pytest.fixture(autouse=True)
 def _no_repo_cache(monkeypatch) -> None:
     """Default every test to a cache miss with writes swallowed."""
-    monkeypatch.setattr(repos, "read_cached_repos", AsyncMock(return_value=None))
-    monkeypatch.setattr(repos, "write_cached_repos", AsyncMock(return_value=None))
+    monkeypatch.setattr(dashboard_routes, "read_cached_repos", AsyncMock(return_value=None))
+    monkeypatch.setattr(dashboard_routes, "write_cached_repos", AsyncMock(return_value=None))
 
 
 @pytest.mark.asyncio
@@ -71,7 +71,7 @@ async def test_list_repos_propagates_repository_page_timeouts(monkeypatch) -> No
     monkeypatch.setattr(repos, "_paginate", fake_paginate)
 
     with pytest.raises(HTTPException) as exc:
-        await repos.list_repos(session={"sub": "octocat"})
+        await dashboard_routes.list_repos(session={"sub": "octocat"})
 
     assert exc.value.status_code == 503
     assert exc.value.detail == "github API request timed out"
@@ -91,7 +91,7 @@ async def test_list_repos_skips_inaccessible_installations(monkeypatch) -> None:
 
     monkeypatch.setattr(repos, "_paginate", fake_paginate)
 
-    result = await repos.list_repos(session={"sub": "octocat"})
+    result = await dashboard_routes.list_repos(session={"sub": "octocat"})
 
     assert result == {
         "installations": [{"id": 123, "account": "acme", "account_type": "Organization"}],
@@ -102,13 +102,15 @@ async def test_list_repos_skips_inaccessible_installations(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_list_repos_serves_fresh_cache_without_calling_github(monkeypatch) -> None:
     cached = {"installations": [], "repositories": [{"full_name": "acme/api", "private": True}]}
-    monkeypatch.setattr(repos, "read_cached_repos", AsyncMock(return_value=(cached, 1_000)))
+    monkeypatch.setattr(
+        dashboard_routes, "read_cached_repos", AsyncMock(return_value=(cached, 1_000))
+    )
     fetch = AsyncMock(return_value=([], []))
-    monkeypatch.setattr(repos, "_fetch_user_installations_and_repos", fetch)
+    monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
     schedule = MagicMock()
     monkeypatch.setattr(repos, "schedule_repo_cache_refresh", schedule)
 
-    result = await repos.list_repos(session={"sub": "octocat"})
+    result = await dashboard_routes.list_repos(session={"sub": "octocat"})
 
     assert result == cached
     fetch.assert_not_awaited()
@@ -124,11 +126,11 @@ async def test_list_repos_serves_stale_cache_and_schedules_refresh(monkeypatch) 
         AsyncMock(return_value=(cached, repos.REPO_LIST_FRESH_MS + 1)),
     )
     fetch = AsyncMock(return_value=([], []))
-    monkeypatch.setattr(repos, "_fetch_user_installations_and_repos", fetch)
+    monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
     schedule = MagicMock()
     monkeypatch.setattr(repos, "schedule_repo_cache_refresh", schedule)
 
-    result = await repos.list_repos(session={"sub": "octocat"})
+    result = await dashboard_routes.list_repos(session={"sub": "octocat"})
 
     assert result == cached
     fetch.assert_not_awaited()
@@ -138,12 +140,12 @@ async def test_list_repos_serves_stale_cache_and_schedules_refresh(monkeypatch) 
 @pytest.mark.asyncio
 async def test_list_repos_refresh_bypasses_cache_and_writes_it(monkeypatch) -> None:
     read = AsyncMock(return_value=({"installations": [], "repositories": []}, 0))
-    monkeypatch.setattr(repos, "read_cached_repos", read)
+    monkeypatch.setattr(dashboard_routes, "read_cached_repos", read)
     write = AsyncMock(return_value=None)
-    monkeypatch.setattr(repos, "write_cached_repos", write)
+    monkeypatch.setattr(dashboard_routes, "write_cached_repos", write)
     monkeypatch.setattr(
         repos,
-        "_fetch_user_installations_and_repos",
+        "fetch_user_installations_and_repos",
         AsyncMock(
             return_value=(
                 [{"id": 123, "account": {"login": "acme", "type": "Organization"}}],
@@ -152,7 +154,7 @@ async def test_list_repos_refresh_bypasses_cache_and_writes_it(monkeypatch) -> N
         ),
     )
 
-    result = await repos.list_repos(refresh=True, session={"sub": "octocat"})
+    result = await dashboard_routes.list_repos(refresh=True, session={"sub": "octocat"})
 
     read.assert_not_awaited()
     assert result == {

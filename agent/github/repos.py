@@ -4,20 +4,11 @@ import logging
 from typing import Any
 
 import httpx2
-from fastapi import APIRouter, HTTPException
+from fastapi import HTTPException
 
-from agent.dashboard.deps import SESSION_DEP
 from agent.dashboard.profiles import get_valid_access_token
-from agent.github.repo_cache import (
-    REPO_LIST_FRESH_MS,
-    read_cached_repos,
-    schedule_repo_cache_refresh,
-    write_cached_repos,
-)
 
 logger = logging.getLogger(__name__)
-
-router = APIRouter(tags=["github"])
 
 _GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
@@ -90,7 +81,7 @@ async def _paginate(
     return out
 
 
-async def _fetch_user_installations_and_repos(
+async def fetch_user_installations_and_repos(
     login: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Resolve the installations and repos a user can access via the GitHub App.
@@ -161,50 +152,7 @@ async def accessible_repo_full_names(login: str) -> frozenset[str]:
     boundary: a stale set would leak repo/PR titles, branches, authors and
     finding counts for repos the user just lost access to.
     """
-    _, repositories = await _fetch_user_installations_and_repos(login)
+    _, repositories = await fetch_user_installations_and_repos(login)
     return frozenset(
         repo["full_name"].lower() for repo in repositories if isinstance(repo.get("full_name"), str)
     )
-
-
-async def _build_repo_payload(login: str) -> dict[str, Any]:
-    installations, repositories = await _fetch_user_installations_and_repos(login)
-    payload = {
-        "installations": [
-            {
-                "id": i.get("id"),
-                "account": (i.get("account") or {}).get("login"),
-                "account_type": (i.get("account") or {}).get("type"),
-            }
-            for i in installations
-        ],
-        "repositories": [
-            {"full_name": r.get("full_name"), "private": r.get("private", False)}
-            for r in repositories
-            if r.get("full_name")
-        ],
-    }
-    await write_cached_repos(login, payload)
-    return payload
-
-
-@router.get("/repos")
-async def list_repos(
-    refresh: bool = False,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    """List repos where Open SWE is installed and the user has access.
-
-    Served from the per-login cache (stale-while-revalidate) unless
-    ``refresh=true``, because the fan-out over every installation takes 10s+
-    for users with hundreds of accessible repos.
-    """
-    login = session["sub"]
-    if not refresh:
-        cached = await read_cached_repos(login)
-        if cached is not None:
-            payload, age_ms = cached
-            if age_ms > REPO_LIST_FRESH_MS:
-                schedule_repo_cache_refresh(login, lambda: _build_repo_payload(login))
-            return payload
-    return await _build_repo_payload(login)

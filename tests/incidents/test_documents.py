@@ -107,13 +107,13 @@ async def test_store_outage_is_not_an_empty_summary(record, monkeypatch):
 
 
 async def test_documents_api_is_read_only_and_checks_channel_access(record):
-    from agent.incidents import api as incidents_api
-    from agent.incidents.document_api import router
+    from agent.incidents import routes as incidents_routes
+    from agent.incidents.document_routes import router
 
     await documents.update_from_report(record, report())
     app = FastAPI()
     app.include_router(router, prefix="/documents")
-    app.dependency_overrides[incidents_api.require_session] = lambda: {"sub": "test-user"}
+    app.dependency_overrides[incidents_routes.require_session] = lambda: {"sub": "test-user"}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:

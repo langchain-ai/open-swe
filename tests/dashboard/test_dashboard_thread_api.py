@@ -13,8 +13,8 @@ from agent.dashboard import deps, options_api, profiles, routes
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 from agent.dashboard.ttft import AssistantTextObservation
-from agent.threads import api as thread_api
 from agent.threads import diffs as thread_diffs
+from agent.threads import handlers
 from agent.threads import listing as thread_listing
 from agent.threads import proxy as thread_proxy
 from agent.threads import routes as thread_routes
@@ -564,14 +564,14 @@ async def test_terminal_sandbox_requires_existing_sandbox(monkeypatch) -> None:
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    assert await thread_api.get_dashboard_terminal_sandbox("tid", "teammate") == (
+    assert await handlers.get_dashboard_terminal_sandbox("tid", "teammate") == (
         "sandbox-123",
         "repo",
     )
 
     metadata["sandbox_id"] = "__creating__"
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_terminal_sandbox("tid", "teammate")
+        await handlers.get_dashboard_terminal_sandbox("tid", "teammate")
     assert exc_info.value.status_code == 404
 
 
@@ -1507,7 +1507,7 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     # Read endpoints succeed for non-owners (org members).
-    state = await thread_api.get_dashboard_thread_state("tid", "teammate")
+    state = await handlers.get_dashboard_thread_state("tid", "teammate")
     assert "values" in state
 
     # stream/events preflight should not raise.
@@ -1581,7 +1581,7 @@ async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(mon
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    state = await thread_api.get_dashboard_thread_state("tid", "owner")
+    state = await handlers.get_dashboard_thread_state("tid", "owner")
 
     assert "next" not in state
 
@@ -1605,7 +1605,7 @@ async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_state("tid", "owner")
+        await handlers.get_dashboard_thread_state("tid", "owner")
     assert exc_info.value.status_code == 404
 
 
@@ -1629,7 +1629,7 @@ async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypa
     patch_thread_module(monkeypatch, "get_thread_active_status", unknown_activity)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "tid",
             "octocat",
             thread_runs.ThreadMessageBody(content="hello"),
@@ -1660,7 +1660,7 @@ async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypa
     patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "tid",
             "teammate",
             thread_runs.ThreadMessageBody(content="ship it"),
@@ -1719,7 +1719,7 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "get_thread_active_status", active)
     patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue)
 
-    await thread_api.send_dashboard_message(
+    await handlers.send_dashboard_message(
         "tid",
         "teammate",
         thread_runs.ThreadMessageBody(content="ship it"),
@@ -1757,7 +1757,7 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
     patch_thread_module(monkeypatch, "get_thread_active_status", active)
     patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue)
 
-    await thread_api.send_dashboard_message(
+    await handlers.send_dashboard_message(
         "tid",
         "owner",
         thread_runs.ThreadMessageBody(content="ship it"),
@@ -1807,16 +1807,16 @@ async def test_resolve_all_dashboard_threads_marks_each_unresolved_thread(monkey
         lambda: SimpleNamespace(threads=FakeThreads()),
     )
     monkeypatch.setattr(
-        thread_api, "list_unresolved_dashboard_threads", AsyncMock(return_value=threads)
+        handlers, "list_unresolved_dashboard_threads", AsyncMock(return_value=threads)
     )
     patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
-    count = await thread_api.resolve_all_dashboard_threads("octocat", email="octocat@example.com")
+    count = await handlers.resolve_all_dashboard_threads("octocat", email="octocat@example.com")
 
     assert count == 2
     assert {thread_id for thread_id, _ in updates} == {"one", "two"}
     assert all(metadata["resolved"] is True for _, metadata in updates)
-    thread_api.list_unresolved_dashboard_threads.assert_awaited_once_with(
+    handlers.list_unresolved_dashboard_threads.assert_awaited_once_with(
         "octocat", email="octocat@example.com"
     )
 
@@ -1844,7 +1844,7 @@ async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
-    summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=True)
+    summary = await handlers.resolve_dashboard_thread("tid", "octocat", resolved=True)
 
     assert updates[-1]["resolved"] is True
     assert isinstance(updates[-1]["resolved_at_ms"], int)
@@ -1879,7 +1879,7 @@ async def test_resolve_dashboard_thread_clears_resolved(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
-    summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=False)
+    summary = await handlers.resolve_dashboard_thread("tid", "octocat", resolved=False)
 
     assert updates[-1]["resolved"] is False
     assert updates[-1]["resolved_at_ms"] is None
@@ -1899,7 +1899,7 @@ async def test_resolve_dashboard_thread_rejects_unsurfaced_thread(monkeypatch) -
     patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.resolve_dashboard_thread("tid", "teammate", resolved=True)
+        await handlers.resolve_dashboard_thread("tid", "teammate", resolved=True)
     assert exc_info.value.status_code == 404
 
 
@@ -2615,17 +2615,17 @@ async def test_get_my_profile_drops_deprecated_models() -> None:
 async def test_options_omits_fable_when_disabled() -> None:
     with (
         patch(
-            "agent.dashboard.options_api.get_team_fable_enabled",
+            "agent.dashboard.options_routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.options_api.get_team_default_model",
+            "agent.dashboard.options_routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.options_api.get_team_default_subagent_model",
+            "agent.dashboard.options_routes.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
@@ -2638,17 +2638,17 @@ async def test_options_omits_fable_when_disabled() -> None:
 async def test_options_includes_fable_when_enabled() -> None:
     with (
         patch(
-            "agent.dashboard.options_api.get_team_fable_enabled",
+            "agent.dashboard.options_routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.dashboard.options_api.get_team_default_model",
+            "agent.dashboard.options_routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.options_api.get_team_default_subagent_model",
+            "agent.dashboard.options_routes.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
@@ -2667,17 +2667,17 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     fable_pair = (_FABLE, "high")
     with (
         patch(
-            "agent.dashboard.options_api.get_team_fable_enabled",
+            "agent.dashboard.options_routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.options_api.get_team_default_model",
+            "agent.dashboard.options_routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
         patch(
-            "agent.dashboard.options_api.get_team_default_subagent_model",
+            "agent.dashboard.options_routes.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
@@ -2839,7 +2839,7 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.cancel_dashboard_thread("thread-1", "owner")
+    result = await handlers.cancel_dashboard_thread("thread-1", "owner")
 
     assert calls[2] == (
         "cancel_many",
@@ -2879,7 +2879,7 @@ async def test_cancel_dashboard_thread_rejects_non_owner(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException):
-        await thread_api.cancel_dashboard_thread("thread-1", "someone-else")
+        await handlers.cancel_dashboard_thread("thread-1", "someone-else")
 
     assert cancelled is False
 
@@ -2921,7 +2921,7 @@ async def test_admin_cancel_dashboard_thread_interrupts_all_active_runs(monkeypa
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.admin_cancel_dashboard_thread("thread-1")
+    result = await handlers.admin_cancel_dashboard_thread("thread-1")
 
     assert calls[2] == (
         "cancel_many",
@@ -2961,7 +2961,7 @@ async def test_admin_cancel_dashboard_thread_does_not_update_on_cancel_failure(m
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.admin_cancel_dashboard_thread("thread-1")
+        await handlers.admin_cancel_dashboard_thread("thread-1")
 
     assert exc_info.value.status_code == 502
     assert updated is False

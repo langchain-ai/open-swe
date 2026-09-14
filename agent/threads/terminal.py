@@ -16,7 +16,7 @@ from pydantic import BaseModel, ValidationError
 from agent.config import ENV
 from agent.dashboard.deps import SESSION_DEP
 from agent.dashboard.oauth import decode_terminal_ticket, issue_terminal_ticket
-from agent.threads.api import get_dashboard_terminal_sandbox
+from agent.threads.handlers import get_dashboard_terminal_sandbox
 from agent.utils.thread_ops import langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)

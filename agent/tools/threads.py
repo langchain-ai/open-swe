@@ -22,7 +22,7 @@ from agent.invocation import resolve_invocation_id
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.threads import plan_api, workflow_approval_api
-from agent.threads.api import (
+from agent.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,

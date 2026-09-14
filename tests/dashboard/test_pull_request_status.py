@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from agent.github import pull_request_status
 from agent.threads import access as thread_access
-from agent.threads import api as thread_api
+from agent.threads import handlers
 from tests.conftest import patch_thread_module
 
 
@@ -356,7 +356,7 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
     patch_thread_module(monkeypatch, "_github_token_for_login", token)
     patch_thread_module(monkeypatch, "get_pull_request_statuses", statuses)
 
-    result = await thread_api.get_dashboard_thread_pull_request_status(
+    result = await handlers.get_dashboard_thread_pull_request_status(
         "thread-1", "teammate", email="teammate@example.com"
     )
 
@@ -389,7 +389,7 @@ async def test_thread_status_read_denial_does_not_resolve_oauth_token(
     patch_thread_module(monkeypatch, "_github_token_for_login", token)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_pull_request_status("thread-1", "intruder")
+        await handlers.get_dashboard_thread_pull_request_status("thread-1", "intruder")
 
     assert exc_info.value.status_code == 403
     token.assert_not_awaited()

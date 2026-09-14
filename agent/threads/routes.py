@@ -11,7 +11,13 @@ from pydantic import BaseModel, Field
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.github.pull_request_checks import PullRequestState
 from agent.threads import terminal
-from agent.threads.api import (
+from agent.threads.diffs import (
+    get_dashboard_thread_branch_diff,
+    get_dashboard_thread_recovery_patch,
+    get_dashboard_thread_working_tree_diff,
+)
+from agent.threads.feedback import feedback_router
+from agent.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     continue_thread_privately,
@@ -26,12 +32,6 @@ from agent.threads.api import (
     resolve_dashboard_thread,
     send_dashboard_message,
 )
-from agent.threads.diffs import (
-    get_dashboard_thread_branch_diff,
-    get_dashboard_thread_recovery_patch,
-    get_dashboard_thread_working_tree_diff,
-)
-from agent.threads.feedback import feedback_router
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_projects,
