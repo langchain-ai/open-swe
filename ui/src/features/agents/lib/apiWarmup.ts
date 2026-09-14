@@ -10,42 +10,50 @@ const AGENTS_HOME_RE = /^\/agents\/?$/
  * Serialized into the document with `toString()`, so it may not reference
  * imports, module scope, or any syntax the build lowers with a helper.
  *
- * `sidebarUrl` is a template because its scope comes from a localStorage
- * preference that only the browser can read.
+ * The sidebar query is built here rather than passed in: every part of it comes
+ * from a localStorage preference that only the browser can read, and a single
+ * wrong parameter costs a whole duplicate request.
  */
 function warmApiRequests(
   urls: Array<string>,
-  sidebarUrl: string | null,
-  prefsKey: string
+  sidebarPath: string | null,
+  prefsKey: string,
+  pageSize: number
 ) {
   if (document.readyState !== "loading") return
 
   const targets = urls.slice()
-  if (sidebarUrl) {
+  if (sidebarPath) {
     let includeAutomations = false
+    let includeResolved = false
     let projectMode = true
+    let sortByCreated = true
     try {
       const raw = localStorage.getItem(prefsKey)
       const prefs = raw ? JSON.parse(raw) : null
       const filters = prefs?.filters
       projectMode = prefs?.organize !== "list"
+      sortByCreated = prefs?.sortChats !== "updated"
       if (filters) {
         includeAutomations =
           filters.includeAutomations === true ||
           (Array.isArray(filters.sources) &&
             filters.sources.indexOf("schedule") !== -1)
+        includeResolved = filters.includeResolved === true
       }
     } catch {
       // An unreadable preference just means the default (false).
     }
-    targets.push(
-      sidebarUrl
-        .replace(
-          "__SIDEBAR_SCOPE__",
-          includeAutomations ? "all" : "interactive"
-        )
-        .replace("__SIDEBAR_OWNERLESS__", String(projectMode))
-    )
+    // Parameter order has to match the api client's, because the handoff below
+    // matches on the resolved URL.
+    const search = new URLSearchParams()
+    search.set("limit", String(pageSize))
+    search.set("offset", "0")
+    if (!includeResolved) search.set("resolved", "false")
+    search.set("scope", includeAutomations ? "all" : "interactive")
+    if (projectMode) search.set("ownerless", "true")
+    search.set("sort_by", sortByCreated ? "created_at" : "updated_at")
+    targets.push(sidebarPath + "?" + search.toString())
   }
 
   const pending = new Map<string, Promise<Response>>()
@@ -98,15 +106,9 @@ function warmApiRequests(
   window.fetch = patched
 }
 
-/** The first sidebar page request, minus the localStorage-dependent scope. */
-function sidebarUrlTemplate(): string {
-  const search = new URLSearchParams()
-  search.set("limit", String(SIDEBAR_PAGE_SIZE))
-  search.set("offset", "0")
-  search.set("resolved", "false")
-  search.set("scope", "__SIDEBAR_SCOPE__")
-  search.set("ownerless", "__SIDEBAR_OWNERLESS__")
-  return `${agentsLangGraphApiUrl}/threads/page?${search.toString()}`
+/** The sidebar page endpoint; the script appends the preference-dependent query. */
+function sidebarPageEndpoint(): string {
+  return `${agentsLangGraphApiUrl}/threads/page`
 }
 
 /**
@@ -125,8 +127,9 @@ export function apiWarmupScript(pathname: string): string | null {
     : []
   const args = [
     JSON.stringify(urls),
-    JSON.stringify(sidebarUrlTemplate()),
+    JSON.stringify(sidebarPageEndpoint()),
     JSON.stringify(SIDEBAR_PREFS_STORAGE_KEY),
+    JSON.stringify(SIDEBAR_PAGE_SIZE),
   ].join(",")
   return `(${warmApiRequests.toString()})(${args});`
 }

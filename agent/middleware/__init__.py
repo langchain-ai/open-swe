@@ -10,6 +10,7 @@ _MIDDLEWARE_MODULES = {
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
     "ModelErrorMiddleware": ".model_errors",
     "ModelFallbackMiddleware": ".model_fallback",
+    "ModelSelectionMiddleware": ".model_selection",
     "notify_step_limit_reached": ".notify_step_limit",
     "PlanModeMiddleware": ".plan_mode",
     "PrepareRunState": ".prepare_run",
@@ -29,7 +30,9 @@ _MIDDLEWARE_MODULES = {
     "task_retry_on": ".task_retry",
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
     "ToolErrorMiddleware": ".tool_error_handler",
+    "ValidateImageReadsMiddleware": ".validate_image_reads",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
+    "WorkspaceSkillsMiddleware": ".workspace_skills",
 }
 
 __all__ = [
@@ -39,6 +42,7 @@ __all__ = [
     "ModelCallTimeoutMiddleware",
     "ModelErrorMiddleware",
     "ModelFallbackMiddleware",
+    "ModelSelectionMiddleware",
     "BasePrepareRunMiddleware",
     "PlanModeMiddleware",
     "PrepareRunState",
@@ -52,7 +56,9 @@ __all__ = [
     "SubdirAgentsReadMiddleware",
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
+    "ValidateImageReadsMiddleware",
     "WorkflowPushGuardMiddleware",
+    "WorkspaceSkillsMiddleware",
     "check_message_queue_before_model",
     "notify_step_limit_reached",
     "record_run_usage",
@@ -69,6 +75,7 @@ if TYPE_CHECKING:
     from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
     from agent.middleware.model_errors import ModelErrorMiddleware
     from agent.middleware.model_fallback import ModelFallbackMiddleware
+    from agent.middleware.model_selection import ModelSelectionMiddleware
     from agent.middleware.notify_step_limit import notify_step_limit_reached
     from agent.middleware.plan_mode import PlanModeMiddleware
     from agent.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
@@ -86,7 +93,9 @@ if TYPE_CHECKING:
     from agent.middleware.task_retry import task_on_failure, task_retry_on
     from agent.middleware.timeout_wrapup import TimeoutWrapupMiddleware
     from agent.middleware.tool_error_handler import ToolErrorMiddleware
+    from agent.middleware.validate_image_reads import ValidateImageReadsMiddleware
     from agent.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
+    from agent.middleware.workspace_skills import WorkspaceSkillsMiddleware
 
 
 def _load_export(name: str) -> Any:

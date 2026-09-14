@@ -78,6 +78,9 @@ async def queue_message_for_thread(
                 MAX_QUEUED_MESSAGES,
             )
         await client.store.put_item(namespace, key, {"messages": existing_messages})
+        from agent.thread_feedback import note_feedback_activity
+
+        await note_feedback_activity(thread_id, client=client)
         logger.info(
             "Queued message for thread %s (total queued: %d)",
             thread_id,

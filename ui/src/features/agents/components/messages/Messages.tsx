@@ -61,12 +61,14 @@ export const Messages = memo(function MessagesComponent({
   scrollKey,
   showPlanArtifact = false,
   emptyState,
+  footer,
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   isStreaming,
   streamIsLoading,
   isThinking,
   settingUpSandbox,
+  isOffloading = false,
   project,
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
@@ -146,7 +148,7 @@ export const Messages = memo(function MessagesComponent({
                 <AgentTurn
                   key={message.id}
                   message={message}
-                  isStreaming={messageIsStreaming}
+                  isStreaming={messageIsStreaming && !isOffloading}
                   isMarkdownLive={messageIsMarkdownLive}
                   projectPath={projectPath}
                   activityLabel={messageIsStreaming ? activityLabel : undefined}
@@ -167,17 +169,21 @@ export const Messages = memo(function MessagesComponent({
               />
             )}
             <QueuedMessages queuedMessages={queuedMessages} />
+            {footer}
             <ThinkingSpinner
               isActive={
-                !!(isThinking || streamIsLoading || isStreaming) &&
-                !(
-                  isStreaming &&
-                  lastAgentIndex >= 0 &&
-                  lastAgentIndex === visibleMessages.length - 1
-                )
+                isOffloading ||
+                (!!(isThinking || streamIsLoading || isStreaming) &&
+                  !(
+                    isStreaming &&
+                    lastAgentIndex >= 0 &&
+                    lastAgentIndex === visibleMessages.length - 1
+                  ))
               }
-              settingUpSandbox={settingUpSandbox}
-              label={activityLabel}
+              settingUpSandbox={settingUpSandbox && !isOffloading}
+              label={
+                isOffloading ? "Offloading conversation..." : activityLabel
+              }
             />
           </div>
         </div>

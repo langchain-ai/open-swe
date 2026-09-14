@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui tunnel web build-dashboard desktop install-desktop install-checkout
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui tunnel web build-dashboard desktop install-desktop install-checkout swagger
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -8,7 +8,7 @@ all: help
 ######################
 
 dev:
-	uv run langgraph dev --no-browser --port 2024
+	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
 
 # UI development in one terminal: Vite (`make web`) and the backend fronting it, so
 # http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
@@ -36,6 +36,9 @@ build-dashboard:
 
 run:
 	uv run uvicorn agent.webapp:app --reload --port 8000
+
+swagger:
+	uv run python -c 'import json; from pathlib import Path; from agent.webapp import app; Path("swagger.json").write_text(json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n", encoding="utf-8")'
 
 desktop:
 	pnpm run dev:desktop
@@ -103,6 +106,7 @@ help:
 	@echo 'web                          - run the dashboard web server'
 	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
 	@echo 'run                          - run webhook server'
+	@echo 'swagger                      - regenerate swagger.json from the backend routes'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'

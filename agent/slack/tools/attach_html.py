@@ -23,12 +23,7 @@ async def slack_attach_html(
     title: str | None = None,
     initial_comment: str | None = None,
 ) -> dict[str, Any]:
-    """Attach a sandbox HTML preview to the current Slack thread.
-
-    Use this when the user asks to receive or preview generated HTML directly in Slack. The file must
-    be a regular `.html` file inside the active sandbox work directory and no larger than 10 MB. Do
-    not attach secrets, credentials, private keys, environment files, or other sensitive data.
-    """
+    """Implement the `slack_attach_html` tool."""
     backend, path, work_dir = await resolve_sandbox_file(file_path)
     if not path.lower().endswith(".html"):
         return {"success": False, "error": "file_path must identify an HTML file"}

@@ -24,6 +24,7 @@ export interface MessagesProps extends ApprovalCallbacks {
   scrollKey?: string
   showPlanArtifact?: boolean
   emptyState?: React.ReactNode
+  footer?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
   isStreaming: boolean
@@ -32,6 +33,7 @@ export interface MessagesProps extends ApprovalCallbacks {
   /** When set, drives the thinking spinner (stream + pending). Falls back to streamIsLoading/isStreaming. */
   isThinking?: boolean
   settingUpSandbox?: boolean
+  isOffloading?: boolean
   project?: Project | null
   contentWidthClass?: string
   /** Horizontal padding on centered content (scroll track stays edge-to-edge). */

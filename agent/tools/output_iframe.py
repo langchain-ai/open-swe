@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from langchain_core.tools import tool
 
+from agent.prompts import load_prompt
 from agent.tools.create_sandbox_file_download_url import (
     create_sandbox_file_download_url,
     resolve_sandbox_file,
@@ -89,11 +90,6 @@ async def _output_iframe(
 
 output_iframe = tool(
     "output_iframe",
-    description="""Display a self-contained HTML file from the sandbox in an isolated dashboard
-iframe. Use this for visualizations, diagrams, interactive demos, SVG graphics, and small HTML
-apps. Read the `html-artifacts` skill for the authoring rules: inline scripts, styles, Canvas,
-WebGL, and data-URI assets all run, and omitting `<html>`/`<head>`/`<body>` wraps the content
-in that skeleton with a minimal CSS reset. Relative paths are resolved from the sandbox
-working directory. Do not use this for regular text responses or file operations.""",
+    description=load_prompt("tools/output_iframe.md"),
     response_format="content_and_artifact",
 )(_output_iframe)

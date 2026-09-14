@@ -111,19 +111,8 @@ function desktopExchangeUrl(backendUrl) {
   return new URL(DESKTOP_EXCHANGE_PATH, backendUrl).toString();
 }
 
-function isTrustedPermissionRequest(
-  permission,
-  requestingUrl,
-  details: any = {},
-) {
-  if (!isAppUrl(requestingUrl)) return false;
-  if (ALLOWED_PERMISSIONS.has(permission)) return true;
-  const mediaTypes = details.mediaTypes ?? [details.mediaType];
-  return (
-    permission === "media" &&
-    mediaTypes.includes("audio") &&
-    !mediaTypes.includes("video")
-  );
+function isTrustedPermissionRequest(permission, requestingUrl) {
+  return isAppUrl(requestingUrl) && ALLOWED_PERMISSIONS.has(permission);
 }
 
 function isTrustedProxyRequest(pageUrl) {

@@ -591,7 +591,9 @@ export function AgentsSidebar({
           to: "/agents",
           search: group.repoFullName
             ? { repo: group.repoFullName }
-            : { localProject: group.localProjectPath },
+            : group.localProjectPath
+              ? { localProject: group.localProjectPath }
+              : { noProject: true },
         })
       }}
       onTogglePin={() => toggleProjectPin(group.key)}
@@ -900,14 +902,15 @@ export function AgentsSidebar({
         {(updateState.status === "ready" || updateInstalling) && (
           <button
             type="button"
-            title={updateInstalling ? "Installing update…" : "Update"}
-            aria-label={updateInstalling ? "Installing update" : "Update"}
+            title={
+              updateInstalling ? "Installing update…" : "Restart to update"
+            }
+            aria-label={
+              updateInstalling ? "Installing update" : "Restart to update"
+            }
             disabled={updateInstalling}
             onClick={() => void installUpdate()}
-            className={cn(
-              "group flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground hover:w-auto hover:bg-primary/90 hover:px-3 disabled:opacity-60",
-              updateInstalling && "w-auto gap-2 px-3"
-            )}
+            className="flex h-8 shrink-0 items-center justify-center gap-2 rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
           >
             {updateInstalling ? (
               <>
@@ -916,8 +919,8 @@ export function AgentsSidebar({
               </>
             ) : (
               <>
-                <DownloadSimpleIcon className="size-4 group-hover:hidden" />
-                <span className="hidden group-hover:inline">Update</span>
+                <DownloadSimpleIcon className="size-4" />
+                <span>Restart to update</span>
               </>
             )}
           </button>
@@ -1210,8 +1213,10 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
-  const pinThread = usePinAgentThread()
-  const resolveThread = useResolveAgentThread()
+  // `useMutation` returns a fresh object every render; only `mutate` is stable,
+  // and an unstable command array re-registers on every commit.
+  const pinThread = usePinAgentThread().mutate
+  const resolveThread = useResolveAgentThread().mutate
   const pinnedThreads = useSidebarPinnedThreads({
     enabled: Boolean(activeThreadId),
   })
@@ -1261,7 +1266,7 @@ export function AgentsShell({
         shortcuts: ["mod+shift+p"],
         group: "Thread",
         run: () =>
-          pinThread.mutate({
+          pinThread({
             threadId: activeThread.id,
             pinned: !pinnedThreads.data?.some(
               (thread) => thread.id === activeThread.id
@@ -1275,7 +1280,7 @@ export function AgentsShell({
         shortcuts: ["mod+shift+s"],
         group: "Thread",
         run: () =>
-          resolveThread.mutate({
+          resolveThread({
             threadId: activeThread.id,
             resolved: !activeThread.resolved,
           }),

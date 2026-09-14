@@ -75,14 +75,17 @@ async def test_only_merged_pr_prompts_original_slack_requester(
         patch("agent.webhooks.common.get_client", return_value=client),
         patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
         patch("agent.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
-        patch(
-            "agent.slack.thread_feedback.post_slack_feedback_prompt", new_callable=AsyncMock
-        ) as prompt,
+        patch("agent.thread_feedback.schedule_pr_feedback", new_callable=AsyncMock) as prompt,
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state=state, merged=merged))
     assert prompt.await_count == expected
     if expected:
-        prompt.assert_awaited_once_with("t1", "original-run", "C-original")
+        assert prompt.await_args.args[0] == "t1"
+        assert prompt.await_args.args[2] == "https://github.com/lc/repo/pull/7"
+        assert prompt.await_args.args[1]["pull_requests"][0]["slack_feedback"] == {
+            "run_id": "original-run",
+            "channel_id": "C-original",
+        }
 
 
 @pytest.mark.asyncio

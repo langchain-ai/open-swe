@@ -224,7 +224,7 @@ jobs:
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe --filter open-swe-e2e
       - name: Install Chromium
         run: |
-          sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
+          sudo rm -f /etc/apt/sources.list.d/{azure-cli,google-chrome,microsoft-prod}.*
           pnpm run test:e2e:install
       - name: Run browser E2E
         run: pnpm run test:e2e --shard=${{ matrix.shard }}/3

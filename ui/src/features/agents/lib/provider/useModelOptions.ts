@@ -23,7 +23,8 @@ function storedSelection(
   try {
     const selection = JSON.parse(
       window.localStorage.getItem(STORAGE_KEY) ?? "null"
-    ) as (Partial<ModelSelection> & { login?: string }) | null
+    ) as (Partial<ModelSelection> & { login?: string; mode?: string }) | null
+    if (selection?.login === login && selection.mode === "auto") return null
     return selection?.login === login &&
       models.some(
         (model) =>
@@ -38,47 +39,26 @@ function storedSelection(
 }
 
 export function persistModelSelection(
-  selection: ModelSelection,
+  selection: ModelSelection | null,
   login: string
 ): void {
   if (typeof window === "undefined" || !login) return
   try {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ ...selection, login })
+      JSON.stringify(
+        selection ? { ...selection, login } : { mode: "auto", login }
+      )
     )
   } catch {}
-}
-
-function toSupportedSelection(
-  models: Array<ModelOption>,
-  modelId?: string | null,
-  effort?: string | null
-): ModelSelection | null {
-  if (!modelId || !effort) return null
-  const supported = models.some(
-    (model) => model.id === modelId && model.efforts.includes(effort)
-  )
-  return supported ? { modelId, effort } : null
 }
 
 export function useModelOptions(): ModelOptionsResult {
   const optionsQuery = useOptions()
   const session = useSession()
   const models = optionsQuery.data?.models ?? []
-  const teamDefaultSelection = toSupportedSelection(
-    models,
-    optionsQuery.data?.default_agent_model,
-    optionsQuery.data?.default_agent_reasoning_effort
-  )
-  const firstModel = models[0]
-  const firstSelection = firstModel
-    ? { modelId: firstModel.id, effort: firstModel.default_effort }
-    : null
   const defaultSelection = optionsQuery.data
-    ? (storedSelection(models, session.data?.login ?? "") ??
-      teamDefaultSelection ??
-      firstSelection)
+    ? storedSelection(models, session.data?.login ?? "")
     : null
 
   return {
@@ -106,7 +86,7 @@ export function formatModelSelection(
   models: Array<ModelOption>,
   selection: ModelSelection | null
 ): string {
-  if (!selection) return "Default"
+  if (!selection) return "Auto"
   const model = models.find((m) => m.id === selection.modelId)
   const modelLabel = model?.label ?? selection.modelId
   return `${modelLabel} ${formatEffort(selection.effort)}`

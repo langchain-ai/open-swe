@@ -722,14 +722,14 @@ def filter_findings_for_publish(
     findings: list[Finding],
     *,
     severity_threshold: Severity = "medium",
-    cap: int = REVIEW_FINDING_CAP,
+    cap: int | None = None,
 ) -> list[Finding]:
     """Return findings to surface to GitHub.
 
     - status must be ``open``
     - severity must be at or above ``severity_threshold``
     - sorted by severity descending, then file/start_line for stable ordering
-    - capped at ``cap`` to avoid review spam
+    - optionally capped at ``cap`` for benchmark runs
     """
     severity_rank = SEVERITY_ORDER[severity_threshold]
     eligible = [

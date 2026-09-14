@@ -356,6 +356,7 @@ export interface AgentPullRequestContextResponse {
 }
 
 export interface AgentThread {
+  visibility?: "public" | "private"
   id: string
   title: string
   repo: string
@@ -363,6 +364,7 @@ export interface AgentThread {
   branch: string
   model: string
   effort?: string | null
+  modelSelection?: "auto" | "explicit" | null
   planMode?: boolean
   planStatus?: string | null
   adminThread?: boolean

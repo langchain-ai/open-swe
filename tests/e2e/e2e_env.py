@@ -49,6 +49,10 @@ _DEFAULTS = {
     # Sandbox: real local provider, rooted in a throwaway temp dir.
     "SANDBOX_TYPE": "local",
     "LOCAL_SANDBOX_ROOT_DIR": str(_WORK_DIR),
+    # Environment scripts write themselves and their logs here. The default,
+    # /open-swe/environment, assumes a sandbox where the agent is root; this
+    # provider runs on the developer's own machine, whose root is not writable.
+    "OPENSWE_SCRIPT_ROOT": str(TMP / "open-swe" / "environment"),
     # Keep git's --global writes (bot identity) out of the user's ~/.gitconfig.
     "GIT_CONFIG_GLOBAL": str(TMP / "gitconfig-global"),
     "GIT_CONFIG_SYSTEM": "/dev/null",
@@ -95,6 +99,9 @@ TEST_USERS = [
 # Alice is the workspace admin (so admin threads + the environments dashboard are
 # reachable); Bob is a plain member, which is what the deny-side assertions use.
 ADMIN_USER = TEST_USERS[0]
+_DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(
+    [*(user["login"] for user in TEST_USERS), "thread-tools-e2e", "threads-workspace-e2e"]
+)
 _DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]
 
 # The default Slack sender / thread owner; a session with this email may continue

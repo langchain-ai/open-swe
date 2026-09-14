@@ -17,6 +17,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.prompts import load_prompt, render_prompt
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
@@ -49,22 +50,16 @@ def build_github_issue_prompt(
     formatted_body = common.format_github_comment_body_for_prompt(
         issue_author or github_login, body
     )
-    return (
-        "Please work on the following GitHub issue:\n\n"
-        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"{triggered_by_line}"
-        f"## GitHub Issue: #{issue_number} - Issue ID: {issue_id}\n\n"
-        f"{issue_url_line}"
-        f"## Title: {sanitized_title}\n\n"
-        f"## Description:\n{formatted_body}\n"
-        f"{comments_text}\n\n"
-        "Please analyze this issue and implement the necessary changes. "
-        "If you open a PR for this issue, make sure the PR description links back to "
-        "this issue and follows this repository's PR conventions for the title, body, "
-        "release note, and/or changelog. Inspect AGENTS.md, PR templates, "
-        ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
-        "When you need to communicate on GitHub, use `gh issue comment` "
-        "with the issue number."
+    return render_prompt(
+        "runs/github-issue.md",
+        repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
+        triggered_by_line=triggered_by_line,
+        issue_number=issue_number,
+        issue_id=issue_id,
+        issue_url_line=issue_url_line,
+        title=sanitized_title,
+        body=formatted_body,
+        comments=comments_text,
     )
 
 
@@ -92,10 +87,7 @@ def build_github_pr_review_prompt(
     head_sha: str,
 ) -> str:
     """Build the reviewer instruction text; PR metadata is serialized separately."""
-    return (
-        "Please review this GitHub pull request. Submit findings as inline GitHub review "
-        "comments. If there are no real issues, submit no comments."
-    )
+    return load_prompt("runs/github-pr-review.md")
 
 
 def _github_person(login: str, user_id: object = None) -> PersonIdentity:
@@ -855,6 +847,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     email = await common.email_for_login(github_login) or ""
     if email:
+        thread_metadata = await common.authorize_github_thread(thread_id, github_login)
         github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     else:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
@@ -892,9 +885,35 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         common.logger.warning("No PR number found in payload, skipping")
         return
 
+    event = payload.get("review" if event_type == "pull_request_review" else "comment", {})
+    event_comment = {
+        "body": event.get("body", ""),
+        "author": event.get("user", {}).get("login", ""),
+        "created_at": event.get("submitted_at") or event.get("created_at", ""),
+        "event_at": event.get("updated_at") if payload.get("action") == "edited" else None,
+        "type": {
+            "issue_comment": "pr_comment",
+            "pull_request_review_comment": "review_comment",
+            "pull_request_review": "review",
+        }[event_type],
+        "comment_id": comment_id,
+        "path": event.get("path", ""),
+        "line": event.get("line") or event.get("original_line"),
+    }
+    if not event_comment["created_at"] or not comment_id:
+        return
+    if common.thread_is_private(thread_metadata) and not common.thread_is_promptable(
+        thread_metadata, event_comment["author"]
+    ):
+        return
+
     try:
         comments = await common.fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token
+            repo_config,
+            pr_number,
+            token=github_token,
+            event_comment=event_comment,
+            authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
         )
     except GitHubAuthError:
         github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
@@ -902,7 +921,11 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
             return
         comments = await common.fetch_pr_comments_since_last_tag(
-            repo_config, pr_number, token=github_token
+            repo_config,
+            pr_number,
+            token=github_token,
+            event_comment=event_comment,
+            authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
         )
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)

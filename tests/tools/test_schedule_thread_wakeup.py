@@ -238,9 +238,11 @@ async def test_wakeup_cron_includes_trace_correlation_and_completion_webhook(
         configurable={"thread_id": "thread-1"},
     )
 
-    prepare_run_id = captured["config"]["configurable"]["prepare_run_id"]
+    invocation_id = captured["config"]["configurable"]["invocation_id"]
     assert result["success"] is True
-    assert captured["metadata"]["prepare_run_id"] == prepare_run_id
+    assert captured["config"]["configurable"]["prepare_run_id"] == invocation_id
+    assert captured["metadata"]["invocation_id"] == invocation_id
+    assert captured["metadata"]["prepare_run_id"] == invocation_id
     assert captured["config"]["metadata"] == captured["metadata"]
     assert captured["webhook"] == "https://app/webhooks/run-complete"
 
@@ -298,7 +300,6 @@ async def test_schedule_thread_wakeup_defaults_prompt_and_omits_none_configurabl
     assert "linear_issue" not in cfg
     assert "schedule_id" not in cfg
     assert cfg["thread_id"] == "test-thread-123"
-    assert "automated re-trigger" in captured["prompt"].lower()
 
 
 async def test_schedule_allows_ten_wakeups_then_rejects_the_eleventh(

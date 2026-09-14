@@ -21,6 +21,7 @@ import type {
   ImageChunk,
   Message,
 } from "./types"
+import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
@@ -476,10 +477,11 @@ export function useSidebarProjects({
   enabled?: boolean
 }) {
   const params = { includeAutomations, includeResolved }
+  const hydrated = useSidebarPrefsHydrated()
   return useQuery({
     queryKey: agentThreadKeys.projects(params),
     queryFn: () => agentsApi.listThreadProjects(params),
-    enabled,
+    enabled: enabled && hydrated,
     placeholderData: (previous) => previous,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -517,8 +519,9 @@ function useSidebarThreadPages(
   params: Omit<ThreadsPageParams, "offset">,
   enabled: boolean
 ) {
+  const hydrated = useSidebarPrefsHydrated()
   const query = useInfiniteThreadsPages(params, {
-    enabled,
+    enabled: enabled && hydrated,
     pollWhileRunning: true,
   })
   return {
@@ -530,6 +533,25 @@ function useSidebarThreadPages(
     error: query.error,
     refetch: query.refetch,
     fetchNextPage: () => void query.fetchNextPage(),
+  }
+}
+
+/** Exported so the head-script warmup can be tested against the real request. */
+export function sidebarRecentsParams({
+  projectMode,
+  includeAutomations = false,
+  includeResolved = false,
+  sort = "created",
+}: {
+  projectMode: boolean
+  includeAutomations?: boolean
+  includeResolved?: boolean
+  sort?: ChatSort
+}): Omit<ThreadsPageParams, "offset"> {
+  return {
+    ...sidebarPageParams({ includeAutomations, includeResolved }),
+    ...(projectMode ? { ownerless: true } : {}),
+    sortBy: sort === "created" ? "created_at" : "updated_at",
   }
 }
 
@@ -547,11 +569,12 @@ export function useSidebarRecents({
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
-    {
-      ...sidebarPageParams({ includeAutomations, includeResolved }),
-      ...(projectMode ? { ownerless: true } : {}),
-      sortBy: sort === "created" ? "created_at" : "updated_at",
-    },
+    sidebarRecentsParams({
+      projectMode,
+      includeAutomations,
+      includeResolved,
+      sort,
+    }),
     enabled
   )
 }
@@ -765,6 +788,7 @@ export function useDeleteAgentSchedule() {
 }
 
 export interface CreateAgentThreadVariables {
+  visibility?: "public" | "private"
   prompt: string
   images?: Array<ImageChunk>
   repo?: string | null
@@ -800,6 +824,7 @@ export function optimisticThread(
   }
   return {
     id: threadId,
+    visibility: vars.visibility ?? "public",
     title: text.slice(0, 80) || "New agent",
     repo: repoFullName.split("/")[1] ?? "",
     repoFullName,
@@ -864,6 +889,21 @@ export function useDeleteAgentThread() {
       if (path.includes(`/agents/${threadId}`)) {
         navigate({ to: "/agents" })
       }
+    },
+  })
+}
+
+export function useContinueThreadPrivately() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+
+  return useMutation({
+    mutationFn: (threadId: string) =>
+      agentsApi.continueThreadPrivately(threadId),
+    onSuccess: (thread) => {
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+      invalidateAgentThreadLists(queryClient)
+      navigate({ to: "/agents/$threadId", params: { threadId: thread.id } })
     },
   })
 }

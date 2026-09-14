@@ -21,6 +21,7 @@ from agent.sandboxes.providers.langsmith import (
     _install_create_extra_fields,
     _merge_sandbox_create_extra_fields,
     _reuse_existing_sandbox,
+    capture_snapshot_with_tag,
     create_langsmith_sandbox,
     create_langsmith_sandbox_from_params,
 )
@@ -35,7 +36,7 @@ def test_sandbox_api_endpoint_appends_v2_sandboxes() -> None:
 def test_sandbox_api_endpoint_no_double_suffix() -> None:
     with patch.dict(
         "os.environ",
-        {"SANDBOX_LANGSMITH_ENDPOINT": "https://x.smith.langchain.com/v2/sandboxes"},
+        {"LANGSMITH_ENDPOINT": "https://x.smith.langchain.com/v2/sandboxes"},
     ):
         assert _get_sandbox_api_endpoint() == "https://x.smith.langchain.com/v2/sandboxes"
 
@@ -303,7 +304,19 @@ async def test_create_from_params_forwards_public_and_hidden_options() -> None:
     client.wait_for_sandbox = AsyncMock(return_value=sandbox)
 
     with (
-        patch("agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client),
+        patch.dict(
+            "os.environ",
+            {
+                "LANGSMITH_API_KEY": "shared-key",
+                "LANGSMITH_ENDPOINT": "https://shared.smith.langchain.com",
+                "SANDBOX_LANGSMITH_API_KEY": "retired-key",
+                "SANDBOX_LANGSMITH_ENDPOINT": "https://retired.smith.langchain.com",
+            },
+            clear=True,
+        ),
+        patch(
+            "agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client
+        ) as client_factory,
         patch("agent.sandboxes.providers.langsmith._install_create_extra_fields") as install,
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_create_extra_fields",
@@ -320,6 +333,9 @@ async def test_create_from_params_forwards_public_and_hidden_options() -> None:
             }
         )
 
+    client_factory.assert_called_once_with(
+        api_key="shared-key", api_endpoint="https://shared.smith.langchain.com/v2/sandboxes"
+    )
     client.create_sandbox.assert_awaited_once_with(
         snapshot_name="python:latest",
         wait_for_ready=False,
@@ -398,6 +414,62 @@ async def test_install_create_extra_fields_merges_only_boxes_post() -> None:
 
     assert calls[0][1] == {"snapshot_id": "s", "_internal_runtime": "v2"}
     assert calls[1][1] == {"foo": "bar"}
+
+
+@pytest.mark.asyncio
+async def test_capture_snapshot_sends_the_tag_and_restores_the_client() -> None:
+    """The SDK has no `tag` parameter yet, so it rides in on the capture body."""
+    calls: list[tuple[str, dict]] = []
+
+    class _FakeHttp:
+        async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+            payload = kwargs.get("json")
+            assert isinstance(payload, dict)
+            calls.append((url, payload))
+            return "ok"
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+            self.original_post = self._http.post
+
+        async def capture_snapshot(self, sandbox_id: str, name: str, *, timeout: int) -> str:
+            await self._http.post(
+                f"https://api/v2/sandboxes/boxes/{sandbox_id}/snapshot", json={"name": name}
+            )
+            return "snap-1"
+
+    client = _FakeClient()
+    snapshot = await capture_snapshot_with_tag(
+        cast(AsyncSandboxClient, client), "sb-1", "acme-monorepo", "latest", timeout=60
+    )
+
+    assert snapshot == "snap-1"
+    assert calls[0][1] == {"name": "acme-monorepo", "tag": "latest"}
+    assert client._http.post == client.original_post
+
+
+@pytest.mark.asyncio
+async def test_capture_snapshot_restores_the_client_after_a_failure() -> None:
+    class _FakeHttp:
+        async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+            raise RuntimeError("capture exploded")
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self._http = _FakeHttp()
+            self.original_post = self._http.post
+
+        async def capture_snapshot(self, sandbox_id: str, name: str, *, timeout: int) -> str:
+            return await self._http.post("https://api/v2/sandboxes/boxes/x/snapshot", json={})
+
+    client = _FakeClient()
+    with pytest.raises(RuntimeError, match="capture exploded"):
+        await capture_snapshot_with_tag(
+            cast(AsyncSandboxClient, client), "sb-1", "acme-monorepo", "latest", timeout=60
+        )
+
+    assert client._http.post == client.original_post
 
 
 @pytest.mark.asyncio
