@@ -195,6 +195,7 @@ from agent.tools import (
     slack_read_thread_messages,
     slack_start_new_thread,
     slack_thread_reply,
+    submit_thread_feedback,
     trigger_automation,
     update_automation,
     web_search,
@@ -813,10 +814,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     thread_id=self._thread_id,
                     metadata={
                         "agent_kind": "agent",
-                        "model": self._model_id,
-                        "effort": self._effort,
+                        "model": attribution_model_id,
+                        "effort": attribution_effort,
                         "source": self._source,
                         "plan_mode": self._plan_mode,
+                        **({"model_route": attribution_route} if attribution_route else {}),
                     },
                 )
                 if cfg.invocation_id:
@@ -1173,6 +1175,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
+        submit_thread_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
     ]
     if credential_login is None:
@@ -1257,7 +1260,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     subagent_tools = [
         tool
         for tool in static_tools
-        if tool is not background_execute and tool is not background_task
+        if tool not in {background_execute, background_task, submit_thread_feedback}
     ]
     title_model = _make_model_or_defer(
         title_model_id,
