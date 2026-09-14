@@ -7,8 +7,8 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
-from agent.dashboard import environment_refresh as refresh
-from agent.dashboard.environments import Environment
+from agent.environments import refresh
+from agent.environments.store import Environment
 from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle

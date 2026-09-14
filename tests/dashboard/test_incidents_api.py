@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from agent import completion, incidents
 from agent.dashboard import oauth, routes
-from agent.dashboard.threads import api, listing, proxy
+from agent.threads import handlers, listing, proxy
 from tests.conftest import patch_thread_module
 
 
@@ -333,7 +333,7 @@ async def test_admin_cancel_cannot_mutate_an_incidents_thread(monkeypatch, sourc
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     with pytest.raises(HTTPException) as exc:
-        await api.admin_cancel_dashboard_thread("i1")
+        await handlers.admin_cancel_dashboard_thread("i1")
 
     assert exc.value.status_code == 404
     threads.update.assert_not_awaited()

@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from agent.dashboard import schedules
+from agent.schedules import store as schedules
 from agent.tools.admin_gate import configurable, require_admin
 
 logger = logging.getLogger(__name__)

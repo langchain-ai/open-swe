@@ -7,8 +7,9 @@ import pytest
 from fastapi import FastAPI
 
 from agent import thread_feedback
-from agent.dashboard import feedback, routes
 from agent.dashboard.oauth import require_session
+from agent.threads import feedback
+from agent.threads.routes import router as threads_router
 
 
 @pytest.fixture
@@ -30,7 +31,7 @@ async def api(monkeypatch, fake_store):
     monkeypatch.setattr(feedback, "langgraph_client", lambda: None)
     await thread_feedback.feedback_store().put("t1", thread_feedback.Feedback(status="ready"))
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(threads_router, prefix="/dashboard/api")
     app.dependency_overrides[require_session] = lambda: session
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),

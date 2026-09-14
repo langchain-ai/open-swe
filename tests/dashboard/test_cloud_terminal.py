@@ -6,7 +6,8 @@ import pytest
 from fastapi import FastAPI, HTTPException, Response, WebSocket
 from fastapi.testclient import TestClient
 
-from agent.dashboard import oauth, routes
+from agent.dashboard import oauth
+from agent.threads import terminal
 
 
 def test_terminal_ticket_is_short_lived_and_thread_bound(monkeypatch) -> None:
@@ -37,7 +38,7 @@ def test_terminal_ticket_rejects_expired_tokens(monkeypatch) -> None:
 def test_cloud_terminal_url_uses_direct_langgraph_origin(monkeypatch) -> None:
     monkeypatch.setenv("LANGGRAPH_URL", "https://agent.example/base")
 
-    assert routes._cloud_terminal_websocket_url("thread/1") == (
+    assert terminal._cloud_terminal_websocket_url("thread/1") == (
         "wss://agent.example/base/dashboard/api/threads/thread%2F1/terminal"
     )
 
@@ -46,10 +47,10 @@ async def test_terminal_connection_requires_owner_before_issuing_ticket(monkeypa
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-with-at-least-32-bytes")
     monkeypatch.setenv("LANGGRAPH_URL", "https://agent.example")
     get_sandbox = AsyncMock(return_value=("sandbox-1", "repo"))
-    monkeypatch.setattr(routes, "get_dashboard_terminal_sandbox", get_sandbox)
+    monkeypatch.setattr(terminal, "get_dashboard_terminal_sandbox", get_sandbox)
     response = Response()
 
-    connection = await routes.api_thread_terminal_connection(
+    connection = await terminal.api_thread_terminal_connection(
         "thread-1",
         response,
         {"sub": "alice", "email": "alice@example.com"},
@@ -77,7 +78,7 @@ def test_cloud_terminal_session_reads_ticket_from_subprotocol(monkeypatch) -> No
         ),
     )
 
-    assert routes._cloud_terminal_session(websocket, "thread-1") == {
+    assert terminal._cloud_terminal_session(websocket, "thread-1") == {
         "sub": "alice",
         "email": None,
     }
@@ -87,7 +88,7 @@ def test_cloud_terminal_session_reads_ticket_from_subprotocol(monkeypatch) -> No
         SimpleNamespace(headers={"sec-websocket-protocol": ticket}),
     )
     with pytest.raises(HTTPException) as exc_info:
-        routes._cloud_terminal_session(invalid_websocket, "thread-1")
+        terminal._cloud_terminal_session(invalid_websocket, "thread-1")
     assert exc_info.value.status_code == 401
 
 
@@ -104,9 +105,9 @@ def test_cloud_terminal_route_accepts_ticket_without_dashboard_cookie(monkeypatc
         await websocket.send_json({"type": "ready"})
         await websocket.close()
 
-    monkeypatch.setattr(routes, "_cloud_terminal", fake_cloud_terminal)
+    monkeypatch.setattr(terminal, "_cloud_terminal", fake_cloud_terminal)
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(terminal.router, prefix="/dashboard/api")
 
     with TestClient(app).websocket_connect(
         "/dashboard/api/threads/thread-1/terminal",

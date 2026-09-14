@@ -5,7 +5,7 @@ from typing import Any
 from langgraph.config import get_config
 
 from agent.dashboard.agent_overrides import resolve_github_login
-from agent.dashboard.skills import (
+from agent.skill_store.store import (
     SkillCreate,
     SkillUpdate,
     create_skill,

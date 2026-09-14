@@ -6,8 +6,7 @@ Wired into admin threads; each tool rechecks user or system authorization.
 import logging
 from typing import Any
 
-from agent.dashboard import environment_refresh as refresh
-from agent.dashboard import environments as store
+from agent.environments import refresh, store
 from agent.tools.admin_gate import configurable as _configurable
 from agent.tools.admin_gate import require_admin
 
