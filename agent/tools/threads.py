@@ -16,7 +16,7 @@ from langgraph.prebuilt import InjectedState
 from agent.dashboard import plan_api, workflow_approval_api
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import resolve_login_from_email_async
-from agent.dashboard.oauth import enforce_org_login_gate
+from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.dashboard.plan_store import get_plan_content, list_plan_comments
 from agent.dashboard.threads.api import (
@@ -30,12 +30,14 @@ from agent.dashboard.threads.api import (
 from agent.dashboard.threads.listing import list_dashboard_threads_page
 from agent.dashboard.threads.proxy import proxy_dashboard_thread_commands
 from agent.dashboard.threads.runs import ThreadMessageBody
+from agent.dashboard.threads.summary import thread_is_owner
 from agent.dashboard.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
 from agent.input_messages import input_message_text, message_sender_id
+from agent.invocation import resolve_invocation_id
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.utils.dashboard_links import (
@@ -122,7 +124,7 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         login = current_login
         email = None
     try:
-        await enforce_org_login_gate(login)
+        await enforce_github_login_gate(login)
     except HTTPException:
         return None
     return _Actor(login=login, email=email, name=login)
@@ -300,6 +302,7 @@ async def list_threads(
             automation_id=automation_id,
             filter_participant_login=filter_participant_login,
             surfaced_only=True,
+            include_private=await _private_thread_context(actor),
             admin_threads=admin_threads,
         )
     except HTTPException as exc:
@@ -492,21 +495,25 @@ def _run_history(runs: list[Any]) -> dict[str, Any]:
     }
 
 
-def _run_prepare_id(run: Any) -> str | None:
+def _run_invocation_id(run: Any) -> str | None:
     metadata = _value(run, "metadata")
-    value = metadata.get("prepare_run_id") if isinstance(metadata, Mapping) else None
-    return value if isinstance(value, str) and value else None
+    if not isinstance(metadata, Mapping):
+        return None
+    try:
+        return resolve_invocation_id(metadata)
+    except ValueError:
+        return None
 
 
 async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
     run_detail = _run_detail(run)
     if run_detail and run_detail.get("status") in {"pending", "running"}:
         return {"status": "pending", "total_usd": None}
-    prepare_run_id = _run_prepare_id(run)
-    if not prepare_run_id:
+    invocation_id = _run_invocation_id(run)
+    if not invocation_id:
         return {"status": "unavailable", "total_usd": None}
     try:
-        snapshot = await get_langsmith_thread_cost(thread_id, prepare_run_id)
+        snapshot = await get_langsmith_thread_cost(thread_id, invocation_id)
     except LangSmithCostUnavailable:
         return {"status": "unavailable", "total_usd": None}
     except Exception:
@@ -590,8 +597,20 @@ def _looks_uuid(value: str) -> bool:
     return True
 
 
+async def _private_thread_context(actor: _Actor) -> bool:
+    thread_id = as_json_object(_config().get("configurable")).get("thread_id")
+    if not isinstance(thread_id, str) or not thread_id:
+        return False
+    try:
+        thread = await langgraph_client().threads.get(thread_id)
+    except Exception:
+        return False
+    metadata = thread_metadata(thread)
+    return metadata.get("visibility") == "private" and thread_is_owner(metadata, actor.login)
+
+
 async def _authorized_locator(
-    locator: str, actor: _Actor
+    locator: str, actor: _Actor, *, admin_override: bool = False
 ) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
     langsmith_locator = parse_langsmith_locator(locator)
     slack_locator = parse_slack_thread_url(locator)
@@ -635,6 +654,12 @@ async def _authorized_locator(
             email=actor.email,
             mark_viewed=False,
         )
+    if (
+        summary.get("visibility") == "private"
+        and not admin_override
+        and not await _private_thread_context(actor)
+    ):
+        raise HTTPException(404, "thread not found")
     return thread_id, summary
 
 
@@ -776,15 +801,10 @@ async def get_thread(
     }
 
 
-async def _send_message(
-    thread_id: str,
-    actor: _Actor,
-    message: str,
-    *,
-    model_id: str | None,
-    effort: str | None,
-    plan_mode: bool | None,
-) -> dict[str, Any]:
+def _message_args(
+    message: str, model_id: str | None, effort: str | None
+) -> dict[str, Any] | tuple[str | None, str | None]:
+    """Validate send_message arguments before any thread access."""
     if not message.strip():
         return _failure("message is required for send_message")
     if len(message) > _MAX_MESSAGE_CHARS:
@@ -799,14 +819,20 @@ async def _send_message(
         )
         if normalized is None:
             return _failure("model_id and effort are not a supported combination")
-        model_id, effort = normalized
+        return normalized
+    return model_id, effort
 
-    summary = await get_dashboard_thread(
-        thread_id,
-        actor.login,
-        email=actor.email,
-        mark_viewed=False,
-    )
+
+async def _send_message(
+    thread_id: str,
+    actor: _Actor,
+    message: str,
+    summary: Mapping[str, Any],
+    *,
+    model_id: str | None,
+    effort: str | None,
+    plan_mode: bool | None,
+) -> dict[str, Any]:
     resolved_plan_mode = summary.get("planMode") is True if plan_mode is None else plan_mode
     body = ThreadMessageBody(
         content=message,
@@ -952,13 +978,30 @@ async def manage_thread(
     )
     if unexpected:
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
+    if action == "admin_cancel" and not actor.admin:
+        return _failure("Only workspace admins can cancel another user's thread")
+    if action == "delete" and not confirm:
+        return _failure("delete requires confirm=true")
+    if action == "send_message":
+        validated = _message_args(message or "", model_id, effort)
+        if isinstance(validated, dict):
+            return validated
+        model_id, effort = validated
 
     try:
+        # Private threads are only reachable from the owner's private context.
+        # admin_cancel is the exception, so its response must not leak details.
+        admin_override = action == "admin_cancel" and actor.admin
+        resolved = await _authorized_locator(thread_id, actor, admin_override=admin_override)
+        if isinstance(resolved, dict):
+            return resolved
+        thread_id, summary = resolved
         if action == "send_message":
             return await _send_message(
                 thread_id,
                 actor,
                 message or "",
+                summary,
                 model_id=model_id,
                 effort=effort,
                 plan_mode=plan_mode,
@@ -967,9 +1010,12 @@ async def manage_thread(
             thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
             return {"success": True, "thread": _list_item(thread)}
         if action == "admin_cancel":
-            if not actor.admin:
-                return _failure("Only workspace admins can cancel another user's thread")
-            thread = await admin_cancel_dashboard_thread(thread_id)
+            thread = await admin_cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
+            if summary.get("visibility") == "private":
+                return {
+                    "success": True,
+                    "thread": {"id": thread_id, "status": thread.get("status")},
+                }
             return {"success": True, "thread": _list_item(thread)}
         if action in {"resolve", "unresolve"}:
             thread = await resolve_dashboard_thread(
@@ -980,8 +1026,6 @@ async def manage_thread(
             )
             return {"success": True, "thread": _list_item(thread)}
         if action == "delete":
-            if not confirm:
-                return _failure("delete requires confirm=true")
             await delete_dashboard_thread(thread_id, actor.login, email=actor.email)
             return {"success": True, "deleted": True, "thread_id": thread_id}
         if action == "add_plan_comment":

@@ -17,7 +17,6 @@ _TOOL_MODULES = {
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
     "http_request": ".http_request",
-    "linear_comment": "agent.linear.tools.comment",
     "list_automations": ".automations",
     "list_environments": ".environments",
     "list_findings": ".list_findings",
@@ -76,7 +75,6 @@ __all__ = [
     "fetch_url",
     "get_thread",
     "http_request",
-    "linear_comment",
     "list_automations",
     "list_environments",
     "list_findings",
@@ -123,7 +121,6 @@ __all__ = [
 if TYPE_CHECKING:
     from agent.github.tools.read_repo_file import read_repo_file
     from agent.github.tools.search_repo_code import search_repo_code
-    from agent.linear.tools.comment import linear_comment
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel

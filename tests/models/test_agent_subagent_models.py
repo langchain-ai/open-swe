@@ -1,9 +1,23 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import langgraph_sdk
 import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import get_agent
+
+
+@pytest.fixture(autouse=True, params=["public", "private"])
+def saved_thread_scope(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(
+                return_value={"metadata": {"visibility": request.param, "owner_login": "octocat"}}
+            )
+        )
+    )
+    monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
 
 
 class _DummyAgent:

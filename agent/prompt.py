@@ -199,8 +199,12 @@ def construct_system_prompt(
     source: str = "dashboard",
     slack_context: bool = False,
     sandbox_file_downloads: bool = False,
+    continued_from_collaborative: bool = False,
 ) -> str:
     del linear_project_id, linear_issue_number
+    untrusted_section = EXTERNAL_UNTRUSTED_COMMENTS_SECTION
+    if continued_from_collaborative:
+        untrusted_section += f"\n\n{load_prompt('system/continued-from-collaborative.md')}"
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
         repo_line = (
@@ -250,7 +254,7 @@ def construct_system_prompt(
         ),
         task_execution_section=load_prompt("system/task-execution.md"),
         dependency_section=load_prompt("system/dependencies.md"),
-        external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
+        external_untrusted_comments_section=untrusted_section,
         commit_pr_section=commit_pr_section,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         environment_section=_render_environment_section(environment_name, environment_instructions),

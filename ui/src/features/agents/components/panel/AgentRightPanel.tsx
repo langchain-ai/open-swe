@@ -13,7 +13,10 @@ import type {
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
-import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
+import {
+  TerminalActions,
+  TerminalPanel,
+} from "@/features/agents/components/TerminalPanel"
 import { RightPanelTabs } from "@/features/agents/components/panel/RightPanelTabs"
 import { RightPanelSheet } from "@/features/agents/components/panel/RightPanelSheet"
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "@/features/agents/components/panel/rightPanelLayout"
@@ -266,6 +269,12 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   const layoutControls = (
     <div className="flex shrink-0 items-center">
+      {activeSurface?.kind === "terminal" ? (
+        <TerminalActions
+          groupId={activeSurface.resourceId}
+          terminals={terminals}
+        />
+      ) : null}
       {narrow ? null : (
         <PanelControl
           label={maximized ? "Exit full screen" : "Expand panel"}
