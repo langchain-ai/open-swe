@@ -14,8 +14,13 @@ test("Back to app returns to the thread that opened settings", async ({
   const threadUrl = page.url();
   const threadHref = new URL(threadUrl);
 
-  await page.getByRole("button", { name: SAME_USER.login }).click();
-  await page.getByRole("menuitem", { name: "Settings" }).click();
+  const userMenu = page.getByRole("button", { name: SAME_USER.login });
+  const settingsItem = page.getByRole("menuitem", { name: "Settings" });
+  await expect(async () => {
+    if (!(await settingsItem.isVisible())) await userMenu.click();
+    await expect(settingsItem).toBeVisible();
+  }).toPass();
+  await settingsItem.click();
   await expect(page).toHaveURL(/\/my-settings$/);
 
   const backLink = page.getByRole("link", { name: "Back to app" });
