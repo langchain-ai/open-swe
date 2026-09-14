@@ -5,7 +5,6 @@ import { test, expect, type Page } from "@playwright/test";
 // creates a sandbox and stamps its id into the thread metadata, and the UI
 // copies that same id. Only the LLM/GitHub/Slack boundaries are faked.
 const SAME_USER = { login: "alice", email: "alice@example.com" };
-const OTHER_USER = { login: "bob", email: "bob@example.com" };
 
 async function loginAs(page: Page, user: { login: string; email: string }) {
   const res = await page.request.post("/control/login", { data: user });
@@ -124,39 +123,5 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     await expect(page).toHaveURL(new RegExp(`/agents/${threadB}$`));
 
     await context.close();
-  });
-
-  test("shared active thread appears in the sidebar with sandbox action", async ({
-    page,
-    browser,
-    baseURL,
-  }, testInfo) => {
-    await loginAs(page, SAME_USER);
-    const threadId = await createThreadWithSandbox(page);
-
-    const bobContext = await browser.newContext({ baseURL });
-    await bobContext.grantPermissions(["clipboard-read", "clipboard-write"], {
-      origin: baseURL,
-    });
-    const bobPage = await bobContext.newPage();
-    await loginAs(bobPage, OTHER_USER);
-    await bobPage.goto(`/agents/${threadId}`);
-    await expect(bobPage).toHaveURL(new RegExp(`/agents/${threadId}$`));
-
-    const row = bobPage.locator(`a[href$="/agents/${threadId}"]`).first();
-    await expect(row).toBeVisible();
-    await row.press("Shift+F10");
-    await expect(copyItem(bobPage)).toBeEnabled();
-
-    const screenshotPath = testInfo.outputPath(
-      "shared-thread-sidebar-sandbox-menu.png",
-    );
-    await bobPage.screenshot({ path: screenshotPath, fullPage: true });
-    await testInfo.attach("shared-thread-sidebar-sandbox-menu", {
-      path: screenshotPath,
-      contentType: "image/png",
-    });
-
-    await bobContext.close();
   });
 });

@@ -1,9 +1,10 @@
 """Utilities for extracting repository configuration from text."""
 
-import os
 import re
 
-_DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
+from agent.config import ENV
+
+_DEFAULT_REPO_OWNER = ENV.DEFAULT_REPO_OWNER.get()
 
 
 def extract_repo_from_text(text: str, default_owner: str | None = None) -> dict[str, str] | None:

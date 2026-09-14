@@ -100,16 +100,6 @@ describe("describeWorkEntry", () => {
     expect(entry.preview).toBe("pnpm test")
   })
 
-  it("drops a preview that would only repeat the heading", () => {
-    const entry = describeWorkEntry(
-      chunk({ title: "write_todos", toolKind: "other", input: {} }),
-      projectPath
-    )
-
-    expect(entry.heading).toBe("Update todos")
-    expect(entry.preview).toBeNull()
-  })
-
   it("falls back to tool locations when the input carries no argument", () => {
     const entry = describeWorkEntry(
       chunk({

@@ -283,9 +283,24 @@ export function AgentTurn({
       : isStreaming || canFoldWork
         ? collapsedItems
         : renderItems
+  const workItemKeys = new Set(workItems.map((item) => item.key))
+  const firstWorkIndex = renderItems.findIndex((item) =>
+    workItemKeys.has(item.key)
+  )
+  const renderItemIndex = new Map(
+    renderItems.map((item, index) => [item.key, index])
+  )
+  const foldIndex = visibleItems.filter(
+    (item) =>
+      (renderItemIndex.get(item.key) ?? Number.POSITIVE_INFINITY) <
+      firstWorkIndex
+  ).length
 
   return (
     <div className="group/turn my-2 min-w-0 space-y-1.5">
+      {visibleItems
+        .slice(0, foldIndex)
+        .map((item, index) => renderItem(item, index, visibleItems.length))}
       {canFoldWork && (
         <TurnFoldRow
           label={foldLabelWithCount}
@@ -294,9 +309,11 @@ export function AgentTurn({
           onToggle={toggleWorkFold}
         />
       )}
-      {visibleItems.map((item, index) =>
-        renderItem(item, index, visibleItems.length)
-      )}
+      {visibleItems
+        .slice(foldIndex)
+        .map((item, index) =>
+          renderItem(item, foldIndex + index, visibleItems.length)
+        )}
 
       <div className="mt-1 flex items-center gap-1">
         {replyText && !isStreaming && (

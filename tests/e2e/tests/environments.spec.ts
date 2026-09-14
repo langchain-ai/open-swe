@@ -26,7 +26,20 @@ interface Environment {
   repos: Array<string>;
   snapshot_id: string | null;
   snapshot_name: string | null;
+  update_script?: string;
   snapshot_status: string;
+  snapshot_tag?: string | null;
+  refresh_kind?: string | null;
+  refresh_status?: string;
+  refresh_error?: string | null;
+  refresh_log?: string | null;
+  refresh_sandbox_id?: string | null;
+  refresh_steps?: Array<{
+    label: string;
+    status: string;
+    exit_code?: number | null;
+    log_path?: string | null;
+  }>;
 }
 
 async function loginAs(page: Page, user: { login: string; email: string }) {
@@ -79,9 +92,14 @@ async function saveDefaultModel(page: Page) {
   expect(res.ok()).toBeTruthy();
 }
 
-async function capturedSnapshots(
-  page: Page,
-): Promise<Array<{ snapshot_id: string; name: string; sandbox_id: string }>> {
+async function capturedSnapshots(page: Page): Promise<
+  Array<{
+    snapshot_id: string;
+    name: string;
+    tag: string | null;
+    sandbox_id: string;
+  }>
+> {
   const res = await page.request.get("/control/snapshots");
   expect(res.ok()).toBeTruthy();
   return (
@@ -89,6 +107,7 @@ async function capturedSnapshots(
       captured: Array<{
         snapshot_id: string;
         name: string;
+        tag: string | null;
         sandbox_id: string;
       }>;
     }
@@ -138,9 +157,9 @@ test.describe("Environments", () => {
     await deleteEnvironment(page, DRAFT_SLUG);
     await createEnvironment(page, DRAFT_NAME, "");
 
-    await page.goto("/my-settings");
+    await page.goto("/environments");
     const section = page
-      .getByRole("heading", { name: "Environments" })
+      .getByRole("heading", { name: "Environments", level: 2 })
       .locator("xpath=ancestor::section");
     await expect(section).toBeVisible();
     await expect(section.getByText(DRAFT_NAME)).toBeVisible();
@@ -163,9 +182,9 @@ test.describe("Environments", () => {
     expect(res.status()).toBe(403);
 
     await page.goto("/agents/environments");
-    await expect(page).toHaveURL(/\/my-settings/);
+    await expect(page).toHaveURL(/\/environments$/);
     await expect(
-      page.getByRole("heading", { name: "Environments" }),
+      page.getByRole("heading", { name: "Environments", level: 2 }),
     ).toBeVisible();
     await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
 
@@ -286,6 +305,19 @@ test.describe("Environments", () => {
       page.getByText(/environment is captured and live/),
     ).toBeVisible();
 
+    // Publishing captured this thread's sandbox synchronously, so the image is
+    // ready as soon as the tool returned. The reproducibility rebuild it then
+    // kicked off is a background job; wait for that on the record.
+    expect((await findEnvironment(page, DEFAULT_SLUG))?.snapshot_status).toBe(
+      "ready",
+    );
+    await expect
+      .poll(
+        async () => (await findEnvironment(page, DEFAULT_SLUG))?.refresh_status,
+        { timeout: 60_000 },
+      )
+      .toBe("success");
+
     // The record the real tools wrote: prompt, repos, and a ready snapshot.
     const record = await findEnvironment(page, DEFAULT_SLUG);
     expect(record).toBeDefined();
@@ -294,16 +326,51 @@ test.describe("Environments", () => {
     expect(record?.snapshot_status).toBe("ready");
     expect(record?.snapshot_name).toBe(EXPECTED_SNAPSHOT_NAME);
 
-    // The capture went to the platform against this thread's own sandbox.
+    // The scripts ran and the whole refresh is recorded, log and all.
+    expect(record?.refresh_status).toBe("success");
+    expect(record?.refresh_error).toBeNull();
+    expect(record?.refresh_log).toContain("--- setup script ---");
+    expect(record?.refresh_log).toContain(".provisioned");
+    expect(record?.refresh_log).toContain("--- update script ---");
+    // `bash -x` traces each command, which is what makes the log worth keeping.
+    expect(record?.refresh_log).toContain("+ ");
+    // The save ran a full rebuild; hourly updates are a separate kind.
+    expect(record?.refresh_kind).toBe("full");
+
+    // Every stage is recorded as it happens, which is what the one poll tool
+    // reports while a rebuild is still running.
+    expect(
+      record?.refresh_steps?.map((step) => [step.label, step.status]),
+    ).toEqual([
+      ["boot", "success"],
+      ["setup", "success"],
+      ["update", "success"],
+      ["capture", "success"],
+    ]);
+    // Script steps carry where their live trace was written; the builder does not.
+    const setupStep = record?.refresh_steps?.find((s) => s.label === "setup");
+    expect(setupStep?.log_path).toContain("/logs/setup.log");
+    // The builder is released with the refresh, so it is no longer offered.
+    expect(record?.refresh_sandbox_id).toBeNull();
+
+    // Two captures under the same name:latest — the tag moved. The first came
+    // from this thread's own sandbox (the publish); the second from the
+    // reproducibility rebuild's throwaway builder, and it is what the record
+    // points at now.
     const captures = await capturedSnapshots(page);
-    expect(captures.map((c) => c.name)).toEqual([EXPECTED_SNAPSHOT_NAME]);
-    expect(captures[0]?.snapshot_id).toBe(record?.snapshot_id);
+    expect(captures.map((c) => c.name)).toEqual([
+      EXPECTED_SNAPSHOT_NAME,
+      EXPECTED_SNAPSHOT_NAME,
+    ]);
+    expect(captures.map((c) => c.tag)).toEqual(["latest", "latest"]);
     const threadRes = await page.request.get(
       `/dashboard/api/threads/${threadId}?mark_viewed=false`,
     );
     expect(threadRes.ok()).toBeTruthy();
     const thread = (await threadRes.json()) as { sandboxId?: string | null };
     expect(captures[0]?.sandbox_id).toBe(thread.sandboxId);
+    expect(captures[1]?.sandbox_id).not.toBe(thread.sandboxId);
+    expect(record?.snapshot_id).toBe(captures[1]?.snapshot_id);
 
     // A later run is told about the environment: the prompt is appended verbatim.
     await typeIntoComposer(page, "Thanks — anything else needed?");
@@ -316,9 +383,18 @@ test.describe("Environments", () => {
     // Admin threads also carry the environment-management instructions.
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
-    await page.goto("/my-settings");
+    await page.goto("/environments");
     await expect(page.getByText("Default environment")).toBeVisible();
-    await expect(page.getByText("Snapshot ready")).toBeVisible();
+    await expect(
+      page.getByText("Default environment · Snapshot ready"),
+    ).toBeVisible();
+    // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
+    await expect(page.getByText(/^Rebuilt /)).toBeVisible();
+    await expect(page.getByText("Refresh log")).toBeVisible();
+    // Each stage is visible to everyone, not only through the agent's tools.
+    for (const label of ["boot", "setup", "update", "capture"]) {
+      await expect(page.getByText(`✓ ${label}`)).toBeVisible();
+    }
     await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
     // Leave no default behind: later specs' runs would boot from it.

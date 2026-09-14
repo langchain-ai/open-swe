@@ -3,7 +3,7 @@ from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-from agent.utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
+from agent.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
 
 
 class _FakeProvider:
@@ -64,7 +64,7 @@ async def test_resolve_repo_dir_uses_provider_work_dir() -> None:
         writable_dirs={"/workspace"},
     )
 
-    repo_dir = await aresolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
+    repo_dir = await resolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
 
     assert repo_dir == "/workspace/open-swe"
     assert backend.commands == ["test -d /workspace && test -w /workspace"]
@@ -80,7 +80,7 @@ async def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_
         writable_dirs={"/home/daytona"},
     )
 
-    work_dir = await aresolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
+    work_dir = await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
 
     assert work_dir == "/home/daytona"
     assert backend.commands == [
@@ -96,21 +96,21 @@ async def test_resolve_sandbox_work_dir_caches_the_result() -> None:
         writable_dirs={"/workspace"},
     )
 
-    first = await aresolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
-    second = await aresolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
+    first = await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
+    second = await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
 
     assert first == "/workspace"
     assert second == "/workspace"
     assert backend.commands == ["test -d /workspace && test -w /workspace"]
 
 
-async def test_aresolve_repo_dir_resolves_home_dir() -> None:
+async def test_resolve_repo_dir_resolves_home_dir() -> None:
     backend = _FakeSandboxBackend(
         provider=_FakeProvider(work_dir="/home/daytona"),
         writable_dirs={"/home/daytona"},
     )
 
-    repo_dir = await aresolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
+    repo_dir = await resolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
 
     assert repo_dir == "/home/daytona/open-swe"
     assert backend.commands == ["test -d /home/daytona && test -w /home/daytona"]

@@ -68,11 +68,10 @@ function fixture(options = {}) {
       return process;
     },
   };
-  const localThreads = new Map([["acp-1", { cwd: root }]]);
+  const localThreads = new Map([["acp-1", { worktreePath: root }]]);
   const manager = createTerminalManager({
     logsDir: path.join(root, ".history"),
-    listProjects: () => [{ cwd: root }],
-    getLocalThread: (id) => localThreads.get(id),
+    getSessionRoot: (id) => localThreads.get(id)?.worktreePath ?? null,
     pty: adapter,
     env: {
       PATH: "/usr/bin",
@@ -136,7 +135,7 @@ test("keeps terminal identity scoped to the local thread and validates launch bo
   assert.equal(value.spawnInputs[0].input.env.ELECTRON_RUN_AS_NODE, undefined);
   await assert.rejects(
     value.manager.open(request(value.outside)),
-    /registered local session/,
+    /local session's workspace/,
   );
   await assert.rejects(
     value.manager.open(request(value.child, { env: { OPEN_SWE_TOKEN: "no" } })),
@@ -200,8 +199,7 @@ test("persists bounded sanitized history and supports clear, restart, detach, an
   value.processes[1].exit();
   const replacement = createTerminalManager({
     logsDir: path.join(value.root, ".history"),
-    listProjects: () => [{ cwd: value.root }],
-    getLocalThread: () => ({ cwd: value.root }),
+    getSessionRoot: () => value.root,
     pty: { spawn: () => new FakeProcess(999) },
     env: { PATH: "/usr/bin" },
     inspect: async () => null,
@@ -313,8 +311,7 @@ test("uses zsh nopromptsp and falls back only for missing executables", async (t
   };
   const manager = createTerminalManager({
     logsDir: path.join(root, ".history"),
-    listProjects: () => [{ cwd: root }],
-    getLocalThread: () => ({ cwd: root }),
+    getSessionRoot: () => root,
     pty: adapter,
     env: { SHELL: "/custom/zsh", PATH: "/usr/bin" },
     inspect: async () => null,
@@ -333,8 +330,7 @@ test("uses zsh nopromptsp and falls back only for missing executables", async (t
   const fatalInputs = [];
   const fatal = createTerminalManager({
     logsDir: path.join(root, ".history-fatal"),
-    listProjects: () => [{ cwd: root }],
-    getLocalThread: () => ({ cwd: root }),
+    getSessionRoot: () => root,
     pty: {
       spawn: (shell) => {
         fatalInputs.push(shell);

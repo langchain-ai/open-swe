@@ -1,12 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ImagePlus,
-  LoaderCircle,
   Map as MapIcon,
-  Mic,
   Plus,
   ServerCog as ServerCogIcon,
-  Square,
   X,
 } from "lucide-react"
 
@@ -22,6 +19,7 @@ import { EnvironmentSelector } from "./EnvironmentSelector"
 import {
   LocalBranchSelector,
   LocalProjectSelector,
+  LocalWorkspaceSelector,
   RunTargetSelector,
 } from "./RunTargetSelector"
 import {
@@ -37,7 +35,11 @@ import type {
 } from "./ComposerPromptEditor"
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
-import type { DesktopProject } from "@/desktop"
+import type {
+  DesktopProject,
+  DesktopProjectRef,
+  DesktopWorkspaceMode,
+} from "@/desktop"
 import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -46,14 +48,12 @@ import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { useRegisterAppCommands } from "@/lib/appCommands"
-import { transcribeAudio } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
 
 const MAX_IMAGE_COUNT = 5
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MAX_AUDIO_BYTES = 10 * 1024 * 1024
 const MAX_MENTION_SUGGESTIONS = 8
 const SUPPORTED_IMAGE_TYPES = new Set([
   "image/png",
@@ -69,6 +69,11 @@ interface SlashCommandSpec {
 }
 
 const SLASH_COMMANDS: Array<SlashCommandSpec> = [
+  {
+    command: "offload",
+    label: "/offload",
+    description: "Offload conversation context",
+  },
   {
     command: "plan",
     label: "/plan",
@@ -92,13 +97,14 @@ export interface ChatComposerProps {
   compact?: boolean
   disabled?: boolean
   busy?: boolean
+  canOffload?: boolean
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
   onStop?: () => void | Promise<void>
   onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
   models?: Array<ModelOption>
   selection?: ModelSelection | null
-  onSelectionChange?: (next: ModelSelection) => void
+  onSelectionChange?: (next: ModelSelection | null) => void
   /** Repos the user can target. When provided with onRepoChange, a repo picker is shown. */
   repos?: Array<{ full_name: string }>
   selectedRepo?: string | null
@@ -109,13 +115,15 @@ export interface ChatComposerProps {
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
   selectedLocalProjectBranch?: string | null
-  localProjectBranches?: Array<string>
+  localProjectBranches?: Array<DesktopProjectRef>
+  localWorkspaceMode?: DesktopWorkspaceMode
+  localWorktreeLabel?: string
+  onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
   onRefreshLocalProjectBranch?: () => void
   onSelectLocalProjectBranch?: (branch: string) => void
-  onCreateLocalProjectBranch?: (branch: string) => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -160,7 +168,8 @@ export function buildCommandItems(
   trigger: ComposerTrigger,
   mentionPaths: Array<string>,
   skills: Array<Skill>,
-  includeModelCommand = true
+  includeModelCommand = true,
+  includeOffloadCommand = false
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
 
@@ -182,7 +191,8 @@ export function buildCommandItems(
         (spec) =>
           spec.command.startsWith(query) &&
           !skillNames.has(spec.command) &&
-          (includeModelCommand || spec.command !== "model")
+          (includeModelCommand || spec.command !== "model") &&
+          (includeOffloadCommand || spec.command !== "offload")
       ).map((spec) => ({
         id: `slash:${spec.command}`,
         type: "slash-command" as const,
@@ -218,6 +228,7 @@ export const ChatComposer = memo(function ChatComposer({
   compact = false,
   disabled = false,
   busy = false,
+  canOffload = false,
   activeRun,
   onStop,
   onSubmit,
@@ -233,12 +244,14 @@ export const ChatComposer = memo(function ChatComposer({
   selectedLocalProjectPath = null,
   selectedLocalProjectBranch = null,
   localProjectBranches = [],
+  localWorkspaceMode = "local",
+  localWorktreeLabel,
+  onLocalWorkspaceModeChange,
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
   onRefreshLocalProjectBranch,
   onSelectLocalProjectBranch,
-  onCreateLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -261,10 +274,7 @@ export const ChatComposer = memo(function ChatComposer({
   )
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [extrasMenuOpen, setExtrasMenuOpen] = useState(false)
-  const [dictationState, setDictationState] = useState<
-    "idle" | "recording" | "transcribing"
-  >("idle")
-  const [dictationError, setDictationError] = useState<string | null>(null)
+  const [composerError, setComposerError] = useState<string | null>(null)
   const composerShortcuts = useMemo(
     () => [
       {
@@ -280,6 +290,14 @@ export const ChatComposer = memo(function ChatComposer({
         shortcuts: ["shift+enter"],
         group: "Composer",
         showInPalette: false,
+      },
+      {
+        id: "open-model-picker",
+        label: "Choose model",
+        aliases: ["model picker", "change model", "reasoning effort"],
+        shortcuts: ["mod+shift+m"],
+        group: "Composer",
+        run: () => setModelPickerOpen(true),
       },
       ...(activeRun?.running
         ? [
@@ -300,10 +318,6 @@ export const ChatComposer = memo(function ChatComposer({
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Array<Blob>>([])
-  const mountedRef = useRef(true)
-  const requestingMicrophoneRef = useRef(false)
 
   useEffect(() => {
     if (autoFocus) editorRef.current?.focus()
@@ -313,14 +327,6 @@ export const ChatComposer = memo(function ChatComposer({
   // click, or two rapid Enters) before React re-renders. Scoped to the send
   // request only — never the run lifecycle.
   const submittingRef = useRef(false)
-
-  useEffect(
-    () => () => {
-      mountedRef.current = false
-      recorderRef.current?.stream.getTracks().forEach((track) => track.stop())
-    },
-    []
-  )
 
   const trigger = useMemo(
     () => detectComposerTrigger(value, cursor),
@@ -334,9 +340,15 @@ export const ChatComposer = memo(function ChatComposer({
   const commandItems = useMemo(
     () =>
       trigger
-        ? buildCommandItems(trigger, mentionPaths, skills, models.length > 0)
+        ? buildCommandItems(
+            trigger,
+            mentionPaths,
+            skills,
+            models.length > 0,
+            canOffload
+          )
         : [],
-    [mentionPaths, models.length, skills, trigger]
+    [mentionPaths, models.length, skills, trigger, canOffload]
   )
   const menuOpen =
     trigger !== null &&
@@ -365,78 +377,6 @@ export const ChatComposer = memo(function ChatComposer({
     setActiveItemId(null)
   }, [])
 
-  const handleDictation = useCallback(async () => {
-    if (dictationState === "recording") {
-      recorderRef.current?.stop()
-      return
-    }
-    if (dictationState !== "idle" || requestingMicrophoneRef.current) return
-    requestingMicrophoneRef.current = true
-    setDictationError(null)
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      if (!mountedRef.current) {
-        stream.getTracks().forEach((track) => track.stop())
-        return
-      }
-      const mimeType = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/mp4",
-      ].find((type) => MediaRecorder.isTypeSupported(type))
-      if (!mimeType) {
-        stream.getTracks().forEach((track) => track.stop())
-        throw new Error("Audio recording is not supported")
-      }
-      const recorder = new MediaRecorder(stream, { mimeType })
-      recorderRef.current = recorder
-      audioChunksRef.current = []
-      recorder.ondataavailable = (event) => {
-        if (event.data.size) audioChunksRef.current.push(event.data)
-      }
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop())
-        if (!mountedRef.current) return
-        setDictationState("transcribing")
-        try {
-          const audio = new Blob(audioChunksRef.current, {
-            type: recorder.mimeType,
-          })
-          if (!audio.size) throw new Error("No audio was recorded")
-          if (audio.size > MAX_AUDIO_BYTES)
-            throw new Error("Recording is too long")
-          const transcript = await transcribeAudio(audio)
-          const snapshot = editorRef.current?.readSnapshot() ?? {
-            value,
-            cursor: value.length,
-          }
-          const separator =
-            snapshot.value && !/\s$/.test(snapshot.value) ? " " : ""
-          const next = `${snapshot.value}${separator}${transcript}`
-          applyPrompt(next, next.length)
-          queueMicrotask(() => editorRef.current?.focusAtEnd())
-        } catch (error) {
-          setDictationError(
-            error instanceof Error
-              ? error.message
-              : "Voice transcription failed"
-          )
-        } finally {
-          recorderRef.current = null
-          setDictationState("idle")
-        }
-      }
-      recorder.start()
-      setDictationState("recording")
-    } catch (error) {
-      setDictationError(
-        error instanceof Error ? error.message : "Microphone access failed"
-      )
-    } finally {
-      requestingMicrophoneRef.current = false
-    }
-  }, [applyPrompt, dictationState, value])
-
   const handleSubmit = useCallback(async () => {
     if (submittingRef.current || disabled) return
     // The editor is the source of truth for what is on screen; a keystroke that
@@ -445,12 +385,21 @@ export const ChatComposer = memo(function ChatComposer({
     const trimmed = (snapshot?.value ?? value).trim()
     if (trimmed.length === 0 && pendingImages.length === 0) return
 
+    if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
+      setComposerError(
+        pendingImages.length
+          ? "Offloading does not accept attachments."
+          : "Offloading requires an idle, existing conversation."
+      )
+      return
+    }
+
     const images = pendingImages
     submittingRef.current = true
     setIsSubmitting(true)
     applyPrompt("", 0)
     setPendingImages([])
-    setDictationError(null)
+    setComposerError(null)
     try {
       await onSubmit?.(trimmed, images)
     } catch {
@@ -459,11 +408,22 @@ export const ChatComposer = memo(function ChatComposer({
       submittingRef.current = false
       setIsSubmitting(false)
     }
-  }, [applyPrompt, disabled, onSubmit, pendingImages, value])
+  }, [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload])
 
   const selectCommandItem = useCallback(
     (item: ComposerCommandItem) => {
       if (!trigger) return
+
+      if (item.type === "slash-command" && item.command === "offload") {
+        const next = replaceTextRange(
+          value,
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          "/offload "
+        )
+        applyPrompt(next.text, next.cursor)
+        return
+      }
 
       if (item.type === "path" || item.type === "skill") {
         const next = replaceTextRange(
@@ -661,23 +621,35 @@ export const ChatComposer = memo(function ChatComposer({
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
-      {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
-        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
-          {runTarget && onRunTargetChange && (
-            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
-          )}
+      {composerError && (
+        <div className="mb-2 px-1 text-xs text-destructive" role="alert">
+          {composerError}
+        </div>
+      )}
+
+      {!selectedModelSupportsImages && (
+        <div className="dropdown-glass mb-2 rounded-xl border border-warning/30 px-3 py-2 text-xs text-muted-foreground">
+          The selected model does not accept image input. Remove the image
+          {pendingImages.length > 1 ? "s" : ""} or switch to a vision-enabled
+          model to send.
+        </div>
+      )}
+
+      {(onRepoChange ||
+        onRunTargetChange ||
+        onEnvironmentChange ||
+        onSelectLocalProjectBranch) && (
+        <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
-              repos={repos}
-              selectedRepo={selectedRepo}
+              emptySelectionLabel="Don't work in a project"
+              noMatchesLabel="No matching projects"
               onRepoChange={onRepoChange}
-            />
-          )}
-          {runTarget !== "local" && onEnvironmentChange && (
-            <EnvironmentSelector
-              environments={environments}
-              selectedSlug={selectedEnvironment}
-              onChange={onEnvironmentChange}
+              placeholder="Select project"
+              repos={repos}
+              searchPlaceholder="Search projects…"
+              selectedRepo={selectedRepo}
+              side="top"
             />
           )}
           {runTarget === "local" &&
@@ -690,43 +662,45 @@ export const ChatComposer = memo(function ChatComposer({
                 onSelectProject={onSelectLocalProject}
                 projects={localProjects}
                 selectedProjectPath={selectedLocalProjectPath}
+                side="top"
               />
             )}
+          {runTarget && onRunTargetChange && (
+            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+          )}
+          {runTarget !== "local" && onEnvironmentChange && (
+            <EnvironmentSelector
+              environments={environments}
+              selectedSlug={selectedEnvironment}
+              onChange={onEnvironmentChange}
+            />
+          )}
           {runTarget === "local" &&
             onRefreshLocalProjectBranch &&
-            onSelectLocalProjectBranch &&
-            onCreateLocalProjectBranch && (
+            onSelectLocalProjectBranch && (
               <LocalBranchSelector
-                branches={localProjectBranches}
+                refs={localProjectBranches}
                 disabled={!selectedLocalProjectPath}
-                onCreateBranch={onCreateLocalProjectBranch}
                 onRefresh={onRefreshLocalProjectBranch}
                 onSelectBranch={onSelectLocalProjectBranch}
                 selectedBranch={selectedLocalProjectBranch}
               />
             )}
-        </div>
-      )}
-
-      {dictationError && (
-        <div className="mb-2 px-1 text-xs text-destructive" role="alert">
-          {dictationError}
-        </div>
-      )}
-
-      {!selectedModelSupportsImages && (
-        <div className="dropdown-glass mb-2 rounded-xl border border-warning/30 px-3 py-2 text-xs text-muted-foreground">
-          The selected model does not accept image input. Remove the image
-          {pendingImages.length > 1 ? "s" : ""} or switch to a vision-enabled
-          model to send.
+          {runTarget === "local" && onSelectLocalProjectBranch && (
+            <LocalWorkspaceSelector
+              onChange={onLocalWorkspaceModeChange}
+              value={localWorkspaceMode}
+              worktreeLabel={localWorktreeLabel}
+            />
+          )}
         </div>
       )}
 
       <div
         className={cn(
-          "relative flex flex-col rounded-2xl border border-border bg-card px-3 py-2.5 shadow-sm transition-colors",
+          "relative z-10 flex flex-col rounded-2xl border-[0.75px] border-foreground/[0.06] bg-card px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.045)] transition-colors dark:bg-[#222] dark:shadow-none",
           compact ? "min-h-[88px]" : "min-h-[106px]",
-          dragKind && "border-primary"
+          dragKind && "border border-primary"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -902,45 +876,6 @@ export const ChatComposer = memo(function ChatComposer({
               contextWindow={contextUsage?.contextWindow}
               usedTokens={contextUsage?.usedTokens}
             />
-
-            {typeof navigator !== "undefined" &&
-              "mediaDevices" in navigator &&
-              typeof MediaRecorder !== "undefined" && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <ComposerControl
-                        aria-label={
-                          dictationState === "recording"
-                            ? "Stop dictation"
-                            : "Start dictation"
-                        }
-                        aria-pressed={dictationState === "recording"}
-                        className={cn(
-                          "size-7 px-0",
-                          dictationState === "recording" && "text-destructive"
-                        )}
-                        disabled={disabled || dictationState === "transcribing"}
-                        onClick={() => void handleDictation()}
-                        type="button"
-                      />
-                    }
-                  >
-                    {dictationState === "transcribing" ? (
-                      <LoaderCircle className="size-4 animate-spin" />
-                    ) : dictationState === "recording" ? (
-                      <Square className="size-3 fill-current" />
-                    ) : (
-                      <Mic className="size-4" />
-                    )}
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">
-                    {dictationState === "recording"
-                      ? "Stop dictation"
-                      : "Dictate message"}
-                  </TooltipPopup>
-                </Tooltip>
-              )}
           </div>
 
           <ComposerPrimaryActions

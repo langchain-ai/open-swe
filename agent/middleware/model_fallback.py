@@ -32,12 +32,15 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import anthropic
-import httpx
+import httpx2
 import openai
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.exceptions import ModelError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
+
+from agent.middleware.trace import OpenSWEMiddleware
+from agent.utils.errors import error_tracking_fields, exception_fields
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +55,7 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.APITimeoutError,
     openai.RateLimitError,
     openai.InternalServerError,
-    httpx.TransportError,
+    httpx2.TransportError,
     # Includes ``ModelCallTimeoutMiddleware``'s deadline: a wedged provider call
     # is exactly the case where trying the other provider is worthwhile.
     TimeoutError,
@@ -75,9 +78,18 @@ MODEL_OUTAGE_MESSAGE = (
 )
 
 
+def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
+    return exc.__class__.__module__.partition(".")[0] == "httpx" and any(
+        cls.__name__ == "TransportError" and cls.__module__.partition(".")[0] == "httpx"
+        for cls in exc.__class__.__mro__
+    )
+
+
 def _should_fallback(exc: BaseException) -> bool:
-    if isinstance(exc, _TRANSIENT_EXCEPTIONS):
+    if isinstance(exc, _TRANSIENT_EXCEPTIONS) or _is_legacy_httpx_transport_error(exc):
         return True
+    if isinstance(exc, ModelError):
+        return exc.is_retryable
     # Catches OverloadedError (529) and other 5xx/429 surfaced as APIStatusError.
     if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
         status = getattr(exc, "status_code", None)
@@ -126,7 +138,7 @@ def _provider_access_error_message(exc: BaseException) -> str | None:
     return None
 
 
-class ModelFallbackMiddleware(AgentMiddleware):
+class ModelFallbackMiddleware(OpenSWEMiddleware):
     """Retry the model call across primary and fallback providers on transient errors.
 
     Args:
@@ -177,9 +189,13 @@ class ModelFallbackMiddleware(AgentMiddleware):
             try:
                 return await handler(attempt_request)
             except Exception as exc:
+                fields = exception_fields(exc)
                 access_error_message = _provider_access_error_message(exc)
                 if access_error_message is not None:
-                    logger.warning("Model access error surfaced to user: %s", type(exc).__name__)
+                    logger.warning(
+                        "Model access error surfaced to user",
+                        extra={**error_tracking_fields(exc), "model_access_error": fields},
+                    )
                     return AIMessage(content=access_error_message)
                 if not _should_fallback(exc):
                     raise
@@ -189,25 +205,39 @@ class ModelFallbackMiddleware(AgentMiddleware):
                 delay = self._backoff_schedule[attempt]
                 if delay > 0:
                     delay += random.uniform(0, delay * 0.25)
+                failed_on = "fallback" if use_fallback else "primary"
+                retry_with = "primary" if use_fallback else "fallback"
                 logger.warning(
-                    "Model call failed transiently (%s) on %s model "
-                    "(attempt %d/%d); retrying %s model in %.1fs",
-                    type(exc).__name__,
-                    "fallback" if use_fallback else "primary",
-                    attempt + 1,
-                    total_attempts,
-                    "primary" if use_fallback else f"fallback ({self._fallback_name()})",
-                    delay,
+                    "Model call failed transiently; retrying",
+                    extra={
+                        **error_tracking_fields(exc),
+                        "model_call_retry": {
+                            "failed_on": failed_on,
+                            "attempt": attempt + 1,
+                            "attempts": total_attempts,
+                            "retry_with": retry_with,
+                            "fallback_model": self._fallback_name(),
+                            "delay_seconds": delay,
+                            **fields,
+                        },
+                    },
                 )
                 if delay > 0:
                     await asyncio.sleep(delay)
 
         assert last_exc is not None  # loop always sets it before breaking
+        last_fields = exception_fields(last_exc)
         logger.error(
-            "Model call failed after %d attempts across primary and fallback (%s): %s",
-            total_attempts,
-            self._fallback_name(),
-            last_exc,
+            "Model call failed after retries across primary and fallback",
+            exc_info=last_exc,
+            extra={
+                **error_tracking_fields(last_exc),
+                "model_call_failure": {
+                    "attempts": total_attempts,
+                    "fallback_model": self._fallback_name(),
+                    **last_fields,
+                },
+            },
         )
         if self._surface_outage_message:
             return AIMessage(content=MODEL_OUTAGE_MESSAGE)

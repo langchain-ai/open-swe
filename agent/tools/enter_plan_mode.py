@@ -5,10 +5,10 @@ from typing import Annotated
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId
-from langgraph.config import get_config
 from langgraph.types import Command
 
-from ..dashboard.plan_store import PLAN_STATUS_PLANNING, set_plan_status
+from agent.dashboard.plan_store import PLAN_STATUS_PLANNING, set_plan_status
+from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +24,7 @@ _ENTERED_MESSAGE = (
 async def enter_plan_mode(
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Activate plan mode mid-run.
-
-    Call this when you believe the task would benefit from a structured
-    implementation plan before writing any code — e.g. when the request is
-    complex, touches many files, or has multiple valid approaches. This is
-    NOT triggered by the word "plan" appearing in the request; use your
-    judgment about whether planning is genuinely warranted.
-
-    Once activated, stay read-only for the target repo: research the codebase,
-    create or edit a dated, self-contained HTML artifact outside any repo (for
-    example, ``/workspace/plans/YYYY-MM-DD-short-task-slug.html``), then publish
-    it with the ``save_plan`` tool and share the plan-review link with the user. Do not
-    edit repo files, commit, push, or open a PR — the user reviews the plan and
-    approves it before you implement.
-    """
+    """Implement the `enter_plan_mode` tool."""
     thread_id = _thread_id_from_config()
     if thread_id:
         try:
@@ -54,10 +40,4 @@ async def enter_plan_mode(
 
 
 def _thread_id_from_config() -> str | None:
-    try:
-        config = get_config()
-    except Exception:
-        return None
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
-    return str(thread_id) if thread_id else None
+    return RunConfig.from_runtime().thread_id or None

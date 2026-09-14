@@ -16,7 +16,7 @@ from agent.middleware.sandbox_circuit_breaker import (
     sandbox_unreachable_message,
 )
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.utils.sandbox_state import (
+from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
     set_sandbox_backend,
 )
@@ -66,7 +66,9 @@ async def test_unreachable_sandbox_notifies_then_ends_the_run() -> None:
                 "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
                 new_callable=AsyncMock,
             ) as mock_notify,
-            patch("agent.server._create_sandbox_with_proxy", new_callable=AsyncMock) as mock_create,
+            patch(
+                "agent.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
+            ) as mock_create,
             pytest.raises(SandboxConnectionError),
         ):
             await middleware.awrap_tool_call(request, handler)
@@ -104,7 +106,7 @@ async def test_unreachable_notification_goes_to_slack_only() -> None:
             new_callable=AsyncMock,
         ) as mock_slack,
         patch(
-            "agent.middleware.sandbox_circuit_breaker.comment_on_linear_issue",
+            "agent.middleware.sandbox_circuit_breaker.post_linear_notification",
             new_callable=AsyncMock,
         ) as mock_linear,
         patch(
@@ -117,8 +119,8 @@ async def test_unreachable_notification_goes_to_slack_only() -> None:
     mock_slack.assert_awaited_once_with(
         "C123", "171.123", sandbox_unreachable_message(sandbox_id="sb-dead")
     )
-    mock_linear.assert_not_called()
     mock_github.assert_not_called()
+    mock_linear.assert_not_awaited()
 
 
 @pytest.mark.asyncio

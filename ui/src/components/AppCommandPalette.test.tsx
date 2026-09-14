@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     id: "local-1",
     title: "Local result",
     cwd: "/tmp/repo",
+    worktreePath: "/tmp/worktrees/repo-local1",
     status: "idle",
     viewed: true,
     createdAt: 1,

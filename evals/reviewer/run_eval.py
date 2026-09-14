@@ -21,7 +21,7 @@ from langgraph_sdk import get_client
 from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 
-from agent.review.eval_store import _EXPERIMENT_URL_RE, _LOG_TAIL_CHARS
+from agent.review.eval_store import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
 from agent.review.findings import REVIEW_FINDING_CAP
 from evals.reviewer.judge import aggregate_pr, judge_match
 from evals.reviewer.store_reporter import StoreReporter, is_enabled
@@ -77,7 +77,7 @@ DEFAULT_CONFIG: ReviewerEvalConfig = {
     "langgraph_url": "",
     "langsmith_project": DEFAULT_LANGSMITH_PROJECT,
     "assistant_id": "reviewer",
-    "model_id": "google_genai:gemini-3.7-flash",
+    "model_id": "google_genai:gemini-3.8-flash",
     "reasoning_effort": "medium",
     "score_mode": "surfaced_findings",
     "severity_threshold": "low",
@@ -201,7 +201,6 @@ def _apply_langsmith_project(project: str | None) -> None:
     """
     resolved = project or os.environ.get("LANGSMITH_PROJECT") or DEFAULT_LANGSMITH_PROJECT
     os.environ["LANGSMITH_PROJECT"] = resolved
-    os.environ["LANGCHAIN_PROJECT"] = resolved
     os.environ.setdefault("LANGSMITH_TRACING", "true")
 
 
@@ -217,8 +216,8 @@ class _TailCapture:
         if not text:
             return
         with self._lock:
-            self._buf = (self._buf + text)[-_LOG_TAIL_CHARS:]
-            found = _EXPERIMENT_URL_RE.findall(self._buf)
+            self._buf = (self._buf + text)[-LOG_TAIL_CHARS:]
+            found = EXPERIMENT_URL_RE.findall(self._buf)
             if found:
                 self._url = found[-1]
 

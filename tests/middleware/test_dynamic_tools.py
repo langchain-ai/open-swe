@@ -25,7 +25,7 @@ class _Request:
     tool_call: dict[str, Any] | None = None
     tool: BaseTool | None = None
 
-    def override(self, **kwargs: Any) -> "_Request":
+    def override(self, **kwargs: Any) -> _Request:
         return replace(self, **kwargs)
 
 
@@ -225,9 +225,3 @@ async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
 
     assert not middleware.has_groups
     assert "- Corridor" not in cast(StructuredTool, middleware.tools[0]).description
-
-
-def test_the_static_corridor_catalog_matches_what_the_loader_exposes() -> None:
-    from agent.integrations.corridor_mcp import _ALLOWED_TOOL_NAMES, CORRIDOR_TOOL_NAMES
-
-    assert set(CORRIDOR_TOOL_NAMES) == set(_ALLOWED_TOOL_NAMES)

@@ -10,11 +10,12 @@ the run-completion webhook — reports it instead of the run going silent.
 
 import asyncio
 import logging
-import os
 from collections.abc import Awaitable, Callable
 
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+
+from agent.config import ENV
+from agent.middleware.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class ModelCallTimeoutError(TimeoutError):
 
 
 def _configured_timeout_seconds() -> float:
-    raw = os.environ.get("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS")
+    raw = ENV.OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS.optional()
     if not raw:
         return DEFAULT_MODEL_CALL_TIMEOUT_SECONDS
     try:
@@ -39,7 +40,7 @@ def _configured_timeout_seconds() -> float:
     return value if value > 0 else DEFAULT_MODEL_CALL_TIMEOUT_SECONDS
 
 
-class ModelCallTimeoutMiddleware(AgentMiddleware):
+class ModelCallTimeoutMiddleware(OpenSWEMiddleware):
     """Fail a model call that exceeds the deadline instead of hanging forever."""
 
     def __init__(self, timeout_seconds: float | None = None) -> None:

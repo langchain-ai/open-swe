@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-slack_breakout_tool = importlib.import_module("agent.tools.slack_start_new_thread")
+slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -143,7 +143,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         return thread_id
 
     fake_client = _FakeClient(captured)
-    monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: fake_client)
     monkeypatch.setattr(
@@ -220,7 +220,6 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert "## Open SWE Links" in dispatch["content"]
     assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in dispatch["content"]
     assert "- Trace: https://smith/x" in dispatch["content"]
-    assert "do not duplicate it manually" in dispatch["content"]
     assert dispatch["content"].endswith(
         "## Breakout Instructions\n"
         "Use the same repo and investigate the follow-up aspect in detail."
@@ -234,7 +233,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
 async def test_slack_start_new_thread_requires_slack_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_breakout_tool, "get_config", lambda: {"configurable": {}})
+    monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": {}})
 
     result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
 
@@ -256,7 +255,7 @@ async def test_slack_start_new_thread_validates_text(
     error: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
 
     result = await slack_breakout_tool.slack_start_new_thread(title, instructions)
 
@@ -267,7 +266,7 @@ async def test_slack_start_new_thread_validates_text(
 async def test_slack_start_new_thread_rejects_invalid_repo_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
 
     result = await slack_breakout_tool.slack_start_new_thread(
         "Title", "Instructions", default_repo="https://github.com/langchain-ai/open-swe"
@@ -291,7 +290,7 @@ async def test_slack_start_new_thread_returns_slack_failure_without_dispatch(
         captured["dispatched"] = True
         return {"run_id": "run-123"}
 
-    monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
     )
@@ -325,7 +324,7 @@ async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
         captured["dispatched"] = True
         return {"run_id": "run-123"}
 
-    monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
+    monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
     )

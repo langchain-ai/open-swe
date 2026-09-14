@@ -11,7 +11,7 @@ const stagingRoot = fs.mkdtempSync(
 );
 const runtimeRoot = path.join(outputRoot, "runtime");
 const uv = process.env.OPEN_SWE_UV_COMMAND || "uv";
-const pythonVersion = process.env.OPEN_SWE_LOCAL_PYTHON_VERSION || "3.12";
+const pythonVersion = process.env.OPEN_SWE_LOCAL_PYTHON_VERSION || "3.14";
 
 function run(args) {
   const result = spawnSync(uv, args, {

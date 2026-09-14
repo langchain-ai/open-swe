@@ -4,7 +4,7 @@ okf_version: "0.2"
 
 # Files
 
-- [Open SWE Quickstart & Wiki Map](quickstart.md) - Start here to orient yourself in the Open SWE LangGraph application, choose the right local command, and route an implementation task to its owning architecture, workflow, integration, operations, or testing guide.
+- [Open SWE Codebase Guide](quickstart.md) - Start here to set up Open SWE, choose the entrypoint and owner for a safe change, and run focused validation. Links route contributors to the detailed architecture, workflow, integration, operations, and testing guides.
 
 # Directories
 

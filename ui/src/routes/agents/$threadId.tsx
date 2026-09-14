@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { RecentAgentThreads } from "@/features/agents/components/RecentAgentThreads"
+import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 
 export const Route = createFileRoute("/agents/$threadId")({
   validateSearch: (
@@ -15,10 +15,5 @@ export const Route = createFileRoute("/agents/$threadId")({
 function AgentThreadRoute() {
   const { threadId } = Route.useParams()
   const { feedback } = Route.useSearch()
-  return (
-    <RecentAgentThreads
-      activeThreadId={threadId}
-      autoFocusComposer={feedback}
-    />
-  )
+  return <AgentThreadPage threadId={threadId} autoFocusComposer={feedback} />
 }

@@ -1,3 +1,3 @@
 # Files
 
-- [Testing Guide](overview.md) - A map of Open SWE's Python, dashboard, desktop, and browser end-to-end test layers, including shared test isolation and the focused validation commands for each boundary.
+- [Focused Validation Strategy](overview.md) - Select the narrowest Python, frontend, or Playwright validation that owns an Open SWE change. This guide explains shared fakes, production-boundary coverage, and focused commands.

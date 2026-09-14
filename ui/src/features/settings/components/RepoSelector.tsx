@@ -13,6 +13,7 @@ type RepoOption = { full_name: string }
 interface RepoSelectorProps {
   repos?: Array<RepoOption>
   selectedRepo?: string | null
+  selectedLabel?: string
   onRepoChange: (repo: string | null) => void
   placeholder?: string
   emptySelectionLabel?: string
@@ -21,12 +22,14 @@ interface RepoSelectorProps {
   className?: string
   triggerClassName?: string
   dropdownClassName?: string
+  side?: "top" | "bottom"
   disabled?: boolean
 }
 
 export function RepoSelector({
   repos,
   selectedRepo = null,
+  selectedLabel,
   onRepoChange,
   placeholder = "Select repository",
   emptySelectionLabel = "No repository",
@@ -35,6 +38,7 @@ export function RepoSelector({
   className,
   triggerClassName,
   dropdownClassName,
+  side = "bottom",
   disabled = false,
 }: RepoSelectorProps) {
   const [open, setOpen] = useState(false)
@@ -73,14 +77,15 @@ export function RepoSelector({
       >
         <FolderIcon className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
-          {selectedRepo || placeholder}
+          {selectedRepo ? (selectedLabel ?? selectedRepo) : placeholder}
         </span>
         <CaretDownIcon className="size-3 shrink-0 opacity-70" />
       </button>
       {open && (
         <div
           className={cn(
-            "absolute top-full left-0 z-50 mt-1 flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg",
+            "absolute left-0 z-50 flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg",
+            side === "top" ? "bottom-full mb-1" : "top-full mt-1",
             dropdownClassName
           )}
         >

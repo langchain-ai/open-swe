@@ -1,33 +1,28 @@
 """Admin gate for tools wired only into admin threads.
 
-Tools re-check the triggering user against ``CONFIGURED_ADMINS`` so a thread whose
-metadata says "admin" cannot act on behalf of someone who is not one.
+Tools recheck user admin membership or a system invocation's saved authorization.
 """
 
-from typing import Any
-
-from langgraph.config import get_config
-
-from ..dashboard.admin import is_admin
+from agent.dashboard.admin import is_admin
+from agent.dashboard.schedules import authorized_admin_schedule
+from agent.run_config import RunConfig
 
 
-def configurable() -> dict[str, Any]:
+def configurable() -> RunConfig:
     try:
-        config = get_config()
+        return RunConfig.from_runtime()
     except Exception:
-        return {}
-    values = config.get("configurable") if isinstance(config, dict) else None
-    return values if isinstance(values, dict) else {}
+        return RunConfig()
 
 
-def require_admin(action: str) -> str | None:
-    """Return an error message when the triggering user is not an admin."""
-    values = configurable()
-    login = values.get("github_login")
-    email = values.get("user_email")
-    if is_admin(
-        email if isinstance(email, str) else None,
-        login=login if isinstance(login, str) else None,
-    ):
+async def require_admin(action: str) -> str | None:
+    """Recheck either the triggering admin or the saved system authorization."""
+    cfg = configurable()
+    allowed = (
+        await authorized_admin_schedule(cfg) is not None
+        if cfg.source == "schedule"
+        else is_admin(cfg.user_email, login=cfg.github_login)
+    )
+    if allowed:
         return None
     return f"Only workspace admins can {action}."

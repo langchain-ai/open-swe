@@ -33,7 +33,44 @@ def test_summarize_run_usage_uses_only_latest_human_turn() -> None:
 
     assert summary is not None
     assert summary.models == ("model-a", "model-b")
-    assert summary.main_agent_tokens == 3_300
+    assert summary.total_tokens == 3_300
+    assert summary.input_tokens == 3_000
+    assert summary.output_tokens == 300
+
+
+def test_summarize_run_usage_reads_legacy_metadata_across_human_messages() -> None:
+    first = _message(model="model-a", input_tokens=100, output_tokens=10)
+    first.response_metadata["open_swe_run_id"] = "run-1"
+    second = _message(model="model-a", input_tokens=200, output_tokens=20)
+    second.response_metadata["open_swe_run_id"] = "run-1"
+    other_run = _message(model="model-b", input_tokens=400, output_tokens=40)
+    other_run.response_metadata["open_swe_run_id"] = "run-2"
+
+    summary = summarize_run_usage(
+        {
+            "messages": [
+                HumanMessage(content="start"),
+                first,
+                HumanMessage(content="queued follow-up"),
+                second,
+                other_run,
+            ]
+        },
+        invocation_id="run-1",
+    )
+
+    assert summary is not None
+    assert summary.models == ("model-a",)
+    assert summary.total_tokens == 330
+
+
+def test_summarize_run_usage_rejects_conflicting_message_identifiers() -> None:
+    message = _message(model="model-a", input_tokens=100, output_tokens=10)
+    message.response_metadata.update(
+        {"open_swe_invocation_id": "inv-1", "open_swe_run_id": "inv-2"}
+    )
+
+    assert summarize_run_usage({"messages": [message]}, invocation_id="inv-1") is None
 
 
 def test_summarize_run_usage_excludes_cached_input_tokens() -> None:
@@ -52,7 +89,9 @@ def test_summarize_run_usage_excludes_cached_input_tokens() -> None:
     )
 
     assert summary is not None
-    assert summary.main_agent_tokens == 500
+    assert summary.total_tokens == 500
+    assert summary.input_tokens == 1_000
+    assert summary.output_tokens == 100
 
 
 def test_summarize_run_usage_ignores_messages_without_usage() -> None:
@@ -65,7 +104,7 @@ def test_summarize_run_usage_ignores_messages_without_usage() -> None:
 
     assert summary is not None
     assert summary.models == ("model-a", "model-b")
-    assert summary.main_agent_tokens == 110
+    assert summary.total_tokens == 110
 
 
 def test_summarize_run_usage_returns_none_without_reported_usage_or_model() -> None:

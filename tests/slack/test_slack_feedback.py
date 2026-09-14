@@ -6,13 +6,13 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.utils import slack_feedback
-from agent.utils.slack_feedback import (
+from agent.slack import feedback as slack_feedback
+from agent.slack import routes as slack_routes
+from agent.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
 from agent.webhooks import common as webhook_common
-from agent.webhooks import slack_routes
 
 
 class _FakeStore:
@@ -228,7 +228,7 @@ async def test_slack_webhook_queues_reaction_added(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
     monkeypatch.setattr(
         webhook_common,
-        "_get_slack_channel_context",
+        "resolve_slack_channel_context",
         AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
 
@@ -250,7 +250,7 @@ async def test_slack_webhook_queues_stop_reaction(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
     monkeypatch.setattr(
         webhook_common,
-        "_get_slack_channel_context",
+        "resolve_slack_channel_context",
         AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
 
@@ -274,7 +274,7 @@ async def test_slack_webhook_queues_reaction_removed(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
     monkeypatch.setattr(
         webhook_common,
-        "_get_slack_channel_context",
+        "resolve_slack_channel_context",
         AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
 
@@ -298,7 +298,7 @@ async def test_slack_webhook_ignores_untracked_reaction(monkeypatch: pytest.Monk
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
     monkeypatch.setattr(
         webhook_common,
-        "_get_slack_channel_context",
+        "resolve_slack_channel_context",
         AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
     )
 

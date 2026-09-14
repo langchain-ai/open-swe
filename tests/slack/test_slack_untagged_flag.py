@@ -8,10 +8,11 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.utils import slack_events
+from agent.slack import events as slack_events
+from agent.slack import routes as slack_routes
+from agent.slack import webhook as slack_service
+from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
-from agent.webhooks import slack as slack_service
-from agent.webhooks import slack_routes
 
 
 class _FakeThreads:
@@ -101,9 +102,6 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
         return {"is_ext_shared": False, "is_pending_ext_shared": False}
 
-    async def not_docs_plz(_channel_id: str, _context: dict[str, Any]) -> bool:
-        return False
-
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
@@ -123,15 +121,14 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
             }
         ),
     )
-    monkeypatch.setattr(webhook_common, "_thread_exists", AsyncMock(return_value=True))
-    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
+    monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=True))
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
     # The two-party gate would admit these messages on its own.
     monkeypatch.setattr(
-        slack_service, "_slack_thread_allows_untagged_reply", AsyncMock(return_value=True)
+        slack_service, "slack_thread_allows_untagged_reply", AsyncMock(return_value=True)
     )
 
 
@@ -142,8 +139,7 @@ async def _untagged_flag_for(text: str, event_id: str) -> bool:
         cast(BackgroundTasks, background_tasks),
     )
     assert response["status"] == "accepted", response
-    event_data = background_tasks.tasks[0][1][0]
-    return bool(event_data["untagged_reply"])
+    return cast(SlackRequest, background_tasks.tasks[0][1][0]).untagged_reply
 
 
 async def test_id_mention_is_not_marked_untagged() -> None:
@@ -168,13 +164,13 @@ async def test_message_update_queues_only_the_new_text() -> None:
 
     assert response["status"] == "accepted"
     assert background_tasks.tasks[0][0] is slack_routes._process_slack_message_update
-    event_data = background_tasks.tasks[0][1][0]
-    assert event_data["message_update"] is True
-    assert event_data["event_ts"] == "1786573400.000000"
-    assert event_data["original_message_ts"] == "1786573369.551099"
-    assert event_data["thread_ts"] == "1786573300.000000"
-    assert event_data["text"] == "new corrected text"
-    assert "old text that must not be resent" not in str(event_data)
+    request = cast(SlackRequest, background_tasks.tasks[0][1][0])
+    assert request.message_update is True
+    assert request.event_ts == "1786573400.000000"
+    assert request.original_message_ts == "1786573369.551099"
+    assert request.thread_ts == "1786573300.000000"
+    assert request.text == "new corrected text"
+    assert "old text that must not be resent" not in str(request)
 
 
 async def _run_message_update_task(background_tasks: _FakeBackgroundTasks) -> None:
@@ -202,8 +198,8 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
     await _run_message_update_task(background_tasks)
 
     assert response["status"] == "accepted"
-    event_data = background_tasks.tasks[0][1][0]
-    assert event_data["thread_ts"] == "1786573369.551099"
+    request = cast(SlackRequest, background_tasks.tasks[0][1][0])
+    assert request.thread_ts == "1786573369.551099"
     lookup = cast(AsyncMock, webhook_common.lookup_slack_thread_id)
     lookup.assert_awaited_once()
     await_args = lookup.await_args
@@ -215,7 +211,7 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
     ("patch_name", "patch_value"),
     [
         ("lookup_slack_thread_id", None),
-        ("_thread_exists", False),
+        ("thread_exists", False),
         ("lookup_slack_run_mapping", None),
     ],
 )
@@ -302,28 +298,6 @@ async def test_message_update_retries_until_delivery_mapping_exists(
     process.assert_awaited_once()
 
 
-async def test_unassociated_message_update_does_not_trigger_docs_gate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(webhook_common, "lookup_slack_run_mapping", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", ())
-    is_docs_plz = AsyncMock(return_value=True)
-    post_reply = AsyncMock()
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", is_docs_plz)
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
-    background_tasks = _FakeBackgroundTasks()
-
-    response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_update_payload())),
-        cast(BackgroundTasks, background_tasks),
-    )
-    await _run_message_update_task(background_tasks)
-
-    assert response == {"status": "accepted", "message": "Slack update queued"}
-    is_docs_plz.assert_not_awaited()
-    post_reply.assert_not_awaited()
-
-
 async def test_message_update_rejects_changed_sender_identity() -> None:
     payload = _message_update_payload()
     payload["event"]["previous_message"]["user"] = "UOTHER"
@@ -347,4 +321,30 @@ async def test_message_update_from_a_bot_is_ignored() -> None:
     )
 
     assert response == {"status": "ignored", "reason": "Event from a bot"}
+    assert background_tasks.tasks == []
+
+
+async def test_message_update_ignores_link_unfurl_attachments() -> None:
+    """Slack unfurls a link by editing the message to add `attachments`.
+
+    Stands in for every metadata-only edit: the text the user wrote is
+    unchanged, so there is nothing new to act on whatever else moved.
+    """
+    payload = _message_update_payload()
+    payload["event"]["previous_message"]["text"] = "new corrected text"
+    payload["event"]["message"]["attachments"] = [
+        {
+            "service_name": "GitHub",
+            "title": "Fix the thing by someone · Pull Request #5888",
+            "title_link": "https://github.com/langchain-ai/deepagents/pull/5888",
+        }
+    ]
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "No user-visible message changes"}
     assert background_tasks.tasks == []

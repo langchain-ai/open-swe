@@ -3,7 +3,7 @@
 When the eval runs in the ``Reviewer eval`` GitHub Action it writes the same
 store record the dashboard reads (namespace ``["evals"]``, key ``"reviewer"``),
 so ``/admin/evals`` shows the run live. The dashboard reconciles a run whose
-heartbeat goes stale to ``failed`` (see ``agent.dashboard.eval_jobs``), so the
+heartbeat goes stale to ``failed`` (see ``agent.review.eval_jobs``), so the
 reporter must keep heartbeating while the eval runs.
 """
 
@@ -17,8 +17,8 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from agent.review.eval_store import (
-    _HEARTBEAT_INTERVAL_SECONDS,
     EVALS_NAMESPACE,
+    HEARTBEAT_INTERVAL_SECONDS,
     REVIEWER_EVAL_KEY,
 )
 
@@ -109,7 +109,7 @@ class StoreReporter:
 
     async def _heartbeat_loop(self) -> None:
         while True:
-            await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
             await self._put(self._record(status="running"))
 
     def run_heartbeat(self) -> asyncio.Task[None]:
