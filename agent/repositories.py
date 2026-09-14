@@ -1,12 +1,14 @@
 """Repositories as rows: the owner every pull request row belongs to.
 
-Keyed by the lowercased ``owner/name`` because GitHub resolves repository paths
-case-insensitively; ``full_name`` keeps the casing GitHub reported for display.
+Rows carry a synthetic UUIDv7 ``id``; the natural key is the lowercased
+``owner/name``, unique, because GitHub resolves repository paths
+case-insensitively. ``full_name`` keeps the casing GitHub reported for display.
 """
 
 import logging
 from datetime import datetime
 from typing import Self
+from uuid import UUID, uuid7
 
 from pydantic import BaseModel, field_validator
 from sqlalchemy import text
@@ -17,11 +19,12 @@ from agent.review.styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
 
-_COLUMNS = "key, full_name, private, default_branch, first_seen_at, last_activity_at"
+_COLUMNS = "id, key, full_name, private, default_branch, first_seen_at, last_activity_at"
 
 
 class Repository(BaseModel):
     full_name: str
+    id: UUID | None = None
     private: bool | None = None
     default_branch: str = ""
     first_seen_at: datetime | None = None
@@ -79,8 +82,8 @@ class Repository(BaseModel):
             (
                 await conn.execute(
                     text(
-                        "INSERT INTO repository (key, full_name, private, default_branch) "
-                        "VALUES (:key, :full_name, :private, :default_branch) "
+                        "INSERT INTO repository (id, key, full_name, private, default_branch) "
+                        "VALUES (:id, :key, :full_name, :private, :default_branch) "
                         "ON CONFLICT (key) DO UPDATE SET "
                         "private = COALESCE(EXCLUDED.private, repository.private), "
                         "default_branch = CASE WHEN EXCLUDED.default_branch <> '' "
@@ -89,6 +92,7 @@ class Repository(BaseModel):
                         f"RETURNING {_COLUMNS}"
                     ),
                     {
+                        "id": self.id or uuid7(),
                         "key": self.key,
                         "full_name": self.full_name,
                         "private": self.private,

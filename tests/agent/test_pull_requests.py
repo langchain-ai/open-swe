@@ -106,6 +106,17 @@ async def test_backfill_runs_once_and_later_reads_use_the_row(
     assert client.threads.search.await_count == search_calls
 
 
+async def test_entity_rows_get_synthetic_uuid7_ids_that_survive_resaves() -> None:
+    saved = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11)
+    resaved = await PullRequest(owner="lc", repo="repo", number=7, title="Retitled").save()
+    repository = await Repository.get("lc/repo")
+
+    assert repository is not None and repository.id is not None
+    assert saved.id is not None and saved.reviews[0].id is not None
+    assert {repository.id.version, saved.id.version, saved.reviews[0].id.version} == {7}
+    assert resaved.id == saved.id
+
+
 async def test_relinking_a_review_replaces_the_row_with_the_same_github_id() -> None:
     await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=3)
     saved = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=1)

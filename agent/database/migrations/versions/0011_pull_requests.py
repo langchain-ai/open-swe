@@ -10,7 +10,8 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE repository (
-            key text PRIMARY KEY,
+            id uuid PRIMARY KEY,
+            key text NOT NULL UNIQUE,
             full_name text NOT NULL,
             private boolean,
             default_branch text NOT NULL DEFAULT '',
@@ -23,7 +24,8 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE pull_request (
-            repository_key text NOT NULL REFERENCES repository (key),
+            id uuid PRIMARY KEY,
+            repository_id uuid NOT NULL REFERENCES repository (id),
             number integer NOT NULL CHECK (number > 0),
             owner text NOT NULL,
             repo text NOT NULL,
@@ -35,7 +37,7 @@ def upgrade() -> None:
             resolves_thread boolean NOT NULL DEFAULT false,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            PRIMARY KEY (repository_key, number)
+            UNIQUE (repository_id, number)
         )
         """
     )
@@ -43,15 +45,12 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE pull_request_thread (
-            repository_key text NOT NULL,
-            number integer NOT NULL,
+            pull_request_id uuid NOT NULL REFERENCES pull_request (id) ON DELETE CASCADE,
             thread_id text NOT NULL,
             role text NOT NULL CHECK (role IN ('primary', 'secondary')),
             source text NOT NULL DEFAULT '',
             linked_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            PRIMARY KEY (repository_key, number, thread_id),
-            FOREIGN KEY (repository_key, number)
-                REFERENCES pull_request (repository_key, number) ON DELETE CASCADE
+            PRIMARY KEY (pull_request_id, thread_id)
         )
         """
     )
@@ -59,7 +58,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE UNIQUE INDEX pull_request_thread_primary_idx
-            ON pull_request_thread (repository_key, number) WHERE role = 'primary'
+            ON pull_request_thread (pull_request_id) WHERE role = 'primary'
         """
     )
 
@@ -72,17 +71,14 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE pull_request_review (
-            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            repository_key text NOT NULL,
-            number integer NOT NULL,
+            id uuid PRIMARY KEY,
+            pull_request_id uuid NOT NULL REFERENCES pull_request (id) ON DELETE CASCADE,
             reviewer_thread_id text NOT NULL DEFAULT '',
             github_review_id bigint,
             url text NOT NULL DEFAULT '',
             head_sha text NOT NULL DEFAULT '',
             finding_count integer,
-            published_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            FOREIGN KEY (repository_key, number)
-                REFERENCES pull_request (repository_key, number) ON DELETE CASCADE
+            published_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
         """
     )
@@ -90,7 +86,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE UNIQUE INDEX pull_request_review_github_idx
-            ON pull_request_review (repository_key, number, github_review_id)
+            ON pull_request_review (pull_request_id, github_review_id)
             WHERE github_review_id IS NOT NULL
         """
     )
@@ -98,7 +94,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE UNIQUE INDEX pull_request_review_local_idx
-            ON pull_request_review (repository_key, number, reviewer_thread_id, head_sha)
+            ON pull_request_review (pull_request_id, reviewer_thread_id, head_sha)
             WHERE github_review_id IS NULL
         """
     )

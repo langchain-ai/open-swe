@@ -13,14 +13,17 @@ writer wins: the role is assigned inside the transaction that inserts the link,
 under the row lock ``save`` takes on the pull request, and a partial unique
 index makes a second primary impossible.
 
-Rows live in PostgreSQL (``POSTGRES_URI``), which this module requires. ``save``
-merges: fields set on the instance win, threads and reviews accrue.
+Rows live in PostgreSQL (``POSTGRES_URI``), which this module requires. Entity
+rows carry a synthetic UUIDv7 ``id``; ``(repository, number)`` stays the natural
+key callers address a PR by. ``save`` merges: fields set on the instance win,
+threads and reviews accrue.
 """
 
 import logging
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal, Self
+from uuid import UUID, uuid7
 
 from pydantic import AliasPath, BaseModel, Field, ValidationError
 from sqlalchemy import text
@@ -41,11 +44,17 @@ ThreadRole = Literal["primary", "secondary"]
 _SEARCH_PAGE_SIZE = 50
 _MUTABLE_COLUMNS = ("state", "title", "head_ref", "base_ref", "author", "resolves_thread")
 _PULL_REQUEST_COLUMNS = (
-    "owner, repo, number, state, title, head_ref, base_ref, author, resolves_thread, "
-    "created_at, updated_at"
+    "pr.id, pr.owner, pr.repo, pr.number, pr.state, pr.title, pr.head_ref, pr.base_ref, "
+    "pr.author, pr.resolves_thread, pr.created_at, pr.updated_at"
+)
+_PULL_REQUEST_FROM = (
+    "FROM pull_request pr JOIN repository r ON r.id = pr.repository_id "
+    "WHERE r.key = :key AND pr.number = :number"
 )
 _THREAD_COLUMNS = "thread_id, role, source, linked_at"
-_REVIEW_COLUMNS = "reviewer_thread_id, github_review_id, url, head_sha, finding_count, published_at"
+_REVIEW_COLUMNS = (
+    "id, reviewer_thread_id, github_review_id, url, head_sha, finding_count, published_at"
+)
 
 
 class ThreadLink(BaseModel):
@@ -56,6 +65,7 @@ class ThreadLink(BaseModel):
 
 
 class ReviewLink(BaseModel):
+    id: UUID | None = None
     reviewer_thread_id: str = ""
     github_review_id: int | None = None
     url: str = ""
@@ -68,6 +78,7 @@ class PullRequest(BaseModel):
     owner: str
     repo: str
     number: int
+    id: UUID | None = None
     state: PrState = "open"
     title: str = ""
     head_ref: str = ""
@@ -92,15 +103,15 @@ class PullRequest(BaseModel):
 
     @classmethod
     async def for_repository(cls, owner: str, repo: str) -> list[Self]:
-        key = f"{owner}/{repo}".lower()
         async with postgres.connection() as conn:
             numbers = (
                 await conn.execute(
                     text(
-                        "SELECT number FROM pull_request WHERE repository_key = :key "
-                        "ORDER BY number"
+                        "SELECT pr.number FROM pull_request pr "
+                        "JOIN repository r ON r.id = pr.repository_id "
+                        "WHERE r.key = :key ORDER BY pr.number"
                     ),
-                    {"key": key},
+                    {"key": f"{owner}/{repo}".lower()},
                 )
             ).scalars()
             records: list[Self] = []
@@ -113,10 +124,6 @@ class PullRequest(BaseModel):
     @property
     def repo_full_name(self) -> str:
         return f"{self.owner}/{self.repo}"
-
-    @property
-    def repository_key(self) -> str:
-        return self.repo_full_name.lower()
 
     @property
     def url(self) -> str:
@@ -149,12 +156,16 @@ class PullRequest(BaseModel):
         pull request's row lock, so the primary is whichever link lands first.
         """
         async with postgres.transaction() as conn:
-            await Repository(full_name=self.repo_full_name, private=repository_private).save(conn)
-            await self._upsert_row(conn)
+            repository = await Repository(
+                full_name=self.repo_full_name, private=repository_private
+            ).save(conn)
+            if repository.id is None:
+                raise RuntimeError(f"repository {self.repo_full_name} saved without an id")
+            pull_request_id = await self._upsert_row(conn, repository.id)
             for link in self.threads:
-                await self._insert_thread(conn, link)
+                await self._insert_thread(conn, pull_request_id, link)
             for review in self.reviews:
-                await self._replace_review(conn, review)
+                await self._replace_review(conn, pull_request_id, review)
             stored = await self.fetch(conn)
         if stored is None:
             raise RuntimeError(f"pull request {self.url} vanished during save")
@@ -244,48 +255,98 @@ class PullRequest(BaseModel):
                 offset += _SEARCH_PAGE_SIZE
         return [thread_id for thread_id, _ in sorted(found.items(), key=lambda item: item[1])]
 
-    def _identity(self) -> dict[str, str | int]:
-        return {"key": self.repository_key, "number": self.number}
+    async def fetch(self, conn: AsyncConnection) -> Self | None:
+        """This PR's stored row with its threads and reviews, read through ``conn``."""
+        natural_key = {"key": self.repo_full_name.lower(), "number": self.number}
+        row = (
+            (
+                await conn.execute(
+                    text(f"SELECT {_PULL_REQUEST_COLUMNS} {_PULL_REQUEST_FROM}"), natural_key
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        by_pull_request = {"pull_request_id": row["id"]}
+        threads = (
+            await conn.execute(
+                text(
+                    f"SELECT {_THREAD_COLUMNS} FROM pull_request_thread "
+                    "WHERE pull_request_id = :pull_request_id "
+                    "ORDER BY role = 'primary' DESC, linked_at, thread_id"
+                ),
+                by_pull_request,
+            )
+        ).mappings()
+        reviews = (
+            await conn.execute(
+                text(
+                    f"SELECT {_REVIEW_COLUMNS} FROM pull_request_review "
+                    "WHERE pull_request_id = :pull_request_id ORDER BY published_at, id"
+                ),
+                by_pull_request,
+            )
+        ).mappings()
+        return type(self).model_validate(
+            {
+                **dict(row),
+                "threads": [dict(thread) for thread in threads],
+                "reviews": [dict(review) for review in reviews],
+            }
+        )
 
-    async def _upsert_row(self, conn: AsyncConnection) -> None:
-        """Insert or update the pull request row, taking its row lock for the transaction."""
+    async def _upsert_row(self, conn: AsyncConnection, repository_id: UUID) -> UUID:
+        """Insert or update the row, taking its row lock for the transaction; returns its id."""
         columns = [column for column in _MUTABLE_COLUMNS if column in self.model_fields_set]
-        insert_columns = ", ".join(["repository_key", "number", "owner", "repo", *columns])
+        insert_columns = ", ".join(["id", "repository_id", "number", "owner", "repo", *columns])
         insert_values = ", ".join(
-            [":key", ":number", ":owner", ":repo", *(f":{c}" for c in columns)]
+            [":id", ":repository_id", ":number", ":owner", ":repo", *(f":{c}" for c in columns)]
         )
         updates = ", ".join(
             [*(f"{c} = EXCLUDED.{c}" for c in columns), "updated_at = clock_timestamp()"]
         )
-        await conn.execute(
+        return await conn.scalar(
             text(
                 f"INSERT INTO pull_request ({insert_columns}) VALUES ({insert_values}) "
-                f"ON CONFLICT (repository_key, number) DO UPDATE SET {updates}"
+                f"ON CONFLICT (repository_id, number) DO UPDATE SET {updates} RETURNING id"
             ),
             {
-                **self._identity(),
+                "id": self.id or uuid7(),
+                "repository_id": repository_id,
+                "number": self.number,
                 "owner": self.owner,
                 "repo": self.repo,
                 **{column: getattr(self, column) for column in columns},
             },
         )
 
-    async def _insert_thread(self, conn: AsyncConnection, link: ThreadLink) -> None:
+    async def _insert_thread(
+        self, conn: AsyncConnection, pull_request_id: UUID, link: ThreadLink
+    ) -> None:
         await conn.execute(
             text(
-                "INSERT INTO pull_request_thread (repository_key, number, thread_id, role, source) "
-                "SELECT :key, :number, :thread_id, CASE WHEN EXISTS ("
+                "INSERT INTO pull_request_thread (pull_request_id, thread_id, role, source) "
+                "SELECT :pull_request_id, :thread_id, CASE WHEN EXISTS ("
                 "SELECT 1 FROM pull_request_thread "
-                "WHERE repository_key = :key AND number = :number AND role = 'primary'"
+                "WHERE pull_request_id = :pull_request_id AND role = 'primary'"
                 ") THEN 'secondary' ELSE 'primary' END, :source "
-                "ON CONFLICT (repository_key, number, thread_id) DO NOTHING"
+                "ON CONFLICT (pull_request_id, thread_id) DO NOTHING"
             ),
-            {**self._identity(), "thread_id": link.thread_id, "source": link.source},
+            {
+                "pull_request_id": pull_request_id,
+                "thread_id": link.thread_id,
+                "source": link.source,
+            },
         )
 
-    async def _replace_review(self, conn: AsyncConnection, review: ReviewLink) -> None:
+    async def _replace_review(
+        self, conn: AsyncConnection, pull_request_id: UUID, review: ReviewLink
+    ) -> None:
         params = {
-            **self._identity(),
+            "id": review.id or uuid7(),
+            "pull_request_id": pull_request_id,
             "reviewer_thread_id": review.reviewer_thread_id,
             "github_review_id": review.github_review_id,
             "url": review.url,
@@ -301,61 +362,17 @@ class PullRequest(BaseModel):
         await conn.execute(
             text(
                 "DELETE FROM pull_request_review "
-                f"WHERE repository_key = :key AND number = :number AND {same_identity}"
+                f"WHERE pull_request_id = :pull_request_id AND {same_identity}"
             ),
             params,
         )
         await conn.execute(
             text(
-                "INSERT INTO pull_request_review (repository_key, number, reviewer_thread_id, "
-                "github_review_id, url, head_sha, finding_count) VALUES (:key, :number, "
+                "INSERT INTO pull_request_review (id, pull_request_id, reviewer_thread_id, "
+                "github_review_id, url, head_sha, finding_count) VALUES (:id, :pull_request_id, "
                 ":reviewer_thread_id, :github_review_id, :url, :head_sha, :finding_count)"
             ),
             params,
-        )
-
-    async def fetch(self, conn: AsyncConnection) -> Self | None:
-        """This PR's stored row with its threads and reviews, read through ``conn``."""
-        row = (
-            (
-                await conn.execute(
-                    text(
-                        f"SELECT {_PULL_REQUEST_COLUMNS} FROM pull_request "
-                        "WHERE repository_key = :key AND number = :number"
-                    ),
-                    self._identity(),
-                )
-            )
-            .mappings()
-            .one_or_none()
-        )
-        if row is None:
-            return None
-        threads = (
-            await conn.execute(
-                text(
-                    f"SELECT {_THREAD_COLUMNS} FROM pull_request_thread "
-                    "WHERE repository_key = :key AND number = :number "
-                    "ORDER BY role = 'primary' DESC, linked_at, thread_id"
-                ),
-                self._identity(),
-            )
-        ).mappings()
-        reviews = (
-            await conn.execute(
-                text(
-                    f"SELECT {_REVIEW_COLUMNS} FROM pull_request_review "
-                    "WHERE repository_key = :key AND number = :number ORDER BY published_at, id"
-                ),
-                self._identity(),
-            )
-        ).mappings()
-        return type(self).model_validate(
-            {
-                **dict(row),
-                "threads": [dict(thread) for thread in threads],
-                "reviews": [dict(review) for review in reviews],
-            }
         )
 
 
