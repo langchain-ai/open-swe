@@ -303,17 +303,22 @@ async def stream_slack_thinking_steps(
             logger.warning("Slack Thinking Steps cleanup failed for run %s", run_id, exc_info=True)
 
 
+async def restore_slack_thinking_status(channel_id: str, thread_ts: str) -> bool:
+    """Restore the status Slack clears when the assistant posts a reply."""
+    return await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS)
+
+
 async def show_slack_thinking_status(
     *, client: LangGraphClient, thread_id: str, run_id: str, channel_id: str, thread_ts: str
 ) -> None:
     """Keep Slack's animated "Thinking..." thread status alive until the run ends."""
-    if not await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS):
+    if not await restore_slack_thinking_status(channel_id, thread_ts):
         return
 
     async def refresh() -> None:
         while True:
             await asyncio.sleep(_STATUS_REFRESH_SECONDS)
-            await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS)
+            await restore_slack_thinking_status(channel_id, thread_ts)
 
     refresher = asyncio.create_task(refresh())
     try:

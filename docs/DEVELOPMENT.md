@@ -63,7 +63,7 @@ LANGSMITH_API_KEY=""            # LangSmith → Settings → API Keys; also used
 LANGSMITH_TRACING="true"        # trace runs to LangSmith
 LANGSMITH_PROJECT=""            # optional project for traces and "View trace" links; default "default"
 
-ANTHROPIC_API_KEY=""            # any provider key, or LANGSMITH_GATEWAY_API_KEY for the LLM Gateway; see the installation guide
+ANTHROPIC_API_KEY=""            # any provider key; not needed if you use an LLM gateway (e.g. LangSmith Gateway; see the installation guide)
 
 GITHUB_APP_ID=""                # step 2
 GITHUB_APP_CLIENT_ID=""
@@ -84,7 +84,7 @@ DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session co
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
 ```
 
-`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. Provider keys, the LLM Gateway, and how the running model is chosen are in [Model providers and API keys](INSTALLATION.md#4-model-providers-and-api-keys). Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
+`LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys). How the running model is chosen is covered in the same section. Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
 ## 6. Run
 
@@ -126,6 +126,8 @@ Before reporting readiness, verify `/ok` on localhost, open the dashboard in a b
 **Slack.** With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@open_swe_you what's in the repo?`. It replies in a thread; ngrok's inspector at `http://localhost:4040` shows the event arriving.
 
 **GitHub.** With the tunnel running and the App's webhook pointed at it, comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub-triggered runs act as the commenting user, so that account has to have signed in to your local dashboard once. The App's **Advanced** tab lists every delivery and its response, and ngrok's inspector at `http://localhost:4040` shows what arrived.
+
+**Incidents.** Follow [Incidents setup](INSTALLATION.md#incidents) to enroll Slack channels. Set `SLACK_APP_ID`; anyone in a channel can pause or complete its incident, and asking the agent requires a connected Open SWE account. Incident turns run on the main `agent` graph and are dispatched straight from the Slack webhook, so `make dev` or `make dev-ui` is all that is needed.
 
 Record the worktree, process IDs, fixed tunnel domain, and state location in ignored `logs/local-dev/` notes in the primary checkout so the next session can reuse them.
 

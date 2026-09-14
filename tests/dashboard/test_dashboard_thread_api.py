@@ -301,6 +301,55 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert enriched["params"]["assistant_id"] == "agent"
 
 
+@pytest.mark.parametrize(
+    ("login", "visibility", "requested_admin", "expected_admin"),
+    [
+        ("workspace-admin", "private", False, True),
+        ("workspace-admin", "public", True, False),
+        ("teammate", "private", True, False),
+    ],
+)
+async def test_private_threads_created_by_admins_get_admin_permissions(
+    monkeypatch,
+    login: str,
+    visibility: str,
+    requested_admin: bool,
+    expected_admin: bool,
+) -> None:
+    created: dict[str, object] = {}
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Update settings"}]},
+            "config": {
+                "configurable": {
+                    "visibility": visibility,
+                    "admin_thread": requested_admin,
+                }
+            },
+        },
+    }
+
+    enriched = await thread_runs._enrich_run_start_command(
+        "new-tid",
+        login,
+        command,
+        metadata={},
+        creating=True,
+        email=f"{login}@example.com",
+    )
+
+    stamped = created["metadata"]
+    assert isinstance(stamped, dict)
+    assert stamped["visibility"] == visibility
+    assert (stamped.get("admin_thread") is True) is expected_admin
+    configurable = enriched["params"]["config"]["configurable"]
+    assert (configurable.get("admin_thread") is True) is expected_admin
+
+
 async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model(
     monkeypatch,
 ) -> None:
