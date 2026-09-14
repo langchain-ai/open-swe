@@ -98,11 +98,10 @@ async def slack_thread_reply(
         )
     if message_ts is None:
         if slack_error == "thread_not_found":
-            if thread_id:
-                await move_thread_to_dashboard(
-                    client, str(thread_id), str(channel_id), str(thread_ts)
-                )
-            return _dashboard_handoff(thread_id)
+            moved = bool(thread_id) and await move_thread_to_dashboard(
+                client, str(thread_id), str(channel_id), str(thread_ts)
+            )
+            return _dashboard_handoff(thread_id) if moved else _dashboard_handoff_failed()
         return {
             "success": False,
             "error": slack_error or "post failed",
@@ -124,6 +123,20 @@ async def _already_moved_to_dashboard(client: LangGraphClient, thread_id: str | 
         )
         return False
     return slack_thread_detached(thread_metadata(thread))
+
+
+def _dashboard_handoff_failed() -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": "Slack thread no longer exists and it could not be moved to the dashboard",
+        "moved_to_dashboard": False,
+        "retry": True,
+        "hint": (
+            "The Slack thread you were replying in is gone, so posting there cannot work, and "
+            "moving this thread to the dashboard failed. Retry once; if it fails again, give "
+            "your answer as your final response."
+        ),
+    }
 
 
 def _dashboard_handoff(thread_id: str | None) -> dict[str, Any]:

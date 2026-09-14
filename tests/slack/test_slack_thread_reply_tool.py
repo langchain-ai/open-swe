@@ -477,3 +477,34 @@ async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
 
     assert (await slack_reply_tool.slack_thread_reply("The answer"))["moved_to_dashboard"] is True
     post.assert_not_awaited()
+
+
+async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "T1",
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_active_slack_thread",
+        AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1.0"}),
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "post_slack_thread_reply_with_ts",
+        AsyncMock(return_value=(None, "thread_not_found")),
+    )
+    monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", AsyncMock(return_value=False))
+
+    result = await slack_reply_tool.slack_thread_reply("The answer")
+
+    assert result["moved_to_dashboard"] is False
+    assert result["retry"] is True
