@@ -54,7 +54,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "id": "openai:gpt-6-astra",
         "label": "GPT-6 Astra",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "xhigh",
+        "default_effort": "low",
         "supports_images": True,
     },
     {

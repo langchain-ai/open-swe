@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from agent.dashboard.agent_usage import record_reviewer_publication
+from agent.analytics.usage import record_reviewer_publication
 from agent.dashboard.team_settings import get_team_review_trace_links_enabled
 from agent.github.checks import review_check_conclusion
 from agent.github.thread_token import (
