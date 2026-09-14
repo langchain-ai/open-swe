@@ -12,7 +12,7 @@ import { useSession } from "@/lib/session"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { rememberAppLocation } from "@/lib/appLocation"
 import { AssistantProvider } from "@/features/assistant/AssistantProvider"
-import { AssistantShell } from "@/features/assistant/AssistantShell"
+import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 
 export const Route = createFileRoute("/assistant")({
   component: AssistantLayout,
@@ -55,9 +55,9 @@ function AssistantLayout() {
           : navigate({ to: "/assistant" }))
       }}
     >
-      <AssistantShell>
+      <AgentsShell user={session.data} activeThreadId={threadId}>
         <Outlet />
-      </AssistantShell>
+      </AgentsShell>
     </AssistantProvider>
   )
 }

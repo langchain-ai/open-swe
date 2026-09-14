@@ -65,6 +65,63 @@ test.afterEach(async ({ page }) => {
   await setExperimentalMode(page, false);
 });
 
+test("restores sidebar navigation, pins, view controls, and search", async ({
+  page,
+}) => {
+  const id = await startSlackThread(page, "Add a greet() helper and open a PR");
+  await waitForThreadIdle(page, id);
+  await page.goto(`/assistant/${id}`);
+  const sidebar = page.locator("[data-sidebar-frame]");
+  for (const path of ["threads", "skills", "automations", "reviews"]) {
+    await expect(
+      sidebar.locator(`nav a[href^="/agents/${path}"]`),
+    ).toBeVisible();
+  }
+  await expect(sidebar.getByRole("link", { name: "New Thread" })).toBeVisible();
+  await sidebar.getByRole("button", { name: "Projects options" }).click();
+  await expect(
+    page.getByRole("menuitemcheckbox", { name: "Show archived" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("menuitemcheckbox", { name: "Show automations" }),
+  ).toBeVisible();
+  await page.getByRole("menuitemradio", { name: "In one list" }).click();
+  await page.keyboard.press("Escape");
+  await expect(
+    sidebar.getByRole("button", { name: "Recents", exact: true }),
+  ).toBeVisible();
+
+  const row = sidebar.locator(`a[href="/assistant/${id}"]`).first();
+  await row.hover();
+  await row.getByRole("button", { name: "Pin thread" }).click();
+  await expect(
+    sidebar.getByRole("button", { name: "Pinned", exact: true }),
+  ).toBeVisible();
+  await row.hover();
+  await row.getByRole("button", { name: "Unpin thread" }).click();
+  await expect(
+    sidebar.getByRole("button", { name: "Pinned", exact: true }),
+  ).toHaveCount(0);
+
+  await composer(page).fill("Keep this draft when opening a new thread.");
+  await sidebar.getByRole("button", { name: "Search", exact: true }).click();
+  await page.getByRole("combobox").fill("New thread");
+  await page.getByRole("option", { name: /New thread/ }).click();
+  await expect(page).toHaveURL(/\/assistant$/);
+  await expect(composer(page)).toHaveValue("");
+  await switchThread(page, id);
+  await expect(composer(page)).toHaveValue(
+    "Keep this draft when opening a new thread.",
+  );
+
+  await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar).toHaveCount(0);
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(sidebar).toBeVisible();
+  await sidebar.getByRole("link", { name: "Skills", exact: true }).click();
+  await expect(page).toHaveURL(/\/agents\/skills$/);
+});
+
 test("waits for the profile and hydrates the transcript only once", async ({
   page,
 }) => {

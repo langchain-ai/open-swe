@@ -24,6 +24,7 @@ import type {
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
+import { chatRoutes } from "@/lib/chatRoutes"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
@@ -863,8 +864,9 @@ export function useDeleteAgentThread() {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
       invalidateAgentThreadLists(queryClient)
       const path = window.location.pathname
-      if (path.includes(`/agents/${threadId}`)) {
-        navigate({ to: "/agents" })
+      const chat = chatRoutes(path)
+      if (path === `${chat.home}/${threadId}`) {
+        navigate({ to: chat.home })
       }
     },
   })
