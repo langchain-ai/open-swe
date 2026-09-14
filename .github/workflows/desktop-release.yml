@@ -23,10 +23,10 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout release tag
+      - name: Checkout workflow ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Resolve desktop release
@@ -36,6 +36,11 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           [[ "$RELEASE_TAG" =~ ^desktop-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          release_sha=$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")
+          git fetch --force origin refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$release_sha" refs/remotes/origin/main || exit 1
+          git checkout --detach "$release_sha"
           version="${RELEASE_TAG#desktop-v}"
           label="Open SWE Desktop v${version}"
           if gh release view "$RELEASE_TAG" --json assets >/tmp/release-assets.json 2>/dev/null; then
