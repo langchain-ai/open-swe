@@ -455,7 +455,7 @@ it("explains incomplete coverage on focus and removes the indicator when costs r
   act(() => trigger.focus())
   const tooltip = await screen.findByText(/Recorded cost so far/)
   expect(tooltip.textContent).toContain(
-    "Costs are missing for 1 of 2 invocations."
+    "Costs are missing for 1 of 2 invocations (50%)."
   )
   expect(tooltip.textContent).toContain(
     "Costs are partial for 1 of 2 invocations."

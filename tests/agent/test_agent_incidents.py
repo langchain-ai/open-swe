@@ -10,9 +10,9 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from agent.dashboard.workspace_mcps import workspace_mcp_source
 from agent.incidents import runtime, service, turns
 from agent.incidents.models import Incident, IncidentPolicy
+from agent.mcp.workspace import workspace_mcp_source
 from tests.agent.test_agent_assembly_context import (
     _capture_create_deep_agent_kwargs,
 )

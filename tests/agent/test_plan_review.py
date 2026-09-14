@@ -20,7 +20,7 @@ def test_dashboard_plan_url_none_without_thread() -> None:
 
 
 def test_format_comments_numbers_and_skips_blank() -> None:
-    from agent.dashboard.plan_store import format_plan_comments
+    from agent.threads.plan_store import format_plan_comments
 
     text = format_plan_comments(
         [
@@ -37,7 +37,7 @@ def test_format_comments_numbers_and_skips_blank() -> None:
 
 
 def test_format_comments_includes_highlight_and_surrounding_context() -> None:
-    from agent.dashboard.plan_store import format_plan_comments
+    from agent.threads.plan_store import format_plan_comments
 
     text = format_plan_comments(
         [
@@ -64,8 +64,8 @@ def test_format_comments_includes_highlight_and_surrounding_context() -> None:
 
 
 def test_format_comments_empty() -> None:
-    from agent.dashboard.plan_api import CommentBody, TextAnchor
-    from agent.dashboard.plan_store import format_plan_comments
+    from agent.threads.plan_api import CommentBody, TextAnchor
+    from agent.threads.plan_store import format_plan_comments
 
     assert format_plan_comments([]) == ""
     anchor = TextAnchor(
@@ -86,7 +86,7 @@ def test_format_comments_empty() -> None:
 
 
 def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:
-    from agent.dashboard.plan_api import _plan_approved_slack_blocks, _plan_approved_slack_text
+    from agent.threads.plan_api import _plan_approved_slack_blocks, _plan_approved_slack_text
 
     text = _plan_approved_slack_text(2, "Alice")
 
@@ -100,7 +100,7 @@ def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:
 
 
 def test_plan_comment_helpers_exported() -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     assert plan_store.PLAN_COMMENTS_NAMESPACE == ["plan", "comments"]
     assert callable(plan_store.add_plan_comment)
@@ -116,7 +116,7 @@ def _fake_client(store: Any) -> Any:
 async def test_list_plan_comments_swallows_errors_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     class _Store:
         async def search_items(self, *a: Any, **k: Any) -> Any:
@@ -127,7 +127,7 @@ async def test_list_plan_comments_swallows_errors_by_default(
 
 
 async def test_list_plan_comments_raises_with_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     class _Store:
         async def search_items(self, *a: Any, **k: Any) -> Any:
@@ -139,7 +139,7 @@ async def test_list_plan_comments_raises_with_flag(monkeypatch: pytest.MonkeyPat
 
 
 async def test_clear_plan_comments_deletes_each(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     deleted: list[str] = []
 
@@ -410,7 +410,7 @@ async def test_list_workflow_approvals_requires_readable_thread(
 ) -> None:
     from fastapi import HTTPException
 
-    from agent.dashboard import workflow_approval_api
+    from agent.threads import workflow_approval_api
 
     async def fake_metadata(thread_id: str) -> dict[str, Any]:
         assert thread_id == "thread-1"
@@ -429,7 +429,7 @@ async def test_list_workflow_approvals_requires_readable_thread(
 async def test_list_workflow_approvals_returns_records(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import workflow_approval_api
+    from agent.threads import workflow_approval_api
 
     async def fake_metadata(thread_id: str) -> dict[str, Any]:
         assert thread_id == "thread-1"
@@ -464,7 +464,7 @@ def test_save_plan_exported_and_wired() -> None:
 
 
 def test_plan_status_constants() -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     assert plan_store.PLAN_STATUS_READY == "ready"
     assert plan_store.PLAN_STATUS_SHARED == "shared"
@@ -474,7 +474,7 @@ def test_plan_status_constants() -> None:
 
 
 def test_plan_file_path_for_thread_uses_plans_dir_and_slug() -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     path = plan_store.plan_file_path_for_thread("Thread ABC/123")
     assert path.startswith("/workspace/plans/")
@@ -540,7 +540,7 @@ def test_plan_mode_middleware_self_deactivation_via_state() -> None:
 
 
 async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     existing = {
         "html": "# Plan",
@@ -568,7 +568,7 @@ async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.Monk
 
 
 async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     saved: dict[str, Any] = {}
     merged: dict[str, Any] = {}
@@ -614,7 +614,7 @@ async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.Monkey
 async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     existing = {
         "html": "# Old report",
@@ -644,7 +644,7 @@ async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
 
 
 async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     cleared: list[str] = []
 
@@ -672,7 +672,7 @@ async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyP
 async def test_save_plan_content_can_skip_plan_mode_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_store
+    from agent.threads import plan_store
 
     merged: dict[str, Any] = {}
 
@@ -696,7 +696,7 @@ async def test_save_plan_content_can_skip_plan_mode_metadata(
 
 
 async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     async def fake_meta(thread_id: str) -> dict[str, Any]:
         return {"source": "slack", "github_login": "owner"}
@@ -733,7 +733,7 @@ def _patch_update_plan_deps(
     saved: dict[str, Any],
     sandbox: dict[str, Any],
 ) -> None:
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     async def fake_meta(thread_id: str) -> dict[str, Any]:
         return metadata
@@ -770,7 +770,7 @@ def _patch_update_plan_deps(
 async def test_update_plan_saves_and_mirrors_sandbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     saved: dict[str, Any] = {}
     sandbox: dict[str, Any] = {}
@@ -800,7 +800,7 @@ async def test_update_plan_saves_and_mirrors_sandbox(
 async def test_update_plan_rejects_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import HTTPException
 
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     _patch_update_plan_deps(monkeypatch, metadata={}, content={}, saved={}, sandbox={})
     with pytest.raises(HTTPException) as exc:
@@ -813,7 +813,7 @@ async def test_update_plan_rejects_empty(monkeypatch: pytest.MonkeyPatch) -> Non
 async def test_update_plan_blocked_once_approved(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import HTTPException
 
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     _patch_update_plan_deps(
         monkeypatch,
@@ -832,7 +832,7 @@ async def test_update_plan_blocked_once_approved(monkeypatch: pytest.MonkeyPatch
 async def test_approve_plan_hides_unreadable_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import HTTPException
 
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     async def fake_meta(thread_id: str) -> dict[str, Any]:
         return {"source": "unknown", "github_login": "owner"}
@@ -848,7 +848,7 @@ async def test_approve_plan_hides_unreadable_thread(monkeypatch: pytest.MonkeyPa
 async def test_any_participant_can_approve_and_dispatch_published_html(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     dispatched: dict[str, Any] = {}
 
@@ -894,7 +894,7 @@ async def test_any_participant_can_approve_and_dispatch_published_html(
 async def test_concurrent_plan_approvals_dispatch_once(monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     state = {"source": "dashboard", "plan_mode": True, "plan_status": "ready"}
     dispatches: list[str] = []
@@ -947,7 +947,7 @@ async def test_concurrent_plan_approvals_dispatch_once(monkeypatch: pytest.Monke
 async def test_failed_approval_dispatch_rolls_back_and_can_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     state = {"source": "dashboard", "plan_mode": True, "plan_status": "ready"}
     status_updates: list[tuple[str, Any]] = []
@@ -1004,7 +1004,7 @@ async def test_failed_approval_dispatch_rolls_back_and_can_retry(
 async def test_approve_plan_posts_slack_approval_notice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     posted: dict[str, Any] = {}
     dispatched: dict[str, Any] = {}
@@ -1093,7 +1093,7 @@ async def test_approve_plan_posts_slack_approval_notice(
 async def test_approve_plan_aborts_when_plan_read_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     dispatched: list[Any] = []
 
@@ -1132,7 +1132,7 @@ async def test_approve_plan_rejects_shared_content(
 ) -> None:
     from fastapi import HTTPException
 
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     dispatched: list[Any] = []
 
@@ -1158,7 +1158,7 @@ async def test_approve_plan_rejects_shared_content(
 async def test_reject_plan_can_mark_revising_without_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     statuses: list[tuple[str, bool]] = []
     dispatched: list[Any] = []
@@ -1198,7 +1198,7 @@ async def test_reject_plan_rejects_stale_decision(
 ) -> None:
     from fastapi import HTTPException
 
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     statuses: list[tuple[str, bool]] = []
 
@@ -1229,7 +1229,7 @@ async def test_reject_plan_rejects_shared_content(
 ) -> None:
     from fastapi import HTTPException
 
-    from agent.dashboard import plan_api
+    from agent.threads import plan_api
 
     dispatched: list[Any] = []
 

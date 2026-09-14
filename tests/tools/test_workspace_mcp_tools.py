@@ -6,8 +6,8 @@ import pytest
 from cryptography.fernet import Fernet
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-from agent.dashboard import workspace_mcps as settings
 from agent.mcp import MCPConnectionUpdate, runtime
+from agent.mcp import workspace as settings
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.tool_loaders import workspace_mcp as loader
 from agent.utils import ttl_cache

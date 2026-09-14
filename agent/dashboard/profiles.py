@@ -15,12 +15,14 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, model_validator
 
 from agent.dashboard.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
+    require_session,
 )
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
@@ -378,3 +380,27 @@ async def has_access_token_record(login: str) -> bool:
 
 async def list_profiles() -> list[dict[str, Any]]:
     return await search_values(PROFILES_NAMESPACE, limit=1000)
+
+
+router = APIRouter(tags=["profiles"])
+# Not agent.dashboard.deps: that module imports repo_access, which imports this one.
+_SESSION_DEP = Depends(require_session)
+
+
+@router.get("/profile")
+async def get_my_profile(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    profile = await get_profile(session["sub"])
+    if not profile:
+        return {}
+    return normalize_profile_for_response(profile)
+
+
+@router.put("/profile")
+async def put_my_profile(
+    update: ProfileUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    update.validate_pairing()
+    return await upsert_profile(session["sub"], session.get("email") or "", update)

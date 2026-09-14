@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard.threads import api as thread_api
 from agent.github import pull_request_context
+from agent.threads import handlers
 from tests.conftest import patch_thread_module
 
 
@@ -257,7 +257,7 @@ async def test_thread_context_requires_tracked_pull_before_token_lookup(
     patch_thread_module(monkeypatch, "_github_token_for_login", token)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_pull_request_context(
+        await handlers.get_dashboard_thread_pull_request_context(
             "thread-1", "owner", repo_full_name="other/repo", number=8
         )
 
@@ -277,7 +277,7 @@ async def test_thread_context_fetches_tracked_pull(monkeypatch: pytest.MonkeyPat
     patch_thread_module(monkeypatch, "_github_token_for_login", token)
     patch_thread_module(monkeypatch, "get_pull_request_context", scan)
 
-    result = await thread_api.get_dashboard_thread_pull_request_context(
+    result = await handlers.get_dashboard_thread_pull_request_context(
         "thread-1", "owner", repo_full_name="o/r", number=7
     )
 
