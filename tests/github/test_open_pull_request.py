@@ -254,6 +254,46 @@ def test_uses_user_token_for_slack_with_login(
     }
 
 
+def test_workspace_repository_check_retries_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {"source": "slack", "github_login": "bob"},
+        metadata={"visibility": "public", "owner_type": "user", "owner_login": "Alice"},
+    )
+    monkeypatch.setattr(
+        "agent.dashboard.profiles.get_valid_access_token", AsyncMock(return_value="alice-token")
+    )
+    monkeypatch.setattr(
+        opr, "get_github_app_installation_token", AsyncMock(return_value="workspace-token")
+    )
+    monkeypatch.setattr(opr, "_record_pr_telemetry", AsyncMock())
+    monkeypatch.setattr(opr, "get_plan_content", AsyncMock(return_value=None))
+    responses = [
+        httpx2.Response(
+            403,
+            json={"message": "API rate limit exceeded for installation ID"},
+            headers={"X-RateLimit-Remaining": "0", "Retry-After": "0"},
+        ),
+        httpx2.Response(200, json={"repositories": [{"full_name": "langchain-ai/open-swe"}]}),
+    ]
+
+    async def github(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/installation/repositories":
+            return responses.pop(0)
+        if request.method == "POST":
+            return httpx2.Response(201, json={"number": 1, "user": {"login": "Alice"}})
+        return httpx2.Response(200, json={"name": "existing-branch", "private": False})
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
+    monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr("agent.github.http.asyncio.sleep", AsyncMock())
+
+    result = _open()
+
+    assert result["success"] is True
+    assert responses == []
+
+
 def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117", "draft_prs": False})
     _stub_token(monkeypatch)
@@ -423,6 +463,71 @@ def test_404_create_returns_actionable_access_diagnostic(
     assert (
         "open_pull_request_failed code=github_app_access_missing_or_repo_not_found" in caplog.text
     )
+
+
+@pytest.mark.asyncio
+async def test_preflight_retries_rate_limit_before_reporting_access_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = [
+        httpx2.Response(
+            403,
+            json={"message": "API rate limit exceeded for installation ID"},
+            headers={"X-RateLimit-Remaining": "0", "Retry-After": "0"},
+        ),
+        httpx2.Response(200, json={"private": True}),
+        httpx2.Response(200, json={"name": "main"}),
+        httpx2.Response(200, json={"name": "open-swe/feature"}),
+    ]
+    requests: list[httpx2.Request] = []
+
+    async def github(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return responses.pop(0)
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
+    monkeypatch.setattr("agent.github.http.asyncio.sleep", AsyncMock())
+
+    result = await opr._preflight_pr_access(
+        client=client,
+        token="token",
+        token_kind="user",
+        owner="langchain-ai",
+        repo="open-swe",
+        head="open-swe/feature",
+        base="main",
+    )
+
+    assert result is None
+    assert [request.url.path for request in requests] == [
+        "/repos/langchain-ai/open-swe",
+        "/repos/langchain-ai/open-swe",
+        "/repos/langchain-ai/open-swe/branches/main",
+        "/repos/langchain-ai/open-swe/branches/open-swe/feature",
+    ]
+
+
+def test_exhausted_preflight_rate_limit_is_not_reported_as_missing_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+    _stub_token(monkeypatch)
+    rate_limit = _FakeResponse(
+        403,
+        {"message": "API rate limit exceeded for installation ID"},
+        text='{"message":"API rate limit exceeded for installation ID"}',
+        headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1789113600"},
+    )
+    monkeypatch.setattr(opr, "github_request", AsyncMock(return_value=rate_limit))
+    client = _FakeClient(post=_FakeResponse(201, {}))
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is False
+    assert "temporary GitHub API rate-limit window" in result["error"]
+    assert "not installed on, granted access" not in result["error"]
+    assert client.post_calls == []
 
 
 def test_preflight_head_branch_404_reports_branch_not_pushed(
