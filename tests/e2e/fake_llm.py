@@ -1022,6 +1022,14 @@ def _is_move_followup(text: str) -> bool:
     return "E2E_DESTINATION_FOLLOWUP" in text or "E2E_SOURCE_RETAG" in text
 
 
+def _is_pull_request_fix(text: str) -> bool:
+    """A dashboard PR-fix dispatch, whose prompt names an existing PR to repair.
+
+    Without this it lands on the catch-all implement script and opens a *new* PR,
+    which renumbers the fake store under whichever spec runs next."""
+    return "Fix merge conflicts and failing CI checks on" in text
+
+
 def _is_approval(text: str) -> bool:
     t = text.lower()
     return "the plan has been approved" in t or (
@@ -1084,6 +1092,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
     ),
     ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
+    ScriptRule("followup", lambda ctx: _is_pull_request_fix(ctx.first_text)),
     ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
     ScriptRule("followup", lambda _ctx: True),
 )
