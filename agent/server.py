@@ -172,6 +172,7 @@ from agent.tools import (
     list_threads,
     manage_baby_sit,
     manage_code_channel,
+    manage_incident,
     manage_thread,
     mark_question_answered,
     notify_automation_channel,
@@ -362,6 +363,21 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     }
 )
 
+# Automatic incident turns are triggered by whatever lands in a public channel, so the
+# prompt cannot be the only boundary: they get the plan-mode research toolset and no
+# Slack posting, PR, HTTP, delegation, or incident-control tools. record_incident_report
+# posts for them.
+# An authorized responder's explicit request restores the normal toolset.
+INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = PLAN_MODE_EXCLUDED_TOOLS | frozenset(
+    {
+        "manage_code_channel",
+        "manage_incident",
+        "slack_add_reaction",
+        "slack_attach_html",
+        "slack_thread_reply",
+    }
+)
+
 
 def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     """Provider guards for subagent model calls.
@@ -396,10 +412,14 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
     return name.startswith("slack_") or name in {
         "get_thread",
         "manage_code_channel",
+        "manage_incident",
         "list_threads",
         "manage_thread",
         "notify_automation_channel",
+        "read_incident",
         "read_user_settings",
+        "record_incident_report",
+        "search_incidents",
     }
 
 
@@ -412,6 +432,7 @@ def _general_purpose_subagent(
     sandbox_file_downloads: bool = False,
     offloading: ConversationOffloadingMiddleware | None = None,
     workspace_skills: WorkspaceSkillsMiddleware | None = None,
+    incident_middleware: AgentMiddleware | None = None,
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -430,6 +451,7 @@ def _general_purpose_subagent(
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),
                 *([offloading] if offloading else []),
@@ -597,7 +619,7 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
     """Return whether the run has trusted Slack source context."""
-    if cfg.source not in {"slack", "schedule"} or cfg.slack_thread is None:
+    if cfg.source not in {"slack", "schedule", "incidents_agent"} or cfg.slack_thread is None:
         return False
     return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
 
@@ -883,6 +905,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(bindable_config(config))
 
+    from agent.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
+
+    incident_session: IncidentSession | None = None
+    if cfg.source == "incidents_agent":
+        incident_session = await load_incident_session(config)
+        cfg.slack_thread = incident_session.slack_thread
+        configurable["slack_thread"] = cfg.slack_thread.dump()
     profile_login = resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
@@ -1132,6 +1161,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     slack_tools = [
         manage_code_channel,
+        manage_incident,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
@@ -1169,6 +1199,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         report_platform_issue,
         schedule_thread_wakeup,
         manage_code_channel,
+        manage_incident,
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
@@ -1188,6 +1219,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    incident_automatic = incident_session is not None and incident_session.explicit_request is None
+    if incident_session is not None:
+        static_tools.extend(incident_session.tools)
+    if incident_automatic:
+        static_tools = [
+            tool
+            for tool in static_tools
+            if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+        ]
     static_tools = apply_tool_descriptions(static_tools)
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
@@ -1290,6 +1330,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
                 offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
+                incident_middleware=IncidentMiddleware(incident_session)
+                if incident_session is not None
+                else None,
             ),
         ],
         skills=skill_sources,
@@ -1320,16 +1363,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     model_selection=model_selection,
                     routing_defaults=routing_defaults,
                 ),
+                *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
                 *([workspace_skills] if workspace_skills else []),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
                 ValidateImageReadsMiddleware(),
-                ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
+                ModelCallLimitMiddleware(
+                    run_limit=incident_session.policy.max_model_calls
+                    if incident_session is not None
+                    else MODEL_CALL_RECURSION_LIMIT,
+                    exit_behavior="end",
+                ),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(
                     excluded=(
                         STOP_SUMMARY_EXCLUDED_TOOLS
                         if stop_summary_mode
+                        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+                        if incident_automatic
                         else DEEP_AGENT_EXCLUDED_TOOLS
                     )
                 ),

@@ -33,6 +33,7 @@ import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedS
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { useRepos } from "@/lib/profile"
+import { IncidentSettings } from "@/features/incidents/IncidentSettings"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -79,6 +80,10 @@ function AdminPage() {
       <FableSection />
 
       <TriggerReviewSection />
+
+      <div id="incidents" className="scroll-mt-8">
+        <IncidentSettings />
+      </div>
 
       <RunningAgentsSection />
 
