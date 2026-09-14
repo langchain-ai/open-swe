@@ -45,6 +45,13 @@ def configured() -> bool:
     return uri() is not None
 
 
+def require_configured() -> None:
+    if not configured():
+        raise RuntimeError(
+            "POSTGRES_URI is required: pull request and repository records are stored in PostgreSQL"
+        )
+
+
 def engine() -> AsyncEngine:
     global _ENGINE, _ENGINE_URI
     database_uri = uri()

@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import logging
 import re
-from typing import Any
+from typing import Any, Literal
 
 import httpx2
 
@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "GitHubAuthError",
     "OPEN_SWE_TAGS",
+    "PrState",
     "build_pr_prompt",
+    "derive_pr_state",
     "describe_open_swe_tags",
     "extract_pr_context",
     "fetch_github_thread_participants",
@@ -45,6 +47,8 @@ def _load_open_swe_tags() -> tuple[str, ...]:
 
 
 OPEN_SWE_TAGS = _load_open_swe_tags()
+
+PrState = Literal["open", "draft", "merged", "closed"]
 
 # Deployments sharing a workspace each own a distinct handle, so a tag must not
 # match when it is only a prefix of a longer one (@openswe vs @openswe-preview).
@@ -103,7 +107,7 @@ def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool
     return hmac.compare_digest(expected, signature)
 
 
-def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> str:
+def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> PrState:
     """Map GitHub PR fields to the dashboard's pr_state vocabulary."""
     if merged:
         return "merged"

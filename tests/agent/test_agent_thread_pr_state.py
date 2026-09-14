@@ -6,6 +6,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent import pull_requests
 from agent.webhooks import common as webhook_common
 
 
@@ -14,14 +15,26 @@ async def _unlocked(*args, **kwargs):
     yield
 
 
+@pytest.fixture(autouse=True)
+async def _pr_registry(registry_db_if_available: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run against PostgreSQL when configured, else the registry-unavailable fallback.
+
+    The registry reads threads through its own client binding, so point it at
+    whichever fake the test installed on the webhook module.
+    """
+    monkeypatch.setattr(pull_requests, "langgraph_client", lambda: webhook_common.get_client())
+
+
 def _pr_payload(*, state: str, merged: bool = False, draft: bool = False) -> dict[str, Any]:
     return {
+        "repository": {"full_name": "lc/repo"},
         "pull_request": {
+            "number": 7,
             "html_url": "https://github.com/lc/repo/pull/7",
             "state": state,
             "merged": merged,
             "draft": draft,
-        }
+        },
     }
 
 

@@ -33,6 +33,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.database.analytics import activate_reporting
     from agent.database.analytics import close as close_analytics
     from agent.database.analytics import migrate as migrate_analytics
+    from agent.database.postgres import require_configured
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
 
@@ -40,8 +41,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    require_configured()
+    await migrate_analytics()
     try:
-        await migrate_analytics()
         await activate_reporting()
         await start_worker()
     except Exception:  # noqa: BLE001
