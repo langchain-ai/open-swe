@@ -51,6 +51,7 @@ async def _start(invocation_id="run"):
         github_login="octo",
         user_email="octo@example.com",
         github_user_id=123,
+        display_name="Octo Cat",
         model_id="model",
         effort=None,
         source="dashboard",
@@ -97,6 +98,7 @@ async def test_queued_completion_and_cost_are_accounted_before_delivery(
     await _deliver(transaction)
     report = await _report()
     row = report["rows"][0]
+    assert row["user"]["name"] == "Octo Cat"
     assert row["invocations"] == 1
     assert row["total_tokens"] == 150
     assert row["total_cost_usd"] == 1.25
