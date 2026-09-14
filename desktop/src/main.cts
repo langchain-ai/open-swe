@@ -175,9 +175,12 @@ function setUpdateState(
   }
 }
 
-function checkForUpdates() {
+function checkForUpdates(): ReturnType<typeof autoUpdater.checkForUpdates> {
+  if (updateChannelChange) {
+    return updateChannelChange.then(() => checkForUpdates());
+  }
   lastUpdateCheck = Date.now();
-  updateCheck ??= (updateChannelChange ?? Promise.resolve())
+  updateCheck ??= Promise.resolve()
     .then(() => configureUpdateFeed(updateChannel))
     .then(async () => {
       const generation = updateCheckGeneration;
