@@ -53,6 +53,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClie
     monkeypatch.setattr(download_tool, "resolve_sandbox_work_dir", work_dir)
     monkeypatch.setattr(download_tool, "unwrap_sandbox_backend", lambda value: value)
     monkeypatch.setattr(download_tool, "get_async_sandbox_client", lambda: client)
+    monkeypatch.setattr(download_tool, "dashboard_base_url", lambda: "")
     return client
 
 
@@ -103,6 +104,37 @@ async def test_create_download_url_defaults_to_a_non_expiring_link(
                 "expires_in_seconds": None,
                 "content_type": None,
                 "content_disposition": "attachment",
+            },
+        )
+    ]
+
+
+async def test_create_download_url_returns_short_dashboard_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _Backend()
+    _configure(monkeypatch, backend)
+    stored: list[tuple[object, str, dict[str, Any]]] = []
+
+    async def put_value(namespace: object, key: str, value: dict[str, Any]) -> None:
+        stored.append((namespace, key, value))
+
+    monkeypatch.setattr(download_tool, "dashboard_base_url", lambda: "https://openswe.example")
+    monkeypatch.setattr(download_tool, "put_value", put_value)
+    monkeypatch.setattr(download_tool.secrets, "token_urlsafe", lambda _length: "short-handle")
+
+    result = await download_tool.create_sandbox_file_download_url("result.zip")
+
+    assert result["url"] == "https://openswe.example/sandbox-download/short-handle"
+    assert stored == [
+        (
+            ("sandbox_downloads",),
+            "short-handle",
+            {
+                "thread_id": "thread-1",
+                "sandbox_id": "sandbox-1",
+                "url": "https://downloads.example/file?token=secret",
+                "expires_at": "2026-08-20T12:00:00Z",
             },
         )
     ]
