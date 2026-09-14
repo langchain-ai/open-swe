@@ -355,7 +355,7 @@ function CloudAgentsPage() {
             weight="bold"
             aria-hidden
           />
-          Defaults saved
+          Changes saved
         </div>
       )}
     </AppShell>
