@@ -71,7 +71,11 @@ def create_app() -> FastAPI:
             allow_origins=allowed_origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
+            # Scoped to what the dashboard frontend actually sends (ui/src/lib/api.ts
+            # etc). With allow_credentials=True, a "*" here doesn't literally send a
+            # wildcard — the middleware reflects back whatever the request asks for
+            # in Access-Control-Request-Headers, which is broader than intended.
+            allow_headers=["Content-Type", "Authorization"],
         )
     add_trace_resource_names(app)
     app.include_router(dashboard_router)
