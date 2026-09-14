@@ -1,9 +1,10 @@
-"""After-agent middleware that persists run usage telemetry."""
+"""Persist usage for completed turns and terminal model failures."""
 
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain.agents.middleware import AgentState, ModelRequest, ModelResponse
+from langchain_core.exceptions import ModelAuthenticationError
 from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 
@@ -20,7 +21,24 @@ class RecordRunUsageMiddleware(OpenSWEMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        response = await handler(request)
+        try:
+            response = await handler(request)
+        except Exception as exc:
+            cfg = RunConfig.from_runtime()
+            if cfg.invocation_id and cfg.thread_id:
+                await finalize_agent_invocation_usage(
+                    invocation_id=cfg.invocation_id,
+                    thread_id=cfg.thread_id,
+                    state=dict(request.state),
+                    status="error",
+                    failure_code=(
+                        "authentication_rejected"
+                        if isinstance(exc, ModelAuthenticationError)
+                        or getattr(exc, "status_code", None) == 401
+                        else None
+                    ),
+                )
+            raise
         invocation_id = RunConfig.from_runtime().invocation_id
         if invocation_id:
             for message in response.result:
