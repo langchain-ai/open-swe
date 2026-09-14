@@ -95,6 +95,33 @@ describe("ModelPicker", () => {
     ).toBeTruthy()
   })
 
+  it("shows the routed mode on the trigger and the model on hover", () => {
+    render(
+      <ModelPicker
+        models={MODELS}
+        selection={null}
+        onSelectionChange={vi.fn()}
+        routed={{ route: "fast", modelId: "google_genai:gemini-3.8-flash" }}
+      />
+    )
+
+    const trigger = screen.getByRole("button", { name: "Auto Fast" })
+    expect(trigger).toBeTruthy()
+    expect(trigger.title).toBe("Routed model: Gemini 3.8 Flash")
+  })
+
+  it("shows plain Auto when no routed model is known yet", () => {
+    render(
+      <ModelPicker
+        models={MODELS}
+        selection={null}
+        onSelectionChange={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
+  })
+
   it("shows the selected model's context, reasoning and model row", () => {
     const { panel } = openPicker()
 
