@@ -42,11 +42,3 @@ jobs:
       - name: Force-push the typechecked commit to prod
         run: |
           git push --force origin HEAD:refs/heads/prod
-
-  release-desktop-nightly:
-    needs: [typecheck, promote]
-    uses: ./.github/workflows/desktop-release.yml
-    with:
-      release_ref: ${{ needs.typecheck.outputs.sha }}
-      nightly: true
-    secrets: inherit
