@@ -9,7 +9,7 @@ import type {
   UsageLeaderboardRow,
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Select,
   SelectContent,
@@ -575,6 +575,9 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <Avatar>
+        {row.user.avatar_url && (
+          <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
+        )}
         <AvatarFallback>{initials}</AvatarFallback>
       </Avatar>
       <div className="flex min-w-0 flex-col">

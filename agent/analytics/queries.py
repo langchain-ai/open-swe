@@ -202,7 +202,9 @@ WITH runs AS (
                 'name', CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
                     THEN name ELSE 'Open SWE user' END,
                 'github_login', CASE WHEN :admin OR is_current THEN NULLIF(github_login, '') END,
-                'email', CASE WHEN is_current THEN NULLIF(email, '') END),
+                'email', CASE WHEN is_current THEN NULLIF(email, '') END,
+                'avatar_url', CASE WHEN NULLIF(github_login, '') IS NOT NULL
+                    THEN 'https://github.com/' || github_login || '.png?size=80' END),
             'favorite_model', favorite_model,
             'avg_invocation_seconds', avg_invocation_seconds,
             'avg_run_seconds', avg_invocation_seconds,
