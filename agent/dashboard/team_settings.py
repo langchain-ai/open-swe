@@ -123,8 +123,6 @@ class TeamSettingsUpdate(BaseModel):
             probability = self.default_agent_routing_fast_alt_probability
             if probability is not None and not 0.0 <= probability <= 1.0:
                 raise ValueError("fast_alt probability must be between 0.0 and 1.0")
-        else:
-            self.default_agent_routing_fast_alt_probability = None
         self.default_reviewer_model, self.default_reviewer_reasoning_effort = (
             _normalize_stale_model_pair(
                 self.default_reviewer_model,
@@ -362,8 +360,13 @@ async def get_team_settings() -> dict[str, Any]:
     if value is None:
         return defaults
     # Skip None-valued model fields so legacy records (or PUTs that cleared the
-    # selection) still surface the hardcoded default instead of a null.
-    overlay = {k: v for k, v in value.items() if v is not None}
+    # selection) still surface the hardcoded default instead of a null, but keep
+    # an explicit 0 fast_alt probability: zero is a valid "experiment off".
+    overlay = {
+        k: v
+        for k, v in value.items()
+        if v is not None or k == "default_agent_routing_fast_alt_probability"
+    }
     merged = {**defaults, **overlay}
     for stale_field in (
         "trigger_mode",
@@ -500,19 +503,25 @@ async def get_team_agent_routing_models() -> dict[str, tuple[str, str]]:
         for tier in tiers
     }
     fast_alt_probability = settings.get("default_agent_routing_fast_alt_probability")
-    # Only include fast_alt when the experiment is configured with a nonzero
-    # split; the middleware skips the alt model when it's absent.
+    # An explicit 0 probability is a valid "experiment off" configuration; only
+    # drop the alt model when no probability (or an unparseable one) was stored
+    # or the alt model was explicitly cleared.
     if (
-        not isinstance(fast_alt_probability, int | float)
-        or isinstance(fast_alt_probability, bool)
-        or not 0.0 < float(fast_alt_probability) <= 1.0
+        isinstance(fast_alt_probability, bool)
+        or not isinstance(fast_alt_probability, int | float)
+        or not 0.0 <= float(fast_alt_probability) <= 1.0
+        or float(fast_alt_probability) == 0.0
     ):
         models.pop("fast_alt", None)
     return models
 
 
 def get_team_fast_alt_probability(settings: Mapping[str, Any]) -> float:
-    """The stored fast-route split, defaulting to the 50/50 experiment value."""
+    """The stored fast-route split, defaulting to the 50/50 experiment value.
+
+    An explicit ``0`` disables the experiment (no fast turns go to the alt
+    model); a missing or invalid value restores the default 50/50 split.
+    """
     value = settings.get("default_agent_routing_fast_alt_probability")
     if isinstance(value, bool) or not isinstance(value, int | float):
         return 0.5

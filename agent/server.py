@@ -562,6 +562,10 @@ async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     )
 
 
+async def _cached_team_settings() -> dict[str, Any]:
+    return await ttl_cache.cached("team:settings", 60, get_team_settings)
+
+
 async def _cached_agent_routing_models() -> dict[str, tuple[str, str]]:
     return await ttl_cache.cached(
         "team:agent-routing-models",
@@ -982,9 +986,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
                 _cached_fable_enabled(),
             )
-            fast_alt_probability = get_team_fast_alt_probability(
-                await ttl_cache.cached("team:agent-routing-models", 60, get_team_settings)
-            )
+            fast_alt_probability = get_team_fast_alt_probability(await _cached_team_settings())
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
