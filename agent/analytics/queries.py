@@ -167,8 +167,8 @@ WITH runs AS (
     SELECT person_id FROM run_totals UNION SELECT person_id FROM pr_totals
 ), metrics AS (
     SELECT p.person_id, d.github_login, d.email,
-        COALESCE(NULLIF(d.github_login, ''), NULLIF(split_part(d.email, '@', 1), ''),
-            'Open SWE user') AS name,
+        COALESCE(NULLIF(d.display_name, ''), NULLIF(d.github_login, ''),
+            NULLIF(split_part(d.email, '@', 1), ''), 'Open SWE user') AS name,
         ((:current_login <> '' AND lower(d.github_login) = :current_login)
           OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE AS is_current,
         COALESCE(r.invocations, 0) AS invocations,
@@ -202,7 +202,9 @@ WITH runs AS (
                 'name', CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
                     THEN name ELSE 'Open SWE user' END,
                 'github_login', CASE WHEN :admin OR is_current THEN NULLIF(github_login, '') END,
-                'email', CASE WHEN is_current THEN NULLIF(email, '') END),
+                'email', CASE WHEN is_current THEN NULLIF(email, '') END,
+                'avatar_url', CASE WHEN NULLIF(github_login, '') IS NOT NULL
+                    THEN 'https://github.com/' || github_login || '.png?size=80' END),
             'favorite_model', favorite_model,
             'avg_invocation_seconds', avg_invocation_seconds,
             'avg_run_seconds', avg_invocation_seconds,
