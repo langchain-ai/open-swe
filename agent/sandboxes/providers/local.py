@@ -6,18 +6,19 @@ from deepagents.backends import LocalShellBackend
 from agent.config import ENV
 
 SANDBOX_GITCONFIG = ".gitconfig-sandbox"
+# Anything declared secret=True in the ENV registry (agent/config.py), plus its
+# aliases, is stripped from the env passed into the unsandboxed local shell.
+# Deriving this from the registry (instead of a manually maintained set) means
+# a newly declared secret is excluded automatically instead of silently
+# leaking into host-level command execution until someone remembers to add it
+# here.
 LOCAL_SHELL_ENV_EXCLUDE = {
-    "ANTHROPIC_API_KEY",
-    "BASETEN_API_KEY",
-    "FIREWORKS_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GROQ_API_KEY",
-    "LANGSMITH_API_KEY",
+    name for var in ENV.variables() if var.secret for name in (var.name, *var.aliases)
+} | {
+    # Not modeled in the registry but still sensitive local-only artifacts.
     "OPEN_SWE_OPENAI_OAUTH_ACCOUNT_FILE",
     "OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN",
     "OPEN_SWE_OPENAI_OAUTH_BROKER_URL",
-    "OPENAI_API_KEY",
 }
 
 
