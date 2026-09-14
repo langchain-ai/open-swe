@@ -70,6 +70,7 @@ async def _capture_create_deep_agent_kwargs(
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
+        patch("agent.server.create_desktop_backend", return_value=MagicMock()),
         patch(
             "agent.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -229,6 +230,33 @@ async def test_model_routing_is_disabled_by_explicit_profile() -> None:
         "openai:gpt-5.6-sol",
         "openai:gpt-5.6-sol",
         "openai:gpt-5.6-luna",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_is_disabled_for_desktop_runs() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        source="desktop",
+        local_project_path="/workspace",
+        agent_model_id="anthropic:claude-sonnet-5",
+        agent_effort="high",
+    )
+
+    agent = await _capture_create_deep_agent_kwargs(config)
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["metadata"]["model_routing_applied"] is False
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert [model for model, _ in calls] == [
+        "anthropic:claude-sonnet-5",
+        "anthropic:claude-sonnet-5",
+        "openai:gpt-5.6-sol",
     ]
 
 
