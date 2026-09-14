@@ -55,7 +55,8 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
   )
   const pool = useStreamPool.getState
   const [runTracker] = useState(
-    () => new RunTracker({ transport: entry.transport, threadId: entry.threadId })
+    () =>
+      new RunTracker({ transport: entry.transport, threadId: entry.threadId })
   )
   useEffect(() => () => runTracker.dispose(), [runTracker])
   const [isOffloading, setIsOffloading] = useState(false)

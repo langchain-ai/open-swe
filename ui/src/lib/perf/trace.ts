@@ -213,7 +213,11 @@ export function subscribePerfSpans(listener: () => void): () => void {
 
 export function exportPerfSpans(): string {
   return JSON.stringify(
-    { exportedAt: new Date().toISOString(), userAgent: navigator.userAgent, spans },
+    {
+      exportedAt: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      spans,
+    },
     null,
     2
   )
