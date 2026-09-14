@@ -602,6 +602,22 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return backendSupervisor.credentialStatus(modelId);
   });
+  ipcMain.handle("desktop:copy-local-trace", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    if (!backendUrl || typeof threadId !== "string" || !threadId)
+      return false;
+    const response = await backendFetch(
+      new URL(
+        `/dashboard/api/me/local-trace-url/${encodeURIComponent(threadId)}`,
+        backendUrl,
+      ).toString(),
+    );
+    if (!response.ok) return false;
+    const payload = await response.json();
+    if (typeof payload?.trace_url !== "string") return false;
+    clipboard.writeText(payload.trace_url);
+    return true;
+  });
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
     if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");

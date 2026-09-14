@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
   localModelCredentialStatus: (modelId) =>
     ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
+  copyLocalTrace: (threadId) =>
+    ipcRenderer.invoke("desktop:copy-local-trace", threadId),
   signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
   startLocalThread: (input) =>
     ipcRenderer.invoke("desktop:start-local-thread", input),

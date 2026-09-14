@@ -196,6 +196,7 @@ declare global {
         variable: string | null
         canSignIn?: boolean
       }>
+      copyLocalTrace: (threadId: string) => Promise<boolean>
       signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {
