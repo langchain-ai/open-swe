@@ -1,0 +1,65 @@
+"""Per-user dashboard data: one store namespace per login, one typed document per feature.
+
+Every document lives at ``["users", <login>]`` under its feature key, so all of a
+user's data is one prefix search away while each feature still writes its own
+record and cannot clobber another's.
+"""
+
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, BeforeValidator, Field
+
+from agent.store import delete_value, get_value, now_iso, put_value
+
+USERS_NAMESPACE = "users"
+
+
+class UserDocument[RecordT: BaseModel]:
+    def __init__(self, key: str, model: type[RecordT]) -> None:
+        self.key = key
+        self.model = model
+
+    @staticmethod
+    def namespace(login: str) -> list[str]:
+        return [USERS_NAMESPACE, login]
+
+    async def get(self, login: str) -> RecordT | None:
+        value = await get_value(self.namespace(login), self.key)
+        return None if value is None else self.model.model_validate(value)
+
+    async def put(self, login: str, record: RecordT) -> RecordT:
+        await put_value(self.namespace(login), self.key, record.model_dump(mode="json"))
+        return record
+
+    async def delete(self, login: str) -> None:
+        await delete_value(self.namespace(login), self.key)
+
+
+ReviewQueueChecksMode = Literal["required", "all", "ignore"]
+
+
+class ReviewQueueRepo(BaseModel):
+    """A followed repo, optionally narrowed to pull requests touching ``paths``."""
+
+    full_name: str
+    paths: list[str] = Field(default_factory=list)
+    checks: ReviewQueueChecksMode = "required"
+
+
+def _as_repos(value: Any) -> Any:
+    if not isinstance(value, list):
+        return value
+    return [{"full_name": entry} if isinstance(entry, str) else entry for entry in value]
+
+
+ReviewQueueRepoList = Annotated[list[ReviewQueueRepo], BeforeValidator(_as_repos)]
+
+
+class ReviewQueueRepos(BaseModel):
+    """Repos whose ready-to-review pull requests the user wants listed."""
+
+    repos: ReviewQueueRepoList = Field(default_factory=list)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+REVIEW_QUEUE_REPOS = UserDocument("review_queue_repos", ReviewQueueRepos)
