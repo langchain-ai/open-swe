@@ -1,28 +1,22 @@
 /** @vitest-environment jsdom */
 
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 
-import {
-  classifyDashboardRequest,
-  parseServerTiming,
-  subscribeRequestTimings,
-  withRequestTiming,
-} from "./fetchTiming"
-import type { RequestTiming } from "./fetchTiming"
+import { classifyDashboardRequest, parseServerTiming } from "./fetchTiming"
 
 const THREAD = "0d5a5a4e-1b2c-4d3e-8f90-123456789abc"
 
 describe("parseServerTiming", () => {
-  it("reads durations and descriptions", () => {
+  it("reads durations", () => {
     expect(
       parseServerTiming(
         'thread_get;dur=12.4, runs_list;dur=30, total;dur=48.1, cache;desc="hit"'
       )
     ).toEqual([
-      { name: "thread_get", duration: 12.4, description: null },
-      { name: "runs_list", duration: 30, description: null },
-      { name: "total", duration: 48.1, description: null },
-      { name: "cache", duration: null, description: "hit" },
+      { name: "thread_get", duration: 12.4 },
+      { name: "runs_list", duration: 30 },
+      { name: "total", duration: 48.1 },
+      { name: "cache", duration: null },
     ])
     expect(parseServerTiming(null)).toEqual([])
   })
@@ -55,39 +49,5 @@ describe("classifyDashboardRequest", () => {
     expect(
       classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/branch-diff`)
     ).toBe(null)
-  })
-})
-
-describe("withRequestTiming", () => {
-  it("reports classified requests with their server timing and leaves others alone", async () => {
-    const timings: Array<RequestTiming> = []
-    const unsubscribe = subscribeRequestTimings((timing) =>
-      timings.push(timing)
-    )
-    const inner = vi.fn(
-      async () =>
-        new Response("{}", {
-          status: 200,
-          headers: { "Server-Timing": "thread_get;dur=5, total;dur=9" },
-        })
-    )
-    const timed = withRequestTiming(inner)
-
-    await timed(`/dashboard/api/threads/${THREAD}`, { method: "GET" })
-    await timed("/dashboard/api/me")
-    unsubscribe()
-
-    expect(inner).toHaveBeenCalledTimes(2)
-    expect(timings).toHaveLength(1)
-    expect(timings[0]).toMatchObject({
-      kind: "thread_detail",
-      threadId: THREAD,
-      status: 200,
-      serverTiming: [
-        { name: "thread_get", duration: 5 },
-        { name: "total", duration: 9 },
-      ],
-    })
-    expect(timings[0]?.ttfbMs).toBeGreaterThanOrEqual(0)
   })
 })

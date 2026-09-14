@@ -20,7 +20,7 @@ import {
   createLocalGraphClient,
   dashboardFetch,
 } from "@/lib/langgraph-client"
-import { createRunTracker } from "@/lib/perf/streaming"
+import { RunTracker } from "@/lib/perf/streaming"
 import { selectStreamFor, useStreamPool } from "./streamPool"
 import type { ReactNode } from "react"
 import type {
@@ -54,19 +54,8 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [cloud]
   )
   const pool = useStreamPool.getState
-  const runTracker = useMemo(
-    () =>
-      createRunTracker({
-        transport: entry.transport,
-        threadId: entry.threadId,
-      }),
-    // A lazily created thread gets its id through `onThreadId` below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entry.transport]
-  )
-  useEffect(
-    () => runTracker.bindThread(entry.threadId),
-    [entry.threadId, runTracker]
+  const [runTracker] = useState(
+    () => new RunTracker({ transport: entry.transport, threadId: entry.threadId })
   )
   useEffect(() => () => runTracker.dispose(), [runTracker])
   const [isOffloading, setIsOffloading] = useState(false)

@@ -11,18 +11,6 @@ import {
   subscribeToDatadogInitialization,
 } from "@/lib/datadog"
 import { registerPerfSink } from "./trace"
-import type { PerfSpan } from "./trace"
-
-export function vitalContext(
-  span: PerfSpan
-): Record<string, string | number | boolean | null> {
-  const context: Record<string, string | number | boolean | null> = {
-    ...span.attributes,
-  }
-  for (const step of span.steps)
-    context[`step_${step.name}_ms`] = Math.round(step.at)
-  return context
-}
 
 export function installDatadogPerfSink(): void {
   let installed = false
@@ -31,19 +19,21 @@ export function installDatadogPerfSink(): void {
     const rum = getDatadogRum()
     if (!rum?.addDurationVital) return
     installed = true
-    const client =
-      typeof window !== "undefined" && window.openSweDesktop ? "desktop" : "web"
-    rum.setGlobalContextProperty?.("client", client)
+    rum.setGlobalContextProperty?.(
+      "client",
+      window.openSweDesktop ? "desktop" : "web"
+    )
     const addDurationVital = rum.addDurationVital
-    registerPerfSink({
-      onSpanEnd(span) {
-        if (span.duration === null) return
-        addDurationVital(span.name, {
-          startTime: span.startEpochMs,
-          duration: span.duration,
-          context: vitalContext(span),
-        })
-      },
+    registerPerfSink((span) => {
+      if (span.duration === null) return
+      const context = { ...span.attributes }
+      for (const step of span.steps)
+        context[`step_${step.name}_ms`] = Math.round(step.at)
+      addDurationVital(span.name, {
+        startTime: span.startEpochMs,
+        duration: span.duration,
+        context,
+      })
     })
   }
   if (isDatadogRumInitialized()) attach()

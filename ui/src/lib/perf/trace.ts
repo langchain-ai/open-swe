@@ -33,9 +33,7 @@ export interface PerfSpan {
   duration: number | null
 }
 
-export interface PerfSink {
-  onSpanEnd(span: PerfSpan): void
-}
+export type PerfSink = (span: PerfSpan) => void
 
 export interface SpanHandle {
   readonly id: string
@@ -46,15 +44,8 @@ export interface SpanHandle {
   set(attributes: PerfAttributes): void
   /** Add to a numeric attribute, starting from zero. */
   add(attribute: string, value: number): void
-  /** Milliseconds since the span started. */
-  elapsed(): number
   end(attributes?: PerfAttributes): PerfSpan
   abandon(reason: string): PerfSpan
-}
-
-export interface StartSpanOptions {
-  /** Override the start, in `performance.now()` time; `0` is the page's time origin. */
-  startedAt?: number
 }
 
 const MAX_RETAINED_SPANS = 60
@@ -65,41 +56,18 @@ const sinks = new Set<PerfSink>()
 const listeners = new Set<() => void>()
 let nextSpanId = 0
 
-function hasPerformance(): boolean {
-  return (
-    typeof performance !== "undefined" && typeof performance.now === "function"
-  )
-}
-
 export function perfNow(): number {
-  return hasPerformance() ? performance.now() : Date.now()
-}
-
-function timeOriginEpochMs(): number {
-  return hasPerformance() && typeof performance.timeOrigin === "number"
-    ? performance.timeOrigin
-    : Date.now() - perfNow()
+  return performance.now()
 }
 
 function userTimingMark(name: string, startTime: number): void {
-  if (!hasPerformance() || typeof performance.mark !== "function") return
   try {
     performance.mark(name, { startTime })
-  } catch {
-    // Older engines only take the name; the mark is a convenience anyway.
-    try {
-      performance.mark(name)
-    } catch {}
-  }
+  } catch {}
 }
 
 function userTimingMeasure(span: PerfSpan): void {
-  if (
-    !hasPerformance() ||
-    typeof performance.measure !== "function" ||
-    span.duration === null
-  )
-    return
+  if (span.duration === null) return
   try {
     performance.measure(`osw:${span.name}`, {
       start: span.startedAt,
@@ -107,12 +75,6 @@ function userTimingMeasure(span: PerfSpan): void {
       detail: { steps: span.steps, attributes: span.attributes },
     })
   } catch {}
-}
-
-function retain(span: PerfSpan): void {
-  spans.push(span)
-  if (spans.length > MAX_RETAINED_SPANS) spans.shift()
-  notify()
 }
 
 function notify(): void {
@@ -132,19 +94,6 @@ export function isPerfHudEnabled(): boolean {
   } catch {
     return false
   }
-}
-
-export function setPerfHudEnabled(enabled: boolean): void {
-  if (typeof window === "undefined") return
-  try {
-    if (enabled) window.localStorage.setItem(PERF_FLAG_STORAGE_KEY, "1")
-    else window.localStorage.removeItem(PERF_FLAG_STORAGE_KEY)
-  } catch {}
-  notify()
-}
-
-function isConsoleEnabled(): boolean {
-  return import.meta.env.DEV || isPerfHudEnabled()
 }
 
 export function formatSpan(span: PerfSpan): string {
@@ -170,14 +119,14 @@ function finish(
     userTimingMark(`osw:${span.name}:end`, span.startedAt + span.duration)
     userTimingMeasure(span)
   }
-  if (isConsoleEnabled()) {
+  if (import.meta.env.DEV) {
     console.debug(`[perf] ${formatSpan(span)}`, span.attributes)
   }
   notify()
   if (status !== "ended") return span
   for (const sink of sinks) {
     try {
-      sink.onSpanEnd(span)
+      sink(span)
     } catch {
       // A failing sink must never affect the app.
     }
@@ -188,21 +137,24 @@ function finish(
 export function startSpan(
   name: PerfSpanName,
   attributes: PerfAttributes = {},
-  options: StartSpanOptions = {}
+  /** Override the start, in `performance.now()` time; `0` is the page's time origin. */
+  options: { startedAt?: number } = {}
 ): SpanHandle {
   const startedAt = options.startedAt ?? perfNow()
   const span: PerfSpan = {
     id: `${name}-${++nextSpanId}`,
     name,
     startedAt,
-    startEpochMs: timeOriginEpochMs() + startedAt,
+    startEpochMs: performance.timeOrigin + startedAt,
     steps: [],
     attributes: { ...attributes },
     status: "open",
     duration: null,
   }
   userTimingMark(`osw:${name}:start`, startedAt)
-  retain(span)
+  spans.push(span)
+  if (spans.length > MAX_RETAINED_SPANS) spans.shift()
+  notify()
 
   return {
     id: span.id,
@@ -230,9 +182,6 @@ export function startSpan(
       const current = span.attributes[attribute]
       span.attributes[attribute] =
         (typeof current === "number" ? current : 0) + value
-    },
-    elapsed() {
-      return perfNow() - startedAt
     },
     end(endAttributes) {
       return finish(span, "ended", endAttributes)
@@ -264,31 +213,24 @@ export function subscribePerfSpans(listener: () => void): () => void {
 
 export function exportPerfSpans(): string {
   return JSON.stringify(
-    {
-      exportedAt: new Date().toISOString(),
-      userAgent: typeof navigator === "undefined" ? null : navigator.userAgent,
-      spans,
-    },
+    { exportedAt: new Date().toISOString(), userAgent: navigator.userAgent, spans },
     null,
     2
   )
 }
 
-interface PerfGlobal {
-  spans: () => ReadonlyArray<PerfSpan>
-  export: () => string
-  clear: () => void
-  hud: (enabled: boolean) => void
-}
-
 /** `window.__openSwePerf` for poking at spans from the console or Playwright. */
 export function exposePerfGlobal(): void {
-  if (typeof window === "undefined") return
-  const target = window as Window & { __openSwePerf?: PerfGlobal }
+  const target = window as Window & {
+    __openSwePerf?: {
+      spans: () => ReadonlyArray<PerfSpan>
+      export: () => string
+      clear: () => void
+    }
+  }
   target.__openSwePerf ??= {
     spans: getPerfSpans,
     export: exportPerfSpans,
     clear: clearPerfSpans,
-    hud: setPerfHudEnabled,
   }
 }

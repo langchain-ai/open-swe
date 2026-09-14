@@ -16,26 +16,10 @@
  */
 
 import { subscribeRequestTimings } from "./fetchTiming"
-import type { RequestTiming } from "./fetchTiming"
 import { startSpan } from "./trace"
 import type { PerfAttributes, SpanHandle } from "./trace"
 
-export type RunTransport = "cloud" | "local"
 export type RunEndReason = "success" | "error" | "interrupt" | "stopped"
-
-export interface RunTracker {
-  /** The thread this stream serves; `null` until a lazily created thread has an id. */
-  bindThread(threadId: string | null): void
-  /** The user pressed send on this stream. */
-  submitted(): void
-  /** The server accepted the run. */
-  created(): void
-  /** A raw protocol event from the `lifecycle` or `messages` channel. */
-  event(event: unknown): void
-  /** The run's streaming phase ended. */
-  completed(reason: RunEndReason): void
-  dispose(): void
-}
 
 interface RunState {
   span: SpanHandle
@@ -51,30 +35,18 @@ interface RunState {
   commitMaxMs: number
 }
 
-const openRuns = new Set<RunTrackerImpl>()
-let requestTimingsSubscribed = false
+const openRuns = new Set<RunTracker>()
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-function isRootNamespace(params: Record<string, unknown>): boolean {
-  const namespace = params["namespace"]
-  return Array.isArray(namespace) && namespace.length === 0
-}
-
-function subscribeRequestTimingsOnce(): void {
-  if (requestTimingsSubscribed) return
-  requestTimingsSubscribed = true
-  subscribeRequestTimings(onRequestTiming)
-}
-
-function openRunsFor(threadId: string): Array<RunTrackerImpl> {
+function openRunsFor(threadId: string): Array<RunTracker> {
   const key = threadId.toLowerCase()
   return [...openRuns].filter((run) => run.threadId === key)
 }
 
-function onRequestTiming(timing: RequestTiming): void {
+subscribeRequestTimings((timing) => {
   for (const run of openRunsFor(timing.threadId)) {
     if (timing.kind === "command") {
       run.state?.span.set({ command_ttfb_ms: Math.round(timing.ttfbMs) })
@@ -84,26 +56,28 @@ function onRequestTiming(timing: RequestTiming): void {
       })
     }
   }
-}
+})
 
-class RunTrackerImpl implements RunTracker {
+export class RunTracker {
   state: RunState | null = null
   threadId: string | null
+  private readonly transport: "cloud" | "local"
 
-  constructor(
-    private readonly attributes: PerfAttributes,
+  constructor(options: {
+    transport: "cloud" | "local"
+    /** `null` until a lazily created thread has an id; see `bindThread`. */
     threadId: string | null
-  ) {
-    this.threadId = threadId?.toLowerCase() ?? null
+  }) {
+    this.transport = options.transport
+    this.threadId = options.threadId?.toLowerCase() ?? null
   }
 
   private begin(extra: PerfAttributes): void {
     if (this.state && !this.state.span.ended) {
       this.state.span.abandon("superseded")
     }
-    subscribeRequestTimingsOnce()
     this.state = {
-      span: startSpan("agent_run", { ...this.attributes, ...extra }),
+      span: startSpan("agent_run", { transport: this.transport, ...extra }),
       events: 0,
       textDeltas: 0,
       lagSum: 0,
@@ -122,24 +96,29 @@ class RunTrackerImpl implements RunTracker {
     this.threadId = threadId?.toLowerCase() ?? null
   }
 
+  /** The user pressed send on this stream. */
   submitted(): void {
     this.begin({ joined: false })
   }
 
+  /** The server accepted the run. */
   created(): void {
     this.state?.span.mark("accepted")
   }
 
+  /** A raw protocol event from the `lifecycle` or `messages` channel. */
   event(event: unknown): void {
     if (!isRecord(event) || !isRecord(event["params"])) return
     const params = event["params"]
     const data = params["data"]
     if (!isRecord(data)) return
     const method = event["method"]
+    const namespace = params["namespace"]
 
     if (
       method === "lifecycle" &&
-      isRootNamespace(params) &&
+      Array.isArray(namespace) &&
+      namespace.length === 0 &&
       data["event"] === "running"
     ) {
       // A run this client did not submit (queued message, another tab, Slack).
@@ -185,6 +164,7 @@ class RunTrackerImpl implements RunTracker {
     state.commitMaxMs = Math.max(state.commitMaxMs, durationMs)
   }
 
+  /** The run's streaming phase ended. */
   completed(reason: RunEndReason): void {
     const state = this.state
     if (!state || state.span.ended) return
@@ -218,13 +198,6 @@ class RunTrackerImpl implements RunTracker {
   }
 }
 
-export function createRunTracker(options: {
-  transport: RunTransport
-  threadId: string | null
-}): RunTracker {
-  return new RunTrackerImpl({ transport: options.transport }, options.threadId)
-}
-
 /** Transcript work for a thread while its run streams. */
 export function runTranscriptBuilt(threadId: string, durationMs: number): void {
   for (const run of openRunsFor(threadId)) run.transcriptBuilt(durationMs)
@@ -236,8 +209,4 @@ export function runTranscriptCommitted(
   durationMs: number
 ): void {
   for (const run of openRunsFor(threadId)) run.transcriptCommitted(durationMs)
-}
-
-export function hasOpenRuns(): boolean {
-  return openRuns.size > 0
 }

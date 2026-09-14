@@ -19,18 +19,15 @@ import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
-import { isPerfHudEnabled, subscribePerfSpans } from "@/lib/perf/trace"
+import { isPerfHudEnabled } from "@/lib/perf/trace"
 
 const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
 
 /** Client-only: the flag lives in localStorage, so the server render never shows it. */
 function PerfHudMount() {
   const [enabled, setEnabled] = useState(false)
-  useEffect(() => {
-    const sync = () => setEnabled(isPerfHudEnabled())
-    sync()
-    return subscribePerfSpans(sync)
-  }, [])
+  // oxlint-disable-next-line react/set-state-in-effect
+  useEffect(() => setEnabled(isPerfHudEnabled()), [])
   if (!enabled) return null
   return (
     <Suspense fallback={null}>

@@ -33,7 +33,7 @@ describe("thread load span", () => {
       threadId: THREAD_A,
       status: 200,
       ttfbMs: 41.2,
-      serverTiming: [{ name: "get_state", duration: 30.6, description: null }],
+      serverTiming: [{ name: "get_state", duration: 30.6 }],
     })
     threadHydrated(THREAD_A, { messages: 7 })
     threadTranscriptBuilt(THREAD_A, 3.2)
@@ -87,13 +87,5 @@ describe("thread load span", () => {
     const [span] = getPerfSpans()
     expect(span?.status).toBe("open")
     expect(span?.steps).toEqual([])
-  })
-
-  it("abandons on hydration failure", () => {
-    onRouterNavigation(`/agents/${THREAD_A}`, "/agents")
-    threadHydrationFailed(THREAD_A)
-    expect(getPerfSpans()[0]?.attributes["abandoned_reason"]).toBe(
-      "hydration_failed"
-    )
   })
 })

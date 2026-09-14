@@ -8,7 +8,6 @@ export interface ServerTimingEntry {
   name: string
   /** Milliseconds, when the backend reported one. */
   duration: number | null
-  description: string | null
 }
 
 export type TimedRequestKind =
@@ -64,19 +63,14 @@ export function parseServerTiming(
   for (const raw of header.split(",")) {
     const [name, ...params] = raw.trim().split(";")
     if (!name) continue
-    let duration: number | null = null
-    let description: string | null = null
-    for (const param of params) {
-      const [key, ...rest] = param.trim().split("=")
-      const value = rest.join("=").replace(/^"|"$/g, "")
-      if (key?.toLowerCase() === "dur") {
-        const parsed = Number(value)
-        duration = Number.isFinite(parsed) ? parsed : null
-      } else if (key?.toLowerCase() === "desc") {
-        description = value
-      }
-    }
-    entries.push({ name: name.trim(), duration, description })
+    const dur = params
+      .map((param) => param.trim())
+      .find((param) => /^dur=/i.test(param))
+    const parsed = dur ? Number(dur.slice(4)) : NaN
+    entries.push({
+      name: name.trim(),
+      duration: Number.isFinite(parsed) ? parsed : null,
+    })
   }
   return entries
 }

@@ -5,6 +5,8 @@
  * beyond what the app already prints to its console.
  */
 
+import type { WebContentsConsoleMessageEventParams } from "electron";
+
 export type ConsoleLevel = "debug" | "info" | "warning" | "error";
 
 export interface ConsoleEntry {
@@ -36,52 +38,19 @@ export interface DiagnosticsReportInput {
   main: ReadonlyArray<ConsoleEntry>;
   /** `window.__openSwePerf.export()` from the renderer, when available. */
   perf: string | null;
-  generatedAt?: Date;
-}
-
-interface ConsoleMessageLike {
-  level?: unknown;
-  message?: unknown;
-  sourceId?: unknown;
-  lineNumber?: unknown;
-}
-
-const LEVELS = new Set<ConsoleLevel>(["debug", "info", "warning", "error"]);
-/** Electron reports `console-message` levels as 0-3: verbose, info, warning, error. */
-const NUMERIC_LEVELS: ReadonlyArray<ConsoleLevel> = [
-  "debug",
-  "info",
-  "warning",
-  "error",
-];
-
-function consoleLevel(level: unknown): ConsoleLevel {
-  if (typeof level === "number") return NUMERIC_LEVELS[level] ?? "info";
-  return LEVELS.has(level as ConsoleLevel) ? (level as ConsoleLevel) : "info";
 }
 
 export function normalizeConsoleMessage(
-  details: ConsoleMessageLike,
-  now: Date = new Date(),
+  details: WebContentsConsoleMessageEventParams,
 ): ConsoleEntry {
-  const level = consoleLevel(details.level);
-  const message =
-    typeof details.message === "string"
-      ? details.message
-      : String(details.message ?? "");
-  const sourceId =
-    typeof details.sourceId === "string" && details.sourceId
-      ? details.sourceId
-      : null;
-  const line =
-    typeof details.lineNumber === "number" && details.lineNumber > 0
-      ? `:${details.lineNumber}`
-      : "";
+  const line = details.lineNumber > 0 ? `:${details.lineNumber}` : "";
   return {
-    at: now.toISOString(),
-    level,
-    message,
-    source: sourceId ? `${redactSecrets(sourceId)}${line}` : null,
+    at: new Date().toISOString(),
+    level: details.level,
+    message: details.message,
+    source: details.sourceId
+      ? `${redactSecrets(details.sourceId)}${line}`
+      : null,
   };
 }
 
@@ -89,7 +58,7 @@ export function normalizeConsoleMessage(
 export class ConsoleLogBuffer {
   private readonly items: Array<ConsoleEntry> = [];
 
-  constructor(private readonly limit = 2000) {}
+  constructor(private readonly limit: number) {}
 
   push(entry: ConsoleEntry): void {
     this.items.push(entry);
@@ -98,10 +67,6 @@ export class ConsoleLogBuffer {
 
   entries(): ReadonlyArray<ConsoleEntry> {
     return this.items;
-  }
-
-  clear(): void {
-    this.items.length = 0;
   }
 }
 
@@ -123,37 +88,21 @@ function formatArgument(value: unknown): string {
 }
 
 /** Mirror the main process's console into a buffer without silencing it. */
-export function captureProcessConsole(
-  buffer: ConsoleLogBuffer,
-  target: Console = console,
-): () => void {
-  const originals = {
-    log: target.log,
-    info: target.info,
-    warn: target.warn,
-    error: target.error,
-  };
-  for (const method of Object.keys(originals) as Array<
-    keyof typeof originals
+export function captureProcessConsole(buffer: ConsoleLogBuffer): void {
+  for (const method of Object.keys(MAIN_LEVELS) as Array<
+    keyof typeof MAIN_LEVELS
   >) {
-    const original = originals[method];
-    target[method] = (...args: Array<unknown>) => {
+    const original = console[method];
+    console[method] = (...args: Array<unknown>) => {
       buffer.push({
         at: new Date().toISOString(),
         level: MAIN_LEVELS[method],
         message: args.map(formatArgument).join(" "),
         source: "main",
       });
-      original.apply(target, args);
+      original.apply(console, args);
     };
   }
-  return () => {
-    for (const method of Object.keys(originals) as Array<
-      keyof typeof originals
-    >) {
-      target[method] = originals[method];
-    }
-  };
 }
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
@@ -193,11 +142,10 @@ function formatEntries(entries: ReadonlyArray<ConsoleEntry>): string {
 }
 
 export function buildDiagnosticsReport(input: DiagnosticsReportInput): string {
-  const generatedAt = (input.generatedAt ?? new Date()).toISOString();
   const { app } = input;
-  const sections = [
+  return [
     `${app.name} diagnostics report`,
-    `Generated: ${generatedAt}`,
+    `Generated: ${new Date().toISOString()}`,
     "",
     "## App",
     `version: ${app.version}${app.isPackaged ? "" : " (development)"}`,
@@ -214,11 +162,10 @@ export function buildDiagnosticsReport(input: DiagnosticsReportInput): string {
     "## Performance spans",
     input.perf ? redactSecrets(input.perf) : "(none recorded)",
     "",
-  ];
-  return sections.join("\n");
+  ].join("\n");
 }
 
-export function diagnosticsFileName(now: Date = new Date()): string {
-  const stamp = now.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+export function diagnosticsFileName(): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return `open-swe-diagnostics-${stamp}.txt`;
 }

@@ -110,9 +110,7 @@ protocol.registerSchemesAsPrivileged([
 let backendUrl = null;
 let mainWindow = null;
 
-// What "Save Diagnostics Report…" exports: the renderer's console as the
-// window saw it, and the main process's own warnings. Installed builds have
-// no terminal, so this is the only record of what went wrong.
+// Installed builds have no terminal; "Save Diagnostics Report…" exports these.
 const rendererConsole = new ConsoleLogBuffer(2000);
 const mainConsole = new ConsoleLogBuffer(500);
 captureProcessConsole(mainConsole);
@@ -1112,8 +1110,7 @@ function createMenu() {
             else void loadApp(mainWindow);
           },
         },
-        // Available in installed builds too: it is how users capture what a
-        // bug report needs, and the renderer is sandboxed with no Node access.
+        // Installed builds too: the renderer is sandboxed with no Node access.
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" },

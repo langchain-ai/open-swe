@@ -5,12 +5,9 @@ import {
   exportPerfSpans,
   formatSpan,
   getPerfSpans,
-  setPerfHudEnabled,
   subscribePerfSpans,
 } from "./trace"
 import type { PerfSpan } from "./trace"
-
-const VISIBLE_SPANS = 8
 
 function attributeSummary(span: PerfSpan): string {
   return Object.entries(span.attributes)
@@ -19,10 +16,7 @@ function attributeSummary(span: PerfSpan): string {
     .join("  ")
 }
 
-/**
- * Development overlay for the perf spans, toggled with `?perf=1` / `?perf=0`
- * or `window.__openSwePerf.hud(true)`. Newest span first.
- */
+/** Development overlay for the perf spans, toggled with `?perf=1` / `?perf=0`. Newest first. */
 export default function PerfHud() {
   const [spans, setSpans] = useState<ReadonlyArray<PerfSpan>>(() =>
     getPerfSpans()
@@ -32,7 +26,7 @@ export default function PerfHud() {
 
   useEffect(() => subscribePerfSpans(() => setSpans([...getPerfSpans()])), [])
 
-  const visible = spans.slice(-VISIBLE_SPANS).reverse()
+  const visible = spans.slice(-8).reverse()
 
   const copy = async () => {
     try {
@@ -60,14 +54,6 @@ export default function PerfHud() {
           onClick={clearPerfSpans}
         >
           clear
-        </button>
-        <button
-          type="button"
-          className="hover:underline"
-          onClick={() => setPerfHudEnabled(false)}
-          aria-label="Hide performance overlay"
-        >
-          ×
         </button>
       </header>
       <ul className="max-h-[40vh] overflow-y-auto">

@@ -15,21 +15,13 @@ import type { RequestTiming } from "./fetchTiming"
 import { startSpan } from "./trace"
 import type { PerfAttributes, SpanHandle } from "./trace"
 
-export type ThreadLoadSource = "navigation" | "page_load"
-
-interface ActiveThreadLoad {
-  threadId: string
-  span: SpanHandle
-}
-
 const THREAD_PATH_RE =
   /^\/agents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
 
-let active: ActiveThreadLoad | null = null
+let active: { threadId: string; span: SpanHandle } | null = null
 let navigated = false
-let requestTimingsSubscribed = false
 
-export function threadIdFromPath(pathname: string): string | null {
+function threadIdFromPath(pathname: string): string | null {
   return THREAD_PATH_RE.exec(pathname)?.[1] ?? null
 }
 
@@ -38,18 +30,12 @@ function current(threadId: string): SpanHandle | null {
   return active.span
 }
 
-export function abandonThreadLoad(reason: string): void {
+function abandonThreadLoad(reason: string): void {
   if (active && !active.span.ended) active.span.abandon(reason)
   active = null
 }
 
-function subscribeRequestTimingsOnce(): void {
-  if (requestTimingsSubscribed) return
-  requestTimingsSubscribed = true
-  subscribeRequestTimings(onRequestTiming)
-}
-
-function onRequestTiming(timing: RequestTiming): void {
+subscribeRequestTimings((timing: RequestTiming) => {
   if (!active || active.span.ended) return
   if (active.threadId.toLowerCase() !== timing.threadId) return
   if (timing.kind !== "thread_detail" && timing.kind !== "thread_state") return
@@ -63,16 +49,15 @@ function onRequestTiming(timing: RequestTiming): void {
       attributes[`${prefix}_srv_${entry.name}_ms`] = Math.round(entry.duration)
   }
   active.span.set(attributes)
-}
+})
 
-export function beginThreadLoad(
+function beginThreadLoad(
   threadId: string,
-  source: ThreadLoadSource
+  source: "navigation" | "page_load"
 ): void {
   if (typeof window === "undefined") return
   if (current(threadId)) return
   abandonThreadLoad("superseded")
-  subscribeRequestTimingsOnce()
   active = {
     threadId,
     span: startSpan(

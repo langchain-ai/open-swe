@@ -225,14 +225,6 @@ export function AgentThreadView({
     runTranscriptBuilt(thread.id, elapsed)
     return built
   }, [stream.messages, stream.toolCalls, thread.id])
-  const onTranscriptRender = useCallback(
-    (
-      _id: string,
-      _phase: "mount" | "update" | "nested-update",
-      actualDuration: number
-    ) => runTranscriptCommitted(thread.id, actualDuration),
-    [thread.id]
-  )
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(
@@ -280,29 +272,24 @@ export function AgentThreadView({
   }, [stream.hydrationPromise, thread.id])
   const hydrationFailed = !isHydrating && !hasMessages && hydrateRejected
 
-  const hydratedMessageCount = stream.messages.length
   useEffect(() => {
     if (!stream.isThreadLoading)
-      threadHydrated(thread.id, { messages: hydratedMessageCount })
-  }, [hydratedMessageCount, stream.isThreadLoading, thread.id])
+      threadHydrated(thread.id, { messages: stream.messages.length })
+  }, [stream.messages, stream.isThreadLoading, thread.id])
 
   // The transcript's first frame: one rAF after the commit that replaced the
   // hydration placeholder. Approximates paint closely enough to compare builds.
-  const transcriptChunkCount = useMemo(
-    () => visibleMessages.reduce((sum, m) => sum + m.chunks.length, 0),
-    [visibleMessages]
-  )
   const paintedThreadId = useRef<string | null>(null)
   useLayoutEffect(() => {
     if (isHydrating || paintedThreadId.current === thread.id) return
     paintedThreadId.current = thread.id
     const messages = visibleMessages.length
-    const chunks = transcriptChunkCount
+    const chunks = visibleMessages.reduce((sum, m) => sum + m.chunks.length, 0)
     const frame = requestAnimationFrame(() =>
       threadTranscriptPainted(thread.id, { messages, chunks })
     )
     return () => cancelAnimationFrame(frame)
-  }, [isHydrating, thread.id, transcriptChunkCount, visibleMessages.length])
+  }, [isHydrating, thread.id, visibleMessages])
 
   return (
     <div className="flex min-w-0 flex-1">
@@ -377,7 +364,12 @@ export function AgentThreadView({
               health={pullRequestHealth}
               healthUnavailable={pullRequestStatus.isError}
             >
-              <Profiler id="transcript" onRender={onTranscriptRender}>
+              <Profiler
+                id="transcript"
+                onRender={(_id, _phase, actualDuration) =>
+                  runTranscriptCommitted(thread.id, actualDuration)
+                }
+              >
                 <Messages
                   messages={visibleMessages}
                   threadId={thread.id}

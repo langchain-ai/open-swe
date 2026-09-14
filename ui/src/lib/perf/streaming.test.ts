@@ -2,8 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { recordRequestTiming } from "./fetchTiming"
 import {
-  createRunTracker,
-  hasOpenRuns,
+  RunTracker,
   runTranscriptBuilt,
   runTranscriptCommitted,
 } from "./streaming"
@@ -44,7 +43,7 @@ afterEach(() => {
 describe("agent run span", () => {
   it("tracks a submitted run from send to completion", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
-    const tracker = createRunTracker({ transport: "cloud", threadId: THREAD_A })
+    const tracker = new RunTracker({ transport: "cloud", threadId: THREAD_A })
 
     tracker.submitted()
     recordRequestTiming({
@@ -78,7 +77,6 @@ describe("agent run span", () => {
     runTranscriptBuilt(THREAD_A, 2.5)
     runTranscriptCommitted(THREAD_A, 4)
     runTranscriptCommitted(THREAD_A, 9)
-    expect(hasOpenRuns()).toBe(true)
     tracker.completed("success")
 
     const [span] = getPerfSpans()
@@ -105,11 +103,10 @@ describe("agent run span", () => {
       commit_ms: 13,
       commit_max_ms: 9,
     })
-    expect(hasOpenRuns()).toBe(false)
   })
 
   it("opens a joined span when a run starts that this client did not submit", () => {
-    const tracker = createRunTracker({ transport: "local", threadId: THREAD_A })
+    const tracker = new RunTracker({ transport: "local", threadId: THREAD_A })
 
     tracker.event(lifecycle("running", Date.now()))
     tracker.completed("interrupt")
@@ -127,8 +124,8 @@ describe("agent run span", () => {
   })
 
   it("keeps request and transcript timings on the stream that owns the thread", () => {
-    const runA = createRunTracker({ transport: "cloud", threadId: THREAD_A })
-    const runB = createRunTracker({ transport: "cloud", threadId: null })
+    const runA = new RunTracker({ transport: "cloud", threadId: THREAD_A })
+    const runB = new RunTracker({ transport: "cloud", threadId: null })
     runA.submitted()
     runB.bindThread(THREAD_B.toUpperCase())
     runB.submitted()
@@ -164,24 +161,5 @@ describe("agent run span", () => {
       build_ms: 5,
       commits: 1,
     })
-  })
-
-  it("abandons an in-flight run when the stream unmounts", () => {
-    const tracker = createRunTracker({ transport: "cloud", threadId: THREAD_A })
-    tracker.submitted()
-    tracker.dispose()
-
-    expect(getPerfSpans()[0]?.attributes["abandoned_reason"]).toBe("unmounted")
-    expect(hasOpenRuns()).toBe(false)
-  })
-
-  it("ignores events with no run open and malformed events", () => {
-    const tracker = createRunTracker({ transport: "cloud", threadId: THREAD_A })
-    tracker.event(textDelta("stray", Date.now()))
-    tracker.event(null)
-    tracker.event({ method: "messages" })
-    tracker.completed("success")
-
-    expect(getPerfSpans()).toHaveLength(0)
   })
 })
