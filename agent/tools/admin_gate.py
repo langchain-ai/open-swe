@@ -4,8 +4,8 @@ Tools recheck user admin membership or a system invocation's saved authorization
 """
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.schedules import authorized_admin_schedule
 from agent.run_config import RunConfig
+from agent.schedules.store import authorized_admin_schedule
 
 
 def configurable() -> RunConfig:

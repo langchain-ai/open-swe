@@ -107,7 +107,7 @@ async def test_store_outage_is_not_an_empty_summary(record, monkeypatch):
 
 
 async def test_documents_api_is_read_only_and_checks_channel_access(record):
-    from agent.dashboard import incidents_api
+    from agent.incidents import api as incidents_api
     from agent.incidents.document_api import router
 
     await documents.update_from_report(record, report())

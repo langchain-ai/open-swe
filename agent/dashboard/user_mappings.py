@@ -25,6 +25,9 @@ import logging
 import threading
 from typing import Any, Literal
 
+from fastapi import APIRouter
+
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.store import delete_value, get_value, now_iso, put_value, search_values
 
 logger = logging.getLogger(__name__)
@@ -279,3 +282,44 @@ async def delete_mapping(github_login: str) -> bool:
     await delete_value(USER_MAPPINGS_NAMESPACE, login.lower())
     _deindex_login(login)
     return existed
+
+
+router = APIRouter(tags=["user-mappings"])
+
+
+@router.get("/my-mapping")
+async def get_my_mapping(
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    """Return the logged-in user's own GitHub↔Slack mapping (or empty)."""
+    mapping = await get_mapping(session["sub"])
+    return mapping or {}
+
+
+@router.get("/admin/user-mappings")
+async def admin_list_user_mappings(
+    page: int = 1,
+    page_size: int = 20,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, Any]:
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 100))
+    records = await list_mappings()
+    total = len(records)
+    start = (page - 1) * page_size
+    items = records[start : start + page_size]
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.delete("/admin/user-mappings/{github_login}")
+async def admin_delete_user_mapping(
+    github_login: str,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, bool]:
+    deleted = await delete_mapping(github_login)
+    return {"deleted": deleted}

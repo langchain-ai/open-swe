@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from agent import completion, incidents
 from agent.dashboard import oauth, routes
-from agent.dashboard.threads import api, listing, proxy
+from agent.threads import api, listing, proxy
 from tests.conftest import patch_thread_module
 
 

@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard.threads import api as thread_api
 from agent.github import pull_request_context
+from agent.threads import api as thread_api
 from tests.conftest import patch_thread_module
 
 

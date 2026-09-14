@@ -4,8 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import plan_api, workflow_approval_api
-from agent.dashboard.threads import access, api, listing, summary
+from agent.threads import access, api, listing, plan_api, summary, workflow_approval_api
 from agent.tools import threads as tools
 
 _ADMINS = {"admin", "admin@example.com"}

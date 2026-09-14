@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from agent import store as agent_store
 from agent.dashboard import repo_access, schedules
-from agent.dashboard.schedules import ScheduleCreateBody, ScheduleUpdateBody
+from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
 
 
 class _FakeStore:

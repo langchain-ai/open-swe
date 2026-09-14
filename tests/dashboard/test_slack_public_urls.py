@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from agent.dashboard import routes
 from agent.dashboard.oauth import COOKIE_NAME, issue_session
-from agent.slack import oauth
+from agent.slack import connect, oauth
 
 
 @pytest.mark.parametrize("public_url", [None, "https://example.ngrok-free.dev/"])
@@ -26,9 +26,9 @@ def test_slack_public_url_applies_to_manifest_and_oauth_without_changing_local_c
     monkeypatch.setattr(oauth, "SLACK_CLIENT_SECRET", "test-secret")
     monkeypatch.setattr(oauth, "SLACK_TEAM_ID", "")
     exchange = AsyncMock(return_value="slack-test-token")
-    monkeypatch.setattr(routes, "exchange_slack_code", exchange)
+    monkeypatch.setattr(connect, "exchange_slack_code", exchange)
     monkeypatch.setattr(
-        routes,
+        connect,
         "fetch_slack_identity",
         AsyncMock(
             return_value=oauth.SlackIdentity(
@@ -41,7 +41,7 @@ def test_slack_public_url_applies_to_manifest_and_oauth_without_changing_local_c
         ),
     )
     save = AsyncMock()
-    monkeypatch.setattr(routes, "upsert_mapping", save)
+    monkeypatch.setattr(connect, "upsert_mapping", save)
     app = FastAPI()
     app.include_router(routes.router)
     expected_base = (public_url or local_url).rstrip("/")

@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
-from agent.dashboard import incidents_api
+from agent.incidents import api as incidents_api
 from agent.incidents import documents
 
 router = APIRouter(tags=["incidents"])

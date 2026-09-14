@@ -9,16 +9,17 @@ from xml.etree import ElementTree
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import routes
+from agent.dashboard import deps, options_api, profiles, routes
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
-from agent.dashboard.threads import api as thread_api
-from agent.dashboard.threads import diffs as thread_diffs
-from agent.dashboard.threads import listing as thread_listing
-from agent.dashboard.threads import proxy as thread_proxy
-from agent.dashboard.threads import runs as thread_runs
-from agent.dashboard.threads import summary as thread_summary
 from agent.dashboard.ttft import AssistantTextObservation
+from agent.threads import api as thread_api
+from agent.threads import diffs as thread_diffs
+from agent.threads import listing as thread_listing
+from agent.threads import proxy as thread_proxy
+from agent.threads import routes as thread_routes
+from agent.threads import runs as thread_runs
+from agent.threads import summary as thread_summary
 from tests.conftest import patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
@@ -55,7 +56,7 @@ async def test_rename_thread_trims_title_and_clears_seed(monkeypatch) -> None:
         lambda: SimpleNamespace(threads=SimpleNamespace(update=update)),
     )
 
-    result = await routes.api_rename_thread(
+    result = await thread_routes.api_rename_thread(
         "thread-1",
         thread_runs.ThreadRenameBody(title="  New title  "),
         {"sub": "alice", "email": "alice@example.com"},
@@ -2597,14 +2598,14 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
 @pytest.mark.asyncio
 async def test_get_my_profile_drops_deprecated_models() -> None:
     with patch(
-        "agent.dashboard.routes.get_profile",
+        "agent.dashboard.profiles.get_profile",
         new_callable=AsyncMock,
         return_value={
             "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
             "reasoning_effort": "high",
         },
     ):
-        payload = await routes.get_my_profile({"sub": "octocat"})
+        payload = await profiles.get_my_profile({"sub": "octocat"})
 
     assert "default_model" not in payload
     assert "reasoning_effort" not in payload
@@ -2614,22 +2615,22 @@ async def test_get_my_profile_drops_deprecated_models() -> None:
 async def test_options_omits_fable_when_disabled() -> None:
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.dashboard.options_api.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.dashboard.options_api.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.dashboard.options_api.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
     ):
-        payload = await routes.options()
+        payload = await options_api.options()
     assert _FABLE not in [m["id"] for m in payload["models"]]
 
 
@@ -2637,22 +2638,22 @@ async def test_options_omits_fable_when_disabled() -> None:
 async def test_options_includes_fable_when_enabled() -> None:
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.dashboard.options_api.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.dashboard.options_api.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.dashboard.options_api.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
     ):
-        payload = await routes.options()
+        payload = await options_api.options()
     assert _FABLE in [m["id"] for m in payload["models"]]
     openai_model = next(m for m in payload["models"] if m["id"] == _VISION_MODEL)
     assert openai_model["context_window"] == 272_000
@@ -2666,22 +2667,22 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     fable_pair = (_FABLE, "high")
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.dashboard.options_api.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.dashboard.options_api.get_team_default_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.dashboard.options_api.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
     ):
-        payload = await routes.options()
+        payload = await options_api.options()
     model_ids = [m["id"] for m in payload["models"]]
     assert _FABLE not in model_ids
     assert payload["default_agent_model"] != _FABLE
@@ -2970,7 +2971,7 @@ async def test_admin_cancel_thread_route_preserves_actor_identity(monkeypatch) -
     cancel = AsyncMock(return_value={"id": "thread-1", "status": "interrupted"})
     monkeypatch.setattr(routes, "admin_cancel_dashboard_thread", cancel)
 
-    result = await routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
+    result = await thread_routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
 
     assert result == {"id": "thread-1", "status": "interrupted"}
     cancel.assert_awaited_once_with("thread-1", "admin", email=None)
@@ -2980,6 +2981,6 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
 
     with pytest.raises(HTTPException) as exc_info:
-        routes._require_admin({"sub": "not-admin", "email": "user@example.com"})
+        deps.require_admin({"sub": "not-admin", "email": "user@example.com"})
 
     assert exc_info.value.status_code == 403

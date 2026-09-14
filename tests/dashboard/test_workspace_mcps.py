@@ -8,10 +8,10 @@ from fastapi import FastAPI
 from mcp.types import Tool
 from pydantic import ValidationError
 
-from agent.dashboard import routes
-from agent.dashboard import workspace_mcps as mcps
+from agent.dashboard import deps, oauth, routes
 from agent.encryption import decrypt_token
 from agent.mcp import MCPConnectionUpdate, runtime
+from agent.mcp import workspace as mcps
 
 
 @pytest.fixture(autouse=True)
@@ -223,7 +223,7 @@ async def test_all_discovered_tools_can_be_saved_for_large_catalogs(fake_store, 
     )
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[routes._admin_session] = lambda: {"sub": "admin"}
+    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     body = {"name": "example", "url": "https://example.com/mcp"}
     async with httpx.AsyncClient(
@@ -252,7 +252,7 @@ async def test_workspace_mcp_routes_are_admin_only_and_same_origin(fake_store, m
     app = FastAPI()
     app.include_router(routes.router)
     session = {"sub": "admin", "email": "admin@example.com"}
-    app.dependency_overrides[routes.require_session] = lambda: session
+    app.dependency_overrides[oauth.require_session] = lambda: session
     body = {
         "name": "example",
         "url": "https://example.com/mcp",
@@ -296,7 +296,7 @@ async def test_reveal_headers_requires_admin_and_same_origin_without_saving(
     app = FastAPI()
     app.include_router(routes.router)
     session = {"sub": "admin", "email": "admin@example.com"}
-    app.dependency_overrides[routes.require_session] = lambda: session
+    app.dependency_overrides[oauth.require_session] = lambda: session
     path = "/dashboard/api/workspace-mcps/example/headers/reveal"
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -332,7 +332,7 @@ async def test_reveal_headers_requires_admin_and_same_origin_without_saving(
 async def test_validation_responses_never_echo_headers(monkeypatch, headers):
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[routes._admin_session] = lambda: {"sub": "admin"}
+    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -372,7 +372,7 @@ async def test_query_credentials_are_rejected_without_saving_or_echoing(
 ):
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[routes._admin_session] = lambda: {"sub": "admin"}
+    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -395,7 +395,7 @@ async def test_query_credentials_are_rejected_without_saving_or_echoing(
 async def test_ordinary_query_parameters_roundtrip_unchanged(fake_store, monkeypatch):
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[routes._admin_session] = lambda: {"sub": "admin"}
+    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     url = (
         "https://mcp.us5.datadoghq.com/v1/mcp"
@@ -437,7 +437,7 @@ async def test_ordinary_query_parameters_roundtrip_unchanged(fake_store, monkeyp
 async def test_validation_identifies_fields_without_echoing_input(monkeypatch, fields, message):
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[routes._admin_session] = lambda: {"sub": "admin"}
+    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -481,7 +481,7 @@ async def test_discover_draft_never_saves_settings(fake_store, monkeypatch, exis
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[routes._admin_session] = lambda: {"sub": "admin"}
+    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",

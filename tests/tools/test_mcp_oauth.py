@@ -9,10 +9,10 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 
-from agent.dashboard import workspace_mcps as settings
 from agent.mcp import MCPConnectionUpdate, runtime
 from agent.mcp import oauth as mcp_oauth
 from agent.mcp import transport as mcp_transport
+from agent.mcp import workspace as settings
 from agent.tool_loaders import workspace_mcp as loader
 
 

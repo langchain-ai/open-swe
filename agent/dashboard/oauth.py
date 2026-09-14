@@ -1,4 +1,4 @@
-"""GitHub App OAuth code-exchange and signed-JWT session cookie."""
+"""GitHub App OAuth code-exchange, signed-JWT sessions, and the dashboard's cookies."""
 
 import base64
 import hashlib
@@ -13,8 +13,9 @@ from urllib.parse import quote, urlparse
 
 import httpx2
 import jwt
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import APIKeyCookie
+from pydantic import BaseModel
 from starlette.requests import HTTPConnection
 
 from agent.config import ENV
@@ -569,3 +570,46 @@ def cookie_security() -> tuple[bool, Literal["lax", "none"]]:
     if not secure or dashboard_is_same_origin():
         return secure, "lax"
     return True, "none"
+
+
+def set_session_cookie(response: Response, jwt_token: str) -> None:
+    secure, samesite = cookie_security()
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=jwt_token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite=samesite,
+        path="/",
+    )
+
+
+def set_state_cookie(response: Response, nonce: str) -> None:
+    # SameSite=Lax so GitHub's top-level redirect back to /auth/callback
+    # still presents this cookie; the cookie is single-purpose and lives
+    # only for the duration of one OAuth round-trip.
+    secure, _ = cookie_security()
+    response.set_cookie(
+        key=STATE_COOKIE_NAME,
+        value=nonce,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/dashboard/api/auth",
+    )
+
+
+def clear_state_cookie(response: Response) -> None:
+    secure, _ = cookie_security()
+    response.delete_cookie(
+        STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=secure
+    )
+
+
+class DesktopConnectExchange(BaseModel):
+    """Body of a desktop connect handoff redemption."""
+
+    code: str
+    verifier: str
