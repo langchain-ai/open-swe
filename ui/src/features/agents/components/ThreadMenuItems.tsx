@@ -2,6 +2,7 @@ import { Menu } from "@base-ui/react/menu"
 import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
+  CalendarBlankIcon,
   CopyIcon,
   PushPinIcon,
   PushPinSlashIcon,
@@ -51,6 +52,16 @@ export function ThreadMenuItems({
         >
           <IoLogoSlack className="size-3.5" />
           Open in Slack
+        </Menu.LinkItem>
+      )}
+      {thread?.automationId && (
+        <Menu.LinkItem
+          href={`/agents/automations/${encodeURIComponent(thread.automationId)}`}
+          closeOnClick
+          className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+        >
+          <CalendarBlankIcon className="size-3.5" />
+          Manage automation
         </Menu.LinkItem>
       )}
       <Menu.Item
