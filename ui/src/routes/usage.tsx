@@ -87,6 +87,9 @@ export function UsageAnalytics({
 }) {
   const [leaderboardPage, setLeaderboardPage] = useState(1)
   const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
+  const [leaderboardCursors, setLeaderboardCursors] = useState<
+    (string | undefined)[]
+  >([undefined])
   const leaderboard = useQuery({
     queryKey: [
       "usageLeaderboard",
@@ -95,12 +98,13 @@ export function UsageAnalytics({
       isAdmin,
       leaderboardPage,
       leaderboardPageSize,
+      leaderboardCursors[leaderboardPage - 1],
     ],
     queryFn: () =>
       api.usageLeaderboard(
         activePeriod,
         leaderboardPageSize,
-        (leaderboardPage - 1) * leaderboardPageSize
+        leaderboardCursors[leaderboardPage - 1]
       ),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
@@ -126,6 +130,7 @@ export function UsageAnalytics({
             value={activePeriod}
             onValueChange={(value) => {
               setLeaderboardPage(1)
+              setLeaderboardCursors([undefined])
               onPeriodChange(value as UsageLeaderboardPeriod)
             }}
           >
@@ -175,10 +180,21 @@ export function UsageAnalytics({
             totalMembers={leaderboard.data.total_members}
             page={leaderboardPage}
             pageSize={leaderboardPageSize}
-            onPageChange={setLeaderboardPage}
+            onPageChange={(page) => {
+              const nextCursor = leaderboard.data.next_cursor
+              if (page > leaderboardPage && nextCursor) {
+                setLeaderboardCursors((cursors) => {
+                  const updated = cursors.slice(0, leaderboardPage)
+                  updated[leaderboardPage] = nextCursor
+                  return updated
+                })
+              }
+              setLeaderboardPage(page)
+            }}
             onPageSizeChange={(pageSize) => {
               setLeaderboardPageSize(pageSize)
               setLeaderboardPage(1)
+              setLeaderboardCursors([undefined])
             }}
           />
         )}
@@ -307,7 +323,7 @@ function PRMergeRateSection({
           </button>
         </div>
       ) : data?.status === "ready" ? (
-        <PRMergeRateTable cohorts={data.cohorts} />
+        <PRMergeRateTable key={data.period} cohorts={data.cohorts} />
       ) : (
         <p
           className="p-6 text-center text-xs text-muted-foreground"
@@ -368,7 +384,12 @@ function PRMergeRateSection({
 function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
-  const rows = cohorts.slice((page - 1) * pageSize, page * pageSize)
+  const pageCount = Math.max(1, Math.ceil(cohorts.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const rows = cohorts.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  )
 
   return (
     <div className="overflow-x-auto">
@@ -424,7 +445,7 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
         </tbody>
       </table>
       <TablePagination
-        page={page}
+        page={currentPage}
         pageSize={pageSize}
         total={cohorts.length}
         onPageChange={setPage}

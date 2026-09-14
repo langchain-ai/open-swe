@@ -327,6 +327,7 @@ export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   rows: Array<UsageLeaderboardRow>
   total_members: number
+  next_cursor?: string | null
   current_user_rank: number | null
   generated_at_ms: number | null
   reviewer_stats: ReviewerStatsPayload
@@ -910,10 +911,10 @@ export const api = {
   usageLeaderboard: (
     period: UsageLeaderboardPeriod = "30d",
     limit = 10,
-    offset = 0
+    cursor?: string
   ) =>
     request<UsageLeaderboardPayload>(
-      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}&offset=${offset}`
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
     ).then((payload) => ({
       ...payload,
       rows: payload.rows.map((row) => ({

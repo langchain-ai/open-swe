@@ -2001,7 +2001,7 @@ async def api_delete_organization_skill(
 async def api_agent_usage_leaderboard(
     period: str | None = "30d",
     limit: int = Query(default=10, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    cursor: str | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     from asyncpg import PostgresError
@@ -2015,7 +2015,7 @@ async def api_agent_usage_leaderboard(
         return await usage_leaderboard(
             period=period,
             limit=limit,
-            offset=offset,
+            cursor=cursor,
             current_login=session["sub"],
             current_email=session.get("email"),
             admin=_session_is_admin(session),
