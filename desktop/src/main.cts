@@ -180,11 +180,15 @@ function checkForUpdates(): ReturnType<typeof autoUpdater.checkForUpdates> {
     return updateChannelChange.then(() => checkForUpdates());
   }
   lastUpdateCheck = Date.now();
+  const generation = updateCheckGeneration;
   updateCheck ??= Promise.resolve()
     .then(() => configureUpdateFeed(updateChannel))
-    .then(async () => {
-      const generation = updateCheckGeneration;
-      const result = await autoUpdater.checkForUpdates();
+    .then(() =>
+      generation === updateCheckGeneration
+        ? autoUpdater.checkForUpdates()
+        : null,
+    )
+    .then((result) => {
       if (generation !== updateCheckGeneration) {
         result?.cancellationToken?.cancel();
       } else {
