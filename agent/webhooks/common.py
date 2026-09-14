@@ -61,7 +61,7 @@ from agent.github.ci import fetch_open_pr_for_branch as github_fetch_open_pr_for
 from agent.github.comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
-    derive_pr_state,
+    derive_pr_state,  # noqa: F401
     describe_open_swe_tags,  # noqa: F401
     extract_pr_context,  # noqa: F401
     fetch_issue_comments,  # noqa: F401
@@ -82,6 +82,7 @@ from agent.github.token import (
 )
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.prompts import render_prompt
+from agent.pull_requests import PullRequest, PullRequestEvent
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -1266,15 +1267,8 @@ async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
 
 
 def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
-    pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
-    if not isinstance(pull_request, dict):
-        return None
-    state = pull_request.get("state")
-    return derive_pr_state(
-        state=state if isinstance(state, str) else None,
-        merged=bool(pull_request.get("merged")),
-        draft=bool(pull_request.get("draft")),
-    )
+    event = PullRequestEvent.parse(payload)
+    return event.state if event is not None else None
 
 
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
@@ -1297,54 +1291,37 @@ async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     """Keep an agent thread's tracked PR state in sync with PR lifecycle events.
 
-    The agent thread is located by the PR's html_url persisted in metadata when
-    the PR was opened (``open_pull_request``). Reviewer threads are skipped.
+    Agent threads come from the PR's own record; a PR that predates the record
+    falls back to a one-time scan of ``pr_url`` thread metadata. Reviewer
+    threads are skipped.
 
     A thread auto-resolves only when every tracked PR is merged or closed and the
     agent opened at least one of them with ``resolves_thread=True``. Without that
     flag the thread is instead marked ``attention_reason="prs_closed"`` so a
     person decides whether to resolve it; any PR reopening clears the mark.
     """
-    pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
-    if not isinstance(pull_request, dict):
+    event = PullRequestEvent.parse(payload)
+    if event is None or event.identity is None:
         return
-    pr_url = pull_request.get("html_url")
-    new_state = _pr_state_from_payload(payload)
-    if not isinstance(pr_url, str) or not pr_url or new_state is None:
-        return
+    owner, repo, pr_number = event.identity
+    pr_url = event.pull_request.html_url or PullRequest.seed(owner, repo, pr_number).url
+    new_state = event.state
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    matching_threads: dict[str, Any] = {}
-    page_size = 50
-    for metadata_filter in ({"pr_url": pr_url}, {"pr_urls": [pr_url]}):
-        offset = 0
-        while True:
-            try:
-                threads = await langgraph_client.threads.search(
-                    metadata=metadata_filter, limit=page_size, offset=offset
-                )
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "Could not search threads for PR %s state update", pr_url, exc_info=True
-                )
-                break
-            page = threads or []
-            for thread in page:
-                thread_id = (
-                    (thread.get("thread_id") or thread.get("id"))
-                    if isinstance(thread, dict)
-                    else None
-                )
-                if isinstance(thread_id, str) and thread_id:
-                    matching_threads[thread_id] = thread
-            if len(page) < page_size:
-                break
-            offset += page_size
+    try:
+        record = await event.record() or PullRequest.seed(owner, repo, pr_number, url=pr_url)
+        thread_ids = await record.linked_threads()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Pull request registry unavailable; scanning thread metadata instead",
+            extra={"pr_url": pr_url},
+            exc_info=True,
+        )
+        thread_ids = list(
+            await PullRequest.seed(owner, repo, pr_number, url=pr_url).discover_threads()
+        )
 
-    for thread_id, thread in matching_threads.items():
-        metadata = thread.get("metadata")
-        if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
-            continue
+    for thread_id in thread_ids:
         try:
             async with agent_thread_pr_state_lock(langgraph_client, thread_id):
                 current = await langgraph_client.threads.get(thread_id)

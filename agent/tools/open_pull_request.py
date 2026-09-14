@@ -14,6 +14,7 @@ from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
 from agent.github.token import GitHubUserAuthRequired
+from agent.pull_requests import PullRequest
 from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,
@@ -672,6 +673,30 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            try:
+                await PullRequest.record(
+                    owner=owner,
+                    repo=repo,
+                    number=pr_number,
+                    url=pr_url if isinstance(pr_url, str) else "",
+                    state=pr_state,
+                    title=pr_title if isinstance(pr_title, str) else "",
+                    head_ref=head,
+                    base_ref=base,
+                    author=author if isinstance(author, str) else "",
+                    resolves_thread=resolves_thread,
+                    thread_id=thread_id,
+                    thread_source="open_pull_request",
+                    private=repo_private,
+                )
+            except Exception:  # noqa: BLE001
+                # The PR exists on GitHub either way; failing the tool over the
+                # registry write would lose the agent's work.
+                logger.warning(
+                    "Failed to record pull request",
+                    extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+                    exc_info=True,
+                )
             active = await get_active_slack_thread(
                 get_client(),
                 thread_id,

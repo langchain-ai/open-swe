@@ -15,6 +15,7 @@ from agent.github.thread_token import (
     get_github_token,
     invalidate_cached_github_token,
 )
+from agent.pull_requests import PullRequest
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
     REVIEW_FINDING_CAP,
@@ -510,6 +511,28 @@ async def _publish_review_async(
         title=check_title,
         summary=check_summary,
     )
+
+    try:
+        record = await PullRequest.load(owner, repo, pr_number)
+        await record.link_review(
+            reviewer_thread_id=thread_id,
+            github_review_id=review_id if isinstance(review_id, int) else None,
+            url=(
+                f"{record.url}#pullrequestreview-{review_id}"
+                if isinstance(review_id, int)
+                else record.url
+            ),
+            head_sha=head_sha,
+            finding_count=len(inline_comments),
+        )
+    except Exception:  # noqa: BLE001
+        # The review is already published on GitHub; a registry write must not
+        # turn that into a tool failure the agent retries.
+        logger.warning(
+            "Failed to link published review to its pull request",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+            exc_info=True,
+        )
 
     result: dict[str, Any] = {
         "success": True,
