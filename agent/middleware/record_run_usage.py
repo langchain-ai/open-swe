@@ -1,5 +1,6 @@
 """Persist usage for completed turns and terminal model failures."""
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -12,6 +13,24 @@ from agent.agent_cost import finalize_agent_invocation_usage
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
 
+logger = logging.getLogger(__name__)
+
+
+def _tag_run_metadata(extra_metadata: dict[str, Any]) -> None:
+    """Attach ``extra_metadata`` to the current LangSmith run, best-effort."""
+    try:
+        from langsmith.run_helpers import get_current_run_tree
+
+        run_tree = get_current_run_tree()
+    except Exception:  # noqa: BLE001
+        run_tree = None
+    if run_tree is None:
+        return
+    try:
+        run_tree.metadata.update(extra_metadata)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not tag run metadata", exc_info=True)
+
 
 class RecordRunUsageMiddleware(OpenSWEMiddleware):
     """Tag model responses with their invocation and persist usage on completion."""
@@ -21,6 +40,9 @@ class RecordRunUsageMiddleware(OpenSWEMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        model_route = request.state.get("model_route")
+        if isinstance(model_route, str) and model_route:
+            _tag_run_metadata({"open_swe_model_route": model_route})
         try:
             response = await handler(request)
         except Exception as exc:
@@ -40,14 +62,17 @@ class RecordRunUsageMiddleware(OpenSWEMiddleware):
                 )
             raise
         invocation_id = RunConfig.from_runtime().invocation_id
-        if invocation_id:
-            for message in response.result:
-                if isinstance(message, AIMessage):
-                    message.response_metadata = {
-                        **message.response_metadata,
-                        "open_swe_invocation_id": invocation_id,
-                        "open_swe_run_id": invocation_id,
-                    }
+        for message in response.result:
+            if isinstance(message, AIMessage):
+                message.response_metadata = {
+                    **message.response_metadata,
+                    **({"open_swe_model_route": model_route} if model_route else {}),
+                    **(
+                        {"open_swe_invocation_id": invocation_id, "open_swe_run_id": invocation_id}
+                        if invocation_id
+                        else {}
+                    ),
+                }
         return response
 
     async def aafter_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:

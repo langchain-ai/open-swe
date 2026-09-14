@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "fast_alt", "balanced", "performance"]
 
-# A/B experiment: "fast" sends half of fast-routed turns to a second model
-# (``fast_alt``) so the two can be compared under real traffic.
+# A/B experiment: "fast" sends a share of fast-routed turns to a second model
+# (``fast_alt``) so the two can be compared under real traffic. The share is
+# drawn from a hash of the thread id, so a thread always lands on the same side
+# and the split is fully repeatable.
 _FAST_ALT_SPLIT = 0.5
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
