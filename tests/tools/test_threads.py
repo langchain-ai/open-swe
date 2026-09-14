@@ -85,10 +85,46 @@ async def test_actor_resolves_schedule_creator_for_scheduled_runs(
         ),
     )
     monkeypatch.setattr(threads_tool, "enforce_github_login_gate", AsyncMock(return_value=None))
+    authorize_admin = AsyncMock(return_value=None)
+    monkeypatch.setattr(threads_tool, "authorized_admin_schedule", authorize_admin)
 
     actor = await threads_tool._actor()
 
-    assert actor == threads_tool._Actor(login="alice", email="alice@example.com", name="alice")
+    assert actor == threads_tool._Actor(
+        login="alice",
+        email="alice@example.com",
+        name="alice",
+        admin_override=False,
+    )
+    assert actor.admin is False
+    authorize_admin.assert_awaited_once()
+
+
+async def test_actor_grants_admin_only_for_authorized_admin_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "source": "schedule",
+                "schedule_id": "sched_1",
+                "admin_thread": True,
+                "thread_id": "thread-1",
+                "invocation_id": "invocation-1",
+            }
+        },
+    )
+    record = {"id": "sched_1", "created_by": "alice", "user_email": "alice@example.com"}
+    monkeypatch.setattr(threads_tool, "get_agent_schedule", AsyncMock(return_value=record))
+    monkeypatch.setattr(threads_tool, "enforce_github_login_gate", AsyncMock(return_value=None))
+    monkeypatch.setattr(threads_tool, "authorized_admin_schedule", AsyncMock(return_value=record))
+
+    actor = await threads_tool._actor()
+
+    assert actor is not None
+    assert actor.admin is True
 
 
 async def test_actor_returns_none_when_schedule_record_is_missing(
