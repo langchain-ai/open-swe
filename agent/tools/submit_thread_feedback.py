@@ -14,10 +14,10 @@ from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 
 
 class ThreadFeedbackResult(TypedDict):
-    status: Literal["completed", "dismissed"]
-    rating: Literal["bad", "good"] | None
+    status: Literal["completed"]
+    rating: Literal["bad", "good"]
     comment: str
-    export_status: Literal["exported", "saved_without_export", "unchanged"]
+    export_status: Literal["exported", "saved_without_export"]
 
 
 async def submit_thread_feedback(
@@ -32,33 +32,31 @@ async def submit_thread_feedback(
     normalized_comment = comment.strip()
     run_id = str(runtime.config.get("run_id") or cfg.run_id or "")
     route: Route | None = runtime.state.get("model_route") if runtime.state else None
-    saved = False
-    export_status = "unchanged"
     async with agent_thread_pr_state_lock(langgraph_client(), cfg.thread_id):
         record = await feedback_store().get(cfg.thread_id)
-        if record is None or record.status not in {"completed", "dismissed"}:
-            record = record or Feedback(event_id=f"tool:{run_id}", answer_run_id=run_id)
-            record.status = "completed"
-            record.rating = rating
-            record.comment = normalized_comment
-            await feedback_store().put(cfg.thread_id, record)
-            saved = True
-    if saved:
-        exported = await create_langsmith_thread_feedback(
-            cfg.thread_id,
-            "rating",
-            score=1.0 if rating == "good" else 0.0,
-            comment=normalized_comment or None,
-            source_info={
-                "source": "agent_thread_feedback_tool",
-                "run_id": run_id,
-                **({"model_route": route} if route else {}),
-            },
-        )
-        export_status = "exported" if exported else "saved_without_export"
+        if record is not None and record.status in {"completed", "dismissed"}:
+            raise ValueError(
+                "Feedback has already been submitted for this thread and cannot be changed."
+            )
+        record = record or Feedback(event_id=f"tool:{run_id}", answer_run_id=run_id)
+        record.status = "completed"
+        record.rating = rating
+        record.comment = normalized_comment
+        await feedback_store().put(cfg.thread_id, record)
+    exported = await create_langsmith_thread_feedback(
+        cfg.thread_id,
+        "rating",
+        score=1.0 if rating == "good" else 0.0,
+        comment=normalized_comment or None,
+        source_info={
+            "source": "agent_thread_feedback_tool",
+            "run_id": run_id,
+            **({"model_route": route} if route else {}),
+        },
+    )
     return ThreadFeedbackResult(
-        status="dismissed" if record.status == "dismissed" else "completed",
-        rating=record.rating if record.rating in {"bad", "good"} else None,
-        comment=record.comment,
-        export_status=export_status,
+        status="completed",
+        rating=rating,
+        comment=normalized_comment,
+        export_status="exported" if exported else "saved_without_export",
     )
