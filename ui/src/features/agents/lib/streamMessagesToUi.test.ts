@@ -192,6 +192,75 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("attaches plan artifacts to their save_plan call", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-plan",
+            name: "save_plan",
+            args: { plan_file_path: "/workspace/plans/plan.html" },
+            type: "tool_call",
+          },
+        ],
+      }),
+      new ToolMessage({
+        tool_call_id: "call-plan",
+        content: '{"success":true,"path":"/workspace/plans/plan.html"}',
+        artifact: {
+          type: "plan",
+          html: "<h1>Plan</h1>",
+          title: "Plan",
+          path: "/workspace/plans/plan.html",
+        },
+      }),
+    ])
+
+    const agent = messages.find((message) => message.author === "agent")
+    const tool = agent?.chunks.find((chunk) => chunk.kind === "tool-execution")
+    expect(tool?.kind === "tool-execution" ? tool.display : undefined).toEqual({
+      type: "plan",
+      html: "<h1>Plan</h1>",
+      title: "Plan",
+      path: "/workspace/plans/plan.html",
+    })
+  })
+
+  it("ignores plan artifacts from other tools", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-plan",
+            name: "other_tool",
+            args: {},
+            type: "tool_call",
+          },
+        ],
+      }),
+      new ToolMessage({
+        tool_call_id: "call-plan",
+        content: "done",
+        artifact: {
+          type: "plan",
+          html: "<h1>Plan</h1>",
+          title: "Plan",
+          path: "/workspace/plans/plan.html",
+        },
+      }),
+    ])
+
+    const agent = messages.find((message) => message.author === "agent")
+    const tool = agent?.chunks.find((chunk) => chunk.kind === "tool-execution")
+    expect(tool?.kind === "tool-execution" ? tool.display : undefined).toBe(
+      undefined
+    )
+  })
+
   it("preserves historical embedded iframe artifacts", () => {
     const messages = streamMessagesToUi([
       new AIMessage({

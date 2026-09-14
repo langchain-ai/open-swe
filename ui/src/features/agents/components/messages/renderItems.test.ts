@@ -38,6 +38,26 @@ describe("buildRenderItems", () => {
     ])
   })
 
+  it("keeps plan artifacts as dedicated inline items", () => {
+    const chunk: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "call-plan",
+      title: "save_plan /workspace/plans/plan.html",
+      toolKind: "other",
+      status: "completed",
+      display: {
+        type: "plan",
+        html: "<h1>Plan</h1>",
+        title: "Plan",
+        path: "/workspace/plans/plan.html",
+      },
+    }
+
+    expect(buildRenderItems([chunk])).toEqual([
+      { type: "plan-item", key: "tool-call-plan", chunk },
+    ])
+  })
+
   it("keeps sent replies visible when later work runs", () => {
     const sentReply: ToolExecutionChunk = {
       kind: "tool-execution",
