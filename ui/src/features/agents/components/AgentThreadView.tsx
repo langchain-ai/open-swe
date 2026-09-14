@@ -278,16 +278,18 @@ export function AgentThreadView({
   }, [stream.messages, stream.isThreadLoading, thread.id])
 
   // The transcript's first frame: one rAF after the commit that replaced the
-  // hydration placeholder. Approximates paint closely enough to compare builds.
+  // hydration placeholder. A commit before the frame fires cancels and
+  // reschedules it, so the frame recorded is the one that actually reached the
+  // screen; the ref is only set once it has.
   const paintedThreadId = useRef<string | null>(null)
   useLayoutEffect(() => {
     if (isHydrating || paintedThreadId.current === thread.id) return
-    paintedThreadId.current = thread.id
     const messages = visibleMessages.length
     const chunks = visibleMessages.reduce((sum, m) => sum + m.chunks.length, 0)
-    const frame = requestAnimationFrame(() =>
+    const frame = requestAnimationFrame(() => {
+      paintedThreadId.current = thread.id
       threadTranscriptPainted(thread.id, { messages, chunks })
-    )
+    })
     return () => cancelAnimationFrame(frame)
   }, [isHydrating, thread.id, visibleMessages])
 
