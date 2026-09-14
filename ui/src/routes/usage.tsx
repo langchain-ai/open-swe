@@ -510,8 +510,7 @@ const USAGE_COLUMNS: Array<SortableColumn> = [
     key: "user",
     label: "User",
     align: "left",
-    sortValue: (row) =>
-      (row.user.github_login ?? row.user.email ?? row.user.name).toLowerCase(),
+    sortValue: (row) => row.user.name.toLowerCase(),
   },
   {
     key: "favorite_model",

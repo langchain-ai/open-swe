@@ -457,6 +457,33 @@ it("sorts textual columns case-insensitively and defaults new columns to descend
   client.clear()
 })
 
+it("sorts users by their displayed name instead of their login", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 2,
+    rows: [
+      {
+        ...sortableRows[0]!,
+        user: { name: "Zoe User", github_login: "aardvark", email: null },
+      },
+      {
+        ...sortableRows[1]!,
+        user: { name: "Alice User", github_login: "zebra", email: null },
+      },
+    ],
+  })
+  const client = mountReport()
+  await screen.findByText("Zoe User")
+
+  fireEvent.click(screen.getByRole("button", { name: /^User/ }))
+  fireEvent.click(screen.getByRole("button", { name: /^User/ }))
+  const body = within(screen.getByRole("table")).getAllByRole("row").slice(1)
+  expect(rowCells(body[0]!)[1]).toContain("Alice User")
+  expect(rowCells(body[1]!)[1]).toContain("Zoe User")
+  client.clear()
+})
+
 it.each([
   {
     name: "confirmed zero",
