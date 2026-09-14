@@ -54,6 +54,7 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
     "slack_thread_reply": "agent.slack.tools.thread_reply",
+    "submit_thread_feedback": ".submit_thread_feedback",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
@@ -112,6 +113,7 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_thread_reply",
+    "submit_thread_feedback",
     "trigger_automation",
     "update_automation",
     "update_finding",
@@ -170,6 +172,7 @@ if TYPE_CHECKING:
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
+    from agent.tools.submit_thread_feedback import submit_thread_feedback
     from agent.tools.threads import get_thread, list_threads, manage_thread
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill
