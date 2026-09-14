@@ -37,6 +37,21 @@ def test_unmatched_paths_keep_the_tracer_default(named_resources: list[str]) -> 
     assert named_resources == []
 
 
+def test_failing_endpoints_are_named_too(named_resources: list[str]) -> None:
+    """The 500 is produced above this middleware, so naming only on the response
+    would leave every failing request in the generic resource."""
+    app = FastAPI()
+
+    @app.get("/dashboard/api/threads/page")
+    async def explode() -> dict[str, str]:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        _client(app).get("/dashboard/api/threads/page")
+
+    assert named_resources == ["GET /dashboard/api/threads/page"]
+
+
 def test_naming_failures_do_not_break_the_response(monkeypatch: pytest.MonkeyPatch) -> None:
     def explode(_resource: str) -> None:
         raise RuntimeError("no tracer here")
