@@ -69,6 +69,56 @@ async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.M
     assert actor == threads_tool._Actor(login="reviewer", email=None, name="reviewer")
 
 
+async def test_actor_resolves_schedule_creator_for_scheduled_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {"configurable": {"source": "schedule", "schedule_id": "sched_1"}},
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "get_agent_schedule",
+        AsyncMock(
+            return_value={"id": "sched_1", "created_by": "alice", "user_email": "alice@example.com"}
+        ),
+    )
+    monkeypatch.setattr(threads_tool, "enforce_github_login_gate", AsyncMock(return_value=None))
+
+    actor = await threads_tool._actor()
+
+    assert actor == threads_tool._Actor(login="alice", email="alice@example.com", name="alice")
+
+
+async def test_actor_returns_none_when_schedule_record_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {"configurable": {"source": "schedule", "schedule_id": "sched_1"}},
+    )
+    monkeypatch.setattr(threads_tool, "get_agent_schedule", AsyncMock(return_value=None))
+
+    assert await threads_tool._actor() is None
+
+
+async def test_actor_ignores_schedule_identity_for_non_schedule_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {"configurable": {"source": "dashboard", "schedule_id": "sched_1"}},
+    )
+    schedule = AsyncMock()
+    monkeypatch.setattr(threads_tool, "get_agent_schedule", schedule)
+
+    assert await threads_tool._actor() is None
+    schedule.assert_not_awaited()
+
+
 async def test_list_threads_denies_actor_outside_allowed_org(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
