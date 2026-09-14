@@ -34,10 +34,6 @@ async def submit_thread_feedback(
     route: Route | None = runtime.state.get("model_route") if runtime.state else None
     async with agent_thread_pr_state_lock(langgraph_client(), cfg.thread_id):
         record = await feedback_store().get(cfg.thread_id)
-        if record is not None and record.status in {"completed", "dismissed"}:
-            raise ValueError(
-                "Feedback has already been submitted for this thread and cannot be changed."
-            )
         record = record or Feedback(event_id=f"tool:{run_id}", answer_run_id=run_id)
         record.status = "completed"
         record.rating = rating

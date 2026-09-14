@@ -68,15 +68,20 @@ async def test_submits_explicit_feedback_with_run_context(context: AsyncMock) ->
     )
 
 
-async def test_rejects_second_feedback_submission(context: AsyncMock) -> None:
+async def test_updates_existing_feedback_submission(context: AsyncMock) -> None:
     await feedback_store().put(
         "thread-1", Feedback(status="completed", rating="good", comment="Already saved")
     )
 
-    with pytest.raises(ValueError, match="already been submitted"):
-        await submit_thread_feedback("bad", _runtime(), "Replace me")
+    result = await submit_thread_feedback("bad", _runtime(), "Replace me")
 
+    assert result == {
+        "status": "completed",
+        "rating": "bad",
+        "comment": "Replace me",
+        "export_status": "exported",
+    }
     assert await feedback_store().get("thread-1") == Feedback(
-        status="completed", rating="good", comment="Already saved"
+        status="completed", rating="bad", comment="Replace me"
     )
-    context.assert_not_awaited()
+    context.assert_awaited_once()
