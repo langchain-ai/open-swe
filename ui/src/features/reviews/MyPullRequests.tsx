@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query"
 import { BugBeetleIcon, FlagIcon } from "@phosphor-icons/react"
 import { useState } from "react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { MultiSelect } from "@/components/ui/multi-select"
@@ -56,7 +57,14 @@ function MergePullRequest({
       const result = await api.mergePullRequest(pr, method)
       if (!result.merged) throw new Error("GitHub did not confirm the merge.")
     },
-    onSuccess: onMerged,
+    onSuccess: () => {
+      toast.success(`Merged ${pr.repo}#${pr.number}`)
+      onMerged()
+    },
+    onError: (error) =>
+      toast.error(`Could not merge ${pr.repo}#${pr.number}`, {
+        description: error.message,
+      }),
     retry: false,
   })
   return (
@@ -105,6 +113,11 @@ function MergePullRequest({
 function FixPullRequest({ pr }: { pr: OpenPullRequest }) {
   const fix = useMutation({
     mutationFn: () => api.fixPullRequest(pr),
+    onSuccess: () => toast.success(`Fix queued for ${pr.repo}#${pr.number}`),
+    onError: (error) =>
+      toast.error(`Could not queue fix for ${pr.repo}#${pr.number}`, {
+        description: error.message,
+      }),
   })
   return (
     <div className="mt-2">

@@ -10,6 +10,9 @@ import {
 } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useState } from "react"
+import { toast } from "sonner"
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 import { api, type OpenPullRequest } from "@/lib/api"
 import { MyPullRequests } from "./MyPullRequests"
 import type { ReviewsSearch } from "./search"
@@ -207,6 +210,7 @@ describe("My PRs", () => {
     finish({ merged: true })
     await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
     expect(screen.getByText("Change 2")).toBeTruthy()
+    expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
     expect(navigate).not.toHaveBeenCalled()
   })
 
@@ -230,6 +234,9 @@ describe("My PRs", () => {
       "Required checks have not passed"
     )
     expect(screen.getByText("Change 1")).toBeTruthy()
+    expect(toast.error).toHaveBeenCalledWith("Could not merge acme/app#1", {
+      description: "Required checks have not passed",
+    })
     expect(
       (screen.getByRole("button", { name: "Retry merge" }) as HTMLButtonElement)
         .disabled
