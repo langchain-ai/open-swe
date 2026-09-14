@@ -197,7 +197,7 @@ async def test_allowed_bot_mention_is_dispatched(
         {"subtype": "message_deleted"},
     ],
 )
-async def test_bot_must_be_allowed_and_explicitly_mention_us(
+async def test_bot_must_be_allowed_and_directly_address_us(
     allowed_bot: None,
     change: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -207,6 +207,24 @@ async def test_bot_must_be_allowed_and_explicitly_mention_us(
     payload["event"].update(change)
     tasks = _FakeBackgroundTasks()
     assert (await _post(payload, tasks))["status"] == "ignored"
+    assert tasks.tasks == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Release contributors: <@BOT> (1 commit)",
+        "Thanks <@BOT>, ship it",
+    ],
+)
+async def test_allowed_bot_incidental_mention_is_ignored(allowed_bot: None, text: str) -> None:
+    payload = _bot_payload()
+    payload["event"]["text"] = text
+    tasks = _FakeBackgroundTasks()
+
+    response = await _post(payload, tasks)
+
+    assert response["status"] == "ignored"
     assert tasks.tasks == []
 
 
