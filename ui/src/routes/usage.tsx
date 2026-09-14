@@ -85,8 +85,37 @@ export function UsageAnalytics({
   isAdmin: boolean
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
-  const [leaderboardPage, setLeaderboardPage] = useState(1)
   const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
+
+  return (
+    <UsageAnalyticsPeriod
+      key={activePeriod}
+      period={activePeriod}
+      login={login}
+      isAdmin={isAdmin}
+      pageSize={leaderboardPageSize}
+      onPageSizeChange={setLeaderboardPageSize}
+      onPeriodChange={onPeriodChange}
+    />
+  )
+}
+
+function UsageAnalyticsPeriod({
+  period: activePeriod,
+  login,
+  isAdmin,
+  pageSize: leaderboardPageSize,
+  onPageSizeChange: setLeaderboardPageSize,
+  onPeriodChange,
+}: {
+  period: UsageLeaderboardPeriod
+  login: string
+  isAdmin: boolean
+  pageSize: number
+  onPageSizeChange: (pageSize: number) => void
+  onPeriodChange: (period: UsageLeaderboardPeriod) => void
+}) {
+  const [leaderboardPage, setLeaderboardPage] = useState(1)
   const [leaderboardCursors, setLeaderboardCursors] = useState<
     (string | undefined)[]
   >([undefined])
@@ -128,11 +157,9 @@ export function UsageAnalytics({
         action={
           <Select
             value={activePeriod}
-            onValueChange={(value) => {
-              setLeaderboardPage(1)
-              setLeaderboardCursors([undefined])
+            onValueChange={(value) =>
               onPeriodChange(value as UsageLeaderboardPeriod)
-            }}
+            }
           >
             <SelectTrigger className="w-36">
               <SelectValue />
