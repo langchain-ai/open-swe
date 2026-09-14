@@ -1,8 +1,8 @@
 Activate plan mode mid-run.
 
-Call this only when the user explicitly asks to enter or use plan mode. Do not
-infer plan mode from task complexity, size, ambiguity, or the word "plan"
-appearing in the request.
+Call this when the user asks you to plan work (e.g. "plan xxx") or explicitly
+requests plan mode. Do not enter it based solely on task complexity, size,
+ambiguity, or an incidental mention of the word "plan".
 
 Once activated, stay read-only for the target repo: research the codebase,
 create or edit a dated, self-contained HTML artifact outside any repo (for
