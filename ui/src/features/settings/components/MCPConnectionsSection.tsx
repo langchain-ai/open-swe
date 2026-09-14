@@ -15,7 +15,7 @@ type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
 type Catalog = { name: string; description: string }[]
 
-export type MCPScope = "workspace" | "user"
+export type MCPScope = "workspace" | "user" | "local"
 
 type MCPScopeConfig = {
   title: string
@@ -51,10 +51,22 @@ const scopes: Record<MCPScope, MCPScopeConfig> = {
     revealHeaders: api.revealMyMCPHeaders,
     discover: api.discoverMyMCP,
   },
+  local: {
+    title: "Local MCPs",
+    description:
+      "Connect MCP servers for local desktop runs. Credentials stay on this computer. New connections enable all tools; edit tool restrictions in mcp.json. Local connections replace personal or workspace connections with the same name.",
+    queryKey: ["localMCPs"],
+    list: () => window.openSweDesktop!.listMcpConnections(),
+    save: (body) => window.openSweDesktop!.saveMcpConnection(body),
+    remove: (name) => window.openSweDesktop!.deleteMcpConnection(name),
+    revealHeaders: (name) => window.openSweDesktop!.revealMcpHeaders(name),
+    discover: async () => [],
+  },
 }
 
 export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
   const { title, description, queryKey, ...client } = scopes[scope]
+  const local = scope === "local"
   const qc = useQueryClient()
   const connections = useQuery({ queryKey, queryFn: client.list })
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -134,7 +146,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
         ...connection,
         oauth:
           connection.oauth === undefined ? previous?.oauth : connection.oauth,
-        enabled: previous?.enabled ?? true,
+        enabled: connection.enabled ?? previous?.enabled ?? true,
         allowed_tools: previous?.allowed_tools ?? [],
         existing: Boolean(previous),
       },
@@ -336,10 +348,10 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
             }
           >
             <option value="headers">Headers / API key</option>
-            <option value="oauth">OAuth client credentials</option>
+            {!local && <option value="oauth">OAuth client credentials</option>}
           </select>
         </label>
-        {draft.oauth && (
+        {draft.oauth && !local && (
           <MCPOAuthFields
             key={draft.name}
             value={draft.oauth}
@@ -359,9 +371,11 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
             {draft.oauth ? "Additional headers" : "Authentication headers"}
           </p>
           <p className="text-xs text-muted-foreground">
-            {draft.oauth
-              ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
-              : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
+            {local
+              ? "Values are stored unencrypted in mcp.json and hidden by default. Use a header such as Authorization or X-API-Key."
+              : draft.oauth
+                ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
+                : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
           </p>
           {!replaceHeaders ? (
             <>
@@ -503,99 +517,106 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
             </>
           )}
         </div>
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Allowed tools</p>
-          <p className="text-xs text-muted-foreground">
-            Discover tools, review the selection, then save. All discovered
-            tools are selected by default for new connections.
-          </p>
-          {toolNames.length > 0 && (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="mr-auto text-xs text-muted-foreground">
-                  {draft.allowed_tools.length} of {toolNames.length} selected
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={draft.allowed_tools.length === toolNames.length}
-                  onClick={() =>
-                    setDraft({ ...draft, allowed_tools: toolNames })
-                  }
+        {!local && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Allowed tools</p>
+            <p className="text-xs text-muted-foreground">
+              Discover tools, review the selection, then save. All discovered
+              tools are selected by default for new connections.
+            </p>
+            {toolNames.length > 0 && (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="mr-auto text-xs text-muted-foreground">
+                    {draft.allowed_tools.length} of {toolNames.length} selected
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={draft.allowed_tools.length === toolNames.length}
+                    onClick={() =>
+                      setDraft({ ...draft, allowed_tools: toolNames })
+                    }
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={draft.allowed_tools.length === 0}
+                    onClick={() => setDraft({ ...draft, allowed_tools: [] })}
+                  >
+                    Clear all
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-expanded={toolsExpanded}
+                    aria-controls={toolsId}
+                    onClick={() => setToolsExpanded(!toolsExpanded)}
+                  >
+                    {toolsExpanded ? "Hide tools" : "Show tools"}
+                  </Button>
+                </div>
+                <div
+                  id={toolsId}
+                  role="region"
+                  aria-label="Available tools"
+                  tabIndex={0}
+                  hidden={!toolsExpanded}
+                  className="max-h-80 space-y-3 overflow-y-auto overscroll-contain rounded-md border p-3"
                 >
-                  Select all
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={draft.allowed_tools.length === 0}
-                  onClick={() => setDraft({ ...draft, allowed_tools: [] })}
-                >
-                  Clear all
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  aria-expanded={toolsExpanded}
-                  aria-controls={toolsId}
-                  onClick={() => setToolsExpanded(!toolsExpanded)}
-                >
-                  {toolsExpanded ? "Hide tools" : "Show tools"}
-                </Button>
-              </div>
-              <div
-                id={toolsId}
-                role="region"
-                aria-label="Available tools"
-                tabIndex={0}
-                hidden={!toolsExpanded}
-                className="max-h-80 space-y-3 overflow-y-auto overscroll-contain rounded-md border p-3"
-              >
-                {toolNames.map((name) => (
-                  <label key={name} className="flex items-start gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="mt-1 shrink-0"
-                      aria-label={`Allow ${name}`}
-                      checked={selectedTools.has(name)}
-                      onChange={(e) =>
-                        setDraft({
-                          ...draft,
-                          allowed_tools: e.target.checked
-                            ? [...draft.allowed_tools, name]
-                            : draft.allowed_tools.filter(
-                                (tool) => tool !== name
-                              ),
-                        })
-                      }
-                    />
-                    <span className="min-w-0 break-words">
-                      {name}
-                      <span className="block text-xs text-muted-foreground">
-                        {toolDescriptions.get(name)}
+                  {toolNames.map((name) => (
+                    <label
+                      key={name}
+                      className="flex items-start gap-2 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-1 shrink-0"
+                        aria-label={`Allow ${name}`}
+                        checked={selectedTools.has(name)}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            allowed_tools: e.target.checked
+                              ? [...draft.allowed_tools, name]
+                              : draft.allowed_tools.filter(
+                                  (tool) => tool !== name
+                                ),
+                          })
+                        }
+                      />
+                      <span className="min-w-0 break-words">
+                        {name}
+                        <span className="block text-xs text-muted-foreground">
+                          {toolDescriptions.get(name)}
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={!draft.name || !draft.url}
-            onClick={(event) => {
-              if (event.currentTarget.form?.reportValidity()) void save(true)
-            }}
-          >
-            Save and discover tools
-          </Button>
+          {!local && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!draft.name || !draft.url}
+              onClick={(event) => {
+                if (event.currentTarget.form?.reportValidity()) void save(true)
+              }}
+            >
+              Save and discover tools
+            </Button>
+          )}
           <Button type="submit" size="sm">
             Save connection
           </Button>
@@ -630,6 +651,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
         )}
         {connections.data?.map((connection) => {
           const isEditing = draft?.existing && draft.name === connection.name
+          const readOnly = local && connection.local_command
           return (
             <section
               key={connection.name}
@@ -641,8 +663,8 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
                   <p className="text-sm font-medium">
                     {connection.name}{" "}
                     <span className="text-muted-foreground">
-                      · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
-                      {connection.allowed_tools.length} tools
+                      · {connection.enabled ? "Enabled" : "Disabled"}
+                      {!local && ` · ${connection.allowed_tools.length} tools`}
                     </span>
                   </p>
                   <p className="text-xs break-all text-muted-foreground">
@@ -653,7 +675,12 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || readOnly}
+                    title={
+                      readOnly
+                        ? "Edit command-based MCPs in mcp.json"
+                        : undefined
+                    }
                     onClick={() => {
                       if (isEditing) closeEditor()
                       else edit(connection)
@@ -667,7 +694,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || readOnly}
                     onClick={() =>
                       run(async () => {
                         await client.save({
@@ -688,7 +715,12 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || readOnly}
+                    title={
+                      readOnly
+                        ? "Delete command-based MCPs in mcp.json"
+                        : undefined
+                    }
                     onClick={() =>
                       run(async () => {
                         await client.remove(connection.name)
@@ -708,6 +740,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
         })}
         {importing ? (
           <MCPImport
+            local={local}
             onImport={([first, ...rest]) => {
               if (!first) return
               setImporting(false)

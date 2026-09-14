@@ -411,7 +411,10 @@ personal credentials; to use yours, continue the thread privately from the dashb
 Both scopes share the **MCPs** tool group. A personal connection with the same name as a
 workspace connection replaces it entirely for that user's runs, and a disabled personal
 connection hides the workspace one rather than falling back to it.
-Desktop (local) runs do not load MCP connections yet. GitHub PR follow-ups targeting a
+Desktop local runs use the signed-in session to call cloud MCPs without downloading
+credentials, and can also load user-configured local servers; see
+[Desktop MCP configuration](../desktop/README.md#mcp-servers-for-local-threads).
+GitHub PR follow-ups targeting a
 private thread are rejected unless the commenter owns that thread, before credentials
 are read or a run is dispatched.
 

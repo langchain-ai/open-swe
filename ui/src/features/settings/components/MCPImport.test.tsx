@@ -58,6 +58,41 @@ it.each([
   ).toThrow(/OAuth/)
 })
 
+it("imports local HTTP settings and rejects local OAuth", () => {
+  expect(
+    parseMCPConfig(
+      JSON.stringify({
+        mcpServers: {
+          local: {
+            url: "http://localhost:8080/mcp",
+            transport: "sse",
+            enabled: false,
+          },
+        },
+      }),
+      true
+    )[0]
+  ).toMatchObject({
+    name: "local",
+    url: "http://localhost:8080/mcp",
+    transport: "sse",
+    enabled: false,
+  })
+  expect(() =>
+    parseMCPConfig(
+      JSON.stringify({
+        mcpServers: {
+          local: {
+            url: "http://localhost:8080/mcp",
+            oauth: { token_url: "https://example.com", client_id: "app" },
+          },
+        },
+      }),
+      true
+    )
+  ).toThrow(/OAuth is not supported/)
+})
+
 it("imports multiple remote Claude-style servers with headers and transports", () => {
   expect(
     parseMCPConfig(

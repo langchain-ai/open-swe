@@ -48,7 +48,24 @@ function MySettingsPage() {
       </main>
     )
   }
-  if (!session.data) return <RequireLogin />
+  if (!session.data) {
+    if (typeof window === "undefined" || !window.openSweDesktop)
+      return <RequireLogin />
+    return (
+      <main className="mx-auto max-w-3xl space-y-10 px-4 pt-14 pb-16 sm:px-8 sm:py-12">
+        <header>
+          <h1 className="font-heading text-xl font-medium tracking-tight">
+            Settings
+          </h1>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Settings for local runs on this computer.
+          </p>
+        </header>
+        <MCPConnectionsSection scope="local" />
+        <DesktopVersionSection />
+      </main>
+    )
+  }
 
   return (
     <AppShell
@@ -61,6 +78,9 @@ function MySettingsPage() {
       <PullRequestsSection />
       <ConnectionsSection user={session.data} />
       <MCPConnectionsSection scope="user" />
+      {typeof window !== "undefined" && window.openSweDesktop && (
+        <MCPConnectionsSection scope="local" />
+      )}
       <PersonalInstructionsSection />
       <DesktopVersionSection />
     </AppShell>

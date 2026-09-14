@@ -28,6 +28,43 @@ The side panel's **Changes** tab diffs the project against a git snapshot taken 
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
 the workspace's branch and discovers its pull request when the GitHub CLI is installed and authenticated.
 
+## MCP servers for local threads
+
+Local threads can use workspace and personal cloud MCPs through the signed-in desktop
+session. Cloud credentials stay on the server; signing out or switching accounts revokes
+calls from an existing run. The backend must include the desktop MCP endpoints.
+
+Configure local servers under **Settings → Local MCPs** in the desktop app. The UI reads
+and writes `mcp.json` inside Electron's user-data directory (on macOS,
+`~/Library/Application Support/Open SWE/`, or `Open SWE Development/` for development):
+
+```json
+{
+  "mcpServers": {
+    "local_files": {
+      "command": "/absolute/path/to/mcp-server",
+      "args": ["/path/to/data"],
+      "env": {"API_KEY": "local-secret"},
+      "allowed_tools": ["read_file"]
+    },
+    "local_http": {
+      "url": "http://127.0.0.1:8080/mcp",
+      "transport": "streamable_http"
+    }
+  }
+}
+```
+
+Local connections support stdio, SSE, and streamable HTTP. Only configure trusted
+servers: stdio commands execute on your computer. Protect this file with user-only
+permissions (`chmod 600`). It is read on each run, never uploaded to the cloud.
+Omitting `allowed_tools` enables all discovered local tools; an empty list enables none.
+Local connection names replace matching cloud connections, even with `"enabled": false`.
+Within the cloud, personal connections replace workspace connections. Editing a local
+connection invalidates its loaded tools until a new run. Cloud lookup failure never falls
+back to another cloud account; local servers remain usable offline. Plan mode still blocks
+MCP tools. Personal Notion integration loading is unchanged.
+
 ## How it connects
 
 The bundled UI runs at an internal `open-swe://app` origin. Electron proxies its

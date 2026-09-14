@@ -228,6 +228,7 @@ export interface MCPConnection {
   oauth?: MCPOAuth | null
   revision: string
   updated_at: string
+  local_command?: boolean
 }
 
 export interface MCPConnectionUpdate {
