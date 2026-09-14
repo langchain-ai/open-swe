@@ -320,8 +320,8 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_subagent_reasoning_effort": fallback_effort,
         "default_agent_routing_fast_model": "fireworks:accounts/fireworks/models/glm-5p3-flash",
         "default_agent_routing_fast_reasoning_effort": "high",
-        # A/B experiment: half of fast-routed turns go to Luna via OpenRouter.
-        "default_agent_routing_fast_alt_model": "openrouter:openai/gpt-5.6-luna",
+        # A/B experiment: half of fast-routed turns go to Luna.
+        "default_agent_routing_fast_alt_model": "openai:gpt-5.6-luna",
         "default_agent_routing_fast_alt_reasoning_effort": "low",
         "default_agent_routing_fast_alt_probability": 0.5,
         "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",

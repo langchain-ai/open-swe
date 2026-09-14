@@ -79,13 +79,6 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "openrouter:openai/gpt-5.6-luna",
-        "label": "GPT-5.6 Luna (OpenRouter)",
-        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
-        "default_effort": "xhigh",
-        "supports_images": True,
-    },
-    {
         "id": "google_genai:gemini-3.8-flash",
         "label": "Gemini 3.8 Flash",
         "efforts": ["minimal", "low", "medium", "high"],
@@ -163,7 +156,6 @@ CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
     "openai:gpt-5.6-sol": 272_000,
     "openai:gpt-5.6-terra": 272_000,
     "openai:gpt-5.6-luna": 272_000,
-    "openrouter:openai/gpt-5.6-luna": 272_000,
 }
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,

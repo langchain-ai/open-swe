@@ -13,7 +13,6 @@ from agent.utils.openai_oauth import (
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
@@ -31,7 +30,6 @@ _TIMEOUT_PROVIDER_PREFIXES = (
     "baseten:",
     "google_genai:",
     "fireworks:",
-    "openrouter:",
 )
 
 _MODEL_CACHE: dict[
@@ -187,16 +185,6 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             if not api_key:
                 raise ValueError("BASETEN_API_KEY is required when Gateway routing is disabled")
             model_kwargs["base_url"] = BASETEN_BASE_URL
-            model_kwargs["api_key"] = api_key
-    elif model_id.startswith("openrouter:"):
-        init_model_id = model_id.split(":", 1)[1]
-        model_kwargs["model_provider"] = "openai"
-        model_kwargs["use_responses_api"] = False
-        if not gateway_applied:
-            api_key = ENV.OPENROUTER_API_KEY.optional()
-            if not api_key:
-                raise ValueError("OPENROUTER_API_KEY is required when Gateway routing is disabled")
-            model_kwargs["base_url"] = OPENROUTER_BASE_URL
             model_kwargs["api_key"] = api_key
 
     profile_override = model_profile_with_context_override(model_id)
@@ -355,10 +343,6 @@ def provider_model_kwargs(
             kwargs["model_kwargs"] = {"reasoning_effort": effort}
     elif model_id.startswith("baseten:") and profile_effort in ("low", "high", "max"):
         kwargs["reasoning_effort"] = profile_effort
-    elif model_id.startswith("openrouter:"):
-        reasoning = openai_reasoning_for(profile_effort)
-        if reasoning is not None:
-            kwargs["reasoning_effort"] = reasoning["effort"]
     return kwargs
 
 
