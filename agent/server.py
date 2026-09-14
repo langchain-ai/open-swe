@@ -856,6 +856,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         github_login=self._profile_login,
                         github_user_id=cfg.github_user_id,
                         user_email=self._user_email,
+                        display_name=(
+                            triggering_user_identity.display_name
+                            if triggering_user_identity and triggering_user_identity.github_profile
+                            else None
+                        ),
                         model_id=self._model_id,
                         effort=self._effort,
                         source=self._source,

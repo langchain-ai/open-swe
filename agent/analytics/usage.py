@@ -90,12 +90,16 @@ async def record_agent_invocation_usage(
     effort: str | None,
     source: str | None,
     github_user_id: str | int | None = None,
+    display_name: str | None = None,
     repository: str | None = None,
 ) -> None:
     if not invocation_id or not thread_id:
         return
     person = await directory.resolve_person(
-        immutable_person_key=github_user_id, github_login=github_login, email=user_email
+        immutable_person_key=github_user_id,
+        github_login=github_login,
+        email=user_email,
+        display_name=display_name,
     )
     await emitter.run_started(
         run_key=invocation_id,

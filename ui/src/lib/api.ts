@@ -282,6 +282,7 @@ export interface UsageLeaderboardRow {
     name: string
     github_login: string | null
     email: string | null
+    avatar_url?: string | null
   }
   favorite_model: string
   invocations: number
