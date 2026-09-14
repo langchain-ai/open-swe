@@ -23,7 +23,6 @@ from agent.github.ci import (
     list_commit_statuses,
 )
 from agent.github.comments import post_github_comment
-from agent.linear.client import comment_on_linear_issue
 from agent.prompts import render_prompt
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
@@ -288,20 +287,29 @@ async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
         destination = context.slack_location
         if destination is not None:
             return await post_slack_thread_reply(destination[0], destination[1], message)
-        if context.linear_issue and context.linear_issue.id:
-            return await comment_on_linear_issue(context.linear_issue.id, message)
         issue_number = context.github_issue.number if context.github_issue else None
         if issue_number is None:
             configured_number = watch.run_config.get("pr_number")
             issue_number = configured_number if isinstance(configured_number, int) else None
-        token = await _watch_token(watch)
-        if issue_number is not None and token:
-            return await post_github_comment(
-                {"owner": watch.owner, "name": watch.repo},
-                issue_number,
-                message,
-                token=token,
+        source_repo = watch.run_config.get("source_repo")
+        repo = (
+            source_repo
+            if isinstance(source_repo, dict)
+            else {
+                "owner": watch.owner,
+                "name": watch.repo,
+            }
+        )
+        source_installation_id = watch.run_config.get("source_installation_id")
+        token = await get_github_app_installation_token(
+            installation_id=(
+                source_installation_id
+                if isinstance(source_installation_id, int)
+                else watch.installation_id
             )
+        )
+        if issue_number is not None and token:
+            return await post_github_comment(repo, issue_number, message, token=token)
     except Exception:
         logger.warning("Failed to notify source for %s", watch.key, exc_info=True)
         return False

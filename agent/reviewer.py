@@ -687,7 +687,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "pr_number": cfg.pr_number,

@@ -1,8 +1,9 @@
-const LEGACY_BOT_SCOPES = [
+const BASE_BOT_SCOPES = [
   "reactions:write",
   "app_mentions:read",
   "channels:history",
   "channels:read",
+  "channels:join",
   "chat:write",
   "files:write",
   "groups:history",
@@ -17,9 +18,35 @@ const LEGACY_BOT_SCOPES = [
   "users:read.email",
 ]
 
-const LEGACY_BOT_EVENTS = ["app_mention", "message.im", "message.mpim"]
+const BASE_BOT_EVENTS = [
+  "app_mention",
+  "message.im",
+  "message.mpim",
+  "message.channels",
+  "channel_created",
+  "channel_rename",
+  "channel_archive",
+]
 
-export function slackAppManifest(codeChannelsEnabled = false) {
+const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
+
+export interface SlackManifestConfig {
+  backendUrl?: string | null
+}
+
+export function slackManifestPlaceholdersRemain(
+  config: SlackManifestConfig = {}
+): boolean {
+  return !config.backendUrl?.trim()
+}
+
+export function slackAppManifest(
+  codeChannelsEnabled = false,
+  config: SlackManifestConfig = {}
+) {
+  const backendUrl =
+    config.backendUrl?.trim().replace(/\/+$/, "") || BACKEND_URL_PLACEHOLDER
+
   const features: Record<string, unknown> = {
     app_home: {
       home_tab_enabled: false,
@@ -31,8 +58,7 @@ export function slackAppManifest(codeChannelsEnabled = false) {
   if (codeChannelsEnabled) {
     features.code_channels = {
       enabled: true,
-      slash_command_url:
-        "https://<your-backend-url>/webhooks/slack/code-channel-commands",
+      slash_command_url: `${backendUrl}/webhooks/slack/code-channel-commands`,
     }
   }
 
@@ -44,31 +70,35 @@ export function slackAppManifest(codeChannelsEnabled = false) {
     },
     features,
     oauth_config: {
-      redirect_urls: ["http://localhost:2024/dashboard/api/slack/callback"],
+      redirect_urls: [`${backendUrl}/dashboard/api/slack/callback`],
       scopes: {
         bot: codeChannelsEnabled
-          ? [...LEGACY_BOT_SCOPES, "code_channels:manage", "files:read"]
-          : LEGACY_BOT_SCOPES,
+          ? [
+              ...BASE_BOT_SCOPES,
+              "code_channels:manage",
+              "files:read",
+              // conversations.invite, for public and private channels.
+              "channels:manage",
+              "groups:write",
+            ]
+          : BASE_BOT_SCOPES,
       },
     },
     settings: {
       event_subscriptions: {
-        request_url: "https://<your-ngrok-url>/webhooks/slack",
+        request_url: `${backendUrl}/webhooks/slack`,
         bot_events: codeChannelsEnabled
           ? [
-              "app_mention",
+              ...BASE_BOT_EVENTS,
               "agent_session_stopped",
               "code_channel_action",
-              "message.channels",
               "message.groups",
-              "message.im",
-              "message.mpim",
             ]
-          : LEGACY_BOT_EVENTS,
+          : BASE_BOT_EVENTS,
       },
       interactivity: {
         is_enabled: true,
-        request_url: "https://<your-ngrok-url>/webhooks/slack/interactivity",
+        request_url: `${backendUrl}/webhooks/slack/interactivity`,
       },
       org_deploy_enabled: false,
       socket_mode_enabled: false,
@@ -77,6 +107,9 @@ export function slackAppManifest(codeChannelsEnabled = false) {
   }
 }
 
-export function slackAppManifestJson(codeChannelsEnabled = false): string {
-  return JSON.stringify(slackAppManifest(codeChannelsEnabled), null, 2)
+export function slackAppManifestJson(
+  codeChannelsEnabled = false,
+  config: SlackManifestConfig = {}
+): string {
+  return JSON.stringify(slackAppManifest(codeChannelsEnabled, config), null, 2)
 }

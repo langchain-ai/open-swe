@@ -72,7 +72,7 @@ async def background_task(
             return {"success": True, "tasks": await _list_all()}
         assert task_id is not None
         provider = next(p for p in _providers() if p.owns(task_id))
-        if provider.admin_only and (denied := require_admin(f"read {provider.name} tasks")):
+        if provider.admin_only and (denied := await require_admin(f"read {provider.name} tasks")):
             return {"success": False, "error": denied}
         result = await (provider.status if action == "status" else provider.stop)(task_id)
         return {"success": True, **result}
@@ -89,7 +89,7 @@ async def _list_all() -> list[dict[str, Any]]:
     """
     tasks: list[dict[str, Any]] = []
     for provider in _providers():
-        if provider.admin_only and require_admin(f"list {provider.name} tasks"):
+        if provider.admin_only and await require_admin(f"list {provider.name} tasks"):
             continue
         try:
             tasks.extend(await provider.list_all())

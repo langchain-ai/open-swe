@@ -283,14 +283,9 @@ test.describe("Environments", () => {
     await page.request.post("/control/reset");
 
     await openNewAgentHome(page);
-    const adminToggle = page.getByRole("button", {
-      name: "Admin mode",
-      exact: true,
-    });
-    await expect(adminToggle).toBeVisible({ timeout: 20_000 });
-    await expect(adminToggle).toHaveAttribute("aria-pressed", "false");
-    await adminToggle.click();
-    await expect(adminToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.getByRole("button", { name: "Thread visibility" }),
+    ).toContainText("Private");
 
     await typeIntoComposer(
       page,
@@ -299,6 +294,22 @@ test.describe("Environments", () => {
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
     expect(threadId).not.toBe("");
+    await expect
+      .poll(async () => {
+        const response = await page.request.get(
+          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+        );
+        if (!response.ok()) return undefined;
+        const thread = (await response.json()) as {
+          adminThread: boolean;
+          visibility: string;
+        };
+        return {
+          adminThread: thread.adminThread,
+          visibility: thread.visibility,
+        };
+      })
+      .toEqual({ adminThread: true, visibility: "private" });
 
     // The agent's own summary, after the real save + capture tools ran.
     await expect(
