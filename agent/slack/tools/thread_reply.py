@@ -4,6 +4,7 @@ from typing import Annotated, Any
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+from langgraph_sdk.client import LangGraphClient
 
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -13,6 +14,12 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.orphan import (
+    dashboard_handoff_message,
+    move_thread_to_dashboard,
+    slack_thread_detached,
+)
+from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
@@ -48,6 +55,8 @@ async def slack_thread_reply(
     channel_id = active.get("channel_id")
     thread_ts = active.get("thread_ts")
     if not channel_id or not thread_ts:
+        if await _already_moved_to_dashboard(client, thread_id):
+            return _dashboard_handoff(thread_id)
         return {
             "success": False,
             "error": "Missing slack_thread.channel_id or slack_thread.thread_ts in config",
@@ -85,6 +94,12 @@ async def slack_thread_reply(
             should_ask_for_feedback=should_ask_for_feedback and not options,
         )
     if message_ts is None:
+        if slack_error == "thread_not_found":
+            if thread_id:
+                await move_thread_to_dashboard(
+                    client, str(thread_id), str(channel_id), str(thread_ts)
+                )
+            return _dashboard_handoff(thread_id)
         return {
             "success": False,
             "error": slack_error or "post failed",
@@ -93,6 +108,26 @@ async def slack_thread_reply(
             "hint": _slack_reply_failure_hint(slack_error),
         }
     return {"success": True}
+
+
+async def _already_moved_to_dashboard(client: LangGraphClient, thread_id: str | None) -> bool:
+    if not thread_id:
+        return False
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:
+        return False
+    return slack_thread_detached(thread_metadata(thread))
+
+
+def _dashboard_handoff(thread_id: str | None) -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": "Slack thread no longer exists",
+        "moved_to_dashboard": True,
+        "retry": False,
+        "hint": dashboard_handoff_message(str(thread_id or "")),
+    }
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:

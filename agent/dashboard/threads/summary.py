@@ -26,7 +26,7 @@ from agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
 
-_DASHBOARD_SOURCE = "dashboard"
+DASHBOARD_SOURCE = "dashboard"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
@@ -67,7 +67,7 @@ def _thread_metadata(thread: ThreadLike) -> JsonObject:
 
 def thread_source(metadata: Mapping[str, Any]) -> str:
     source = metadata.get("source")
-    return source if isinstance(source, str) and source else _DASHBOARD_SOURCE
+    return source if isinstance(source, str) and source else DASHBOARD_SOURCE
 
 
 def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:

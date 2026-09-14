@@ -372,6 +372,24 @@ def _log_automated_warning_sent_to_slack(
     logger.error("Sent automated warning message to Slack channel %s: %s", channel_id, text)
 
 
+def _threaded_under(data: Any, reply_ts: str) -> bool:
+    message = data.get("message")
+    if not isinstance(message, Mapping):
+        return True
+    return message.get("thread_ts") == reply_ts
+
+
+async def _delete_slack_message(channel_id: str, message_ts: str) -> None:
+    try:
+        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            await client.chat_delete(channel=channel_id, ts=message_ts)
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning(
+            "Orphaned Slack reply could not be removed",
+            extra={"slack_error": slack_error(exc), "slack_channel": channel_id},
+        )
+
+
 async def _post_slack_message_with_ts(
     channel_id: str,
     text: str,
@@ -401,6 +419,15 @@ async def _post_slack_message_with_ts(
             )
         message_ts = data.get("ts")
         if isinstance(message_ts, str) and message_ts:
+            # Slack accepts a reply to a deleted parent and posts it at the channel
+            # root, where it reads as a message nobody asked for.
+            if reply_ts and not _threaded_under(data, reply_ts):
+                await _delete_slack_message(channel_id, message_ts)
+                logger.warning(
+                    "Slack reply landed outside its thread",
+                    extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},
+                )
+                return None, "thread_not_found"
             _log_automated_warning_sent_to_slack(channel_id, thread_ts, text)
             return message_ts, None
         return None, None
@@ -1640,6 +1667,9 @@ async def update_slack_trace_reply_for_web_handoff(
     return ok
 
 
+SLACK_DETACHED_AT_KEY = "slack_thread_detached_at"
+SLACK_DETACHED_FROM_KEY = "slack_thread_detached_from"
+
 _SLACK_THREAD_MAP_NAMESPACE = "slack_thread_map"
 _SLACK_RUN_MAP_NAMESPACE = "slack_run_map"
 _THREAD_RUN_KEY_PREFIX = "thread:"
@@ -1777,6 +1807,10 @@ async def get_active_slack_thread(
                     context.slack_thread.channel_id, context.slack_thread.thread_ts
                 )
                 return context.dump()["slack_thread"]
+            # A detached thread keeps a stale location in the run config; honoring
+            # it would post into Slack again.
+            if isinstance(metadata, Mapping) and metadata.get(SLACK_DETACHED_AT_KEY):
+                return None
         except Exception:
             logger.debug("Could not resolve active Slack location for thread %s", thread_id)
     if isinstance(fallback, Mapping):

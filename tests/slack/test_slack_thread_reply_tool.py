@@ -420,3 +420,60 @@ async def test_slack_thread_reply_passes_model_reported_usage(
     usage = captured["usage"]
     assert usage.models == ("model-a",)
     assert usage.total_tokens == 110
+
+
+async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "T1",
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_active_slack_thread",
+        AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1.0"}),
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "post_slack_thread_reply_with_ts",
+        AsyncMock(return_value=(None, "thread_not_found")),
+    )
+    moved = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", moved)
+
+    result = await slack_reply_tool.slack_thread_reply("The answer")
+
+    assert result["moved_to_dashboard"] is True
+    assert result["retry"] is False
+    assert moved.await_args.args[1:] == ("T1", "C1", "1.0")
+
+
+async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "T1",
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            }
+        },
+    )
+    monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_reply_tool, "_already_moved_to_dashboard", AsyncMock(return_value=True)
+    )
+    post = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "post_slack_thread_reply_with_ts", post)
+
+    assert (await slack_reply_tool.slack_thread_reply("The answer"))["moved_to_dashboard"] is True
+    post.assert_not_awaited()
