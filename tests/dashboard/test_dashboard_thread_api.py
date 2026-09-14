@@ -2596,13 +2596,20 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_get_my_profile_drops_deprecated_models() -> None:
-    with patch(
-        "agent.dashboard.routes.get_profile",
-        new_callable=AsyncMock,
-        return_value={
-            "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
-            "reasoning_effort": "high",
-        },
+    with (
+        patch(
+            "agent.dashboard.routes.get_profile",
+            new_callable=AsyncMock,
+            return_value={
+                "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
+                "reasoning_effort": "high",
+            },
+        ),
+        patch(
+            "agent.dashboard.routes.get_disabled_model_providers",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         payload = await routes.get_my_profile({"sub": "octocat"})
 
@@ -2617,6 +2624,11 @@ async def test_options_omits_fable_when_disabled() -> None:
             "agent.dashboard.routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
+        ),
+        patch(
+            "agent.dashboard.routes.get_disabled_model_providers",
+            new_callable=AsyncMock,
+            return_value=[],
         ),
         patch(
             "agent.dashboard.routes.get_team_default_model",
@@ -2634,12 +2646,49 @@ async def test_options_omits_fable_when_disabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_omits_disabled_provider_and_reports_it() -> None:
+    with (
+        patch(
+            "agent.dashboard.routes.get_team_fable_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "agent.dashboard.routes.get_disabled_model_providers",
+            new_callable=AsyncMock,
+            return_value=["anthropic"],
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_model",
+            new_callable=AsyncMock,
+            return_value=_PAIR,
+        ),
+        patch(
+            "agent.dashboard.routes.get_team_default_subagent_model",
+            new_callable=AsyncMock,
+            return_value=_PAIR,
+        ),
+    ):
+        payload = await routes.options()
+    assert all(not model["id"].startswith("anthropic:") for model in payload["models"])
+    anthropic = next(
+        provider for provider in payload["model_providers"] if provider["id"] == "anthropic"
+    )
+    assert anthropic["enabled"] is False
+
+
+@pytest.mark.asyncio
 async def test_options_includes_fable_when_enabled() -> None:
     with (
         patch(
             "agent.dashboard.routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=True,
+        ),
+        patch(
+            "agent.dashboard.routes.get_disabled_model_providers",
+            new_callable=AsyncMock,
+            return_value=[],
         ),
         patch(
             "agent.dashboard.routes.get_team_default_model",
@@ -2669,6 +2718,11 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
             "agent.dashboard.routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
+        ),
+        patch(
+            "agent.dashboard.routes.get_disabled_model_providers",
+            new_callable=AsyncMock,
+            return_value=[],
         ),
         patch(
             "agent.dashboard.routes.get_team_default_model",

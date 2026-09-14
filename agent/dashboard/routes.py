@@ -91,7 +91,9 @@ from agent.dashboard.oauth import (
 from agent.dashboard.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
 from agent.dashboard.options import (
     FABLE_MODEL_IDS,
+    MODEL_PROVIDERS,
     SUPPORTED_MODELS,
+    filter_models_by_provider,
     gate_fable_model,
     models_with_profile_context_windows,
 )
@@ -159,6 +161,7 @@ from agent.dashboard.skills import (
 )
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
+    get_disabled_model_providers,
     get_team_default_model,
     get_team_default_subagent_model,
     get_team_fable_enabled,
@@ -683,6 +686,7 @@ async def options() -> dict[str, Any]:
     agent_model, agent_effort = await get_team_default_model("agent")
     subagent_model, subagent_effort = await get_team_default_subagent_model("agent")
     fable_enabled = await get_team_fable_enabled()
+    disabled_providers = await get_disabled_model_providers()
     # Never advertise a default that isn't in the selectable list: when Fable is
     # off, gate a stale Fable default down to its non-Fable fallback so the Cloud
     # Agents page (and the PUT /profile it drives) don't choke on it.
@@ -692,13 +696,15 @@ async def options() -> dict[str, Any]:
     subagent_model, subagent_effort = gate_fable_model(
         subagent_model, subagent_effort, fable_enabled=fable_enabled
     )
-    models = (
-        SUPPORTED_MODELS
-        if fable_enabled
-        else [m for m in SUPPORTED_MODELS if m["id"] not in FABLE_MODEL_IDS]
-    )
+    models = filter_models_by_provider(SUPPORTED_MODELS, disabled_providers)
+    if not fable_enabled:
+        models = [m for m in models if m["id"] not in FABLE_MODEL_IDS]
     return {
         "models": models_with_profile_context_windows(models),
+        "model_providers": [
+            {**provider, "enabled": provider["id"] not in disabled_providers}
+            for provider in MODEL_PROVIDERS
+        ],
         "default_agent_model": agent_model,
         "default_agent_reasoning_effort": agent_effort,
         "default_agent_subagent_model": subagent_model,
@@ -713,7 +719,7 @@ async def get_my_profile(
     profile = await get_profile(session["sub"])
     if not profile:
         return {}
-    return normalize_profile_for_response(profile)
+    return normalize_profile_for_response(profile, await get_disabled_model_providers())
 
 
 @router.put("/profile")
@@ -721,7 +727,7 @@ async def put_my_profile(
     update: ProfileUpdate,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    update.validate_pairing()
+    update.validate_pairing(await get_disabled_model_providers())
     return await upsert_profile(session["sub"], session.get("email") or "", update)
 
 

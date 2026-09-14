@@ -111,8 +111,15 @@ export interface ModelOption {
   context_window?: number | null
 }
 
+export interface ModelProviderOption {
+  id: string
+  label: string
+  enabled: boolean
+}
+
 export interface OptionsPayload {
   models: Array<ModelOption>
+  model_providers: Array<ModelProviderOption>
   default_agent_model: string
   default_agent_reasoning_effort: string
   default_agent_subagent_model: string
@@ -178,6 +185,7 @@ export interface TeamSettings {
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   fable_enabled?: boolean
+  disabled_model_providers?: Array<string>
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null

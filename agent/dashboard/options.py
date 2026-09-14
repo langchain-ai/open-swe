@@ -18,6 +18,23 @@ class ModelOption(TypedDict):
     context_window: NotRequired[int | None]
 
 
+class ModelProviderOption(TypedDict):
+    id: str
+    label: str
+
+
+MODEL_PROVIDERS: list[ModelProviderOption] = [
+    {"id": "anthropic", "label": "Anthropic"},
+    {"id": "openai", "label": "OpenAI"},
+    {"id": "google_genai", "label": "Google"},
+    {"id": "fireworks", "label": "Fireworks"},
+    {"id": "baseten", "label": "Baseten"},
+]
+SUPPORTED_MODEL_PROVIDER_IDS: frozenset[str] = frozenset(
+    provider["id"] for provider in MODEL_PROVIDERS
+)
+
+
 SUPPORTED_MODELS: list[ModelOption] = [
     {
         "id": "anthropic:claude-opus-5",
@@ -54,14 +71,14 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "id": "openai:gpt-6-astra",
         "label": "GPT-6 Astra",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "xhigh",
+        "default_effort": "low",
         "supports_images": True,
     },
     {
         "id": "openai:gpt-5.6-sol",
         "label": "GPT-5.6 Sol",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
-        "default_effort": "xhigh",
+        "default_effort": "low",
         "supports_images": True,
     },
     {
@@ -270,9 +287,20 @@ def model_supports_images(model_id: str) -> bool:
     return False
 
 
-def _provider_of(model_id: str) -> str | None:
+def model_provider_id(model_id: str) -> str | None:
     provider, _, rest = model_id.partition(":")
     return provider if rest else None
+
+
+def model_provider_enabled(model_id: str, disabled_providers: Sequence[str]) -> bool:
+    provider = model_provider_id(model_id)
+    return provider is not None and provider not in disabled_providers
+
+
+def filter_models_by_provider(
+    models: Sequence[ModelOption], disabled_providers: Sequence[str]
+) -> list[ModelOption]:
+    return [model for model in models if model_provider_enabled(model["id"], disabled_providers)]
 
 
 def _claude_family_of(model_id: str) -> str | None:
@@ -332,16 +360,16 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
     """
     if not isinstance(model_id, str) or model_id in DEPRECATED_MODEL_IDS:
         return None
-    provider = _provider_of(model_id)
+    provider = model_provider_id(model_id)
     if provider is None:
         return None
     family = _claude_family_of(model_id)
     if family is not None:
         for m in SUPPORTED_MODELS:
-            if _provider_of(m["id"]) == provider and _claude_family_of(m["id"]) == family:
+            if model_provider_id(m["id"]) == provider and _claude_family_of(m["id"]) == family:
                 return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
     for m in SUPPORTED_MODELS:
-        if _provider_of(m["id"]) == provider:
+        if model_provider_id(m["id"]) == provider:
             return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
     return None
 
@@ -363,16 +391,44 @@ def default_model_pair() -> tuple[str, str]:
     raise ValueError(f"Unsupported default LLM_MODEL_ID: {model_id!r}")
 
 
-def default_vision_model_pair() -> tuple[str, str]:
-    """Default OpenAI/Anthropic model pair to use when image input is required."""
+def enabled_default_model_pair(
+    disabled_providers: Sequence[str], effort: object = None
+) -> tuple[str, str]:
+    deployment_model, deployment_effort = default_model_pair()
+    if model_provider_enabled(deployment_model, disabled_providers):
+        return deployment_model, deployment_effort
+    for model in SUPPORTED_MODELS:
+        if model.get("can_be_default", True) and model_provider_enabled(
+            model["id"], disabled_providers
+        ):
+            return model["id"], _fallback_effort_for(model, effort) or model["default_effort"]
+    raise ValueError("at least one model provider must remain enabled")
+
+
+def gate_model_provider(
+    model_id: str,
+    effort: str | None,
+    *,
+    disabled_providers: Sequence[str],
+    fallback: tuple[str, str] | None = None,
+) -> tuple[str, str | None]:
+    if model_provider_enabled(model_id, disabled_providers):
+        return model_id, effort
+    return fallback or enabled_default_model_pair(disabled_providers, effort)
+
+
+def default_vision_model_pair(
+    disabled_providers: Sequence[str] = (),
+) -> tuple[str, str]:
+    """Default enabled model pair to use when image input is required."""
     if (
         DEFAULT_MODEL_ID in SUPPORTED_MODEL_IDS
         and model_supports_images(DEFAULT_MODEL_ID)
         and model_supports_effort(DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT)
-        and DEFAULT_MODEL_ID.startswith(("openai:", "anthropic:"))
+        and model_provider_enabled(DEFAULT_MODEL_ID, disabled_providers)
     ):
         return DEFAULT_MODEL_ID, DEFAULT_MODEL_EFFORT
     for model in SUPPORTED_MODELS:
-        if model["id"].startswith(("openai:", "anthropic:")) and model["supports_images"]:
+        if model["supports_images"] and model_provider_enabled(model["id"], disabled_providers):
             return model["id"], model["default_effort"]
-    return default_model_pair()
+    return enabled_default_model_pair(disabled_providers)

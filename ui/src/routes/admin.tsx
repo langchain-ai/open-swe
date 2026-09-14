@@ -4,7 +4,12 @@ import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
-import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api"
+import type {
+  ModelOption,
+  ModelProviderOption,
+  TeamSettings,
+  UserMapping,
+} from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -75,6 +80,8 @@ function AdminPage() {
       <MCPConnectionsSection scope="workspace" />
 
       <LLMGatewaySection />
+
+      <ModelProvidersSection providers={options.data?.model_providers ?? []} />
 
       <FableSection />
 
@@ -542,6 +549,65 @@ function LLMGatewaySection() {
             </Select>
           }
         />
+      </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+export function ModelProvidersSection({
+  providers,
+}: {
+  providers: Array<ModelProviderOption>
+}) {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      qc.invalidateQueries({ queryKey: ["options"] })
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const setEnabled = (providerId: string, enabled: boolean) => {
+    if (!settings.data) return
+    const disabled = new Set(settings.data.disabled_model_providers ?? [])
+    if (enabled) disabled.delete(providerId)
+    else disabled.add(providerId)
+    save.mutate({
+      ...settings.data,
+      disabled_model_providers: Array.from(disabled),
+    })
+  }
+
+  return (
+    <SettingsSection
+      title="Model providers"
+      description="Control which providers are available in model pickers and agent runs across this workspace."
+    >
+      <div className="divide-y divide-border">
+        {providers.map((provider) => (
+          <SettingsRow
+            key={provider.id}
+            label={provider.label}
+            description={`Allow models served by ${provider.label}.`}
+            control={
+              <Switch
+                aria-label={`${provider.label} models`}
+                checked={provider.enabled}
+                onCheckedChange={(enabled) => setEnabled(provider.id, enabled)}
+                disabled={!settings.data || save.isPending}
+              />
+            }
+          />
+        ))}
       </div>
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
