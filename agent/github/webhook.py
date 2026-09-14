@@ -849,14 +849,10 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
     owner, name = repo_config.get("owner", ""), repo_config.get("name", "")
     if pr_number and owner and name:
         try:
-            await PullRequest.record(
-                owner=owner,
-                repo=name,
-                number=pr_number,
-                head_ref=branch_name or None,
-                thread_id=thread_id,
-                thread_source="github_pr_comment",
-            )
+            pull_request = PullRequest(owner=owner, repo=name, number=pr_number)
+            if branch_name:
+                pull_request.head_ref = branch_name
+            await pull_request.link_thread(thread_id, source="github_pr_comment")
         except Exception:  # noqa: BLE001
             common.logger.warning(
                 "Failed to link PR comment thread to its pull request",

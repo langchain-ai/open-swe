@@ -82,7 +82,7 @@ from agent.github.token import (
 )
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.prompts import render_prompt
-from agent.pull_requests import PullRequest, PullRequestEvent
+from agent.pull_requests import PullRequestEvent
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -1301,25 +1301,23 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     person decides whether to resolve it; any PR reopening clears the mark.
     """
     event = PullRequestEvent.parse(payload)
-    if event is None or event.identity is None:
+    pull_request = event.to_pull_request() if event is not None else None
+    if event is None or pull_request is None:
         return
-    owner, repo, pr_number = event.identity
-    pr_url = event.pull_request.html_url or PullRequest.seed(owner, repo, pr_number).url
-    new_state = event.state
+    pr_url = pull_request.url
+    new_state = pull_request.state
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
-        record = await event.record() or PullRequest.seed(owner, repo, pr_number, url=pr_url)
-        thread_ids = await record.linked_threads()
+        saved = await pull_request.save(repository_private=event.repo_private)
+        thread_ids = await saved.linked_threads()
     except Exception:  # noqa: BLE001
         logger.warning(
             "Pull request registry unavailable; scanning thread metadata instead",
             extra={"pr_url": pr_url},
             exc_info=True,
         )
-        thread_ids = list(
-            await PullRequest.seed(owner, repo, pr_number, url=pr_url).discover_threads()
-        )
+        thread_ids = list(await pull_request.discover_threads())
 
     for thread_id in thread_ids:
         try:

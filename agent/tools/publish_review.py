@@ -513,15 +513,9 @@ async def _publish_review_async(
     )
 
     try:
-        record = await PullRequest.load(owner, repo, pr_number)
-        await record.link_review(
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
             reviewer_thread_id=thread_id,
             github_review_id=review_id if isinstance(review_id, int) else None,
-            url=(
-                f"{record.url}#pullrequestreview-{review_id}"
-                if isinstance(review_id, int)
-                else record.url
-            ),
             head_sha=head_sha,
             finding_count=len(inline_comments),
         )

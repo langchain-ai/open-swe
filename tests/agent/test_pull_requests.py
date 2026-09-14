@@ -21,6 +21,10 @@ def _unlocked_registry(fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(pull_requests, "agent_thread_pr_state_lock", _unlocked)
 
 
+def _pr() -> PullRequest:
+    return PullRequest(owner="lc", repo="repo", number=7)
+
+
 def _client_returning(*pages: list[dict[str, object]]) -> MagicMock:
     client = MagicMock()
     client.threads.search = AsyncMock(side_effect=[*pages, []])
@@ -29,34 +33,34 @@ def _client_returning(*pages: list[dict[str, object]]) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_first_linked_thread_is_primary_and_later_ones_are_secondary() -> None:
-    await PullRequest.record(owner="lc", repo="repo", number=7, thread_id="opener")
-    record = await PullRequest.record(owner="lc", repo="repo", number=7, thread_id="fixer")
+    await _pr().link_thread("opener")
+    saved = await _pr().link_thread("fixer")
 
-    assert record.primary_thread_id == "opener"
-    assert record.thread_ids == ["opener", "fixer"]
+    assert saved.primary_thread_id == "opener"
+    assert saved.thread_ids == ["opener", "fixer"]
 
 
 @pytest.mark.asyncio
 async def test_relinking_a_thread_does_not_duplicate_or_promote_it() -> None:
-    await PullRequest.record(owner="lc", repo="repo", number=7, thread_id="opener")
-    await PullRequest.record(owner="lc", repo="repo", number=7, thread_id="fixer")
-    record = await PullRequest.record(owner="lc", repo="repo", number=7, thread_id="fixer")
+    await _pr().link_thread("opener")
+    await _pr().link_thread("fixer")
+    saved = await _pr().link_thread("fixer")
 
-    assert record.thread_ids == ["opener", "fixer"]
-    assert record.primary_thread_id == "opener"
-
-
-@pytest.mark.asyncio
-async def test_record_leaves_fields_the_caller_did_not_pass() -> None:
-    await PullRequest.record(owner="lc", repo="repo", number=7, title="Add widget", author="ada")
-    record = await PullRequest.record(owner="lc", repo="repo", number=7, state="merged")
-
-    assert (record.state, record.title, record.author) == ("merged", "Add widget", "ada")
+    assert saved.thread_ids == ["opener", "fixer"]
+    assert saved.primary_thread_id == "opener"
 
 
 @pytest.mark.asyncio
-async def test_recording_a_pull_request_registers_its_repository() -> None:
-    await PullRequest.record(owner="LangChain-AI", repo="Open-SWE", number=7, private=True)
+async def test_save_leaves_fields_the_caller_did_not_set() -> None:
+    await PullRequest(owner="lc", repo="repo", number=7, title="Add widget", author="ada").save()
+    saved = await PullRequest(owner="lc", repo="repo", number=7, state="merged").save()
+
+    assert (saved.state, saved.title, saved.author) == ("merged", "Add widget", "ada")
+
+
+@pytest.mark.asyncio
+async def test_saving_a_pull_request_registers_its_repository() -> None:
+    await PullRequest(owner="LangChain-AI", repo="Open-SWE", number=7).save(repository_private=True)
 
     repository = await Repository.get("langchain-ai/open-swe")
     assert repository is not None
@@ -102,11 +106,9 @@ async def test_backfill_runs_once_and_later_reads_use_the_record(
 
 @pytest.mark.asyncio
 async def test_relinking_a_review_replaces_the_entry_with_the_same_github_id() -> None:
-    record = await PullRequest.record(owner="lc", repo="repo", number=7)
-    await record.link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=3)
-    updated = await record.link_review(
-        reviewer_thread_id="rev", github_review_id=11, finding_count=1
-    )
+    await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=3)
+    saved = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=1)
 
-    assert [review.github_review_id for review in updated.reviews] == [11]
-    assert updated.reviews[0].finding_count == 1
+    assert [review.github_review_id for review in saved.reviews] == [11]
+    assert saved.reviews[0].finding_count == 1
+    assert saved.reviews[0].url == "https://github.com/lc/repo/pull/7#pullrequestreview-11"
