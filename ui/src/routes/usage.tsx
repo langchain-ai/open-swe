@@ -9,7 +9,7 @@ import type {
   UsageLeaderboardRow,
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Select,
   SelectContent,
@@ -572,18 +572,24 @@ function CounterList({
 
 function UserCell({ row }: { row: UsageLeaderboardRow }) {
   const initials = initialsFor(row.user.name)
+  const detail = row.user.email ?? row.user.github_login ?? "unknown"
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <Avatar>
+        {row.user.avatar_url && (
+          <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
+        )}
         <AvatarFallback>{initials}</AvatarFallback>
       </Avatar>
       <div className="flex min-w-0 flex-col">
         <span className="truncate font-medium text-foreground">
           {row.user.name}
         </span>
-        <span className="truncate text-xs text-muted-foreground">
-          {row.user.email ?? row.user.github_login ?? "unknown"}
-        </span>
+        {detail !== row.user.name ? (
+          <span className="truncate text-xs text-muted-foreground">
+            {detail}
+          </span>
+        ) : null}
       </div>
     </div>
   )
@@ -627,7 +633,7 @@ function UsageCost({ row }: { row: UsageLeaderboardRow }) {
     ? [
         unavailable ? "No costs have been recorded." : "Recorded cost so far.",
         missing > 0
-          ? `Costs are missing for ${missing} of ${row.invocations} invocations.`
+          ? `Costs are missing for ${missing} of ${row.invocations} invocations (${formatPercent(missing / row.invocations)}).`
           : "",
         partial > 0
           ? `Costs are partial for ${partial} of ${row.invocations} invocations.`

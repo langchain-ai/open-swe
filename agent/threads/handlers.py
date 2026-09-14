@@ -10,20 +10,25 @@ from typing import Any
 from fastapi import HTTPException
 
 from agent.dashboard.options import normalize_model_choice
-from agent.dashboard.threads.access import (
+from agent.dispatch import dispatch_agent_run
+from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
+from agent.github.pull_request_context import get_pull_request_context
+from agent.github.pull_request_status import get_pull_request_statuses
+from agent.slack.client import parse_github_pr_url
+from agent.threads.access import (
     _authorized_thread,
     _github_token_for_login,
     _readable_thread_metadata,
 )
-from agent.dashboard.threads.listing import list_unresolved_dashboard_threads
-from agent.dashboard.threads.runs import (
+from agent.threads.listing import list_unresolved_dashboard_threads
+from agent.threads.runs import (
     _ASSISTANT_ID,
     ThreadMessageBody,
     _build_dashboard_configurable,
     _notify_slack_web_handoff,
     _user_message_content,
 )
-from agent.dashboard.threads.summary import (
+from agent.threads.summary import (
     _SANDBOX_CREATING_SENTINEL,
     DASHBOARD_SOURCE,
     _assert_thread_postable,
@@ -39,11 +44,6 @@ from agent.dashboard.threads.summary import (
     _thread_summary,
     thread_source,
 )
-from agent.dispatch import dispatch_agent_run
-from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
-from agent.github.pull_request_context import get_pull_request_context
-from agent.github.pull_request_status import get_pull_request_statuses
-from agent.slack.client import parse_github_pr_url
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,

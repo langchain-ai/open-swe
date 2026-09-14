@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
-from agent.dashboard.environments import ENVIRONMENTS, parse_environment_tag
+from agent.environments.store import ENVIRONMENTS, parse_environment_tag
 from agent.input_messages import (
     InputMessageContext,
     MessageKind,
@@ -204,7 +204,7 @@ async def slack_user_can_reply_to_ready_plan(
 ) -> bool:
     if not channel_id or not thread_ts or not slack_user_id:
         return False
-    from agent.dashboard.plan_api import fetch_thread_metadata
+    from agent.threads.plan_api import fetch_thread_metadata
 
     try:
         thread_id = await common.lookup_slack_thread_id(
@@ -585,8 +585,8 @@ async def process_slack_mention(request: SlackRequest, repo: Repo | None) -> Non
 
 
 async def process_slack_plan_approval(request: SlackRequest, repo: Repo | None) -> None:
-    from agent.dashboard.plan_api import approve_plan_for_thread
-    from agent.dashboard.plan_store import make_plan_approver
+    from agent.threads.plan_api import approve_plan_for_thread
+    from agent.threads.plan_store import make_plan_approver
 
     try:
         await approve_plan_for_thread(

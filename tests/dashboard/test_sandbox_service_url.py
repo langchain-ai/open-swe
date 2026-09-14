@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException, Response
 
-from agent.dashboard import routes
 from agent.sandboxes.providers import langsmith
+from agent.threads import terminal
 
 
 class _Client:
@@ -53,7 +53,7 @@ def _in(seconds: int) -> str:
 @pytest.fixture
 def store(monkeypatch: pytest.MonkeyPatch) -> _Store:
     store = _Store()
-    monkeypatch.setattr(routes, "langgraph_client", lambda: SimpleNamespace(store=store))
+    monkeypatch.setattr(terminal, "langgraph_client", lambda: SimpleNamespace(store=store))
     return store
 
 
@@ -69,10 +69,10 @@ async def test_service_url_returns_the_token_not_the_browser_url(
     monkeypatch: pytest.MonkeyPatch, langsmith_sandbox: _Client, store: _Store
 ) -> None:
     get_sandbox = AsyncMock(return_value=("sandbox-1", "repo"))
-    monkeypatch.setattr(routes, "get_dashboard_terminal_sandbox", get_sandbox)
+    monkeypatch.setattr(terminal, "get_dashboard_terminal_sandbox", get_sandbox)
     response = Response()
 
-    service = await routes.api_thread_service_url(
+    service = await terminal.api_thread_service_url(
         "thread-1", 3000, response, {"sub": "alice", "email": "alice@example.com"}
     )
 
@@ -91,7 +91,7 @@ async def test_service_url_reuses_a_stored_token(
     monkeypatch: pytest.MonkeyPatch, langsmith_sandbox: _Client, store: _Store
 ) -> None:
     monkeypatch.setattr(
-        routes, "get_dashboard_terminal_sandbox", AsyncMock(return_value=("sandbox-1", None))
+        terminal, "get_dashboard_terminal_sandbox", AsyncMock(return_value=("sandbox-1", None))
     )
     stored = {
         "service_url": "https://svc.example",
@@ -100,7 +100,7 @@ async def test_service_url_reuses_a_stored_token(
     }
     store.items[(("sandbox_service", "sandbox-1"), "3000")] = stored
 
-    service = await routes.api_thread_service_url("thread-1", 3000, Response(), {"sub": "alice"})
+    service = await terminal.api_thread_service_url("thread-1", 3000, Response(), {"sub": "alice"})
 
     assert service == stored
     assert langsmith_sandbox.calls == []
@@ -110,7 +110,7 @@ async def test_service_url_replaces_an_expiring_token(
     monkeypatch: pytest.MonkeyPatch, langsmith_sandbox: _Client, store: _Store
 ) -> None:
     monkeypatch.setattr(
-        routes, "get_dashboard_terminal_sandbox", AsyncMock(return_value=("sandbox-1", None))
+        terminal, "get_dashboard_terminal_sandbox", AsyncMock(return_value=("sandbox-1", None))
     )
     key = (("sandbox_service", "sandbox-1"), "3000")
     store.items[key] = {
@@ -119,7 +119,7 @@ async def test_service_url_replaces_an_expiring_token(
         "expires_at": _in(30),
     }
 
-    service = await routes.api_thread_service_url("thread-1", 3000, Response(), {"sub": "alice"})
+    service = await terminal.api_thread_service_url("thread-1", 3000, Response(), {"sub": "alice"})
 
     assert service["token"] == "secret"
     assert store.items[key]["token"] == "secret"
@@ -131,10 +131,10 @@ async def test_service_url_rejects_ports_outside_the_range(
     monkeypatch: pytest.MonkeyPatch, langsmith_sandbox: _Client, port: int
 ) -> None:
     get_sandbox = AsyncMock(return_value=("sandbox-1", None))
-    monkeypatch.setattr(routes, "get_dashboard_terminal_sandbox", get_sandbox)
+    monkeypatch.setattr(terminal, "get_dashboard_terminal_sandbox", get_sandbox)
 
     with pytest.raises(HTTPException) as exc_info:
-        await routes.api_thread_service_url("thread-1", port, Response(), {"sub": "alice"})
+        await terminal.api_thread_service_url("thread-1", port, Response(), {"sub": "alice"})
 
     assert exc_info.value.status_code == 422
     get_sandbox.assert_not_awaited()
@@ -144,6 +144,6 @@ async def test_service_url_requires_a_langsmith_sandbox(monkeypatch: pytest.Monk
     monkeypatch.setenv("SANDBOX_TYPE", "local")
 
     with pytest.raises(HTTPException) as exc_info:
-        await routes.api_thread_service_url("thread-1", 3000, Response(), {"sub": "alice"})
+        await terminal.api_thread_service_url("thread-1", 3000, Response(), {"sub": "alice"})
 
     assert exc_info.value.status_code == 400

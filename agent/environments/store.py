@@ -7,7 +7,7 @@ base snapshot (clone the repos, install toolchains, warm caches), and an optiona
 dependency sync — run against the current snapshot at most hourly, and only while
 the environment is actually in use.
 
-:mod:`agent.dashboard.environment_refresh` runs both scripts in a throwaway
+:mod:`agent.environments.refresh` runs both scripts in a throwaway
 sandbox and captures the result, nightly on a cron and on demand. Because the
 scripts are the definition, the snapshot can always be rebuilt, and the refresh
 outcome — status, timestamps, and a capped log — rides on the record for the
@@ -646,7 +646,7 @@ class EnvironmentStore(TypedStore[Environment]):
         if record is None:
             return False
         await self.delete(slug)
-        from agent.dashboard.environment_refresh import remove_refresh_cron
+        from agent.environments.refresh import remove_refresh_cron
 
         await remove_refresh_cron(record)
         await _delete_snapshot(record.snapshot_id)

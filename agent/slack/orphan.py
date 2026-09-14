@@ -9,7 +9,6 @@ import logging
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.dashboard.threads.summary import DASHBOARD_SOURCE
 from agent.slack.client import (
     SLACK_DETACHED_AT_KEY,
     SLACK_DETACHED_FROM_KEY,
@@ -17,6 +16,7 @@ from agent.slack.client import (
 )
 from agent.source_context import SourceContext
 from agent.store import now_iso
+from agent.threads.summary import DASHBOARD_SOURCE
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import JsonObject, thread_metadata
 

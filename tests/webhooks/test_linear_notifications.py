@@ -9,10 +9,10 @@ import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 
 from agent import completion
-from agent.dashboard import workspace_mcps
 from agent.github import token as auth
 from agent.linear import notifications
 from agent.mcp import MCPConnectionUpdate, runtime
+from agent.mcp import workspace as workspace_mcps
 from agent.middleware import sandbox_circuit_breaker
 
 

@@ -2,12 +2,12 @@
 
 from langchain_core.tools import BaseTool
 
-from agent.dashboard.workspace_mcps import (
+from agent.mcp import MCPConnectionUpdate, discover_tools, load_mcp_tools
+from agent.mcp.workspace import (
     get_workspace_mcp,
     prepare_workspace_mcp,
     workspace_mcp_source,
 )
-from agent.mcp import MCPConnectionUpdate, discover_tools, load_mcp_tools
 
 
 async def discover_workspace_mcp(

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.dashboard.environments import Environment, script_log_path
+from agent.environments.store import Environment, script_log_path
 from agent.sandboxes.lifecycle import SandboxCreateConfig
 
 

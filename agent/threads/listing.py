@@ -7,8 +7,8 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 
-from agent.dashboard.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
-from agent.dashboard.threads.summary import (
+from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
+from agent.threads.summary import (
     _SURFACED_SOURCES,
     DASHBOARD_SOURCE,
     _assert_thread_readable,

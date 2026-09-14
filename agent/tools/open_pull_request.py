@@ -10,7 +10,6 @@ from langgraph_sdk import get_client
 
 from agent.analytics.usage import record_agent_pr_usage
 from agent.credential_scope import pr_author_login, private_credential_login
-from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
 from agent.github.token import GitHubUserAuthRequired
@@ -27,6 +26,7 @@ from agent.slack.code_channels import (
     set_context_bar,
     set_view,
 )
+from agent.threads.plan_store import get_plan_content
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 
 logger = logging.getLogger(__name__)
