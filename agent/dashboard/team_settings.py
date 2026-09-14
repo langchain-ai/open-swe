@@ -6,6 +6,7 @@ configuration in one place. Per-repo style prompts live in
 """
 
 import logging
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
@@ -58,6 +59,10 @@ class TeamSettingsUpdate(BaseModel):
     default_agent_subagent_reasoning_effort: str | None = None
     default_agent_routing_fast_model: str | None = None
     default_agent_routing_fast_reasoning_effort: str | None = None
+    default_agent_routing_fast_alt_model: str | None = None
+    default_agent_routing_fast_alt_reasoning_effort: str | None = None
+    # Probability that a fast-routed turn goes to the fast_alt model instead.
+    default_agent_routing_fast_alt_probability: float | None = None
     default_agent_routing_balanced_model: str | None = None
     default_agent_routing_balanced_reasoning_effort: str | None = None
     default_agent_routing_performance_model: str | None = None
@@ -102,14 +107,24 @@ class TeamSettingsUpdate(BaseModel):
                 self.default_agent_subagent_reasoning_effort,
             )
         )
-        for tier in ("fast", "balanced", "performance"):
+        for tier in ("fast", "fast_alt", "balanced", "performance"):
             model_field = f"default_agent_routing_{tier}_model"
             effort_field = f"default_agent_routing_{tier}_reasoning_effort"
+            if not hasattr(self, model_field):
+                continue
             model, effort = _normalize_stale_model_pair(
                 getattr(self, model_field), getattr(self, effort_field)
             )
             setattr(self, model_field, model)
             setattr(self, effort_field, effort)
+        if self.default_agent_routing_fast_alt_model is not None:
+            if self.default_agent_routing_fast_model is None:
+                raise ValueError("fast_alt model set without a fast model")
+            probability = self.default_agent_routing_fast_alt_probability
+            if probability is not None and not 0.0 <= probability <= 1.0:
+                raise ValueError("fast_alt probability must be between 0.0 and 1.0")
+        else:
+            self.default_agent_routing_fast_alt_probability = None
         self.default_reviewer_model, self.default_reviewer_reasoning_effort = (
             _normalize_stale_model_pair(
                 self.default_reviewer_model,
@@ -147,7 +162,7 @@ class TeamSettingsUpdate(BaseModel):
             self.default_agent_subagent_reasoning_effort,
             "agent subagent",
         )
-        for tier in ("fast", "balanced", "performance"):
+        for tier in ("fast", "fast_alt", "balanced", "performance"):
             _validate_model_effort_pair(
                 getattr(self, f"default_agent_routing_{tier}_model"),
                 getattr(self, f"default_agent_routing_{tier}_reasoning_effort"),
@@ -242,6 +257,10 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
     ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
     ("default_agent_routing_fast_model", "default_agent_routing_fast_reasoning_effort"),
     (
+        "default_agent_routing_fast_alt_model",
+        "default_agent_routing_fast_alt_reasoning_effort",
+    ),
+    (
         "default_agent_routing_balanced_model",
         "default_agent_routing_balanced_reasoning_effort",
     ),
@@ -301,6 +320,10 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_subagent_reasoning_effort": fallback_effort,
         "default_agent_routing_fast_model": "fireworks:accounts/fireworks/models/glm-5p3-flash",
         "default_agent_routing_fast_reasoning_effort": "high",
+        # A/B experiment: half of fast-routed turns go to Luna via OpenRouter.
+        "default_agent_routing_fast_alt_model": "openrouter:openai/gpt-5.6-luna",
+        "default_agent_routing_fast_alt_reasoning_effort": "low",
+        "default_agent_routing_fast_alt_probability": 0.5,
         "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
         "default_agent_routing_performance_model": "openai:gpt-6-astra",
@@ -370,6 +393,13 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_agent_subagent_reasoning_effort": update.default_agent_subagent_reasoning_effort,
         "default_agent_routing_fast_model": update.default_agent_routing_fast_model,
         "default_agent_routing_fast_reasoning_effort": update.default_agent_routing_fast_reasoning_effort,
+        "default_agent_routing_fast_alt_model": update.default_agent_routing_fast_alt_model,
+        "default_agent_routing_fast_alt_reasoning_effort": (
+            update.default_agent_routing_fast_alt_reasoning_effort
+        ),
+        "default_agent_routing_fast_alt_probability": (
+            update.default_agent_routing_fast_alt_probability
+        ),
         "default_agent_routing_balanced_model": update.default_agent_routing_balanced_model,
         "default_agent_routing_balanced_reasoning_effort": update.default_agent_routing_balanced_reasoning_effort,
         "default_agent_routing_performance_model": update.default_agent_routing_performance_model,
@@ -461,13 +491,33 @@ async def get_team_default_model_pair(
 
 async def get_team_agent_routing_models() -> dict[str, tuple[str, str]]:
     settings = await get_team_settings()
-    return {
+    tiers = ("fast", "fast_alt", "balanced", "performance")
+    models = {
         tier: _resolve_default_pair(
             settings.get(f"default_agent_routing_{tier}_model"),
             settings.get(f"default_agent_routing_{tier}_reasoning_effort"),
         )
-        for tier in ("fast", "balanced", "performance")
+        for tier in tiers
     }
+    fast_alt_probability = settings.get("default_agent_routing_fast_alt_probability")
+    # Only include fast_alt when the experiment is configured with a nonzero
+    # split; the middleware skips the alt model when it's absent.
+    if (
+        not isinstance(fast_alt_probability, int | float)
+        or isinstance(fast_alt_probability, bool)
+        or not 0.0 < float(fast_alt_probability) <= 1.0
+    ):
+        models.pop("fast_alt", None)
+    return models
+
+
+def get_team_fast_alt_probability(settings: Mapping[str, Any]) -> float:
+    """The stored fast-route split, defaulting to the 50/50 experiment value."""
+    value = settings.get("default_agent_routing_fast_alt_probability")
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 0.5
+    probability = float(value)
+    return probability if 0.0 <= probability <= 1.0 else 0.5
 
 
 async def get_team_default_grouping_model() -> tuple[str, str]:

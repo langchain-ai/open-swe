@@ -347,6 +347,7 @@ ENV.var("OPENAI_BASE_URL", "OpenAI-compatible API base URL.", aliases=("OPENAI_A
 ENV.var("GOOGLE_API_KEY", "Google AI API key.", secret=True)
 ENV.var("GROQ_API_KEY", "Groq API key.", secret=True)
 ENV.var("FIREWORKS_API_KEY", "Fireworks API key.", secret=True)
+ENV.var("OPENROUTER_API_KEY", "OpenRouter API key.", secret=True)
 ENV.var("BASETEN_API_KEY", "Baseten API key.", secret=True)
 ENV.var("LLM_MODEL_ID", "Default model in provider:model form.")
 ENV.var(
