@@ -651,6 +651,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
         "manage_code_channel",
+        "manage_incident",
         "notify_automation_channel",
         "slack_add_reaction",
         "slack_attach_html",
@@ -668,6 +669,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "list_threads",
         "manage_thread",
         "read_user_settings",
+        "submit_thread_feedback",
     }
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)

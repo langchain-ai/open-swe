@@ -217,7 +217,6 @@ async def _create_dashboard_thread_record(
     effort: str | None = None,
     plan_mode: bool = False,
     model_selection: str = "auto",
-    admin_thread: bool = False,
     visibility: Literal["public", "private"] = "public",
     environment: str | None = None,
 ) -> dict[str, Any]:
@@ -262,7 +261,7 @@ async def _create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
-    if admin_thread:
+    if visibility == "private" and is_admin(email, login=login):
         metadata["admin_thread"] = True
     if environment:
         metadata["environment"] = environment
@@ -507,9 +506,6 @@ async def _enrich_run_start_command(
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
             model_selection=model_selection or "auto",
-            admin_thread=(
-                client_configurable.get("admin_thread") is True and is_admin(email, login=login)
-            ),
             environment=await _resolve_requested_environment(
                 client_configurable.get("environment")
             ),

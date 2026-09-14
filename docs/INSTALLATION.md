@@ -11,7 +11,7 @@ What a deployment needs:
 | `LANGSMITH_API_KEY` | LangSmith → Settings → API Keys. LangGraph Platform injects it. |
 | A model provider key such as `ANTHROPIC_API_KEY`, or `LANGSMITH_GATEWAY_API_KEY` for the LangSmith LLM Gateway | Your provider, or a LangSmith key with `gateway:invoke` (step 4) |
 | `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_INSTALLATION_ID` | The GitHub App you create in step 3 |
-| `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME` | The Slack app you create in step 5 |
+| `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_APP_ID`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME` | The Slack app you create in step 5 |
 | `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 6) |
 | `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` | The GitHub organizations or users allowed to log in (step 6) |
 | `CONFIGURED_ADMINS` | The GitHub logins or emails of your admins (step 6) |
@@ -144,6 +144,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
                 "app_mentions:read",
                 "channels:history",
                 "channels:read",
+                "channels:join",
                 "chat:write",
                 "files:read",
                 "files:write",
@@ -165,6 +166,10 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
             "request_url": "https://<your-url>/webhooks/slack",
             "bot_events": [
                 "app_mention",
+                "channel_created",
+                "channel_rename",
+                "channel_archive",
+                "message.channels",
                 "message.im",
                 "message.mpim"
             ]
@@ -188,6 +193,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
 ```bash
 SLACK_BOT_TOKEN=""        # OAuth & Permissions → Bot User OAuth Token (xoxb-...)
 SLACK_SIGNING_SECRET=""   # Basic Information → App Credentials → Signing Secret
+SLACK_APP_ID=""           # Basic Information → App ID (A...); Incidents accepts events only from this app
 SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack → ⋮ → Copy member ID)
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```
@@ -247,6 +253,26 @@ Open a section when you want that feature; everything above keeps working withou
 **"Sign in with Slack" account linking.** Lets a user link their Slack identity to their GitHub login from **My settings**, so Slack-triggered runs resolve to the right GitHub user through Slack's verified claims. Without it, an admin links people under **Admin → User mappings**. The manifest already registers the OIDC redirect; make sure the `openid`, `email`, and `profile` user scopes are available, then set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from **Basic Information → App Credentials**, and optionally `SLACK_TEAM_ID` (`T...`) to restrict linking to one workspace. When they are unset the link is simply hidden.
 
 **Code channels (early access).** To enable Slack [code channels](https://api.slack.com/partners/code-channels), open **Admin → Slack integration**, turn on **Slack Code Channels**, copy the generated manifest, update the Slack app, and reinstall it. In a code channel the whole channel is one Open SWE session: it answers without an `@`-mention, replies at the channel level by default, reports session status, and keeps the context bar current; the `manage_code_channel` tool covers channel lifecycle, status, views, and canvases. This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`; `slash_command_url` delivers runtime-registered commands to the signed Open SWE endpoint. If your workspace is not enrolled, leave the toggle off.
+
+</details>
+
+<details id="incidents">
+<summary><strong>Incidents</strong></summary>
+
+The **Incidents** dashboard at `/incidents` investigates public internal Slack channels. Each incident is one persistent, system-owned conversation on the main `agent` graph, driven by the same Slack webhook path as code channels, with the normal sandbox, coding/PR tools, subagents, organization skills, and configured workspace integrations. Responders can copy the agent's postmortem summary and consult retained incident history.
+
+1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**. Incidents needs the `channel_created`, `channel_rename`, `channel_archive`, `message.channels`, and `app_mention` events. The manifest includes the public-channel scopes and `users:read` / `users:read.email` needed for authorized Slack controls.
+2. Access follows the rest of Open SWE: any signed-in dashboard user can read incidents, postmortems, and history, and only `CONFIGURED_ADMINS` can change incident settings. In Slack, anyone in an incident channel can pause, resume, or complete it; asking the agent a question or starting an incident manually requires a connected Open SWE account (Sign in with Slack in the dashboard), the same as mentioning Open SWE anywhere else. Reads recheck current channel access.
+3. Optionally give the agent an incident tracker: add its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, under **Admin → Workspace MCPs** following [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers). The agent uses those tools like any other workspace integration, only for an explicit responder request.
+4. In **Admin → Incidents**, set a channel prefix such as `inc-` and optionally a model and a model-call limit per turn. Enable Incidents, then create a matching public channel or rename one into the prefix. Anyone with a connected Open SWE account can also mention the bot in any public channel and ask it to monitor that channel as an incident; the agent's `manage_incident` tool enrolls it. To turn it off, anyone in the channel mentions the bot with `pause` (stops automatic analysis) or `complete` (ends the incident), asks it in plain words, or uses the buttons on the incident's dashboard page.
+
+Slack findings and control notices use compact messages directly in the incident channel. Questions posted in the channel receive channel replies; questions inside an existing thread receive replies in that thread. Detailed hypotheses, questions, coverage gaps, and citations remain in the incident report and postmortem. Changes only to those detailed hypotheses or questions do not generate another Slack update.
+
+Ordinary channel messages, including bot alerts, are queued as context and analyzed together in one turn about 15 seconds after the first arrives; enrollment queues the most recent channel history the same way. Direct questions and pause/stop controls bypass the delay. As in the main Slack handler, a direct mention interrupts an active turn, while ordinary messages wait for the next one. Nothing runs while the channel is quiet, so there is no idle timeout or watch limit; complete, pause, or archiving the channel stops the bot.
+
+The agent stores its latest postmortem summary as Markdown in the existing LangGraph Store. The **Postmortem** tab renders it and **Copy incident** copies the text and source links for use elsewhere. **History** searches retained incident metadata and summaries, including incidents whose raw context has expired. There is no document editor or revision-history UI.
+
+Public status-page publishing is not implemented. Authorized responders can ask the agent to edit code, open a PR as the GitHub App, or use configured integrations for a specified action. Automatic turns investigate and propose mitigation; alerts and ordinary channel messages do not authorize external changes. Personal integrations remain unavailable in these system-owned threads.
 
 </details>
 

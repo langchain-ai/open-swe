@@ -2,11 +2,9 @@ const STORAGE_KEY = "open-swe:last-app-location"
 const FALLBACK_LOCATION = "/agents"
 
 function isAppLocation(value: string): boolean {
-  return (
-    value === FALLBACK_LOCATION ||
-    value.startsWith(`${FALLBACK_LOCATION}/`) ||
-    value === "/assistant" ||
-    value.startsWith("/assistant/")
+  const pathname = value.split(/[?#]/, 1)[0]
+  return [FALLBACK_LOCATION, "/assistant", "/incidents"].some(
+    (root) => pathname === root || pathname?.startsWith(`${root}/`)
   )
 }
 

@@ -9,15 +9,28 @@ beforeEach(() => {
 })
 
 describe("app location", () => {
-  it("restores the last thread location", () => {
-    rememberAppLocation("/agents/thread-1?view=diff#latest")
+  it.each([
+    "/agents/thread-1?view=diff#latest",
+    "/assistant",
+    "/assistant?noProject=true",
+    "/assistant/thread-1",
+    "/incidents",
+    "/incidents?view=inactive",
+    "/incidents/incident-1",
+  ])("restores the last app location: %s", (href) => {
+    rememberAppLocation(href)
 
-    expect(getLastAppLocation()).toBe("/agents/thread-1?view=diff#latest")
+    expect(getLastAppLocation()).toBe(href)
   })
 
-  it("ignores locations outside the app", () => {
+  it.each([
+    "/my-settings",
+    "/incidents-external",
+    "/assistant-external",
+    "https://example.com/incidents",
+  ])("ignores locations outside the app: %s", (href) => {
     rememberAppLocation("/agents/thread-1")
-    rememberAppLocation("/my-settings")
+    rememberAppLocation(href)
 
     expect(getLastAppLocation()).toBe("/agents/thread-1")
   })

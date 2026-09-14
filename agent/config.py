@@ -276,6 +276,7 @@ ENV.var(
     "Public URL for Slack webhooks and the Sign in with Slack callback; defaults to "
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
+ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
@@ -319,6 +320,25 @@ ENV.var(
 )
 ENV.var("RUN_COMPLETE_WEBHOOK_SECRET", "Token authenticating /webhooks/run-complete.", secret=True)
 ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks.")
+
+# --- Analytics -------------------------------------------------------------------------------
+ENV.var(
+    "POSTGRES_URI", "LangGraph deployment PostgreSQL URI available to custom code.", secret=True
+)
+ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
+ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
+ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
+ENV.var("ANALYTICS_MIN_COHORT_SIZE", "Minimum aggregate cohort size.", default="5")
+ENV.var("ANALYTICS_POOL_SIZE", "Analytics PostgreSQL connection pool size.", default="5")
+ENV.var("ANALYTICS_POOL_OVERFLOW", "Analytics PostgreSQL pool overflow.", default="5")
+ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "Analytics pool checkout timeout.", default="5")
+ENV.var("ANALYTICS_HEALTH_TIMEOUT_SECONDS", "Analytics readiness timeout.", default="3")
+ENV.var("ANALYTICS_OUTBOX_MAX_ATTEMPTS", "Delivery attempts before dead-lettering.", default="10")
+ENV.var("ANALYTICS_RAW_EVENT_MONTHS", "Online raw-event retention.", default="25")
+ENV.var("ANALYTICS_AGGREGATE_YEARS", "Aggregate summary retention.", default="7")
+ENV.var("ANALYTICS_PERSON_MONTHS", "Named identity and summary retention.", default="13")
+ENV.var("ANALYTICS_ACK_OUTBOX_DAYS", "Acknowledged outbox retention.", default="30")
+ENV.var("ANALYTICS_RECEIPT_DAYS", "Ingestion-receipt retention.", default="90")
 
 # --- Models and tools ------------------------------------------------------------------------
 ENV.var("ANTHROPIC_API_KEY", "Anthropic API key.", secret=True)
