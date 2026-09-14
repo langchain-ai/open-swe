@@ -201,6 +201,7 @@ function ReviewsPage() {
                       <PullRequestLinks
                         repo={`${review.owner}/${review.repo}`}
                         number={review.number}
+                        title={review.title}
                       />
                       <div className="mt-0.5 text-xs text-muted-foreground">
                         {review.owner}/{review.repo}#{review.number}

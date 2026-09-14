@@ -960,10 +960,10 @@ export const api = {
       `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/fix`,
       { method: "POST", body: JSON.stringify(pr) }
     ),
-  openPullRequestThread: (repo: string, number: number) =>
+  openPullRequestThread: (repo: string, number: number, title: string) =>
     request<{ thread_id: string }>(
       `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/thread`,
-      { method: "POST" }
+      { method: "POST", body: JSON.stringify({ title }) }
     ),
   mergePullRequest: (
     pr: OpenPullRequest,

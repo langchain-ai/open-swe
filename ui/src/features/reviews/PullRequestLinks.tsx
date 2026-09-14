@@ -5,14 +5,16 @@ import { api } from "@/lib/api"
 export function PullRequestLinks({
   repo,
   number,
+  title,
 }: {
   repo: string
   number: number
+  title: string
 }) {
   const [owner, name] = repo.split("/")
   const navigate = useNavigate()
   const thread = useMutation({
-    mutationFn: () => api.openPullRequestThread(repo, number),
+    mutationFn: () => api.openPullRequestThread(repo, number, title),
     onSuccess: ({ thread_id }) =>
       navigate({ to: "/agents/$threadId", params: { threadId: thread_id } }),
     retry: false,

@@ -20,6 +20,10 @@ from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 
 
+class OpenPullRequestThreadRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=1000)
+
+
 class PullRequestFixContext(BaseModel):
     title: str = Field(max_length=1000)
     headRef: str | None = Field(max_length=1000)
@@ -87,6 +91,8 @@ async def open_pull_request_thread(
     number: int,
     login: str,
     email: str | None = None,
+    *,
+    title: str,
 ) -> dict[str, str]:
     full_name = f"{owner}/{repo}"
     if pull_request_identity({"repo_full_name": full_name, "number": number}) is None:
@@ -103,7 +109,7 @@ async def open_pull_request_thread(
             login,
             email,
             prompt=f"Work on {url}.",
-            title=f"{full_name}#{number}",
+            title=title,
         )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)

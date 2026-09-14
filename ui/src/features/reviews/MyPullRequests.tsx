@@ -495,7 +495,11 @@ export function MyPullRequests({
                       </td>
                       <td className="max-w-md min-w-64 px-4 py-4">
                         <span className="font-medium">{pr.title}</span>
-                        <PullRequestLinks repo={pr.repo} number={pr.number} />
+                        <PullRequestLinks
+                          repo={pr.repo}
+                          number={pr.number}
+                          title={pr.title}
+                        />
                         {!pr.statusAvailable && !pr.detailsLoading && (
                           <p className="mt-1 text-amber-700 dark:text-amber-400">
                             Live PR status unavailable

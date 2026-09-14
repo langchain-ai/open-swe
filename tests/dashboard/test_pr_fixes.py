@@ -102,9 +102,9 @@ async def test_fix_message_includes_full_displayed_failure_context(setup):
 
 
 async def test_open_reuses_thread_without_dispatching_or_mutating_it(setup):
-    assert await pr_fixes.open_pull_request_thread("acme", "app", 12, "alice") == {
-        "thread_id": "existing"
-    }
+    assert await pr_fixes.open_pull_request_thread(
+        "acme", "app", 12, "alice", title="Fix broken build"
+    ) == {"thread_id": "existing"}
     pr_fixes._create_dashboard_thread_record.assert_not_awaited()
     pr_fixes.dispatch_agent_run.assert_not_awaited()
     setup.threads.update.assert_not_awaited()
@@ -118,9 +118,10 @@ async def test_open_creates_idle_thread_when_no_accessible_coding_thread_exists(
             "metadata": {"source": "dashboard", "visibility": "private", "owner_login": "bob"},
         },
     ]
-    assert await pr_fixes.open_pull_request_thread("acme", "app", 12, "alice") == {
-        "thread_id": "new"
-    }
+    assert await pr_fixes.open_pull_request_thread(
+        "acme", "app", 12, "alice", title="Fix broken build"
+    ) == {"thread_id": "new"}
+    assert pr_fixes._create_dashboard_thread_record.await_args.kwargs["title"] == "Fix broken build"
     setup.threads.update.assert_awaited_once_with(
         thread_id="new",
         metadata={
@@ -135,7 +136,9 @@ async def test_open_creates_idle_thread_when_no_accessible_coding_thread_exists(
 async def test_open_denied_repo_never_searches_or_creates_threads(setup):
     pr_fixes.require_repo_access_for_user.side_effect = HTTPException(403, "denied")
     with pytest.raises(HTTPException):
-        await pr_fixes.open_pull_request_thread("acme", "app", 12, "alice")
+        await pr_fixes.open_pull_request_thread(
+            "acme", "app", 12, "alice", title="Fix broken build"
+        )
     setup.threads.search.assert_not_awaited()
     pr_fixes._create_dashboard_thread_record.assert_not_awaited()
 
@@ -144,7 +147,7 @@ async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypat
     from agent.dashboard.threads import runs
 
     setup.threads.search.return_value = []
-    await pr_fixes.open_pull_request_thread("acme", "app", 12, "alice")
+    await pr_fixes.open_pull_request_thread("acme", "app", 12, "alice", title="Fix broken build")
     metadata = setup.threads.update.await_args.kwargs["metadata"]
     monkeypatch.setattr(runs, "resolve_run_email", AsyncMock(return_value=None))
     configurable = await runs._build_dashboard_configurable(

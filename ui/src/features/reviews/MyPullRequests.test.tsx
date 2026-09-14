@@ -145,7 +145,11 @@ describe("My PRs", () => {
       name: "Opening thread…",
     })
     expect((opening as HTMLButtonElement).disabled).toBe(true)
-    expect(api.openPullRequestThread).toHaveBeenCalledWith("acme/app", 1)
+    expect(api.openPullRequestThread).toHaveBeenCalledWith(
+      "acme/app",
+      1,
+      "Change 1"
+    )
     expect(navigate).not.toHaveBeenCalled()
     finish({ thread_id: "coding-thread" })
     await waitFor(() =>

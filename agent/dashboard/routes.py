@@ -197,6 +197,7 @@ from agent.dashboard.threads.listing import (
     unpin_dashboard_thread,
 )
 from agent.dashboard.threads.pr_fixes import (
+    OpenPullRequestThreadRequest,
     PullRequestFixContext,
     fix_pull_request,
     open_pull_request_thread,
@@ -1622,10 +1623,11 @@ async def api_open_pull_request_thread(
     owner: str,
     repo: str,
     pr_number: int,
+    body: OpenPullRequestThreadRequest,
     session: dict[str, str] = _SESSION_DEP,
 ) -> dict[str, str]:
     return await open_pull_request_thread(
-        owner, repo, pr_number, session["sub"], session.get("email")
+        owner, repo, pr_number, session["sub"], session.get("email"), title=body.title
     )
 
 
