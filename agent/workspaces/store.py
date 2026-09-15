@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, f
 from agent.config import ENV
 from agent.review.styles import normalize_repo_full_name
 from agent.store import TypedStore, now_iso, search_all_values
+from agent.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
 
@@ -690,14 +691,18 @@ class WorkspaceStore(TypedStore[Workspace]):
 
     async def save(self, record: Workspace) -> Workspace:
         record.updated_at = now_iso()
-        return await self.put(record.slug, record)
+        result = await self.put(record.slug, record)
+        ttl_cache.invalidate("workspaces:all")
+        return result
 
     async def create(self, create: WorkspaceCreate, created_by: str) -> Workspace:
         record = Workspace.seed(create, created_by)
         await self._assert_unique(record)
         if await self.get(record.slug) is not None:
             raise ValueError(f"environment {create.name!r} already exists")
-        return await self.put(record.slug, record)
+        result = await self.put(record.slug, record)
+        ttl_cache.invalidate("workspaces:all")
+        return result
 
     async def apply_update(self, slug: str, update: WorkspaceUpdate) -> Workspace:
         record = await self.get(slug)
@@ -739,7 +744,9 @@ class WorkspaceStore(TypedStore[Workspace]):
             snapshot_name=snapshot_name,
             source_sandbox_id=source_sandbox_id,
         )
-        return await self.save(record)
+        result = await self.save(record)
+        ttl_cache.invalidate("workspaces:all")
+        return result
 
     async def remove(self, slug: str) -> bool:
         record = await self.get(slug)
@@ -750,6 +757,7 @@ class WorkspaceStore(TypedStore[Workspace]):
 
         await remove_refresh_cron(record)
         await _delete_snapshot(record.snapshot_id)
+        ttl_cache.invalidate("workspaces:all")
         return True
 
     async def mark_capturing(self, slug: str) -> Workspace | None:

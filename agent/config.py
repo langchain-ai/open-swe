@@ -381,6 +381,12 @@ ENV.var("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "Client-side grace past a comman
 ENV.var("SANDBOX_CREATE_EXTRA_JSON", "JSON object merged into the sandbox create body.")
 ENV.var("ENVIRONMENT_SNAPSHOT_PREFIX", "Prefix for environment snapshot names.", default="openswe")
 ENV.var(
+    "OPEN_SWE_UNASSIGNED_REPO_WORKSPACE",
+    "Where GitHub events for a repository no workspace owns go: 'default' routes them to the "
+    "default workspace, 'ignore' drops them.",
+    default="default",
+)
+ENV.var(
     "OPENSWE_SCRIPT_ROOT",
     "Where an environment's setup/update scripts and their logs live inside a sandbox. "
     "The default assumes a sandbox where the agent is root; the local provider runs on a "
