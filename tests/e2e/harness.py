@@ -13,6 +13,7 @@ and renders their state back as a user-facing UI.
 import hashlib
 import hmac
 import json
+import logging
 import os
 import sys
 import threading
@@ -70,6 +71,8 @@ from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from agent.slack.client import lookup_slack_thread_id  # noqa: E402
 from agent.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
+logger = logging.getLogger(__name__)
+
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 STATIC_DIR = Path(__file__).parent / "static"
@@ -97,12 +100,26 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 
 
 # --- control + Slack compose (the test driver) -----------------------------
+@app.get("/control/media-uploads")
+async def control_media_uploads() -> JSONResponse:
+    return JSONResponse({"uploads": MEDIA_UPLOADS})
+
+
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    MEDIA_UPLOADS.clear()
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
+    # Media requests live in Postgres, not the in-memory fakes: a fresh test
+    # gets a clean table so fingerprints never collide with a previous run's.
+    from sqlalchemy import text
+
+    from agent.database import postgres
+
+    async with postgres.transaction() as conn:
+        await conn.execute(text("DELETE FROM pr_media_request"))
     return JSONResponse({"ok": True})
 
 
@@ -647,7 +664,63 @@ async def gh_list_installation_repositories() -> JSONResponse:
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
 async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
-    return JSONResponse({"full_name": f"{owner}/{repo}", "private": fakes.repo_private()})
+    known = {(OWNER, REPO), (SECOND_OWNER, SECOND_REPO)}
+    if (owner, repo) not in known:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    repo_id = abs(hash((owner, repo))) % (2**31) + 1
+    return JSONResponse(
+        {
+            "id": repo_id,
+            "full_name": f"{owner}/{repo}",
+            "name": repo,
+            "private": fakes.repo_private(),
+            "permissions": {"push": True},
+        }
+    )
+
+
+MEDIA_UPLOADS: list[dict[str, Any]] = []
+
+
+@app.post("/fake-gh/uploads/user-attachments/assets")
+async def gh_upload_asset(request: Request) -> Response:
+    """Fake uploads.github.com: the token class gate and the asset URL."""
+    auth = request.headers.get("authorization", "")
+    token = auth.removeprefix("Bearer ").strip()
+    if not token.startswith(("gho_", "ghp_", "github_pat_")):
+        return Response(
+            json.dumps(
+                {"message": "Media uploads require a user OAuth token or personal access token"}
+            ),
+            status_code=403,
+            media_type="application/json",
+        )
+    params = request.query_params
+    body = await request.body()
+    asset_id = len(MEDIA_UPLOADS) + 1
+    url = f"{BASE_URL}/fake-gh/assets/{asset_id}/{params.get('name', 'asset')}"
+    MEDIA_UPLOADS.append(
+        {
+            "name": params.get("name"),
+            "content_type": params.get("content_type"),
+            "repository_id": params.get("repository_id"),
+            "size": len(body),
+            "url": url,
+        }
+    )
+    return Response(json.dumps({"url": url}), media_type="application/json")
+
+
+@app.post("/fake-gh/repos/{owner}/{repo}/issues/{number}/comments")
+async def gh_create_issue_comment(
+    owner: str, repo: str, number: int, request: Request
+) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    body = await request.json()
+    pr.setdefault("issue_comments", []).append({"body": body.get("body", "")})
+    return JSONResponse({"id": len(pr["issue_comments"])}, status_code=201)
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")
@@ -665,15 +738,19 @@ async def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls")
 async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONResponse:
     body = await request.json()
-    pr = fakes.create_pull(
-        owner,
-        repo,
-        head=body.get("head", ""),
-        base=body.get("base", "main"),
-        title=body.get("title", ""),
-        body=body.get("body", ""),
-        draft=bool(body.get("draft", True)),
-    )
+    try:
+        pr = fakes.create_pull(
+            owner,
+            repo,
+            head=body.get("head", ""),
+            base=body.get("base", "main"),
+            title=body.get("title", ""),
+            body=body.get("body", ""),
+            draft=bool(body.get("draft", True)),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("fake pull creation failed")
+        return JSONResponse({"message": str(exc)}, status_code=500)
     return JSONResponse(_gh_pr_json(pr), status_code=201)
 
 

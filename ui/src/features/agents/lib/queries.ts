@@ -44,6 +44,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "working-tree-diff"] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
+  mediaRequests: (threadId: string) =>
+    ["agent-threads", threadId, "media-requests"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
@@ -730,6 +732,43 @@ export function useWorkflowApprovalDecision(threadId: string) {
         queryKey: agentThreadKeys.detail(threadId),
       })
       invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
+export function useMediaRequests(
+  threadId: string,
+  options: { pollWhileActive?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.mediaRequests(threadId),
+    queryFn: () => agentsApi.listMediaRequests(threadId),
+    enabled: Boolean(threadId),
+    refetchInterval: (query) =>
+      options.pollWhileActive ||
+      query.state.data?.requests.some(
+        (request) => request.status === "pending"
+      )
+        ? 3000
+        : false,
+    retry: false,
+  })
+}
+
+export function useMediaRequestDecision(threadId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: {
+      fingerprint: string
+      decision: "approve" | "reject"
+    }) =>
+      vars.decision === "approve"
+        ? agentsApi.approveMediaRequest(threadId, vars.fingerprint)
+        : agentsApi.rejectMediaRequest(threadId, vars.fingerprint),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.mediaRequests(threadId),
+      })
     },
   })
 }

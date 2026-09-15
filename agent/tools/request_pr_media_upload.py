@@ -61,11 +61,10 @@ async def _request_pr_media_upload(
         if len(media) > pr_media.MAX_MEDIA_BYTES:
             return {"success": False, "error": "media exceeds GitHub's 100 MB attachment limit"}
 
-        repo_info = await pr_media_support.resolve_repository(
-            login, owner=repo.owner, repo=repo.name
-        )
+        # Preparation uses the bot workspace credentials, never a personal OAuth
+        # token; the approver's OAuth is only touched on approval.
+        repo_id = await pr_media_support.resolve_repository(owner=repo.owner, repo=repo.name)
         pull_title = await pr_media_support.fetch_pull_title(
-            repo_info["token"],
             owner=repo.owner,
             repo=repo.name,
             pull_number=pull_number,
@@ -74,12 +73,13 @@ async def _request_pr_media_upload(
             str(thread_id),
             owner=repo.owner,
             repo=repo.name,
-            repo_id=repo_info["repo_id"],
+            repo_id=repo_id,
             pull_number=pull_number,
             pull_title=pull_title,
             file_name=file_name,
             content_type=content_type,
             media=media,
+            requested_by=login,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("request_pr_media_upload failed for thread %s", thread_id)

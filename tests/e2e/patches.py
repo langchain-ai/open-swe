@@ -85,6 +85,19 @@ def apply() -> None:
     profiles.get_valid_access_token = _dummy_user_token
     thread_access.get_valid_access_token = _dummy_user_token
     webhook_common.get_valid_access_token = _dummy_user_token
+
+    # PR media: bot workspace lookups go to fake GitHub; the approver's OAuth
+    # token is a user-class token (gho_) so the upload passes the credential
+    # gate exactly as a real OAuth token would.
+    from agent.github import pr_media, pr_media_support
+
+    async def _gho_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
+        return f"gho_{login}_test"
+
+    pr_media_support.get_valid_access_token = _gho_user_token
+    pr_media_support.get_github_app_installation_token = _dummy_install_token
+    pr_media.GITHUB_API = FAKE_GITHUB_API
+    pr_media.UPLOAD_ENDPOINT = f"{FAKE_GITHUB_API}/uploads/user-attachments/assets"
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"

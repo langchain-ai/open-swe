@@ -3,13 +3,15 @@
 A thread prepares a media request (file + target PR); the authenticated human
 who owns the thread approves that exact request in the dashboard; the upload
 then executes server-side with the approver's GitHub OAuth token, which never
-enters the shared sandbox.
+enters the shared sandbox. Approval claiming is an atomic database
+compare-and-set, so one request executes at most once.
 """
 
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
@@ -57,15 +59,10 @@ async def list_media_requests(
     metadata = _metadata_or_404(await fetch_thread_metadata(thread_id))
     if not thread_is_readable(metadata, session["sub"], session.get("email")):
         raise HTTPException(404, "thread not found")
-    requests = await pr_media.get_media_requests(thread_id)
+    requests = await pr_media.list_media_requests(thread_id)
     return {
         "threadId": thread_id,
-        "requests": [
-            pr_media.media_request_response(r)
-            for r in sorted(
-                requests.values(), key=lambda r: str(r.get("requested_at", "")), reverse=True
-            )
-        ],
+        "requests": [pr_media.media_request_response(r) for r in requests],
     }
 
 
@@ -92,23 +89,26 @@ async def create_media_request(
     if len(media) > pr_media.MAX_MEDIA_BYTES:
         raise HTTPException(413, "media exceeds GitHub's 100 MB attachment limit")
 
-    repo_info = await pr_media_support.resolve_repository(
-        preparer_login, owner=body.owner, repo=body.repo
-    )
+    # Bot workspace credentials only: no personal OAuth is touched until the
+    # human actually approves an upload.
+    repo_id = await pr_media_support.resolve_repository(owner=body.owner, repo=body.repo)
     pull_title = await pr_media_support.fetch_pull_title(
-        repo_info["token"], owner=body.owner, repo=body.repo, pull_number=body.pull_number
+        owner=body.owner, repo=body.repo, pull_number=body.pull_number
     )
     record, created = await pr_media.create_media_request(
         thread_id,
         owner=body.owner,
         repo=body.repo,
-        repo_id=repo_info["repo_id"],
+        repo_id=repo_id,
         pull_number=body.pull_number,
         pull_title=pull_title,
         file_name=body.file_name,
         content_type=content_type,
         media=media,
+        requested_by=preparer_login,
     )
+    if record["thread_id"] != thread_id:
+        raise HTTPException(409, "an identical media request already exists on another thread")
     logger.info(
         "media request prepared",
         extra={
@@ -120,39 +120,62 @@ async def create_media_request(
     return {"request": pr_media.media_request_response(record), "created": created}
 
 
+@router.get("/{thread_id}/{fingerprint}/preview")
+async def preview_media_request(
+    thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
+) -> Response:
+    """Serve the exact recorded bytes so the approver can review what will upload.
+
+    Images only (videos render nothing useful inline here); readable threads
+    only. The bytes are the immutable payload keyed by digest — no credentials,
+    no thread metadata — so this response carries no authority beyond display.
+    """
+    metadata = _metadata_or_404(await fetch_thread_metadata(thread_id))
+    if not thread_is_readable(metadata, session["sub"], session.get("email")):
+        raise HTTPException(404, "thread not found")
+    record = await pr_media.get_media_request(thread_id, fingerprint)
+    if record is None:
+        raise HTTPException(404, "media request not found")
+    content_type = str(record.get("content_type") or "")
+    if not content_type.startswith("image/"):
+        raise HTTPException(415, "only image media can be previewed inline")
+    encoded = record.get("media_base64")
+    if not isinstance(encoded, str) or not encoded:
+        raise HTTPException(404, "media request has no payload")
+    media = pr_media.decode_media_base64(encoded)
+    if len(media) > 10 * 1024 * 1024:
+        raise HTTPException(413, "media too large to preview")
+    return Response(
+        content=media,
+        media_type=content_type,
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @router.post("/{thread_id}/{fingerprint}/approve")
 async def approve_media_request(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     """Approve and execute the exact recorded upload as the thread owner.
 
-    Claiming the approval (pending -> approved) is the single execution claim:
-    the upload then runs at most once, regardless of how the request ends.
+    Claiming the approval (pending -> approved) is an atomic database
+    compare-and-set: only one concurrent approver wins, and the winner's upload
+    then runs at most once, regardless of how the request ends.
     """
     metadata = _metadata_or_404(await fetch_thread_metadata(thread_id))
     owner_login = _require_thread_owner(metadata, session)
-    requests = await pr_media.get_media_requests(thread_id)
-    record = requests.get(fingerprint)
-    if record is None:
-        raise HTTPException(404, "media request not found")
-    if record.get("status") == pr_media.MEDIA_REQUEST_COMPLETED:
-        raise HTTPException(409, "media request already executed")
-    if record.get("status") == pr_media.MEDIA_REQUEST_REJECTED:
-        raise HTTPException(409, "media request was rejected")
-    if record.get("status") != pr_media.MEDIA_REQUEST_PENDING:
-        raise HTTPException(409, "media request is not pending")
 
-    record["status"] = pr_media.MEDIA_REQUEST_APPROVED
-    record["decided_by"] = owner_login
-    requests[fingerprint] = record
-    await pr_media.save_media_requests(thread_id, requests)
+    outcome = await pr_media.claim_media_request(thread_id, fingerprint, actor=owner_login)
+    if outcome == "missing":
+        raise HTTPException(404, "media request not found")
+    if outcome == "expired":
+        raise HTTPException(410, "media request expired; prepare a new one")
+    if outcome != "claimed":
+        raise HTTPException(409, "media request is not pending")
 
     oauth_token = await pr_media_support.get_oauth_token_for_upload(owner_login)
     if oauth_token is None:
-        record["status"] = pr_media.MEDIA_REQUEST_PENDING
-        record.pop("decided_by", None)
-        requests[fingerprint] = record
-        await pr_media.save_media_requests(thread_id, requests)
+        await pr_media.release_media_request_claim(thread_id, fingerprint, actor=owner_login)
         raise HTTPException(401, "GitHub re-authentication required before uploading")
     try:
         record = await pr_media.execute_approved_media_request(
@@ -171,14 +194,12 @@ async def reject_media_request(
 ) -> dict[str, Any]:
     metadata = _metadata_or_404(await fetch_thread_metadata(thread_id))
     owner_login = _require_thread_owner(metadata, session)
-    requests = await pr_media.get_media_requests(thread_id)
-    record = requests.get(fingerprint)
+    outcome = await pr_media.reject_media_request(thread_id, fingerprint, actor=owner_login)
+    if outcome == "missing":
+        raise HTTPException(404, "media request not found")
+    if outcome != "rejected":
+        raise HTTPException(409, "only pending media requests can be rejected")
+    record = await pr_media.get_media_request(thread_id, fingerprint)
     if record is None:
         raise HTTPException(404, "media request not found")
-    if record.get("status") not in (pr_media.MEDIA_REQUEST_PENDING,):
-        raise HTTPException(409, "only pending media requests can be rejected")
-    record["status"] = pr_media.MEDIA_REQUEST_REJECTED
-    record["decided_by"] = owner_login
-    requests[fingerprint] = record
-    await pr_media.save_media_requests(thread_id, requests)
     return {"request": pr_media.media_request_response(record)}

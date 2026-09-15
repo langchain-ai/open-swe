@@ -268,6 +268,38 @@ export interface WorkflowPushApprovalsResponse {
   approvals: Array<WorkflowPushApproval>
 }
 
+export type MediaRequestStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "completed"
+  | "failed"
+
+export interface MediaRequest {
+  fingerprint: string
+  status: MediaRequestStatus
+  owner: string
+  repo: string
+  pullNumber: number
+  pullTitle: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  digest: string
+  requestedBy: string | null
+  requestedAt: string | null
+  expiresAtEpoch: number | null
+  decidedBy: string | null
+  decidedAt: string | null
+  assetUrl: string | null
+  error: string | null
+}
+
+export interface MediaRequestsResponse {
+  threadId: string
+  requests: Array<MediaRequest>
+}
+
 export interface AgentPullRequestSummary {
   number: number
   title: string

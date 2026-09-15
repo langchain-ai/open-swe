@@ -11,6 +11,7 @@ import type { MessagesProps } from "./types"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
+import { MediaApprovalCard } from "@/features/agents/components/MediaApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
 function QueuedMessages({
@@ -168,6 +169,7 @@ export const Messages = memo(function MessagesComponent({
                 pollWhileActive={pollWorkflowApprovalsWhileActive}
               />
             )}
+            {threadId && <MediaApprovalCard threadId={threadId} />}
             <QueuedMessages queuedMessages={queuedMessages} />
             {footer}
             <ThinkingSpinner

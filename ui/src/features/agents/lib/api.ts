@@ -4,6 +4,8 @@ import type {
   AgentSchedule,
   AgentThread,
   ImageChunk,
+  MediaRequest,
+  MediaRequestsResponse,
   Message,
   SlackNotificationMode,
   AutomationTrigger,
@@ -399,6 +401,24 @@ export const agentsApi = {
     agentsRequest<{ status: string; fingerprint: string }>(
       `/workflow-approval/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/reject`,
       { method: "POST" }
+    ),
+  listMediaRequests: (threadId: string) =>
+    agentsRequest<MediaRequestsResponse>(
+      `/pr-media/${encodeURIComponent(threadId)}`
+    ),
+  approveMediaRequest: (threadId: string, fingerprint: string) =>
+    agentsRequest<{ request: MediaRequest }>(
+      `/pr-media/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/approve`,
+      { method: "POST" }
+    ),
+  rejectMediaRequest: (threadId: string, fingerprint: string) =>
+    agentsRequest<{ request: MediaRequest }>(
+      `/pr-media/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/reject`,
+      { method: "POST" }
+    ),
+  mediaPreviewUrl: (threadId: string, fingerprint: string) =>
+    dashboardApiUrl(
+      `/pr-media/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/preview`
     ),
   queueMessage: (threadId: string, body: ThreadMessageRequest) =>
     agentsRequest<AgentThread>(

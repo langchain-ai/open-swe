@@ -1,16 +1,23 @@
 """Supporting lookups for the PR media approval API."""
 
 import logging
-from typing import Any
 
 import httpx2
 from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
 from agent.github import pr_media
+from agent.github.app import get_github_app_installation_token
 from agent.github.http import DEFAULT_TIMEOUT, github_headers
 
 logger = logging.getLogger(__name__)
+
+
+async def _bot_installation_token() -> str:
+    token = await get_github_app_installation_token()
+    if token is None:
+        raise HTTPException(503, "GitHub App installation token is unavailable")
+    return token
 
 
 async def get_oauth_token_for_upload(login: str) -> str | None:
@@ -18,31 +25,33 @@ async def get_oauth_token_for_upload(login: str) -> str | None:
     return await get_valid_access_token(login)
 
 
-async def resolve_repository(login: str, *, owner: str, repo: str) -> dict[str, Any]:
-    """Verify the preparer can push and capture the immutable repository id."""
-    token = await get_valid_access_token(login)
-    if token is None:
-        raise HTTPException(401, "GitHub re-authentication required before preparing media")
+async def resolve_repository(*, owner: str, repo: str) -> int:
+    """Capture the immutable repository id and verify the PR is reachable.
+
+    Uses the workspace GitHub App installation token — never a personal OAuth
+    token — so preparing a request does not consume a human's credentials.
+    Push access is deliberately not required: a reviewer may attach media to a
+    PR they can read, and the upload itself re-uses the approver's token.
+    """
+    token = await _bot_installation_token()
     async with httpx2.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         response = await client.get(
             f"{pr_media.GITHUB_API}/repos/{owner}/{repo}",
             headers=github_headers(token),
         )
     if response.status_code == 404:
-        raise HTTPException(404, "repository not found or not accessible")
+        raise HTTPException(404, "repository not found or the GitHub App is not installed on it")
     if response.status_code != 200:
         raise HTTPException(502, f"GitHub repository lookup failed ({response.status_code})")
     data = response.json()
     repo_id = data.get("id")
-    permissions = data.get("permissions") if isinstance(data.get("permissions"), dict) else {}
-    if permissions and permissions.get("push") is not True:
-        raise HTTPException(403, "push access to the repository is required to attach media")
     if not isinstance(repo_id, int):
         raise HTTPException(502, "GitHub repository lookup returned no repository id")
-    return {"repo_id": repo_id, "token": token}
+    return repo_id
 
 
-async def fetch_pull_title(token: str, *, owner: str, repo: str, pull_number: int) -> str:
+async def fetch_pull_title(*, owner: str, repo: str, pull_number: int) -> str:
+    token = await _bot_installation_token()
     async with httpx2.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         response = await client.get(
             f"{pr_media.GITHUB_API}/repos/{owner}/{repo}/pulls/{pull_number}",
