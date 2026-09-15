@@ -17,10 +17,11 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { api } from "@/lib/api"
+import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import {
   useAdminCancelAgentThread,
   useThreadsPage,
+  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -33,6 +34,7 @@ import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedS
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import { WorkspaceSelect } from "@/features/settings/components/WorkspaceSelect"
 import { useRepos } from "@/lib/profile"
 import { IncidentSettings } from "@/features/incidents/IncidentSettings"
 
@@ -41,9 +43,21 @@ export const Route = createFileRoute("/admin")({ component: AdminPage })
 function AdminPage() {
   const session = useSession()
 
+  const workspaceOptions = useWorkspaceOptions(!!session.data?.is_admin)
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(
+    null
+  )
+  // Falls back to the deployment default while the workspace list is still
+  // loading, or once the user hasn't picked one yet.
+  const workspace =
+    selectedWorkspace ??
+    workspaceOptions.data?.default_slug ??
+    DEFAULT_WORKSPACE_SLUG
+  // The selectable models follow the workspace being edited, since the Fable
+  // flag that gates them is one of its settings.
   const options = useQuery({
-    queryKey: ["options"],
-    queryFn: api.options,
+    queryKey: ["options", workspace],
+    queryFn: () => api.options(workspace),
     enabled: !!session.data?.is_admin,
   })
 
@@ -63,7 +77,13 @@ function AdminPage() {
       title="Admin"
       description="Workspace-wide defaults and user mappings."
     >
+      <WorkspaceSelect
+        workspaces={workspaceOptions.data?.workspaces ?? []}
+        value={workspace}
+        onChange={setSelectedWorkspace}
+      />
       <GlobalDefaultsSection
+        workspace={workspace}
         models={(options.data?.models ?? []).filter(
           (model) => model.can_be_default !== false
         )}
@@ -74,11 +94,16 @@ function AdminPage() {
       >
         <AllowedSlackBotsSection />
       </SlackIntegrationSection>
-      <MCPConnectionsSection scope="workspace" />
+      <WorkspaceSelect
+        workspaces={workspaceOptions.data?.workspaces ?? []}
+        value={workspace}
+        onChange={setSelectedWorkspace}
+      />
+      <MCPConnectionsSection scope="workspace" workspace={workspace} />
 
-      <LLMGatewaySection />
+      <LLMGatewaySection workspace={workspace} />
 
-      <FableSection />
+      <FableSection workspace={workspace} />
 
       <ExpeditedReviewSection />
 
@@ -479,18 +504,18 @@ function gatewayModeValue(mode: GatewayMode): boolean | null {
   return null
 }
 
-function LLMGatewaySection() {
+function LLMGatewaySection({ workspace }: { workspace: string }) {
   const qc = useQueryClient()
   const settings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryKey: ["teamSettings", workspace],
+    queryFn: () => api.getTeamSettings(workspace),
   })
   const [error, setError] = useState<string | null>(null)
 
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body, workspace),
     onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved)
+      qc.setQueryData(["teamSettings", workspace], saved)
       setError(null)
     },
     onError: (e: Error) => setError(e.message),
@@ -538,17 +563,17 @@ function LLMGatewaySection() {
   )
 }
 
-function FableSection() {
+function FableSection({ workspace }: { workspace: string }) {
   const qc = useQueryClient()
   const settings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryKey: ["teamSettings", workspace],
+    queryFn: () => api.getTeamSettings(workspace),
   })
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body, workspace),
     onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved)
+      qc.setQueryData(["teamSettings", workspace], saved)
       qc.invalidateQueries({ queryKey: ["options"] }) // refresh pickers so Fable appears/disappears
       setError(null)
     },
@@ -580,19 +605,25 @@ function FableSection() {
   )
 }
 
-function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
+function GlobalDefaultsSection({
+  workspace,
+  models,
+}: {
+  workspace: string
+  models: Array<ModelOption>
+}) {
   const qc = useQueryClient()
   const settings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryKey: ["teamSettings", workspace],
+    queryFn: () => api.getTeamSettings(workspace),
   })
   const repos = useRepos()
   const [error, setError] = useState<string | null>(null)
 
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body, workspace),
     onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved)
+      qc.setQueryData(["teamSettings", workspace], saved)
       setError(null)
     },
     onError: (e: Error) => setError(e.message),

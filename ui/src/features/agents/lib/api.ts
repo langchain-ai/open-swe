@@ -147,6 +147,8 @@ export interface SidebarProject {
   repoFullName: string
   name: string
   updatedAt: number
+  /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
+  workspace: string
 }
 
 const API_BASE = dashboardApiBase()

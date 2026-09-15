@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { api } from "@/lib/api"
+import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import {
   buildProfileUpdate,
   useOptions,
@@ -36,9 +36,18 @@ export function PullRequestsSection() {
   const profile = useProfile()
   const options = useOptions()
   const save = useSaveProfile()
+  // Which team default applies depends on the workspace a pull request's
+  // repository belongs to; the user's own workspace is the one answer this
+  // page can give, and it is where their new threads run.
+  const preferences = useQuery({
+    queryKey: ["myPreferences"],
+    queryFn: api.getMyPreferences,
+  })
+  const workspace =
+    preferences.data?.default_workspace ?? DEFAULT_WORKSPACE_SLUG
   const teamSettings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryKey: ["teamSettings", workspace],
+    queryFn: () => api.getTeamSettings(workspace),
   })
   const [error, setError] = useState<string | null>(null)
 
@@ -94,7 +103,9 @@ export function PullRequestsSection() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="team_default">
-                {`Use team default (currently: ${teamDefaultOn ? "On" : "Off"})`}
+                {`Use workspace default (currently: ${
+                  teamDefaultOn ? "On" : "Off"
+                })`}
               </SelectItem>
               <SelectItem value="always_on">Always review my drafts</SelectItem>
               <SelectItem value="always_off">Never review my drafts</SelectItem>

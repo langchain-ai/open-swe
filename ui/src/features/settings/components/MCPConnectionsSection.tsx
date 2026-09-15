@@ -5,7 +5,7 @@ import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 import { SettingsSection } from "@/components/AppShell"
 import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { api } from "@/lib/api"
+import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
 import { MCPImport } from "./MCPImport"
 import type { ImportedMCP } from "./MCPImport"
@@ -28,34 +28,46 @@ type MCPScopeConfig = {
   discover: (body: MCPConnectionUpdate) => Promise<Catalog>
 }
 
-const scopes: Record<MCPScope, MCPScopeConfig> = {
-  workspace: {
-    title: "Workspace MCPs",
-    description:
-      "Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them.",
-    queryKey: ["workspaceMCPs"],
-    // Hard-coded to the default workspace until a workspace selector lands.
-    list: () => api.getWorkspaceMCPs("default"),
-    save: (body) => api.saveWorkspaceMCP("default", body),
-    remove: (name) => api.deleteWorkspaceMCP("default", name),
-    revealHeaders: (name) => api.revealWorkspaceMCPHeaders("default", name),
-    discover: (body) => api.discoverWorkspaceMCP("default", body),
-  },
-  user: {
-    title: "Personal MCPs",
-    description:
-      "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
-    queryKey: ["myMCPs"],
-    list: api.getMyMCPs,
-    save: api.saveMyMCP,
-    remove: api.deleteMyMCP,
-    revealHeaders: api.revealMyMCPHeaders,
-    discover: api.discoverMyMCP,
-  },
+function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
+  const scopes: Record<MCPScope, MCPScopeConfig> = {
+    workspace: {
+      title: "Workspace MCPs",
+      description:
+        "Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+      queryKey: ["workspaceMCPs", workspace],
+      list: () => api.getWorkspaceMCPs(workspace),
+      save: (body) => api.saveWorkspaceMCP(workspace, body),
+      remove: (name) => api.deleteWorkspaceMCP(workspace, name),
+      revealHeaders: (name) => api.revealWorkspaceMCPHeaders(workspace, name),
+      discover: (body) => api.discoverWorkspaceMCP(workspace, body),
+    },
+    user: {
+      title: "Personal MCPs",
+      description:
+        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+      queryKey: ["myMCPs"],
+      list: api.getMyMCPs,
+      save: api.saveMyMCP,
+      remove: api.deleteMyMCP,
+      revealHeaders: api.revealMyMCPHeaders,
+      discover: api.discoverMyMCP,
+    },
+  }
+  return scopes[scope]
 }
 
-export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
-  const { title, description, queryKey, ...client } = scopes[scope]
+export function MCPConnectionsSection({
+  scope,
+  workspace = DEFAULT_WORKSPACE_SLUG,
+}: {
+  scope: MCPScope
+  /** Only meaningful for `scope: "workspace"`; ignored for personal MCPs. */
+  workspace?: string
+}) {
+  const { title, description, queryKey, ...client } = scopeConfig(
+    scope,
+    workspace
+  )
   const qc = useQueryClient()
   const connections = useQuery({ queryKey, queryFn: client.list })
   const [draft, setDraft] = useState<Draft | null>(null)

@@ -77,10 +77,8 @@ export function AgentsHome({
   const routePending = useRouterState({
     select: (state) => state.status === "pending",
   })
-  const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
-  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
@@ -100,18 +98,14 @@ export function AgentsHome({
   >(null)
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
-  const workspaceOptions = useWorkspaceOptions(cloudEnabled)
-  const workspaces = workspaceOptions.data?.workspaces ?? []
-  // undefined = untouched, so the run falls back to the default workspace.
+  const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
+  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
+  // undefined = untouched, so the run falls back to the repo's own workspace,
+  // then the default one.
   const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
     null
   )
-  const defaultWorkspaceSlug = workspaceOptions.data?.default_slug ?? null
-  const selectedWorkspace =
-    workspaceOverride ??
-    (workspaces.some((env) => env.slug === defaultWorkspaceSlug)
-      ? defaultWorkspaceSlug
-      : null)
+  const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
   const [submittedDraft, setSubmittedDraft] =
     useState<CreateAgentThreadVariables | null>(null)
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
@@ -175,6 +169,25 @@ export function AgentsHome({
     repoOverride === undefined
       ? (profileQuery.data?.default_repo ?? null)
       : repoOverride
+
+  // Follows the selected repo's owning workspace until the user overrides it;
+  // falls back to the instance default when no workspace claims this repo.
+  const repoWorkspaceSlug = repo
+    ? (workspaces.find((workspace) =>
+        workspace.repos.some((r) => r.toLowerCase() === repo.toLowerCase())
+      )?.slug ?? null)
+    : null
+  const selectedWorkspace =
+    workspaceOverride ??
+    repoWorkspaceSlug ??
+    (workspaces.some((workspace) => workspace.slug === defaultWorkspaceSlug)
+      ? defaultWorkspaceSlug
+      : null)
+
+  // The picker offers the workspace being composed in its own models and
+  // default, not the deployment default's.
+  const { models, defaultSelection } = useModelOptions(selectedWorkspace)
+  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
 
   // Holds the just-submitted prompt until the SDK mints the thread id.
   const draftRef = useRef<CreateAgentThreadVariables | null>(null)
@@ -453,7 +466,7 @@ export function AgentsHome({
     if (repoOverride === null) configurable.repo_explicitly_none = true
     configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
-    if (selectedWorkspace) configurable.environment = selectedWorkspace
+    if (selectedWorkspace) configurable.workspace = selectedWorkspace
 
     const handleCloudSubmitError = (error: unknown) => {
       resetPendingSubmit()
@@ -573,7 +586,7 @@ export function AgentsHome({
             onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
-            workspaces={workspaces}
+            workspaceOptions={workspaces}
             selectedWorkspace={selectedWorkspace}
             onWorkspaceChange={
               !optimisticDraftThread && runTarget === "cloud"
