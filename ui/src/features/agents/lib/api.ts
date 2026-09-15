@@ -146,6 +146,18 @@ export interface SidebarProject {
   updatedAt: number
 }
 
+/** One message as the dashboard's thread state endpoints serialize it. */
+export interface ThreadStateMessage {
+  id?: string
+  type?: string
+  content?: unknown
+  additional_kwargs?: Record<string, unknown>
+}
+
+export interface ThreadStatePayload {
+  values?: { messages?: Array<ThreadStateMessage> }
+}
+
 const API_BASE = dashboardApiBase()
 
 export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
@@ -353,6 +365,14 @@ export const agentsApi = {
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
     }),
+  getThreadState: (threadId: string, view: "full" | "trimmed" = "full") =>
+    agentsRequest<ThreadStatePayload>(
+      `/threads/${encodeURIComponent(threadId)}/state?view=${view}`
+    ),
+  getThreadMessage: (threadId: string, messageId: string) =>
+    agentsRequest<ThreadStateMessage>(
+      `/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`
+    ),
   getThread: (threadId: string, options?: { markViewed?: boolean }) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}${

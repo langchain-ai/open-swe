@@ -122,8 +122,9 @@ export function apiWarmupScript(pathname: string): string | null {
   const isAgentsHome = AGENTS_HOME_RE.test(pathname)
   if (!threadId && !isAgentsHome) return null
 
+  // Must resolve to the exact URL the SDK's hydration read uses, view included.
   const urls = threadId
-    ? [`${agentsLangGraphApiUrl}/threads/${threadId}/state`]
+    ? [`${agentsLangGraphApiUrl}/threads/${threadId}/state?view=trimmed`]
     : []
   const args = [
     JSON.stringify(urls),

@@ -105,6 +105,12 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
+  /**
+   * The output was blanked by the trimmed state view and is not cached yet;
+   * `resultMessageId` names the tool message to fetch it from.
+   */
+  outputPending?: boolean
+  resultMessageId?: string
   display?: OutputIframeDisplay
   elapsedMs?: number
   approvalRequestId?: string
@@ -160,6 +166,9 @@ export interface ImageChunk {
   base64?: string
   /** Store reference left by the agent's image offload middleware. */
   fileId?: string
+  /** Bytes were blanked by the trimmed state view; fetch `messageId` to get them. */
+  pending?: boolean
+  messageId?: string
 }
 
 export type Chunk =

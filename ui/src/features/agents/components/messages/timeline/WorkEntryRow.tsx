@@ -14,6 +14,7 @@ import {
   X,
   Zap,
 } from "lucide-react"
+import { PendingToolOutput } from "./PendingToolOutput"
 import { ToolResultBody } from "./ToolResultBody"
 import type { KeyboardEvent, ReactNode } from "react"
 
@@ -121,7 +122,8 @@ export function WorkEntryRow({
   const toggle = useCallback(() => setExpanded((value) => !value), [])
 
   const canExpand =
-    onActivate == null && (body != null || entry.expandedText != null)
+    onActivate == null &&
+    (body != null || entry.expandedText != null || entry.outputPending)
   const activate = onActivate ?? (canExpand ? toggle : null)
   const isError = entry.tone === "error"
   const hoverTimestamp = formatHoverTimestamp(timestamp)
@@ -257,10 +259,14 @@ export function WorkEntryRow({
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          {body ??
+          {entry.outputPending && entry.resultMessageId ? (
+            <PendingToolOutput messageId={entry.resultMessageId} />
+          ) : (
+            (body ??
             (entry.expandedText != null && (
               <ToolResultBody value={entry.expandedText} />
-            ))}
+            )))
+          )}
         </div>
       )}
     </div>

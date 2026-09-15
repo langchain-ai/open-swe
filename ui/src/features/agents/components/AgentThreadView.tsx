@@ -38,6 +38,8 @@ import { Messages } from "@/features/agents/components/messages"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import type { StubbedContentResolver } from "@/features/agents/lib/streamMessagesToUi"
+import { useMessageContentStore } from "@/features/agents/lib/messageContentStore"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
@@ -213,18 +215,40 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
+  // The SDK hydrates from the trimmed state view, so large tool outputs and
+  // pasted images arrive blanked; the cache fills them in as they load.
+  const cachedContents = useMessageContentStore(
+    (state) => state.contents[thread.id]
+  )
+  const resolveStubbedContent = useCallback<StubbedContentResolver>(
+    (messageId) => cachedContents?.[messageId],
+    [cachedContents]
+  )
   const baseMessages = useMemo<Array<Message>>(() => {
     const started = perfNow()
     const built = streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
-      messageArrivalTimestamp
+      messageArrivalTimestamp,
+      resolveStubbedContent
     )
     const elapsed = perfNow() - started
     threadTranscriptBuilt(thread.id, elapsed)
     runTranscriptBuilt(thread.id, elapsed)
     return built
-  }, [stream.messages, stream.toolCalls, thread.id])
+  }, [resolveStubbedContent, stream.messages, stream.toolCalls, thread.id])
+  const hasPendingContent = useMemo(
+    () =>
+      baseMessages.some((message) =>
+        message.chunks.some(
+          (chunk) =>
+            (chunk.kind === "tool-execution" && chunk.outputPending) ||
+            (chunk.kind === "image" && chunk.pending)
+        )
+      ),
+    [baseMessages]
+  )
+  const prefetchContents = useMessageContentStore((state) => state.prefetch)
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(
@@ -275,6 +299,15 @@ export function AgentThreadView({
   useEffect(() => {
     if (!stream.isThreadLoading) threadHydrated(thread.id)
   }, [stream.isThreadLoading, thread.id])
+
+  // Once the trimmed transcript is on screen, load everything it blanked in
+  // one background read so expanding a row is instant. Deferred a tick so the
+  // first frame is not competing with a large JSON parse.
+  useEffect(() => {
+    if (isHydrating || !hasPendingContent) return
+    const timer = setTimeout(() => void prefetchContents(thread.id), 0)
+    return () => clearTimeout(timer)
+  }, [hasPendingContent, isHydrating, prefetchContents, thread.id])
 
   // The transcript's first frame: one rAF after the commit that replaced the
   // hydration placeholder. A commit before the frame fires cancels and
