@@ -1,13 +1,9 @@
 """SQLite checkpointer for the desktop app's bundled ``langgraph dev`` server.
 
-``langgraph dev`` keeps checkpoints in memory and pickles them to
-``.langgraph_api/`` every ten seconds. When the desktop app is quit or killed
-before that flush, or the pickle fails to serialize, users lose their threads.
-This module is wired through ``checkpointer.path`` in ``langgraph.desktop.json``
-so every checkpoint commits to SQLite as it is written.
-
-Existing pickled checkpoints are imported into the database the first time it
-is created, so threads started before the switch keep their history.
+The dev server keeps checkpoints in memory and pickles them every ten seconds,
+so quitting the app loses recent thread history. ``langgraph.desktop.json``
+wires this module through ``checkpointer.path`` so each checkpoint commits to
+SQLite as it is written.
 """
 
 import logging
@@ -17,79 +13,50 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import aiosqlite
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 logger = logging.getLogger(__name__)
 
 DB_PATH_ENV = "OPEN_SWE_LOCAL_CHECKPOINT_DB"
 STATE_DIR = Path(".langgraph_api")
-DEFAULT_DB_NAME = "checkpoints.sqlite"
-IMPORT_MARKER_SUFFIX = ".imported-pickles"
-# Seconds to wait on a locked database. The dev server opens one connection per
-# event-loop thread, so writers can briefly contend on the same file.
-BUSY_TIMEOUT_SECONDS = 5.0
-
-
-def checkpoint_db_path() -> Path:
-    """Resolve the checkpoint database path.
-
-    The desktop app sets ``OPEN_SWE_LOCAL_CHECKPOINT_DB`` to a file under its
-    local data directory. Without it the database lives next to the dev
-    server's other state in ``.langgraph_api`` under the working directory.
-    """
-    configured = os.environ.get(DB_PATH_ENV)
-    if configured:
-        return Path(configured).expanduser()
-    return STATE_DIR / DEFAULT_DB_NAME
 
 
 @asynccontextmanager
 async def create_checkpointer() -> AsyncIterator[AsyncSqliteSaver]:
-    """Yield an ``AsyncSqliteSaver`` backed by the local checkpoint database."""
-    db_path = checkpoint_db_path()
+    db_path = Path(os.environ.get(DB_PATH_ENV) or STATE_DIR / "checkpoints.sqlite")
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(str(db_path), timeout=BUSY_TIMEOUT_SECONDS) as conn:
+    # The dev server opens one connection per event-loop thread, so writers can
+    # briefly contend on the same file.
+    async with aiosqlite.connect(str(db_path), timeout=5.0) as conn:
         saver = AsyncSqliteSaver(conn)
         await saver.setup()
-        await import_pickled_checkpoints(saver, db_path)
+        await _import_pickled_checkpoints(saver, db_path)
         yield saver
 
 
-def _claim_import(marker: Path) -> bool:
-    """Atomically claim the one-time import; only the first caller wins."""
-    try:
-        with marker.open("x"):
-            return True
-    except FileExistsError:
-        return False
+async def _import_pickled_checkpoints(saver: AsyncSqliteSaver, db_path: Path) -> None:
+    """Copy ``langgraph dev``'s pickled checkpoints into ``saver`` once.
 
-
-async def import_pickled_checkpoints(
-    saver: BaseCheckpointSaver[str], db_path: Path, pickle_dir: Path = STATE_DIR
-) -> int:
-    """Copy checkpoints from ``langgraph dev``'s pickle files into ``saver`` once.
-
-    Returns the number of checkpoints imported. Runs only when pickle files
-    exist and no earlier import has been recorded next to the database. The
-    pickle files are left in place; the import never blocks server startup.
+    A marker file next to the database claims the import atomically. The pickle
+    files are left in place and a failed import never blocks startup.
     """
-    marker = db_path.with_name(db_path.name + IMPORT_MARKER_SUFFIX)
-    if not any(pickle_dir.glob(".langgraph_checkpoint.*.pckl")):
-        return 0
-    if not _claim_import(marker):
-        return 0
+    if not any(STATE_DIR.glob(".langgraph_checkpoint.*.pckl")):
+        return
+    marker = db_path.with_name(db_path.name + ".imported-pickles")
+    try:
+        marker.touch(exist_ok=False)
+    except FileExistsError:
+        return
     try:
         imported = await _copy_pickled_checkpoints(saver)
     except Exception:
         marker.unlink(missing_ok=True)
         logger.exception("Could not import pickled checkpoints into SQLite")
-        return 0
+        return
     logger.info("Imported pickled checkpoints into SQLite", extra={"count": imported})
-    return imported
 
 
-async def _copy_pickled_checkpoints(saver: BaseCheckpointSaver[str]) -> int:
+async def _copy_pickled_checkpoints(saver: AsyncSqliteSaver) -> int:
     # The in-memory saver that wrote the pickles is the one that can read
     # them back; it loads ``.langgraph_api/.langgraph_checkpoint.*.pckl``
     # from the working directory when constructed.

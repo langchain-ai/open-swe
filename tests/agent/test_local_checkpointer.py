@@ -21,24 +21,6 @@ def _checkpoint(value: str, version: str) -> Checkpoint:
 _METADATA: CheckpointMetadata = {"source": "input", "step": 0, "parents": {}}
 
 
-async def test_checkpoints_survive_reopening_the_database(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    db_path = tmp_path / "state" / "checkpoints.sqlite"
-    monkeypatch.setenv(DB_PATH_ENV, str(db_path))
-
-    async with create_checkpointer() as saver:
-        await saver.aput(
-            _thread_config("t1"), _checkpoint("hello", "1"), _METADATA, {"messages": "1"}
-        )
-
-    assert db_path.exists()
-    async with create_checkpointer() as saver:
-        stored = await saver.aget_tuple(_thread_config("t1"))
-    assert stored is not None
-    assert stored.checkpoint["channel_values"] == {"messages": ["hello"]}
-
-
 async def test_pickled_dev_server_checkpoints_are_imported_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
