@@ -15,7 +15,6 @@ from uuid import UUID
 import httpx2
 
 from agent.dashboard.profiles import get_valid_access_token
-from agent.dashboard.user_mappings import login_for_slack_id
 from agent.expedited_review.approvals import (
     REQUIRED_APPROVALS,
     ApprovalVote,
@@ -37,6 +36,7 @@ from agent.github.app import (
 )
 from agent.github.ci import has_repo_write_permission
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.input_messages import PersonIdentity
 from agent.prompts import render_prompt
 from agent.slack.client import (
     post_slack_ephemeral_message,
@@ -44,6 +44,7 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
 )
 from agent.users import User
+from agent.users.resolve import resolve_person, split_identity
 from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.thread_ops import langgraph_client
 
@@ -72,18 +73,8 @@ class Voter:
     app_token: str
 
 
-async def _user_for_slack(slack_user_id: str) -> User | None:
-    """The person behind a Slack member id; legacy Slack→GitHub mappings are honoured."""
-    user = await User.for_identity("slack", slack_user_id)
-    if user is not None:
-        return user
-    login = await login_for_slack_id(slack_user_id)
-    return await User.for_login("github", login) if login else None
-
-
-async def _resolve_voter(approval: ExpeditedApproval, slack_user_id: str) -> Voter | VoteOutcome:
+async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Voter | VoteOutcome:
     """The authorized voter behind a click, or why they are not one."""
-    user = await _user_for_slack(slack_user_id)
     login = github_login_of(user) if user is not None else ""
     if user is None or not any(identity.provider == "github" for identity in user.identities):
         return VoteOutcome(f"Your Slack account is not linked to GitHub. {_reconnect_hint()}")
@@ -150,13 +141,13 @@ async def handle_vote(
     approval: ExpeditedApproval,
     *,
     decision: VoteDecision,
-    slack_user_id: str,
+    user: User | None,
     feedback: str = "",
 ) -> VoteOutcome:
     """Record one click. Slow work runs unlocked; the row lock covers only the write."""
     if approval.state != "open":
         return VoteOutcome("This expedited review is no longer accepting votes.")
-    voter = await _resolve_voter(approval, slack_user_id)
+    voter = await _resolve_voter(approval, user)
     if isinstance(voter, VoteOutcome):
         return voter
     login, app_token = voter.github_login, voter.app_token
@@ -305,12 +296,13 @@ async def process_vote(
     approval_id: str,
     *,
     decision: VoteDecision,
-    slack_user_id: str,
+    person: PersonIdentity,
     channel_id: str,
     thread_ts: str,
     feedback: str = "",
 ) -> None:
     """Background entry point for a Slack click; answers the clicker ephemerally."""
+    slack_user_id = split_identity(person)[1]
     try:
         approval = await ExpeditedApproval.get(UUID(approval_id))
     except ValueError:
@@ -325,7 +317,10 @@ async def process_vote(
             langgraph_client(), channel_id, thread_ts, purpose=f"expedited:{approval_id}"
         ):
             outcome = await handle_vote(
-                approval, decision=decision, slack_user_id=slack_user_id, feedback=feedback
+                approval,
+                decision=decision,
+                user=await resolve_person(person),
+                feedback=feedback,
             )
     except Exception:
         logger.exception("Expedited review vote failed", extra={"approval_id": approval_id})

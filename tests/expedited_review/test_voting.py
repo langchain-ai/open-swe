@@ -11,7 +11,8 @@ from agent.expedited_review import voting, watch
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
 from agent.github.pull_requests import PullRequest
-from agent.users import User
+from agent.users import User, resolve
+from agent.users.resolve import resolve_person
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -69,7 +70,7 @@ class _Harness:
 @pytest.fixture
 def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     h = _Harness()
-    monkeypatch.setattr(voting, "login_for_slack_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(resolve, "login_for_slack_id", AsyncMock(return_value=None))
     monkeypatch.setattr(voting, "repo_token", AsyncMock(return_value="app-token"))
     monkeypatch.setattr(voting, "has_repo_write_permission", AsyncMock(return_value=True))
     monkeypatch.setattr(voting, "_submit_github_approval", h.submit_review)
@@ -107,7 +108,7 @@ async def _vote(approval: ExpeditedApproval, slack_user: str, decision: str = "a
     return await voting.handle_vote(
         current,
         decision="approve" if decision == "approve" else "reject",
-        slack_user_id=slack_user,
+        user=await resolve_person({"id": f"slack:{slack_user}", "platform": "slack"}),
     )
 
 

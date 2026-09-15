@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks
 from agent.expedited_review import card
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.voting import process_vote
+from agent.input_messages import PersonIdentity
 from agent.slack.client import open_slack_modal, post_slack_ephemeral_message
 from agent.slack.payloads import SlackButtonValue, SlackInteraction
 from agent.slack.responses import FeedbackResponse, WebhookResponse, accepted, ignored
@@ -65,11 +66,18 @@ async def handle_button(
         process_vote,
         button.fingerprint,
         decision="approve" if button.action == "approve" else "reject",
-        slack_user_id=user_id,
+        person=slack_person(user_id, interaction.user.username or interaction.user.name),
         channel_id=channel_id,
         thread_ts=thread_ts,
     )
     return accepted("Expedited review vote queued")
+
+
+def slack_person(slack_user_id: str, handle: str = "") -> PersonIdentity:
+    person: PersonIdentity = {"id": f"slack:{slack_user_id}", "platform": "slack"}
+    if handle:
+        person["handle"] = handle
+    return person
 
 
 async def handle_submission(
@@ -102,7 +110,7 @@ async def handle_submission(
         process_vote,
         approval_id,
         decision="reject",
-        slack_user_id=user_id,
+        person=slack_person(user_id, str(_object(payload.get("user")).get("username") or "")),
         channel_id=channel_id,
         thread_ts=thread_ts,
         feedback=feedback,
