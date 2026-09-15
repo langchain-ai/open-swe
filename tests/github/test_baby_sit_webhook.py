@@ -30,7 +30,7 @@ def _post(event_type: str, payload: dict[str, Any], *, delivery_id: str = "deliv
 
 @pytest.mark.parametrize("event_type", ["check_run", "check_suite", "workflow_run", "status"])
 def test_signed_ci_events_route_without_mention(
-    event_type: str, monkeypatch: pytest.MonkeyPatch
+    event_type: str, fake_store: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict[str, Any] = {}
 

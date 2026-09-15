@@ -92,7 +92,7 @@ def _run_process(
     )
 
 
-def test_linear_configurable_carries_github_login() -> None:
+def test_linear_configurable_carries_github_login(fake_store: Any) -> None:
     configurable, _upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -104,7 +104,7 @@ def test_linear_configurable_carries_github_login() -> None:
     assert configurable["user_email"] == "zhen@example.com"
 
 
-def test_linear_upsert_tags_thread_with_login() -> None:
+def test_linear_upsert_tags_thread_with_login(fake_store: Any) -> None:
     _configurable, upsert, _email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -114,7 +114,7 @@ def test_linear_upsert_tags_thread_with_login() -> None:
     assert upsert["user_email"] == "zhen@example.com"
 
 
-def test_linear_omits_login_when_unmapped() -> None:
+def test_linear_omits_login_when_unmapped(fake_store: Any) -> None:
     configurable, upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="nobody@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -125,7 +125,7 @@ def test_linear_omits_login_when_unmapped() -> None:
     assert upsert["github_login"] == ""
 
 
-def test_linear_description_images_stay_with_issue_without_comments() -> None:
+def test_linear_description_images_stay_with_issue_without_comments(fake_store: Any) -> None:
     issue = _full_issue()
     issue["description"] = "See ![issue](https://example.com/issue.png)"
     _configurable, _upsert, _email, content = _run_process(
@@ -139,7 +139,7 @@ def test_linear_description_images_stay_with_issue_without_comments() -> None:
     assert messages[1]["content"][1]["image_url"]["url"] == "https://example.com/issue.png"
 
 
-def test_linear_comment_images_stay_with_their_comments() -> None:
+def test_linear_comment_images_stay_with_their_comments(fake_store: Any) -> None:
     issue = _full_issue()
     issue["comments"]["nodes"] = [
         {

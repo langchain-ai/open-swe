@@ -886,7 +886,13 @@ async def get_thread_workspace(thread_id: str) -> str | None:
 
 
 async def workspace_for_repo_config(repo_config: dict[str, str] | None) -> str:
-    """The workspace that owns ``repo_config``, or the instance default."""
+    """The workspace that owns ``repo_config``, or the instance default.
+
+    A failed ownership lookup lands on the default too:
+    :func:`agent.workspaces.routing.workspace_for_repo` logs it at error and
+    answers ``None``, because every caller of this is about to start or label a
+    run, and one in ``default`` beats none.
+    """
     if not repo_config or not repo_config.get("owner") or not repo_config.get("name"):
         return DEFAULT_WORKSPACE_SLUG
     return (

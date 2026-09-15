@@ -55,7 +55,7 @@ def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset())
 
 
-def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch) -> None:
+def test_gate_blocks_non_member_on_public_pr_comment(fake_store: Any, monkeypatch) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -97,7 +97,7 @@ def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch) -> None:
     assert seen["calls"] == ["stranger"]
 
 
-def test_gate_allows_org_member_on_public_pr_comment(monkeypatch) -> None:
+def test_gate_allows_org_member_on_public_pr_comment(fake_store: Any, monkeypatch) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -139,7 +139,7 @@ def test_gate_allows_org_member_on_public_pr_comment(monkeypatch) -> None:
     assert called["event"] == "issue_comment"
 
 
-def test_gate_skipped_on_private_repo(monkeypatch) -> None:
+def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -182,7 +182,7 @@ def test_gate_skipped_on_private_repo(monkeypatch) -> None:
     assert seen["calls"] == []
 
 
-def test_gate_disabled_when_env_unset(monkeypatch) -> None:
+def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch) -> None:
     _common_setup(monkeypatch, gate="")
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -225,7 +225,7 @@ def test_gate_disabled_when_env_unset(monkeypatch) -> None:
     assert seen["calls"] == []
 
 
-def test_gate_blocks_non_member_on_public_issue(monkeypatch) -> None:
+def test_gate_blocks_non_member_on_public_issue(fake_store: Any, monkeypatch) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -261,7 +261,9 @@ def test_gate_blocks_non_member_on_public_issue(monkeypatch) -> None:
     assert "not a member" in body["reason"]
 
 
-def test_review_requested_is_unsupported_before_public_repo_gate(monkeypatch) -> None:
+def test_review_requested_is_unsupported_before_public_repo_gate(
+    fake_store: Any, monkeypatch
+) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -295,7 +297,7 @@ def test_review_requested_is_unsupported_before_public_repo_gate(monkeypatch) ->
     assert seen["calls"] == []
 
 
-def test_gate_allows_internal_bot_sender(monkeypatch) -> None:
+def test_gate_allows_internal_bot_sender(fake_store: Any, monkeypatch) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 

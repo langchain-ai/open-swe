@@ -22,6 +22,7 @@ from agent.slack.request import SlackRequest
 from agent.source_context import SourceContext
 from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import common as webhook_common
+from tests.conftest import FakeStore
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -842,6 +843,7 @@ async def _no_team_default_repo(workspace: str | None = None) -> dict[str, str] 
 
 
 def test_get_slack_repo_config_new_thread_uses_default(
+    fake_store: FakeStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(raise_not_found=True)
@@ -861,6 +863,7 @@ def test_get_slack_repo_config_new_thread_uses_default(
 
 
 def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
+    fake_store: FakeStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
@@ -928,6 +931,7 @@ def test_get_slack_repo_config_applies_profile_default_repo(
 
 
 def test_get_slack_repo_config_applies_team_default_repo(
+    fake_store: FakeStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
@@ -949,6 +953,7 @@ def test_get_slack_repo_config_applies_team_default_repo(
 
 
 def test_get_slack_repo_config_is_none_when_nothing_names_a_repo(
+    fake_store: FakeStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
