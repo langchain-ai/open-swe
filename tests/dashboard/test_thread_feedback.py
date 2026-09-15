@@ -89,6 +89,32 @@ async def test_only_verified_initiator_gets_feedback(api, monkeypatch, identity,
     assert submitted.status_code == (200 if identity == "slack_initiator" else 403)
 
 
+async def test_open_feedback_makes_it_available_immediately(api):
+    await thread_feedback.feedback_store().delete("t1")
+    response = await api.client.post("/dashboard/api/threads/t1/feedback/open")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "rating": None, "comment": ""}
+    submitted = await api.client.post(
+        "/dashboard/api/threads/t1/feedback", json={"rating": "good"}
+    )
+    assert submitted.status_code == 200
+
+
+async def test_open_feedback_releases_pending_prompt(api):
+    await thread_feedback.feedback_store().put(
+        "t1", thread_feedback.Feedback(status="pending", event_id="feedback-1")
+    )
+    response = await api.client.post("/dashboard/api/threads/t1/feedback/open")
+    assert response.json() == {"status": "ready", "rating": None, "comment": ""}
+    assert (await thread_feedback.feedback_store().get("t1")).event_id == "feedback-1"
+
+
+async def test_open_feedback_keeps_completed_feedback(api):
+    await api.client.post("/dashboard/api/threads/t1/feedback", json={"rating": "good"})
+    response = await api.client.post("/dashboard/api/threads/t1/feedback/open")
+    assert response.json() == {"status": "completed", "rating": "good", "comment": ""}
+
+
 async def test_private_thread_owner_can_give_feedback(api):
     api.metadata.update({"visibility": "private", "owner_login": "owner"})
     visible = await api.client.get("/dashboard/api/threads/t1/feedback")

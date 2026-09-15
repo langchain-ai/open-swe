@@ -8,7 +8,13 @@ from pydantic import BaseModel, Field, model_validator
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
 from agent.dashboard.user_mappings import login_for_slack_id
 from agent.source_context import SourceContext
-from agent.thread_feedback import PromptStatus, Rating, feedback_prompt_status, feedback_store
+from agent.thread_feedback import (
+    Feedback,
+    PromptStatus,
+    Rating,
+    feedback_prompt_status,
+    feedback_store,
+)
 from agent.threads.plan_api import fetch_thread_metadata
 from agent.threads.summary import thread_is_readable
 from agent.utils.thread_ops import langgraph_client
@@ -70,6 +76,24 @@ async def get_thread_feedback(
         rating=record.rating if record else None,
         comment=record.comment if record else "",
     )
+
+
+@feedback_router.post("/{thread_id}/feedback/open")
+async def open_thread_feedback(
+    thread_id: str, session: dict[str, Any] = _SESSION_DEP
+) -> ThreadFeedbackResponse:
+    login = str(session["sub"]).strip().lower()
+    if not await _is_initiator(thread_id, login, session.get("email")):
+        raise HTTPException(403, "Only the thread initiator can give feedback.")
+    async with agent_thread_pr_state_lock(langgraph_client(), thread_id):
+        record = await feedback_store().get(thread_id)
+        if record is None:
+            record = Feedback(status="ready")
+            await feedback_store().put(thread_id, record)
+        elif record.status == "pending":
+            record.status = "ready"
+            await feedback_store().put(thread_id, record)
+    return ThreadFeedbackResponse.model_validate(record, from_attributes=True)
 
 
 @feedback_router.post("/{thread_id}/feedback")
