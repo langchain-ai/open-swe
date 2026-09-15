@@ -73,3 +73,24 @@ async def test_options_carry_repos_channels_and_default_flag(
     assert by_slug["oss"]["repos"] == ["acme/oss"] and by_slug["oss"]["slack_channel_ids"] == [
         "C0SS"
     ]
+
+
+async def test_a_workspace_with_no_repository_is_a_400(
+    admin_client: httpx.AsyncClient, fake_store: FakeStore
+) -> None:
+    """Only `default` may claim nothing; a malformed definition is not a conflict."""
+    response = await admin_client.post("/dashboard/api/workspaces", json={"name": "OSS"})
+    assert response.status_code == 400
+    assert "at least one repository" in response.json()["detail"]
+
+
+async def test_a_repeated_workspace_name_is_a_409(
+    admin_client: httpx.AsyncClient, fake_store: FakeStore
+) -> None:
+    payload = {"name": "Core", "repos": ["acme/api"]}
+    assert (await admin_client.post("/dashboard/api/workspaces", json=payload)).status_code == 200
+    second = await admin_client.post(
+        "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/other"]}
+    )
+    assert second.status_code == 409
+    assert "already exists" in second.json()["detail"]
