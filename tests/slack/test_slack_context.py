@@ -22,6 +22,7 @@ from agent.slack.request import SlackRequest
 from agent.source_context import SourceContext
 from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import common as webhook_common
+from agent.workspaces.store import WORKSPACES_NAMESPACE
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -1118,7 +1119,7 @@ def slack_file_mention(monkeypatch, fake_store):
     monkeypatch.setattr(lifecycle, "get_recorded_proxy_base_config", lambda _: None)
     monkeypatch.setattr(webhook_common, "get_slack_permalink", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_utils, "download_slack_file", AsyncMock(return_value=b"zip"))
-    fake_store.seed(["workspaces"], "staging", {"slug": "staging", "name": "Staging"})
+    fake_store.seed(WORKSPACES_NAMESPACE, "staging", {"slug": "staging", "name": "Staging"})
     request = SlackRequest(
         channel_id="C123",
         thread_ts="1700000000.000100",
