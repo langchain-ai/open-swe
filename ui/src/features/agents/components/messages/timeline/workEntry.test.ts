@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { describeWorkEntry, liveActivityLabel } from "./workEntry"
+import {
+  combinedEditDiff,
+  describeEditGroup,
+  describeReadGroup,
+  describeWorkEntry,
+  liveActivityLabel,
+} from "./workEntry"
 import type {
   Chunk,
   DiffData,
@@ -49,6 +55,25 @@ describe("describeWorkEntry", () => {
     expect(entry.icon).toBe("eye")
   })
 
+  it("labels repeated reads with their call count", () => {
+    const reads = [
+      chunk({
+        toolCallId: "read-1",
+        input: { file_path: `${projectPath}/ui/src/AGENTS.md` },
+      }),
+      chunk({
+        toolCallId: "read-2",
+        input: { file_path: `${projectPath}/ui/src/AGENTS.md` },
+      }),
+    ]
+
+    expect(describeReadGroup(reads, projectPath)).toMatchObject({
+      heading: "Read (x2)",
+      preview: "AGENTS.md",
+      status: "completed",
+    })
+  })
+
   it("describes a completed edit from its diff rather than the raw tool title", () => {
     const entry = describeWorkEntry(
       chunk({ title: "edit_file", toolKind: "edit", diffData: diff() }),
@@ -62,6 +87,52 @@ describe("describeWorkEntry", () => {
     expect(entry.icon).toBe("square-pen")
     // The diff is rendered as the row body, so there is no text fallback.
     expect(entry.expandedText).toBeNull()
+  })
+
+  it("describes repeated edits from their combined before and after state", () => {
+    const chunks = [
+      chunk({
+        toolCallId: "edit-1",
+        toolKind: "edit",
+        diffData: diff({ originalContent: "a\n", newContent: "b\n" }),
+      }),
+      chunk({
+        toolCallId: "edit-2",
+        toolKind: "edit",
+        diffData: diff({ originalContent: "b\n", newContent: "c\nd\n" }),
+      }),
+    ]
+
+    expect(combinedEditDiff(chunks)).toMatchObject({
+      originalContent: "a\n",
+      newContent: "c\nd\n",
+    })
+    expect(describeEditGroup(chunks, projectPath)).toMatchObject({
+      heading: "Edited (x2)",
+      preview: "app.tsx",
+      diffStats: { additions: 2, deletions: 1 },
+      status: "completed",
+    })
+  })
+
+  it("combines edits whose snippets do not include the previous edit", () => {
+    const chunks = [
+      chunk({
+        toolCallId: "edit-1",
+        toolKind: "edit",
+        diffData: diff({ originalContent: "a\n", newContent: "b\n" }),
+      }),
+      chunk({
+        toolCallId: "edit-2",
+        toolKind: "edit",
+        diffData: diff({ originalContent: "x\n", newContent: "y\n" }),
+      }),
+    ]
+
+    expect(combinedEditDiff(chunks)).toMatchObject({
+      originalContent: "a\n\nx\n",
+      newContent: "b\n\ny\n",
+    })
   })
 
   it("distinguishes a created file from an edited one", () => {
