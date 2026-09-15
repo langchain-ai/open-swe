@@ -138,7 +138,12 @@ async def slack_callback(
         source="slack_oauth",
         status="active",
     )
-    await _link_slack_identity(session, slack_user_id=identity.user_id, team_id=identity.team_id)
+    await _link_slack_identity(
+        session,
+        slack_user_id=identity.user_id,
+        email=identity.email or "",
+        team_id=identity.team_id,
+    )
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
@@ -157,7 +162,7 @@ async def _verified_slack_identity(code: str) -> SlackIdentity:
 
 
 async def _link_slack_identity(
-    session: dict[str, Any], *, slack_user_id: str, team_id: str
+    session: dict[str, Any], *, slack_user_id: str, email: str, team_id: str
 ) -> None:
     """Attach the Slack account to the person the session belongs to.
 
@@ -177,7 +182,7 @@ async def _link_slack_identity(
             extra={"github_login": github_login},
         )
         return
-    await user.link("slack", slack_user_id, team_id=team_id)
+    await user.link("slack", slack_user_id, email=email, team_id=team_id)
 
 
 @router.post("/slack/desktop/exchange")
@@ -203,6 +208,7 @@ async def slack_desktop_exchange(
     await _link_slack_identity(
         session,
         slack_user_id=slack_user_id,
+        email=email,
         team_id=team_id if isinstance(team_id, str) else "",
     )
     return {"connected": True}

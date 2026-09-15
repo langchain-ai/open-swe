@@ -16,18 +16,12 @@ def upgrade() -> None:
         """
         CREATE TABLE users (
             id uuid PRIMARY KEY,
-            email text NOT NULL DEFAULT '',
             display_name text NOT NULL DEFAULT '',
             avatar_url text NOT NULL DEFAULT '',
+            is_admin boolean NOT NULL DEFAULT false,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             last_seen_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
-        """
-    )
-
-    op.execute(
-        """
-        CREATE INDEX users_email_idx ON users (lower(email)) WHERE email <> ''
         """
     )
 
@@ -38,6 +32,7 @@ def upgrade() -> None:
             provider text NOT NULL CHECK (provider IN ('github', 'slack')),
             external_id text NOT NULL,
             login text NOT NULL DEFAULT '',
+            email text NOT NULL DEFAULT '',
             team_id text NOT NULL DEFAULT '',
             linked_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             last_seen_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -56,6 +51,13 @@ def upgrade() -> None:
         """
         CREATE INDEX user_identity_login_idx
             ON user_identity (provider, lower(login)) WHERE login <> ''
+        """
+    )
+
+    op.execute(
+        """
+        CREATE INDEX user_identity_email_idx
+            ON user_identity (lower(email)) WHERE email <> ''
         """
     )
 

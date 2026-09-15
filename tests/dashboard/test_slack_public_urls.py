@@ -126,4 +126,4 @@ def test_slack_callback_links_the_slack_identity_to_the_session_user(
         assert callback.status_code == 302, callback.text
 
     get_user.assert_awaited_once_with(user.id)
-    link.assert_awaited_once_with("slack", "U123", team_id="T123")
+    link.assert_awaited_once_with("slack", "U123", email="alice@example.com", team_id="T123")

@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from agent.config import ENV
+from agent.dashboard.admin import configured_admins, is_admin
 from agent.dashboard.deps import SESSION_DEP, session_is_admin
 from agent.dashboard.oauth import (
     COOKIE_NAME,
@@ -150,6 +151,7 @@ async def _signed_in_user_id(user: GithubUser, email: str | None) -> str:
         email=email or "",
         display_name=user.name or "",
         avatar_url=user.avatar_url or "",
+        admin=is_admin(email, login=user.login) if configured_admins() else None,
     )
     return str(signed_in.id)
 

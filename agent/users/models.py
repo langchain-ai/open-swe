@@ -9,11 +9,12 @@ reference ``users.id`` instead of a provider-specific handle.
 """
 
 import logging
+from collections.abc import Collection
 from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
-from sqlalchemy import ForeignKey, Select, Text, delete, func, select, update
+from sqlalchemy import ForeignKey, Select, Text, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -33,6 +34,7 @@ class UserIdentity(Base):
     external_id: Mapped[str] = mapped_column(primary_key=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), init=False)
     login: Mapped[str] = mapped_column(server_default="", default="")
+    email: Mapped[str] = mapped_column(server_default="", default="")
     team_id: Mapped[str] = mapped_column(server_default="", default="")
     linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -42,9 +44,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
-    email: Mapped[str] = mapped_column(server_default="", default="")
     display_name: Mapped[str] = mapped_column(server_default="", default="")
     avatar_url: Mapped[str] = mapped_column(server_default="", default="")
+    is_admin: Mapped[bool] = mapped_column(default=False)
     identities: Mapped[list[UserIdentity]] = relationship(
         default_factory=list,
         cascade="all, delete-orphan",
@@ -93,23 +95,28 @@ class User(Base):
         external_id: str,
         *,
         login: str = "",
-        team_id: str = "",
         email: str = "",
+        team_id: str = "",
         display_name: str = "",
         avatar_url: str = "",
+        admin: bool | None = None,
     ) -> Self:
         """Get or create the person behind a provider account, in one transaction.
 
-        Known values win; empty ones leave what is stored alone.
+        Known values win; empty ones leave what is stored alone. ``admin`` is
+        written only when given, so callers without an opinion leave it be.
         """
         async with postgres.session() as session:
-            user_id = await cls._claim(session, provider, external_id, login=login, team_id=team_id)
+            user_id = await cls._claim(
+                session, provider, external_id, login=login, email=email, team_id=team_id
+            )
             await session.execute(
                 update(cls)
                 .where(cls.id == user_id)
                 .values(
                     last_seen_at=func.clock_timestamp(),
-                    **_known(email=email, display_name=display_name, avatar_url=avatar_url),
+                    **_known(display_name=display_name, avatar_url=avatar_url),
+                    **({} if admin is None else {"is_admin": admin}),
                 )
             )
             await session.flush()
@@ -124,6 +131,7 @@ class User(Base):
         external_id: str,
         *,
         login: str = "",
+        email: str = "",
         team_id: str = "",
     ) -> Self:
         """Attach another provider account to this person, taking it over if needed."""
@@ -134,6 +142,7 @@ class User(Base):
                 provider=provider,
                 external_id=external_id,
                 login=login,
+                email=email,
                 team_id=team_id,
             )
             await session.execute(
@@ -142,7 +151,7 @@ class User(Base):
                     set_={
                         "user_id": upsert.excluded.user_id,
                         "last_seen_at": func.clock_timestamp(),
-                        **_known(login=login, team_id=team_id),
+                        **_known(login=login, email=email, team_id=team_id),
                     },
                 )
             )
@@ -153,6 +162,30 @@ class User(Base):
         return stored
 
     @classmethod
+    async def sync_admins(cls, admins: Collection[str]) -> int:
+        """Make ``is_admin`` match ``admins``: GitHub logins or identity emails.
+
+        Returns how many rows changed.
+        """
+        wanted = [entry.strip().lower() for entry in admins if entry.strip()]
+        listed = select(UserIdentity.user_id).where(
+            or_(
+                (UserIdentity.provider == "github") & func.lower(UserIdentity.login).in_(wanted),
+                func.lower(UserIdentity.email).in_(wanted),
+            )
+        )
+        async with postgres.session() as session:
+            changed = await session.scalars(
+                update(cls)
+                .where(cls.is_admin != cls.id.in_(listed))
+                .values(is_admin=cls.id.in_(listed))
+                .returning(cls.id)
+            )
+            count = len(changed.all())
+        logger.info("Synced admins from configuration", extra={"changed_users": count})
+        return count
+
+    @classmethod
     async def _claim(
         cls,
         session: AsyncSession,
@@ -160,6 +193,7 @@ class User(Base):
         external_id: str,
         *,
         login: str,
+        email: str,
         team_id: str,
     ) -> UUID:
         """The id of the person owning this identity, creating them when new.
@@ -183,6 +217,7 @@ class User(Base):
             provider=provider,
             external_id=external_id,
             login=login,
+            email=email,
             team_id=team_id,
         )
         claimed = await session.scalar(
@@ -190,7 +225,7 @@ class User(Base):
                 index_elements=[UserIdentity.provider, UserIdentity.external_id],
                 set_={
                     "last_seen_at": func.clock_timestamp(),
-                    **_known(login=login, team_id=team_id),
+                    **_known(login=login, email=email, team_id=team_id),
                 },
             ).returning(UserIdentity.user_id)
         )
