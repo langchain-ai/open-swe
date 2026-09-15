@@ -13,6 +13,7 @@ _TOOL_MODULES = {
     "delete_automation": ".automations",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
+    "expedite_pr_approval": ".expedite_pr_approval",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
@@ -73,6 +74,7 @@ __all__ = [
     "delete_automation",
     "delete_environment",
     "enter_plan_mode",
+    "expedite_pr_approval",
     "fetch_review_diff",
     "fetch_url",
     "get_thread",
@@ -154,6 +156,7 @@ if TYPE_CHECKING:
         publish_environment,
         refresh_environment_start,
     )
+    from agent.tools.expedite_pr_approval import expedite_pr_approval
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url
     from agent.tools.http_request import http_request

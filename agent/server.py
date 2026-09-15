@@ -166,6 +166,7 @@ from agent.tools import (
     delete_organization_skill,
     delete_user_skill,
     enter_plan_mode,
+    expedite_pr_approval,
     fetch_url,
     get_thread,
     http_request,
@@ -345,6 +346,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "background_task",
         "create_sandbox_service_url",
         "http_request",
+        "expedite_pr_approval",
         "manage_baby_sit",
         "manage_thread",
         "open_pull_request",
@@ -1175,6 +1177,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     slack_tools = [
+        expedite_pr_approval,
         manage_code_channel,
         manage_incident,
         slack_add_reaction,
@@ -1200,6 +1203,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         get_thread,
         manage_thread,
         manage_baby_sit,
+        expedite_pr_approval,
         mark_question_answered,
         notify_automation_channel,
         open_pull_request,
