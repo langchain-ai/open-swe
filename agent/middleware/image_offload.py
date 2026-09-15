@@ -36,7 +36,6 @@ class StoredImage(TypedDict):
     mime_type: str
     base64: str
     file_name: str | None
-    bytes: int
 
 
 def _as_block(item: object) -> ContentBlock | None:
@@ -94,11 +93,6 @@ def _configurable() -> dict[str, object]:
     return configurable if isinstance(configurable, dict) else {}
 
 
-def _current_thread_id() -> str:
-    thread_id = _configurable().get("thread_id")
-    return str(thread_id) if thread_id else ""
-
-
 def image_owner_threads(thread_id: str, continued_from_thread_id: object) -> frozenset[str]:
     """Threads whose stored images ``thread_id`` may show.
 
@@ -109,15 +103,6 @@ def image_owner_threads(thread_id: str, continued_from_thread_id: object) -> fro
     if isinstance(continued_from_thread_id, str) and continued_from_thread_id:
         owners.add(continued_from_thread_id)
     return frozenset(owners)
-
-
-def _current_image_owners() -> frozenset[str]:
-    configurable = _configurable()
-    return image_owner_threads(_current_thread_id(), configurable.get("continued_from_thread_id"))
-
-
-def _encoded_bytes(encoded: str) -> int:
-    return len(encoded) * 3 // 4 - encoded[-2:].count("=")
 
 
 async def offload_message_images(
@@ -144,7 +129,6 @@ async def offload_message_images(
             "mime_type": mime_type,
             "base64": encoded,
             "file_name": file_name if isinstance(file_name, str) else None,
-            "bytes": _encoded_bytes(encoded),
         }
         await store.aput(IMAGE_STORE_NAMESPACE, image_id, dict(stored))
         reference: ContentBlock = {
@@ -160,7 +144,9 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
 
     def __init__(self) -> None:
         super().__init__()
-        self._rehydrated: OrderedDict[tuple[str, str], ContentBlock | None] = OrderedDict()
+        self._rehydrated: OrderedDict[tuple[frozenset[str], str], ContentBlock | None] = (
+            OrderedDict()
+        )
 
     async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict[str, object] | None:
         messages = state.get("messages") or []
@@ -170,7 +156,7 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
         if store is None:
             logger.warning("No store available to offload inline images")
             return None
-        thread_id = _current_thread_id()
+        thread_id = str(_configurable().get("thread_id") or "")
         replaced: list[BaseMessage] = []
         for message in messages:
             try:
@@ -194,17 +180,11 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
         return {"messages": replaced}
 
     async def _inline_block(
-        self,
-        store: BaseStore,
-        block: ContentBlock,
-        file_id: str,
-        *,
-        thread_id: str,
-        owners: frozenset[str],
+        self, store: BaseStore, block: ContentBlock, file_id: str, owners: frozenset[str]
     ) -> ContentBlock:
         # The middleware instance is shared by every thread, so the cache is
-        # scoped to the thread that resolved the image.
-        cache_key = (thread_id, file_id)
+        # scoped to the threads allowed to see the image.
+        cache_key = (owners, file_id)
         if cache_key in self._rehydrated:
             self._rehydrated.move_to_end(cache_key)
             cached = self._rehydrated[cache_key]
@@ -218,30 +198,16 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
                 encoded = value.get("base64")
                 mime_type = value.get("mime_type")
                 if isinstance(encoded, str) and isinstance(mime_type, str):
-                    inline_block: ContentBlock = {
-                        "type": "image",
-                        "base64": encoded,
-                        "mime_type": mime_type,
-                    }
-                    cached = inline_block
+                    cached = {"type": "image", "base64": encoded, "mime_type": mime_type}
             self._rehydrated[cache_key] = cached
             while len(self._rehydrated) > _REHYDRATE_CACHE_SIZE:
                 self._rehydrated.popitem(last=False)
         if cached is None:
             return {"type": "text", "text": IMAGE_UNAVAILABLE_TEXT}
-        inline = dict(cached)
-        for key in ("id", "index"):
-            if key in block:
-                inline[key] = block[key]
-        return inline
+        return {**{key: value for key, value in block.items() if key != "file_id"}, **cached}
 
     async def _rehydrate(
-        self,
-        store: BaseStore,
-        message: AnyMessage,
-        *,
-        thread_id: str,
-        owners: frozenset[str],
+        self, store: BaseStore, message: AnyMessage, owners: frozenset[str]
     ) -> AnyMessage:
         content: list[object] = []
         for item in message.content:
@@ -250,9 +216,7 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
             if block is None or file_id is None:
                 content.append(item)
                 continue
-            content.append(
-                await self._inline_block(store, block, file_id, thread_id=thread_id, owners=owners)
-            )
+            content.append(await self._inline_block(store, block, file_id, owners))
         return message.model_copy(update={"content": content})
 
     async def awrap_model_call(
@@ -265,12 +229,12 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
         store = _resolve_store(request.runtime)
         if store is None:
             return await handler(request)
-        thread_id = _current_thread_id()
-        owners = _current_image_owners()
+        configurable = _configurable()
+        owners = image_owner_threads(
+            str(configurable.get("thread_id") or ""), configurable.get("continued_from_thread_id")
+        )
         messages: list[AnyMessage] = [
-            await self._rehydrate(store, message, thread_id=thread_id, owners=owners)
-            if _has_reference(message)
-            else message
+            await self._rehydrate(store, message, owners) if _has_reference(message) else message
             for message in request.messages
         ]
         return await handler(request.override(messages=messages))

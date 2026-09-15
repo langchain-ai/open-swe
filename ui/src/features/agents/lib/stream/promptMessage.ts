@@ -2,22 +2,12 @@ import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 
 export function imageBlocks(images: ReadonlyArray<ImageChunk> = []) {
-  return images.flatMap((image) => {
-    const source = image.fileId
-      ? { file_id: image.fileId }
-      : image.base64
-        ? { base64: image.base64 }
-        : null
-    if (!source) return []
-    return [
-      {
-        type: "image" as const,
-        ...source,
-        mime_type: image.mimeType,
-        ...(image.fileName ? { file_name: image.fileName } : {}),
-      },
-    ]
-  })
+  return images.map((image) => ({
+    type: "image" as const,
+    base64: image.base64,
+    mime_type: image.mimeType,
+    ...(image.fileName ? { file_name: image.fileName } : {}),
+  }))
 }
 
 /** The human message a prompt bar submission becomes on the graph. */

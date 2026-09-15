@@ -17,7 +17,6 @@ def _stored(**overrides: Any) -> dict[str, Any]:
         "thread_id": "thread-1",
         "mime_type": "image/png",
         "base64": base64.b64encode(PNG_BYTES).decode(),
-        "file_name": "shot (1).png",
         **overrides,
     }
 
@@ -36,7 +35,6 @@ async def test_serves_the_stored_bytes_with_its_content_type(
 
     assert response.body == PNG_BYTES
     assert response.media_type == "image/png"
-    assert response.headers["content-disposition"] == 'inline; filename="shot-1-.png"'
     assert "immutable" in response.headers["cache-control"]
 
 
@@ -48,6 +46,7 @@ async def test_serves_the_stored_bytes_with_its_content_type(
         (IMAGE_ID, _stored(mime_type="text/html")),
         (IMAGE_ID, _stored(base64="%%%")),
         (IMAGE_ID, _stored(thread_id="")),
+        (IMAGE_ID, _stored(thread_id="other")),
     ],
 )
 async def test_unusable_images_are_not_found(
@@ -57,16 +56,6 @@ async def test_unusable_images_are_not_found(
 
     with pytest.raises(HTTPException) as exc:
         await images.get_dashboard_thread_image("thread-1", image_id, "alice")
-    assert exc.value.status_code == 404
-
-
-async def test_images_of_other_threads_are_not_served(
-    monkeypatch: pytest.MonkeyPatch, readable: None
-) -> None:
-    monkeypatch.setattr(images, "get_value", AsyncMock(return_value=_stored(thread_id="other")))
-
-    with pytest.raises(HTTPException) as exc:
-        await images.get_dashboard_thread_image("thread-1", IMAGE_ID, "alice")
     assert exc.value.status_code == 404
 
 

@@ -66,20 +66,6 @@ async def test_before_model_moves_inline_images_to_the_store() -> None:
     assert item is not None
     assert item.value["base64"] == PNG
     assert item.value["thread_id"] == "thread-1"
-    assert item.value["bytes"] == 48
-
-
-async def test_before_model_is_a_no_op_without_inline_images() -> None:
-    messages = [
-        HumanMessage(id="m0", content="hello"),
-        HumanMessage(
-            id="m1", content=[{"type": "image", "file_id": "abc", "mime_type": "image/png"}]
-        ),
-        AIMessage(id="m2", content="hi"),
-    ]
-    assert (
-        await ImageOffloadMiddleware().abefore_model({"messages": messages}, _runtime(None)) is None
-    )
 
 
 async def test_model_call_sees_the_bytes_while_state_keeps_the_reference() -> None:
@@ -87,7 +73,7 @@ async def test_model_call_sees_the_bytes_while_state_keeps_the_reference() -> No
     await store.aput(
         IMAGE_STORE_NAMESPACE,
         "0" * 32,
-        {"thread_id": "thread-1", "mime_type": "image/png", "base64": PNG, "bytes": 48},
+        {"thread_id": "thread-1", "mime_type": "image/png", "base64": PNG},
     )
     human = HumanMessage(
         id="m1",
@@ -130,39 +116,20 @@ async def _model_saw(
     return seen[0].content
 
 
-async def test_a_reference_to_another_threads_image_is_not_rehydrated() -> None:
+async def test_only_threads_that_may_show_an_image_get_its_bytes() -> None:
     store = InMemoryStore()
     await store.aput(
         IMAGE_STORE_NAMESPACE,
         "0" * 32,
-        {"thread_id": "victim", "mime_type": "image/png", "base64": PNG, "bytes": 48},
+        {"thread_id": "victim", "mime_type": "image/png", "base64": PNG},
     )
     middleware = ImageOffloadMiddleware()
+    image = [{"type": "image", "base64": PNG, "mime_type": "image/png"}]
+    unavailable = [{"type": "text", "text": IMAGE_UNAVAILABLE_TEXT}]
 
-    assert await _model_saw(middleware, store, _config("victim")) == [
-        {"type": "image", "base64": PNG, "mime_type": "image/png"}
-    ]
+    assert await _model_saw(middleware, store, _config("victim")) == image
     # Already cached for the victim's thread, which must not leak it to another.
-    assert await _model_saw(middleware, store, _config("attacker")) == [
-        {"type": "text", "text": IMAGE_UNAVAILABLE_TEXT}
-    ]
-    assert await _model_saw(middleware, store, {"configurable": {}}) == [
-        {"type": "text", "text": IMAGE_UNAVAILABLE_TEXT}
-    ]
-
-
-async def test_a_private_continuation_rehydrates_the_images_it_copied() -> None:
-    store = InMemoryStore()
-    await store.aput(
-        IMAGE_STORE_NAMESPACE,
-        "0" * 32,
-        {"thread_id": "source", "mime_type": "image/png", "base64": PNG, "bytes": 48},
-    )
-
-    content = await _model_saw(
-        ImageOffloadMiddleware(),
-        store,
-        _config("continued", continued_from_thread_id="source"),
-    )
-
-    assert content == [{"type": "image", "base64": PNG, "mime_type": "image/png"}]
+    assert await _model_saw(middleware, store, _config("attacker")) == unavailable
+    assert await _model_saw(middleware, store, {"configurable": {}}) == unavailable
+    continued = _config("continued", continued_from_thread_id="victim")
+    assert await _model_saw(middleware, store, continued) == image

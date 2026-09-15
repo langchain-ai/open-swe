@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ImagePlus, Map as MapIcon, Plus, X } from "lucide-react"
-import { dataUrl } from "@/features/agents/lib/imageSource"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl"
@@ -739,7 +738,7 @@ export const ChatComposer = memo(function ChatComposer({
                 <img
                   alt={image.fileName || "Pending image"}
                   className="size-16 rounded-lg border border-border object-cover"
-                  src={dataUrl(image.mimeType, image.base64 ?? "")}
+                  src={`data:${image.mimeType};base64,${image.base64}`}
                 />
                 <button
                   aria-label="Remove image"

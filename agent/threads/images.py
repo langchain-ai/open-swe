@@ -12,12 +12,6 @@ from agent.threads.access import _readable_thread_metadata
 
 _IMAGE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _SERVABLE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
-_FILE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-
-
-def _content_disposition(file_name: object) -> str:
-    name = _FILE_NAME_RE.sub("-", file_name).strip("-") if isinstance(file_name, str) else ""
-    return f'inline; filename="{name or "image"}"'
 
 
 async def get_dashboard_thread_image(
@@ -49,6 +43,5 @@ async def get_dashboard_thread_image(
             # Image ids are immutable, so the browser can keep them for good.
             "Cache-Control": "private, max-age=31536000, immutable",
             "X-Content-Type-Options": "nosniff",
-            "Content-Disposition": _content_disposition(stored.get("file_name")),
         },
     )
