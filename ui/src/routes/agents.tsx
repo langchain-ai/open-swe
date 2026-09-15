@@ -44,6 +44,12 @@ function AgentsLayout() {
     from: "/agents/local/$sessionId",
     shouldThrow: false,
   })
+  // The plan route covers the shell with a full-screen overlay; the sidebar
+  // stays mounted underneath and must not keep taking focus.
+  const planMatch = useMatch({
+    from: "/agents/$threadId_/plan",
+    shouldThrow: false,
+  })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
   const location = useRouterState({
@@ -76,6 +82,7 @@ function AgentsLayout() {
       localOnly={localOnly}
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
+      sidebarInert={Boolean(planMatch)}
     >
       <AgentStreamProvider
         threadId={activeLocalSessionId ?? activeThreadId ?? null}

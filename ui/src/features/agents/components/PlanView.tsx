@@ -3,28 +3,17 @@ import { Link } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
 import { useIsHydrated } from "@/lib/hydration"
 
+import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { PlanReview } from "@/features/agents/components/PlanReview"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"
 import { currentAuthRedirectPath } from "@/lib/auth-redirect"
 import { PlanApiError, getPlan } from "@/lib/plan"
-import { cn } from "@/lib/utils"
 
-function Centered({
-  children,
-  standalone,
-}: {
-  children: React.ReactNode
-  standalone: boolean
-}) {
+function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className={cn(
-        "flex min-w-0 flex-1 items-center justify-center px-4 py-6",
-        standalone && "max-md:pt-14 md:p-6"
-      )}
-    >
+    <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center px-4 py-6">
       {children}
     </div>
   )
@@ -81,7 +70,7 @@ export function PlanView({
 
   if (!mounted || query.isLoading) {
     return (
-      <Centered standalone={standalone}>
+      <Centered>
         <Skeleton className="h-48 w-full max-w-2xl" />
       </Centered>
     )
@@ -90,7 +79,7 @@ export function PlanView({
   if (query.isError) {
     const status = query.error instanceof PlanApiError ? query.error.status : 0
     return (
-      <Centered standalone={standalone}>
+      <Centered>
         <div className="space-y-3 text-center text-sm text-muted-foreground/70">
           <p>
             {status === 401
@@ -107,7 +96,7 @@ export function PlanView({
   const plan = query.data
   if (!plan?.html.trim() && !plan?.markdown.trim()) {
     return (
-      <Centered standalone={standalone}>
+      <Centered>
         <div className="space-y-3 text-center text-sm text-muted-foreground/70">
           <p>
             The agent is still writing the content. This view will update
@@ -119,12 +108,32 @@ export function PlanView({
     )
   }
 
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {standalone && (
-        <div className="border-b border-border px-4 pt-14 md:px-6 md:pt-3">
+  if (standalone && plan.html.trim()) {
+    return (
+      <div className="fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col bg-background">
+        <nav className="flex h-9 shrink-0 items-center border-b border-border px-3">
           {backLink}
-        </div>
+        </nav>
+        <PlanArtifactFrame
+          html={plan.html}
+          className="min-h-0 min-w-0 flex-1"
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={
+        standalone
+          ? "fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col bg-background"
+          : "flex min-h-0 min-w-0 flex-1 flex-col"
+      }
+    >
+      {standalone && (
+        <nav className="flex h-9 shrink-0 items-center border-b border-border px-3">
+          {backLink}
+        </nav>
       )}
       <PlanReview plan={plan} onApprove={onApprove} />
     </div>

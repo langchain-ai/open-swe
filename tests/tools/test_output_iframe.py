@@ -60,7 +60,7 @@ async def test_output_iframe_snapshots_html_and_returns_signed_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls, backend = _configure(monkeypatch)
-    snapshot_path = "/workspace/project/.open-swe/iframe-artifacts/artifact-id/chart.html"
+    snapshot_path = "/artifacts/iframe-artifacts/artifact-id/chart.html"
 
     content, artifact = await iframe_tool._output_iframe("chart.html", "Quarterly chart")
 
@@ -74,7 +74,7 @@ async def test_output_iframe_snapshots_html_and_returns_signed_urls(
     }
     assert backend.commands == [
         "test -f /workspace/project/chart.html && stat -c %s -- /workspace/project/chart.html",
-        "mkdir -p -- /workspace/project/.open-swe/iframe-artifacts/artifact-id && "
+        "mkdir -p -- /artifacts/iframe-artifacts/artifact-id && "
         + sandbox_wrap_command(
             "/workspace/project/chart.html",
             snapshot_path,
@@ -125,9 +125,7 @@ async def test_output_iframe_rejects_snapshot_that_grows_during_copy(
     with pytest.raises(ValueError, match="1 MB"):
         await iframe_tool._output_iframe("chart.html")
 
-    assert backend.commands[-1] == (
-        "rm -f -- /workspace/project/.open-swe/iframe-artifacts/artifact-id/chart.html"
-    )
+    assert backend.commands[-1] == ("rm -f -- /artifacts/iframe-artifacts/artifact-id/chart.html")
     assert calls == []
 
 
