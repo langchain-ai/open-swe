@@ -4,11 +4,12 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
 from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
 from agent.review.analyzer_cron import remove_continual_cron
 from agent.review.chat import (
@@ -26,6 +27,7 @@ from agent.review.reviews import (
     create_review_comment,
     get_review,
     get_review_diff,
+    get_review_summaries,
     list_review_comments,
     list_reviews,
     proxy_pr_image,
@@ -43,6 +45,13 @@ from agent.review.styles import (
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
+)
+from agent.threads.pr_fixes import (
+    OpenPullRequestThreadRequest,
+    PullRequestFixContext,
+    fix_pull_request,
+    open_pull_request_thread,
+    pull_request_thread_running,
 )
 
 router = APIRouter(tags=["review"])
@@ -92,6 +101,35 @@ async def api_list_review_styles(
     ]
 
 
+class ReviewSummaryRef(BaseModel):
+    repo: str = Field(max_length=140)
+    number: int = Field(ge=1)
+
+
+class ReviewSummariesRequest(BaseModel):
+    pullRequests: list[ReviewSummaryRef] = Field(max_length=100)
+
+
+@router.post("/reviews/summaries")
+async def api_get_review_summaries(
+    payload: ReviewSummariesRequest,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    identities: list[tuple[str, str, int]] = []
+    for ref in payload.pullRequests:
+        identity = pull_request_identity({"repo_full_name": ref.repo, "number": ref.number})
+        if identity is None:
+            raise HTTPException(422, "invalid pull request reference")
+        identities.append(identity)
+    accessible = await accessible_repo_full_names(session["sub"])
+    authorized = [
+        (owner, repo, number)
+        for owner, repo, number in identities
+        if f"{owner}/{repo}".lower() in accessible
+    ]
+    return await get_review_summaries(authorized) if authorized else {}
+
+
 @router.get("/reviews")
 async def api_list_reviews(
     page: int = 0,
@@ -112,6 +150,41 @@ async def api_list_reviews(
         is_accessible=is_accessible,
     )
     return {"reviews": reviews, "page": page, "has_more": has_more}
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/thread-status")
+async def api_pull_request_thread_status(
+    owner: str, repo: str, pr_number: int, session: dict[str, str] = SESSION_DEP
+) -> dict[str, bool]:
+    return await pull_request_thread_running(
+        owner, repo, pr_number, session["sub"], session.get("email")
+    )
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/thread")
+async def api_open_pull_request_thread(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    body: OpenPullRequestThreadRequest,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, str]:
+    return await open_pull_request_thread(
+        owner, repo, pr_number, session["sub"], session.get("email"), title=body.title
+    )
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/fix")
+async def api_fix_pull_request(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    context: PullRequestFixContext,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, str | bool]:
+    return await fix_pull_request(
+        owner, repo, pr_number, session["sub"], session.get("email"), context=context
+    )
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}")

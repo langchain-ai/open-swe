@@ -91,6 +91,31 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
+let activePrDetails = 0
+const pendingPrDetails: Array<() => void> = []
+
+async function loadPrDetails(
+  repo: string,
+  number: number
+): Promise<OpenPullRequest | null> {
+  await new Promise<void>((resolve) => {
+    const start = () => {
+      activePrDetails++
+      resolve()
+    }
+    if (activePrDetails < 4) start()
+    else pendingPrDetails.push(start)
+  })
+  try {
+    return await request<OpenPullRequest | null>(
+      `/my-pull-requests/${repo.split("/").map(encodeURIComponent).join("/")}/${number}`
+    )
+  } finally {
+    activePrDetails--
+    pendingPrDetails.shift()?.()
+  }
+}
+
 export interface SessionUser {
   login: string
   email: string | null
@@ -587,6 +612,37 @@ export interface ReviewListPayload {
   has_more: boolean
 }
 
+export interface OpenPullRequest {
+  detailsLoading?: boolean
+  detailsError?: boolean
+  repo: string
+  number: number
+  title: string
+  draft: boolean | null
+  additions: number | null
+  deletions: number | null
+  mergeable: boolean | null
+  mergeState: string
+  headSha: string | null
+  headRef: string | null
+  reviewDecision: "approved" | "changes_requested" | "none" | null
+  statusAvailable: boolean
+  createdAt: string | null
+  updatedAt: string | null
+  ci: "passing" | "failing" | "pending" | "unknown" | "none"
+  failingChecks: string[]
+  pendingChecks: string[]
+}
+
+export type MergeMethod = "squash" | "merge" | "rebase"
+
+export interface OpenPullRequestsPayload {
+  pullRequests: OpenPullRequest[]
+  nextPage: number | null
+  incomplete: boolean
+  updatedAt: string
+}
+
 export interface ReviewUserRef {
   login: string
   avatar_url?: string | null
@@ -945,6 +1001,53 @@ export const api = {
     ),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
+  myPullRequests: (
+    repo: string,
+    sort: "createdAt" | "updatedAt" = "updatedAt",
+    direction: "asc" | "desc" = "desc",
+    page = 1
+  ) =>
+    request<OpenPullRequestsPayload>(
+      `/my-pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}`
+    ),
+  myPullRequestDetails: (repo: string, number: number) =>
+    loadPrDetails(repo, number),
+  fixPullRequest: (pr: OpenPullRequest) =>
+    request<{ thread_id: string; already_running?: boolean }>(
+      `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/fix`,
+      { method: "POST", body: JSON.stringify(pr) }
+    ),
+  pullRequestThreadStatus: (repo: string, number: number) =>
+    request<{ running: boolean }>(
+      `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/thread-status`
+    ),
+  openPullRequestThread: (repo: string, number: number, title: string) =>
+    request<{ thread_id: string }>(
+      `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/thread`,
+      { method: "POST", body: JSON.stringify({ title }) }
+    ),
+  mergePullRequest: (pr: OpenPullRequest, method: MergeMethod) =>
+    request<{ merged: boolean }>(
+      `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/merge`,
+      {
+        method: "POST",
+        body: JSON.stringify({ sha: pr.headSha, merge_method: method }),
+      }
+    ),
+  closePullRequest: (pr: OpenPullRequest) =>
+    request<{ closed: boolean }>(
+      `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/close`,
+      { method: "POST" }
+    ),
+  repoMergeMethods: (repo: string) =>
+    request<{ mergeMethods: MergeMethod[] }>(
+      `/my-pull-requests/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`
+    ),
+  reviewSummaries: (pullRequests: Array<{ repo: string; number: number }>) =>
+    request<Record<string, ReviewSummary | null>>("/reviews/summaries", {
+      method: "POST",
+      body: JSON.stringify({ pullRequests }),
+    }),
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
