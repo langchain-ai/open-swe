@@ -13,7 +13,10 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
-from agent.slack.thinking import restore_slack_thinking_status
+from agent.slack.thinking import (
+    maintain_slack_thinking_status_task,
+    restore_slack_thinking_status,
+)
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
@@ -95,6 +98,14 @@ async def slack_thread_reply(
         }
     if run_id and not is_code_channel_session(str(thread_ts)):
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+        if cfg.untagged_reply and thread_id:
+            maintain_slack_thinking_status_task(
+                client=client,
+                thread_id=thread_id,
+                run_id=run_id,
+                channel_id=str(channel_id),
+                thread_ts=str(thread_ts),
+            )
     return {"success": True}
 
 
