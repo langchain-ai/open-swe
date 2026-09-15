@@ -456,4 +456,3 @@ def test_web_auth_callback_rejects_missing_state_cookie(monkeypatch) -> None:
 
     assert callback_response.status_code == 400
     assert "oauth state mismatch" in callback_response.json()["detail"]
-
