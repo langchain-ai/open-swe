@@ -143,21 +143,15 @@ async def test_search_failure_is_not_an_empty_success(monkeypatch):
     assert error.value.status_code == 502
 
 
-def search_item(number):
-    return {
-        "number": number,
-        "title": f"PR {number}",
-        "repository_url": "https://api.github.com/repos/acme/app",
-    }
-
-
-async def test_search_pages_through_complete_results(monkeypatch):
+async def test_search_pages_through_results_and_reports_incomplete(monkeypatch):
     monkeypatch.setattr(prs, "github_client", client)
-    search = AsyncMock(return_value=response({"items": [], "total_count": 250}))
+    search = AsyncMock(
+        return_value=response({"items": [], "total_count": 250, "incomplete_results": True})
+    )
     monkeypatch.setattr(prs, "github_request", search)
     result = await prs.list_open_pull_requests("octocat", "user-token")
     assert search.await_args.kwargs["params"]["page"] == "1"
-    assert result["nextPage"] == 2 and result["incomplete"] is False
+    assert result["nextPage"] == 2 and result["incomplete"] is True
     result = await prs.list_open_pull_requests("octocat", "user-token", page=3)
     assert search.await_args.kwargs["params"]["page"] == "3"
     assert result["nextPage"] is None
@@ -167,57 +161,6 @@ async def test_search_pages_through_complete_results(monkeypatch):
     with pytest.raises(HTTPException) as error:
         await prs.list_open_pull_requests("octocat", "user-token", page=11)
     assert error.value.status_code == 422
-
-
-async def test_a_timed_out_search_is_retried_rather_than_shown_truncated(monkeypatch):
-    """GitHub answers a timed-out search with an arbitrary subset of the matches."""
-    monkeypatch.setattr(prs, "github_client", client)
-    complete = {"items": [search_item(n) for n in range(1, 60)], "total_count": 59}
-    search = AsyncMock(
-        side_effect=[
-            response({"items": [search_item(1)], "total_count": 3, "incomplete_results": True}),
-            response(complete),
-        ]
-    )
-    monkeypatch.setattr(prs, "github_request", search)
-    result = await prs.list_open_pull_requests("octocat", "user-token", lightweight=True)
-    assert search.await_count == 2
-    assert len(result["pullRequests"]) == 59 and result["incomplete"] is False
-
-
-async def test_an_always_incomplete_search_keeps_the_fullest_answer(monkeypatch):
-    monkeypatch.setattr(prs, "github_client", client)
-    incomplete = [
-        response(
-            {
-                "items": [search_item(n) for n in range(1, count + 1)],
-                "total_count": count,
-                "incomplete_results": True,
-            }
-        )
-        for count in (2, 7, 4)
-    ]
-    search = AsyncMock(side_effect=incomplete)
-    monkeypatch.setattr(prs, "github_request", search)
-    result = await prs.list_open_pull_requests("octocat", "user-token", lightweight=True)
-    assert search.await_count == 3
-    assert len(result["pullRequests"]) == 7 and result["incomplete"] is True
-    assert result["nextPage"] is None
-
-
-async def test_a_failed_retry_keeps_the_partial_answer(monkeypatch):
-    monkeypatch.setattr(prs, "github_client", client)
-    search = AsyncMock(
-        side_effect=[
-            response(
-                {"items": [search_item(1)], "total_count": 1, "incomplete_results": True},
-            ),
-            httpx2.ConnectError("boom"),
-        ]
-    )
-    monkeypatch.setattr(prs, "github_request", search)
-    result = await prs.list_open_pull_requests("octocat", "user-token", lightweight=True)
-    assert len(result["pullRequests"]) == 1 and result["incomplete"] is True
 
 
 async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypatch):

@@ -1,7 +1,6 @@
 """Live GitHub pull-request health for dashboard threads."""
 
 import asyncio
-import logging
 import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -17,14 +16,11 @@ from agent.github.http import (
     github_request,
 )
 
-logger = logging.getLogger(__name__)
-
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _SEARCH_PAGE_SIZE = 100
 # GitHub search returns at most 1000 results per query.
 _SEARCH_MAX_PAGES = 10
-_SEARCH_ATTEMPTS = 3
 _SHA_PATTERN = re.compile(r"[0-9a-fA-F]{40,64}")
 _FAILING_CHECK_CONCLUSIONS = frozenset(
     {"failure", "timed_out", "action_required", "startup_failure"}
@@ -438,41 +434,6 @@ async def list_open_pull_requests(
     for name in repositories:
         query += f" repo:{name}"
     async with github_client(token=token) as client:
-        payload = await _search_open_pull_requests(client, query, page, sort, direction)
-        semaphore = asyncio.Semaphore(4)
-
-        async def load(item: object) -> dict[str, Any] | None:
-            async with semaphore:
-                return await load_open_pull_request(client, item, details=not lightweight)
-
-        items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
-    total = payload.get("total_count")
-    incomplete = payload.get("incomplete_results") is True
-    # A timed-out search reports a partial total_count, so it cannot rule out a
-    # further page; offer one whenever the page came back full.
-    has_more = page < _SEARCH_MAX_PAGES and (
-        len(payload["items"]) >= _SEARCH_PAGE_SIZE
-        if incomplete
-        else isinstance(total, int) and page * _SEARCH_PAGE_SIZE < total
-    )
-    return {
-        "pullRequests": [item for item in items if item is not None],
-        "nextPage": page + 1 if has_more else None,
-        "incomplete": incomplete,
-        "updatedAt": datetime.now(UTC).isoformat(),
-    }
-
-
-async def _search_open_pull_requests(
-    client: httpx2.AsyncClient, query: str, page: int, sort: str, direction: str
-) -> dict[str, Any]:
-    """Search for open PRs, retrying while GitHub reports a timed-out result.
-
-    A timed-out search answers with an arbitrary subset of the matches, so one
-    unlucky response would silently hide most of a user's PRs.
-    """
-    best: dict[str, Any] | None = None
-    for attempt in range(_SEARCH_ATTEMPTS):
         try:
             response = await github_request(
                 client,
@@ -489,21 +450,26 @@ async def _search_open_pull_requests(
             response.raise_for_status()
             payload = response.json()
         except (httpx2.HTTPError, ValueError) as exc:
-            if best is not None:
-                return best
             raise HTTPException(502, "Could not load open PRs from GitHub") from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
             raise HTTPException(502, "Invalid GitHub PR search response")
-        if payload.get("incomplete_results") is not True:
-            return payload
-        if best is None or len(payload["items"]) > len(best["items"]):
-            best = payload
-        if attempt + 1 < _SEARCH_ATTEMPTS:
-            logger.warning(
-                "GitHub PR search returned incomplete results; retrying",
-                extra={"search_page": page, "search_attempt": attempt + 1},
-            )
-    return best if best is not None else {"items": [], "total_count": 0}
+        semaphore = asyncio.Semaphore(4)
+
+        async def load(item: object) -> dict[str, Any] | None:
+            async with semaphore:
+                return await load_open_pull_request(client, item, details=not lightweight)
+
+        items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
+    total = payload.get("total_count")
+    has_more = (
+        isinstance(total, int) and page * _SEARCH_PAGE_SIZE < total and page < _SEARCH_MAX_PAGES
+    )
+    return {
+        "pullRequests": [item for item in items if item is not None],
+        "nextPage": page + 1 if has_more else None,
+        "incomplete": payload.get("incomplete_results") is True,
+        "updatedAt": datetime.now(UTC).isoformat(),
+    }
 
 
 async def load_open_pull_request(
