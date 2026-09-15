@@ -426,7 +426,6 @@ async def slack_webhook(
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
     is_direct_message = not is_message_update and event.channel_type == "im" and bool(user_id)
-    is_untagged_two_party_reply = False
     if (
         event.type != "app_mention"
         and not is_message_update
@@ -443,27 +442,12 @@ async def slack_webhook(
                 channel_id, event.thread_ts, user_id
             )
         )
-        is_untagged_two_party_reply = bool(
-            not event.subtype
-            and not is_direct_message
-            and not has_username_mention
-            and not has_id_mention
-            and await service.slack_thread_allows_untagged_reply(
-                channel_id,
-                event.thread_ts,
-                text,
-                bot_user_id,
-                user_id,
-                event_ts,
-            )
-        )
         should_handle_message = any(
             (
                 has_username_mention,
                 has_id_mention,
                 is_ready_plan_reply,
                 is_direct_message,
-                is_untagged_two_party_reply,
             )
         )
         if not should_handle_message:
@@ -538,7 +522,6 @@ async def slack_webhook(
                     bot_user_id=bot_user_id,
                     thread_id=thread_id,
                     treat_all_messages_as_mentions=is_direct_message or in_code_channel,
-                    untagged_reply=is_untagged_two_party_reply,
                     code_channel=in_code_channel,
                     reply_thread_ts=reply_thread_ts if in_code_channel else "",
                     team_id=team_id,

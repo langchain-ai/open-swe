@@ -1,9 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 
-// Feature: in a Slack thread whose only participants are Open SWE and one human,
-// a follow-up no longer needs to @-mention the bot — UNLESS it tags a different
-// user. Driven through the real webhook + real agent; only the LLM is faked.
-
 type SendResult = {
   thread_ts: string;
   thread_id: string;
@@ -72,20 +68,25 @@ async function openTwoPartyThread(
 }
 
 test.describe("Slack untagged two-party replies", () => {
-  test("an untagged follow-up triggers a run once Open SWE is in the thread", async ({
+  test("a follow-up requires a mention even after Open SWE joins the thread", async ({
     request,
   }) => {
     const { thread_ts, thread_id } = await openTwoPartyThread(request);
 
-    // A plain message (no @-mention) in the two-party thread is accepted…
     const followUp = await send(request, {
       text: "actually, can you also add a docstring?",
       mention_bot: false,
       thread_ts,
     });
-    expect(followUp.webhook.status).toBe("accepted");
+    expect(followUp.webhook.status).toBe("ignored");
 
-    // …and the agent actually runs on it (its follow-up reply lands in state).
+    const taggedFollowUp = await send(request, {
+      text: "<@U0BOT> actually, can you also add a docstring?",
+      mention_bot: true,
+      thread_ts,
+    });
+    expect(taggedFollowUp.webhook.status).toBe("accepted");
+
     await expect
       .poll(async () => stateText(request, thread_id), { timeout: 60_000 })
       .toContain("anything else you'd like changed");
