@@ -153,6 +153,42 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("attaches persisted server tool duration without deriving client timing", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "execute",
+            args: { command: "sleep 2" },
+            type: "tool_call",
+          },
+          {
+            id: "call-2",
+            name: "read_file",
+            args: { file_path: "/tmp/result" },
+            type: "tool_call",
+          },
+        ],
+      }),
+      new ToolMessage({
+        tool_call_id: "call-1",
+        content: "done",
+        response_metadata: { open_swe_tool_elapsed_ms: 2345 },
+      }),
+      new ToolMessage({ tool_call_id: "call-2", content: "done" }),
+    ])
+
+    const agent = messages.find((message) => message.author === "agent")
+    const tools = agent?.chunks.filter(
+      (chunk) => chunk.kind === "tool-execution"
+    )
+    expect(tools?.[0]?.elapsedMs).toBe(2345)
+    expect(tools?.[1]?.elapsedMs).toBeUndefined()
+  })
+
   it("attaches validated output iframe artifacts to their tool call", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({ id: "user-1", content: "draw a chart" }),

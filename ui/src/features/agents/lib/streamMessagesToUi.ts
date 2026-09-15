@@ -36,6 +36,7 @@ const EXECUTE_TOOLS = new Set(["execute", "bash", "shell", "run_terminal_cmd"])
 const SEARCH_TOOLS = new Set(["glob", "grep", "web_search", "search"])
 const FETCH_TOOLS = new Set(["fetch", "fetch_url", "http_request"])
 const INTERNAL_TOOLS = new Set(["confirming_completion", "no_op"])
+const TOOL_CALL_ELAPSED_MS_KEY = "open_swe_tool_elapsed_ms"
 
 type ToolKind = ToolExecutionChunk["toolKind"]
 
@@ -268,6 +269,15 @@ function isHttpUrl(value: unknown): value is string {
   }
 }
 
+function toolElapsedMs(
+  toolMessage: ToolMessage | undefined
+): number | undefined {
+  const value = toolMessage?.response_metadata[TOOL_CALL_ELAPSED_MS_KEY]
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined
+}
+
 function outputIframeDisplay(
   toolMessage: ToolMessage | undefined
 ): OutputIframeDisplay | undefined {
@@ -452,6 +462,8 @@ export function streamMessagesToUi(
         }
         const output = toolOutputText(assembled, toolMessage)
         if (output) chunk.output = output
+        const elapsedMs = toolElapsedMs(toolMessage)
+        if (elapsedMs !== undefined) chunk.elapsedMs = elapsedMs
         const display = outputIframeDisplay(toolMessage)
         if (display) chunk.display = display
         const diffData = maybeDiffFromArgs(args)

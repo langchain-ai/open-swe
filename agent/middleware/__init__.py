@@ -30,6 +30,7 @@ _MIDDLEWARE_MODULES = {
     "task_retry_on": ".task_retry",
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
     "ToolErrorMiddleware": ".tool_error_handler",
+    "ToolCallTimingMiddleware": ".tool_call_timing",
     "ValidateImageReadsMiddleware": ".validate_image_reads",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
     "WorkspaceSkillsMiddleware": ".workspace_skills",
@@ -54,6 +55,7 @@ __all__ = [
     "SanitizeToolInputsMiddleware",
     "StableToolResultOrderMiddleware",
     "SubdirAgentsReadMiddleware",
+    "ToolCallTimingMiddleware",
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
     "ValidateImageReadsMiddleware",
@@ -92,6 +94,7 @@ if TYPE_CHECKING:
     from agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
     from agent.middleware.task_retry import task_on_failure, task_retry_on
     from agent.middleware.timeout_wrapup import TimeoutWrapupMiddleware
+    from agent.middleware.tool_call_timing import ToolCallTimingMiddleware
     from agent.middleware.tool_error_handler import ToolErrorMiddleware
     from agent.middleware.validate_image_reads import ValidateImageReadsMiddleware
     from agent.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
