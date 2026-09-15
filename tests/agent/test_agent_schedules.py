@@ -924,6 +924,49 @@ async def test_launch_github_issue_automations_isolates_launch_failures(
     assert retried == []
 
 
+async def test_switching_to_issue_trigger_clears_the_cron_expression(
+    fake_client: _FakeClient, auth: None
+) -> None:
+    created = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            prompt="Nightly sweep", schedule="0 9 * * *", repo="langchain-ai/open-swe"
+        ),
+        email="alice@example.com",
+    )
+    assert created["schedule"] == "0 9 * * *"
+    assert created["cronId"] is not None
+
+    updated = await schedules.update_agent_schedule(
+        created["id"],
+        "alice",
+        ScheduleUpdateBody(trigger="github_issue_opened", schedule=None),
+        email="alice@example.com",
+    )
+
+    assert updated["trigger"] == "github_issue_opened"
+    assert updated["schedule"] is None
+    assert updated["cronId"] is None
+
+
+async def test_create_issue_automation_ignores_a_supplied_cron(
+    fake_client: _FakeClient, auth: None
+) -> None:
+    result = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            prompt="Triage issues",
+            trigger="github_issue_opened",
+            repo="langchain-ai/open-swe",
+            schedule="0 9 * * *",
+        ),
+        email="alice@example.com",
+    )
+
+    assert result["schedule"] is None
+    assert fake_client.crons.created == []
+
+
 async def test_launch_github_issue_automations_isolates_claim_failures(
     fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

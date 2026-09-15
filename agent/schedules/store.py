@@ -88,6 +88,8 @@ class ScheduleCreateBody(BaseModel):
             raise ValueError("schedule is required for scheduled automations")
         if self.trigger == "github_issue_opened" and not self.repo:
             raise ValueError("repo is required for GitHub issue automations")
+        if self.trigger != "schedule":
+            self.schedule = None
         return self
 
     @field_validator("slack_channel_id")
@@ -445,6 +447,8 @@ async def update_agent_schedule(
         updated_repo if isinstance(updated_repo, dict) else None
     ):
         raise HTTPException(422, "repo is required for GitHub issue automations")
+    if trigger != "schedule":
+        updated["schedule"] = None
     schedule_changed = updated.get("schedule") != existing.get("schedule")
     enabled_changed = updated.get("enabled") != existing.get("enabled")
     trigger_changed = trigger != (existing.get("trigger") or _DEFAULT_AUTOMATION_TRIGGER)
