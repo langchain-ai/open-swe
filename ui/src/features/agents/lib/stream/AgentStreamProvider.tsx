@@ -49,7 +49,9 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
   const client = useMemo(
     () =>
       cloud
-        ? createDashboardClient(agentsApi.langGraphApiUrl)
+        ? createDashboardClient(agentsApi.langGraphApiUrl, {
+            stateView: "trimmed",
+          })
         : createLocalGraphClient(),
     [cloud]
   )

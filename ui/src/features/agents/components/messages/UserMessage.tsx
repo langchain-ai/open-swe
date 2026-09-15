@@ -6,6 +6,7 @@ import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import { useImageChunkSrc } from "@/features/agents/lib/imageSource"
+import { useMessageContentStore } from "@/features/agents/lib/messageContentStore"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
@@ -18,6 +19,12 @@ function UserImage({
   threadId?: string
 }) {
   const src = useImageChunkSrc(image, threadId)
+  const ensure = useMessageContentStore((state) => state.ensure)
+  const pendingMessageId = image.pending ? image.messageId : undefined
+  useEffect(() => {
+    if (!threadId || !pendingMessageId) return
+    void ensure(threadId, pendingMessageId)
+  }, [ensure, pendingMessageId, threadId])
   return (
     <div className="overflow-hidden rounded-lg border border-border/80 bg-background/70">
       {src ? (

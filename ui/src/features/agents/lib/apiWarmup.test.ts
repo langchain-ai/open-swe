@@ -8,7 +8,7 @@ import { SIDEBAR_PAGE_SIZE, sidebarRecentsParams } from "./queries"
 import type { ChatSort } from "./sidebarPrefs"
 
 const THREAD_ID = "1dd69115-f4b9-507f-b4d5-9f355f9f5ba0"
-const STATE_PATH = `/dashboard/api/threads/${THREAD_ID}/state`
+const STATE_PATH = `/dashboard/api/threads/${THREAD_ID}/state?view=trimmed`
 
 function setReadyState(value: DocumentReadyState) {
   Object.defineProperty(document, "readyState", { value, configurable: true })

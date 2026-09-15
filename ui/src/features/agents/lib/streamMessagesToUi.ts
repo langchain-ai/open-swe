@@ -176,7 +176,50 @@ function reasoningText(raw: BaseMessage): string {
   return text.trim()
 }
 
-function imageChunks(content: unknown): Array<Chunk> {
+/** Marker the trimmed state view leaves where it blanked content. */
+export const STUB_KEY = "open_swe_stub"
+
+export type MessageContent = string | Array<Record<string, unknown>>
+
+/** Full content for a message the trimmed view blanked, when the cache has it. */
+export type StubbedContentResolver = (
+  messageId: string
+) => MessageContent | undefined
+
+function isStubbed(message: BaseMessage): boolean {
+  return message.additional_kwargs?.[STUB_KEY] !== undefined
+}
+
+function hasStubbedImage(content: unknown): boolean {
+  return (
+    Array.isArray(content) &&
+    content.some(
+      (block) =>
+        block &&
+        typeof block === "object" &&
+        (block as Record<string, unknown>).type === "image" &&
+        (block as Record<string, unknown>)[STUB_KEY] !== undefined
+    )
+  )
+}
+
+function contentText(content: MessageContent): string | undefined {
+  if (typeof content === "string") return content.trim() || undefined
+  const texts = content
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+  if (texts.length) return texts.join("\n").trim() || undefined
+  try {
+    return JSON.stringify(content)
+  } catch {
+    return undefined
+  }
+}
+
+function imageChunks(
+  content: unknown,
+  pendingFor?: { messageId?: string }
+): Array<Chunk> {
   if (!Array.isArray(content)) return []
 
   const chunks: Array<Chunk> = []
@@ -191,6 +234,8 @@ function imageChunks(content: unknown): Array<Chunk> {
       const data = block.data ?? block.base64
       const mime = block.mime_type ?? block.mimeType
       const fileId = block.file_id
+      const fileName = block.fileName ?? block.file_name
+      const named = typeof fileName === "string" && fileName ? { fileName } : {}
       if (typeof data === "string" && typeof mime === "string") {
         base64 = data
         mimeType = mime
@@ -199,12 +244,15 @@ function imageChunks(content: unknown): Array<Chunk> {
         fileId &&
         typeof mime === "string"
       ) {
-        const fileName = block.fileName ?? block.file_name
+        chunks.push({ kind: "image", fileId, mimeType: mime, ...named })
+        continue
+      } else if (block[STUB_KEY] !== undefined && typeof mime === "string") {
         chunks.push({
           kind: "image",
-          fileId,
           mimeType: mime,
-          ...(typeof fileName === "string" && fileName ? { fileName } : {}),
+          pending: true,
+          ...(pendingFor?.messageId ? { messageId: pendingFor.messageId } : {}),
+          ...named,
         })
         continue
       }
@@ -334,7 +382,8 @@ function outputIframeDisplay(
 export function streamMessagesToUi(
   messages: Array<BaseMessage>,
   toolCalls: ReadonlyArray<AssembledToolCall> = [],
-  resolveCreatedAt?: (messageId: string) => string | undefined
+  resolveCreatedAt?: (messageId: string) => string | undefined,
+  resolveStubbedContent?: StubbedContentResolver
 ): Array<Message> {
   const toolCallsById = new Map<string, AssembledToolCall>()
   for (const toolCall of toolCalls) {
@@ -398,7 +447,17 @@ export function streamMessagesToUi(
       flushAgentTurn()
       turnKey = typeof raw.id === "string" ? raw.id : undefined
       const content = (raw as unknown as { content?: unknown }).content
-      const chunks = imageChunks(content)
+      const stubbedImages = hasStubbedImage(content)
+      const cached =
+        stubbedImages && typeof raw.id === "string"
+          ? resolveStubbedContent?.(raw.id)
+          : undefined
+      const chunks = imageChunks(
+        cached ?? content,
+        stubbedImages && cached === undefined
+          ? { messageId: typeof raw.id === "string" ? raw.id : undefined }
+          : undefined
+      )
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
       if (
@@ -465,7 +524,23 @@ export function streamMessagesToUi(
           status: toolStatus(assembled, toolMessage),
         }
         const output = toolOutputText(assembled, toolMessage)
-        if (output) chunk.output = output
+        if (output) {
+          chunk.output = output
+        } else if (toolMessage && isStubbed(toolMessage)) {
+          const messageId =
+            typeof toolMessage.id === "string" ? toolMessage.id : undefined
+          const cached = messageId
+            ? resolveStubbedContent?.(messageId)
+            : undefined
+          const cachedText =
+            cached !== undefined ? contentText(cached) : undefined
+          if (cachedText) {
+            chunk.output = cachedText
+          } else if (cached === undefined) {
+            chunk.outputPending = true
+            if (messageId) chunk.resultMessageId = messageId
+          }
+        }
         const display = outputIframeDisplay(toolMessage)
         if (display) chunk.display = display
         const diffData = maybeDiffFromArgs(args)

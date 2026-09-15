@@ -290,3 +290,74 @@ describe("offloaded images", () => {
     ])
   })
 })
+
+describe("trimmed state stubs", () => {
+  const stubbedTool = () =>
+    new ToolMessage({
+      id: "t1",
+      tool_call_id: "c1",
+      content: "",
+      additional_kwargs: {
+        open_swe_stub: { kind: "tool_output", bytes: 9000 },
+      },
+    })
+  const call = () =>
+    new AIMessage({
+      id: "a1",
+      content: "",
+      tool_calls: [{ id: "c1", name: "execute", args: { command: "ls" } }],
+    })
+
+  it("marks a blanked tool output as pending until it is cached", () => {
+    const [turn] = streamMessagesToUi([call(), stubbedTool()])
+    expect(turn?.chunks[0]).toMatchObject({
+      kind: "tool-execution",
+      status: "completed",
+      outputPending: true,
+      resultMessageId: "t1",
+    })
+    expect(turn?.chunks[0]).not.toHaveProperty("output")
+  })
+
+  it("uses the cached content once the message has been fetched", () => {
+    const [turn] = streamMessagesToUi(
+      [call(), stubbedTool()],
+      [],
+      undefined,
+      (id) => (id === "t1" ? "the real output" : undefined)
+    )
+    expect(turn?.chunks[0]).toMatchObject({ output: "the real output" })
+    expect(turn?.chunks[0]).not.toHaveProperty("outputPending")
+  })
+
+  it("marks blanked images as pending and restores them from the cache", () => {
+    const human = new HumanMessage({
+      id: "h1",
+      content: [
+        {
+          type: "image",
+          mime_type: "image/png",
+          open_swe_stub: { kind: "image", bytes: 5 },
+        },
+        { type: "text", text: "look" },
+      ],
+    })
+    const [pending] = streamMessagesToUi([human])
+    expect(pending?.chunks[0]).toEqual({
+      kind: "image",
+      mimeType: "image/png",
+      pending: true,
+      messageId: "h1",
+    })
+
+    const [restored] = streamMessagesToUi([human], [], undefined, () => [
+      { type: "image", mime_type: "image/png", base64: "AAAA" },
+      { type: "text", text: "look" },
+    ])
+    expect(restored?.chunks[0]).toEqual({
+      kind: "image",
+      base64: "AAAA",
+      mimeType: "image/png",
+    })
+  })
+})

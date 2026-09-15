@@ -36,6 +36,9 @@ export interface WorkEntryView {
   status: AcpToolStatus
   /** Plain-text detail for rows that have no richer renderer of their own. */
   expandedText: string | null
+  /** The output exists on the server but has not been fetched yet. */
+  outputPending: boolean
+  resultMessageId?: string
 }
 
 function iconForChunk(chunk: ToolExecutionChunk): WorkEntryIconName {
@@ -164,6 +167,7 @@ export function describeWorkEntry(
       status: chunk.status,
       // The diff itself is the body; a text dump alongside it would be noise.
       expandedText: null,
+      outputPending: false,
     }
   }
 
@@ -187,6 +191,10 @@ export function describeWorkEntry(
     tone: toneForChunk(chunk),
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, projectPath),
+    outputPending: chunk.outputPending === true,
+    ...(chunk.resultMessageId
+      ? { resultMessageId: chunk.resultMessageId }
+      : {}),
   }
 }
 
