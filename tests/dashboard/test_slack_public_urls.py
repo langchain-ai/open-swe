@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from agent.dashboard import routes
 from agent.dashboard.oauth import COOKIE_NAME, issue_session
 from agent.slack import connect, oauth
+from agent.users import User
 
 
 @pytest.mark.parametrize("public_url", [None, "https://example.ngrok-free.dev/"])
@@ -68,3 +69,56 @@ def test_slack_public_url_applies_to_manifest_and_oauth_without_changing_local_c
     assert save.await_args is not None
     assert save.await_args.kwargs["github_login"] == "alice"
     assert save.await_args.kwargs["slack_user_id"] == "U123"
+
+
+def test_slack_callback_links_the_slack_identity_to_the_session_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_url = "http://localhost:2024"
+    monkeypatch.setenv("DASHBOARD_BASE_URL", local_url)
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", local_url)
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
+    monkeypatch.delenv("SLACK_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.setattr(oauth, "SLACK_CLIENT_ID", "test-client")
+    monkeypatch.setattr(oauth, "SLACK_CLIENT_SECRET", "test-secret")
+    monkeypatch.setattr(oauth, "SLACK_TEAM_ID", "")
+    monkeypatch.setattr(connect, "exchange_slack_code", AsyncMock(return_value="slack-test-token"))
+    monkeypatch.setattr(
+        connect,
+        "fetch_slack_identity",
+        AsyncMock(
+            return_value=oauth.SlackIdentity(
+                user_id="U123",
+                team_id="T123",
+                email="alice@example.com",
+                email_verified=True,
+                name="Alice",
+            )
+        ),
+    )
+    monkeypatch.setattr(connect, "upsert_mapping", AsyncMock())
+
+    user = User()
+    link = AsyncMock(return_value=user)
+    monkeypatch.setattr(user, "link", link)
+    get_user = AsyncMock(return_value=user)
+    monkeypatch.setattr(connect.User, "get", get_user)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url=local_url) as client:
+        client.cookies.set(
+            COOKIE_NAME,
+            issue_session(login="alice", email=None, avatar_url=None, user_id=str(user.id)),
+        )
+        login = client.get("/dashboard/api/slack/login", follow_redirects=False)
+        state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+        callback = client.get(
+            "/dashboard/api/slack/callback",
+            params={"code": "code", "state": state},
+            follow_redirects=False,
+        )
+        assert callback.status_code == 302, callback.text
+
+    get_user.assert_awaited_once_with(user.id)
+    link.assert_awaited_once_with("slack", "U123", team_id="T123")

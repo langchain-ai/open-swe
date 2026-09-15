@@ -1,6 +1,7 @@
 """Sign in with Slack endpoints that link a Slack identity to a GitHub login."""
 
 import hmac
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -22,11 +23,13 @@ from agent.dashboard.oauth import (
     redeem_connect_handoff,
     require_session,
     sanitize_redirect_to,
+    session_user_id,
     valid_handoff_challenge,
 )
 from agent.dashboard.user_mappings import upsert_mapping
 from agent.slack.oauth import (
     SLACK_STATE_COOKIE_NAME,
+    SlackIdentity,
     build_authorize_url,
     exchange_slack_code,
     fetch_slack_identity,
@@ -34,6 +37,9 @@ from agent.slack.oauth import (
     slack_oauth_configured,
     verify_team,
 )
+from agent.users import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["slack"])
 
@@ -100,11 +106,15 @@ async def slack_callback(
         # Same as the Notion flow: hand the verified identity back over the
         # loopback port, for the app to redeem under the session it holds.
         challenge, port = handoff
-        slack_user_id, work_email = await _verified_slack_identity(code)
+        identity = await _verified_slack_identity(code)
         handoff_code = issue_connect_handoff(
             provider="slack",
             challenge=challenge,
-            claims={"slack_user_id": slack_user_id, "email": work_email},
+            claims={
+                "slack_user_id": identity.user_id,
+                "email": identity.email,
+                "team_id": identity.team_id,
+            },
         )
         response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
         _clear_slack_state_cookie(response)
@@ -120,14 +130,15 @@ async def slack_callback(
     ):
         raise HTTPException(400, "oauth state mismatch — please retry")
 
-    slack_user_id, work_email = await _verified_slack_identity(code)
+    identity = await _verified_slack_identity(code)
     await upsert_mapping(
         github_login=session["sub"],
-        work_email=work_email,
-        slack_user_id=slack_user_id,
+        work_email=identity.email or "",
+        slack_user_id=identity.user_id,
         source="slack_oauth",
         status="active",
     )
+    await _link_slack_identity(session, slack_user_id=identity.user_id, team_id=identity.team_id)
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
@@ -135,14 +146,45 @@ async def slack_callback(
     return response
 
 
-async def _verified_slack_identity(code: str) -> tuple[str, str]:
-    """Resolve an authorization code to a Slack member id and verified email."""
+async def _verified_slack_identity(code: str) -> SlackIdentity:
+    """Resolve an authorization code to a Slack identity with a verified email."""
     redirect_uri = f"{slack_base_url()}/dashboard/api/slack/callback"
     identity = await fetch_slack_identity(await exchange_slack_code(code, redirect_uri))
     verify_team(identity)
     if not identity.email or not identity.email_verified:
         raise HTTPException(400, "your Slack account has no verified email to link")
-    return identity.user_id, identity.email
+    return identity
+
+
+async def _link_slack_identity(
+    session: dict[str, Any], *, slack_user_id: str, team_id: str
+) -> None:
+    """Attach the Slack account to the person the session belongs to.
+
+    Best effort: the Store-backed mapping above is what the rest of the app
+    reads, so a users table hiccup must not fail the connect flow.
+    """
+    github_login = session["sub"]
+    try:
+        user_id = session_user_id(session)
+        user = (
+            await User.get(user_id)
+            if user_id is not None
+            else await User.for_login("github", github_login)
+        )
+        if user is None:
+            logger.info(
+                "Slack identity not linked — no user for this GitHub login",
+                extra={"github_login": github_login},
+            )
+            return
+        await user.link("slack", slack_user_id, team_id=team_id)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to link a Slack identity",
+            extra={"github_login": github_login},
+            exc_info=True,
+        )
 
 
 @router.post("/slack/desktop/exchange")
@@ -154,6 +196,7 @@ async def slack_desktop_exchange(
     claims = redeem_connect_handoff(provider="slack", code=body.code, verifier=body.verifier)
     slack_user_id = claims.get("slack_user_id")
     email = claims.get("email")
+    team_id = claims.get("team_id")
     if not isinstance(slack_user_id, str) or not isinstance(email, str):
         raise HTTPException(400, "malformed handoff code")
 
@@ -163,5 +206,10 @@ async def slack_desktop_exchange(
         slack_user_id=slack_user_id,
         source="slack_oauth",
         status="active",
+    )
+    await _link_slack_identity(
+        session,
+        slack_user_id=slack_user_id,
+        team_id=team_id if isinstance(team_id, str) else "",
     )
     return {"connected": True}

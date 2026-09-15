@@ -1,14 +1,27 @@
 import base64
 import hashlib
 from typing import Any
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import jwt
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent.dashboard import auth_routes, routes
-from agent.dashboard.oauth import COOKIE_NAME, decode_session, sanitize_redirect_to
+from agent.dashboard.oauth import COOKIE_NAME, GithubUser, decode_session, sanitize_redirect_to
+from agent.users import User
+
+
+def _stub_sign_in(monkeypatch: pytest.MonkeyPatch, user: User | Exception) -> AsyncMock:
+    """Stand in for the users-table write the callback makes."""
+    sign_in = AsyncMock(
+        side_effect=user if isinstance(user, Exception) else None,
+        return_value=None if isinstance(user, Exception) else user,
+    )
+    monkeypatch.setattr(auth_routes.User, "sign_in", sign_in)
+    return sign_in
 
 
 def test_sanitize_redirect_to_preserves_allowed_dashboard_target(monkeypatch) -> None:
@@ -93,12 +106,11 @@ def test_auth_callback_preserves_relative_plan_redirect(monkeypatch) -> None:
         assert code == "oauth-code"
         return token_data
 
-    async def fake_fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
+    async def fake_fetch_github_user(access_token: str) -> tuple[GithubUser, str | None]:
         assert access_token == "gho_test"
-        return {
-            "login": "alice",
-            "avatar_url": "https://avatars.example/alice.png",
-        }, "alice@example.com"
+        return GithubUser(
+            id=42, login="alice", avatar_url="https://avatars.example/alice.png"
+        ), "alice@example.com"
 
     async def fake_enforce_github_login_gate(login: str) -> None:
         assert login == "alice"
@@ -116,6 +128,7 @@ def test_auth_callback_preserves_relative_plan_redirect(monkeypatch) -> None:
         "upsert_access_token_from_github_response",
         fake_upsert_access_token_from_github_response,
     )
+    _stub_sign_in(monkeypatch, User())
 
     app = FastAPI()
     app.include_router(routes.router)
@@ -155,8 +168,10 @@ def test_auth_callback_cross_origin_redirect(monkeypatch) -> None:
     async def fake_exchange_code(code: str) -> dict[str, Any]:
         return token_data
 
-    async def fake_fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
-        return {"login": "alice", "avatar_url": "https://avatars.example/alice.png"}, None
+    async def fake_fetch_github_user(access_token: str) -> tuple[GithubUser, str | None]:
+        return GithubUser(
+            id=42, login="alice", avatar_url="https://avatars.example/alice.png"
+        ), None
 
     async def fake_enforce_github_login_gate(login: str) -> None:
         pass
@@ -174,6 +189,7 @@ def test_auth_callback_cross_origin_redirect(monkeypatch) -> None:
         "upsert_access_token_from_github_response",
         fake_upsert_access_token_from_github_response,
     )
+    _stub_sign_in(monkeypatch, User())
 
     app = FastAPI()
     app.include_router(routes.router)
@@ -206,8 +222,8 @@ def _desktop_login_env(monkeypatch) -> None:
     async def fake_exchange_code(code: str) -> dict[str, Any]:
         return {"access_token": "gho_test"}
 
-    async def fake_fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
-        return {"login": "alice", "avatar_url": None}, "alice@example.com"
+    async def fake_fetch_github_user(access_token: str) -> tuple[GithubUser, str | None]:
+        return GithubUser(id=42, login="alice", avatar_url=None), "alice@example.com"
 
     async def fake_enforce_github_login_gate(login: str) -> None:
         pass
@@ -225,6 +241,88 @@ def _desktop_login_env(monkeypatch) -> None:
         "upsert_access_token_from_github_response",
         fake_upsert_access_token_from_github_response,
     )
+    _stub_sign_in(monkeypatch, User())
+
+
+def test_auth_callback_session_carries_the_signed_in_user(monkeypatch) -> None:
+    _desktop_login_env(monkeypatch)
+    user = User()
+    sign_in = _stub_sign_in(monkeypatch, user)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        login_response = client.get("/dashboard/api/auth/login", follow_redirects=False)
+        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+        callback_response = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+
+        assert callback_response.status_code == 302
+        session = decode_session(client.cookies[COOKIE_NAME])
+        assert session["user_id"] == str(user.id)
+        assert client.get("/dashboard/api/me").json()["user_id"] == str(user.id)
+
+    assert sign_in.await_args is not None
+    assert sign_in.await_args.args == ("github", "42")
+    assert sign_in.await_args.kwargs["login"] == "alice"
+
+
+def test_auth_callback_still_signs_in_when_the_users_table_is_unavailable(monkeypatch) -> None:
+    _desktop_login_env(monkeypatch)
+    _stub_sign_in(monkeypatch, RuntimeError("users table unavailable"))
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        login_response = client.get("/dashboard/api/auth/login", follow_redirects=False)
+        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+        callback_response = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+
+        assert callback_response.status_code == 302
+        session = decode_session(client.cookies[COOKIE_NAME])
+        assert (session["sub"], session["user_id"]) == ("alice", None)
+        assert client.get("/dashboard/api/me").json()["user_id"] is None
+
+
+def test_desktop_handoff_carries_the_signed_in_user(monkeypatch) -> None:
+    _desktop_login_env(monkeypatch)
+    user = User()
+    _stub_sign_in(monkeypatch, user)
+    verifier = "desktop-verifier"
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    )
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        login_response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": challenge, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+        callback_response = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+        handoff = parse_qs(urlparse(callback_response.headers["location"]).query)["code"][0]
+        exchange = client.post(
+            "/dashboard/api/auth/desktop/exchange",
+            json={"code": handoff, "verifier": verifier},
+            headers={"origin": "open-swe://app"},
+        )
+
+    assert exchange.status_code == 200
+    assert decode_session(exchange.json()["session"])["user_id"] == str(user.id)
 
 
 def test_desktop_login_hands_the_session_back_over_loopback(monkeypatch) -> None:

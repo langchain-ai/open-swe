@@ -10,6 +10,7 @@ it to, so the link can only ever land on the session the app itself holds.
 import base64
 import hashlib
 from typing import Any
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import jwt
@@ -53,6 +54,8 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     async def fake_upsert_mapping(**kwargs: Any) -> None:
         collected.append(kwargs)
 
+    monkeypatch.setattr(connect.User, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(connect.User, "for_login", AsyncMock(return_value=None))
     monkeypatch.setattr(connect, "slack_oauth_configured", lambda: True)
     monkeypatch.setattr(
         connect,
@@ -140,4 +143,12 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
     # Slack account to that login instead.
     payload = jwt.decode(handoff, "test-secret", algorithms=["HS256"])
     assert "alice" not in payload.values()
-    assert set(payload) == {"slack_user_id", "email", "provider", "challenge", "iat", "exp"}
+    assert set(payload) == {
+        "slack_user_id",
+        "email",
+        "team_id",
+        "provider",
+        "challenge",
+        "iat",
+        "exp",
+    }

@@ -30,6 +30,7 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
 
 from agent.dashboard import auth_routes, routes  # noqa: E402
+from agent.dashboard.oauth import GithubUser  # noqa: E402
 
 LOGIN = os.environ.get("FAKE_GITHUB_LOGIN", "local-tester")
 EMAIL = os.environ.get("FAKE_GITHUB_EMAIL", "local-tester@example.com")
@@ -41,8 +42,8 @@ async def fake_exchange_code(code: str) -> dict[str, Any]:
     return {"access_token": "gho_local", "token_type": "bearer"}
 
 
-async def fake_fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
-    return {"login": LOGIN, "avatar_url": None}, EMAIL
+async def fake_fetch_github_user(access_token: str) -> tuple[GithubUser, str | None]:
+    return GithubUser(id=1, login=LOGIN, avatar_url=None), EMAIL
 
 
 async def fake_enforce_github_login_gate(login: str) -> None:

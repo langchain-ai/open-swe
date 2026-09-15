@@ -10,6 +10,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import quote, urlparse
+from uuid import UUID
 
 import httpx2
 import jwt
@@ -192,16 +193,30 @@ async def enforce_github_login_gate(login: str) -> None:
     raise HTTPException(403, "your GitHub account is not authorized")
 
 
-def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:
+def issue_session(
+    *, login: str, email: str | None, avatar_url: str | None, user_id: str | None = None
+) -> str:
     now = int(time.time())
     payload = {
         "sub": login,
         "email": email,
         "avatar_url": avatar_url,
+        "user_id": user_id,
         "iat": now,
         "exp": now + SESSION_TTL_SECONDS,
     }
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+
+def session_user_id(session: dict[str, Any]) -> UUID | None:
+    """The person a session was minted for, or ``None`` for one issued without."""
+    raw = session.get("user_id")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return UUID(raw)
+    except ValueError:
+        return None
 
 
 def decode_session(token: str) -> dict[str, Any]:
@@ -316,12 +331,17 @@ def _decode_handoff(*, code: str, verifier: str) -> dict[str, Any]:
 
 
 def issue_desktop_handoff(
-    *, login: str, email: str | None, avatar_url: str | None, challenge: str
+    *,
+    login: str,
+    email: str | None,
+    avatar_url: str | None,
+    challenge: str,
+    user_id: str | None = None,
 ) -> str:
     """Mint the code the browser hands back after a desktop login."""
     return _mint_handoff(
         challenge=challenge,
-        claims={"sub": login, "email": email, "avatar_url": avatar_url},
+        claims={"sub": login, "email": email, "avatar_url": avatar_url, "user_id": user_id},
     )
 
 
@@ -333,10 +353,12 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
         raise HTTPException(400, "malformed handoff code")
     email = payload.get("email")
     avatar_url = payload.get("avatar_url")
+    user_id = payload.get("user_id")
     return issue_session(
         login=login,
         email=email if isinstance(email, str) else None,
         avatar_url=avatar_url if isinstance(avatar_url, str) else None,
+        user_id=user_id if isinstance(user_id, str) else None,
     )
 
 
@@ -529,7 +551,17 @@ async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
     return data
 
 
-async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
+class GithubUser(BaseModel):
+    """The GitHub account a dashboard session is minted from."""
+
+    id: int
+    login: str
+    name: str | None = None
+    avatar_url: str | None = None
+    email: str | None = None
+
+
+async def fetch_github_user(access_token: str) -> tuple[GithubUser, str | None]:
     """Return ``(user, primary_email)`` for the authenticated user."""
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -539,8 +571,8 @@ async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | No
     async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         u = await client.get("https://api.github.com/user", headers=headers)
         u.raise_for_status()
-        user = u.json()
-        email = user.get("email")
+        user = GithubUser.model_validate(u.json())
+        email = user.email
         if not email:
             e = await client.get("https://api.github.com/user/emails", headers=headers)
             if e.status_code == 200:
