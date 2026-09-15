@@ -313,13 +313,15 @@ async def _create_cron(record: dict[str, Any]) -> str:
     return cron_id
 
 
-async def _delete_cron(cron_id: str | None) -> None:
+async def _delete_cron(cron_id: str | None) -> bool:
     if not cron_id:
-        return
+        return True
     try:
         await langgraph_client().crons.delete(cron_id)
     except Exception:
-        logger.debug("Could not delete schedule cron %s", cron_id, exc_info=True)
+        logger.debug("Could not delete schedule cron", extra={"cron_id": cron_id}, exc_info=True)
+        return False
+    return True
 
 
 async def create_agent_schedule(
@@ -461,8 +463,8 @@ async def update_agent_schedule(
         await _delete_cron(existing.get("cron_id"))
         updated["cron_id"] = new_cron_id
     elif (updated.get("enabled") is False or trigger != "schedule") and existing.get("cron_id"):
-        await _delete_cron(existing.get("cron_id"))
-        updated["cron_id"] = None
+        if await _delete_cron(existing.get("cron_id")):
+            updated["cron_id"] = None
 
     updated = await _put_schedule(updated)
     return _schedule_summary(updated, await _get_run_state(schedule_id))
@@ -860,6 +862,8 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
     record = await get_agent_schedule(schedule_id)
     if not record:
         return {"status": "missing", "schedule_id": schedule_id}
+    if (record.get("trigger") or _DEFAULT_AUTOMATION_TRIGGER) != "schedule":
+        return {"status": "trigger_mismatch", "schedule_id": schedule_id}
     return await _launch_agent_schedule_record(record)
 
 

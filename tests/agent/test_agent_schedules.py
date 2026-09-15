@@ -549,6 +549,38 @@ async def test_update_agent_schedule_pause_deletes_cron(fake_client) -> None:  #
     assert fake_client.crons.deleted == ["cron_old"]
 
 
+async def test_issue_trigger_rejects_stale_cron_and_preserves_failed_cleanup(
+    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            prompt="Triage issues", schedule="0 9 * * *", repo="langchain-ai/open-swe"
+        ),
+    )
+    cron_delete = AsyncMock(side_effect=RuntimeError("cron service unavailable"))
+    monkeypatch.setattr(fake_client.crons, "delete", cron_delete)
+
+    updated = await schedules.update_agent_schedule(
+        created["id"], "alice", ScheduleUpdateBody(trigger="github_issue_opened")
+    )
+    tick = await schedules.launch_scheduled_agent_run(created["id"])
+
+    assert updated["trigger"] == "github_issue_opened"
+    assert updated["enabled"] is True
+    assert updated["cronId"] == created["cronId"]
+    assert tick["status"] == "trigger_mismatch"
+    assert fake_client.runs.created == []
+
+    cron_delete.side_effect = None
+    cleaned = await schedules.update_agent_schedule(
+        created["id"], "alice", ScheduleUpdateBody(name="Issue triage")
+    )
+    assert cleaned["cronId"] is None
+    cron_delete.assert_awaited_with(created["cronId"])
+    assert (await schedules.trigger_agent_schedule(created["id"]))["status"] == "started"
+
+
 async def test_trigger_agent_schedule_runs_paused_automation_as_test(
     fake_client, monkeypatch
 ) -> None:  # noqa: ANN001
