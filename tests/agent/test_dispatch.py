@@ -122,6 +122,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         "kind": "test",
         "invocation_id": invocation_id,
         "prepare_run_id": invocation_id,
+        "invocation_started_at": created["config"]["configurable"]["invocation_started_at"],
     }
     assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
