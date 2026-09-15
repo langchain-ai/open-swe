@@ -1154,7 +1154,10 @@ def slack_file_mention(monkeypatch, fake_store):
 @pytest.mark.parametrize("private", [False, True])
 @pytest.mark.parametrize(
     ("existing", "tag", "environment"),
-    [(False, "", None), (False, "env:staging", "staging"), (True, "", "staging")],
+    # A first mention with no tag, repo, or channel binding still resolves
+    # through the shared workspace resolver, which falls all the way back to
+    # the instance default rather than leaving the sandbox unbound.
+    [(False, "", "default"), (False, "env:staging", "staging"), (True, "", "staging")],
 )
 async def test_slack_files_reach_bound_sandbox_with_thread_environment(
     slack_file_mention, private, existing, tag, environment

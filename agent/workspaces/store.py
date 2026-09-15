@@ -134,8 +134,9 @@ _SENSITIVE_CREATE_PARAM_PREFIXES = (
     "token_",
 )
 _SENSITIVE_HEADER_NAMES = frozenset({"authorization", "cookie", "proxy_authorization", "x_api_key"})
-# `env:my-box` anywhere in a message, as a whole word.
-_ENV_TAG_RE = re.compile(r"(?:(?<=\s)|^)env:([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)")
+# `workspace:my-box` (or the legacy `env:my-box` spelling) anywhere in a message,
+# as a whole word.
+_ENV_TAG_RE = re.compile(r"(?:(?<=\s)|^)(?:env|workspace):([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)")
 
 
 def slugify(name: str) -> str:

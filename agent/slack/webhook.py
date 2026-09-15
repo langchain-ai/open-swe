@@ -41,6 +41,7 @@ from agent.utils.thread_ops import (
 )
 from agent.utils.thread_ops import queue_message_for_thread
 from agent.webhooks import common
+from agent.workspaces.routing import resolve_workspace
 from agent.workspaces.store import WORKSPACES, parse_workspace_tag
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
@@ -851,22 +852,23 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         or "(no text in mention)"
     )
     is_first_mention = not await common.thread_exists(thread_id)
-    # `env:<name>` on the message that opens a thread picks the environment its
-    # sandbox boots from. Only the opening message can: the sandbox is created
-    # once, so honoring a later tag would change the prompt but not the image. The
-    # tag is stripped only when it resolves, so a typo stays visible in the
-    # transcript instead of vanishing.
-    workspace_slug: str | None = None
+    # A `workspace:<name>` (or legacy `env:<name>`) tag on the message that opens
+    # a thread is one input to which workspace its sandbox boots from — resolved
+    # below, once the triggering user's GitHub login is known. Only the opening
+    # message can pick it: the sandbox is created once, so honoring a later tag
+    # would change the prompt but not the image. The tag is stripped only when it
+    # names a real workspace, so a typo stays visible in the transcript instead
+    # of vanishing.
+    tagged_slug: str | None = None
     if is_first_mention:
-        tagged_slug, text_without_tag = parse_workspace_tag(clean_text)
-        if tagged_slug and await WORKSPACES.get(tagged_slug) is not None:
-            workspace_slug = tagged_slug
+        parsed_slug, text_without_tag = parse_workspace_tag(clean_text)
+        if parsed_slug and await WORKSPACES.get(parsed_slug) is not None:
+            tagged_slug = parsed_slug
             clean_text = text_without_tag or "(no text in mention)"
-        elif tagged_slug:
+        elif parsed_slug:
             common.logger.info(
-                "Slack thread %s tagged unknown environment %s; using the default",
-                thread_id,
-                tagged_slug,
+                "Slack thread tagged an unknown workspace",
+                extra={"slack_thread_id": thread_id, "tagged_workspace": parsed_slug},
             )
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
     trigger_user_timezone_section = (
@@ -1017,12 +1019,22 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if mapped_login:
         configurable["github_login"] = mapped_login
         logins_by_user_id[user_id] = mapped_login
-    # Later mentions carry no tag, so the thread's environment comes back from
+    # Later mentions carry no tag, so the thread's workspace comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
-    # was built from the environment the opening message picked.
-    thread_environment = workspace_slug or await common.get_thread_workspace(thread_id)
-    if thread_environment:
-        configurable["environment"] = thread_environment
+    # was built from the workspace the opening message resolved to.
+    if is_first_mention:
+        resolution = await resolve_workspace(
+            tag=tagged_slug,
+            repo=(repo.owner, repo.name) if repo else None,
+            slack_channel_id=channel_id,
+            login=mapped_login,
+        )
+        thread_workspace = resolution.slug
+    else:
+        thread_workspace = await common.get_thread_workspace(thread_id)
+    if thread_workspace:
+        configurable["workspace"] = thread_workspace
+        configurable["environment"] = thread_workspace
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
@@ -1049,7 +1061,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
-        workspace=workspace_slug,
+        workspace=thread_workspace,
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes
         # the whole set rather than only the latest sender.
@@ -1076,7 +1088,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         staged_files = await _download_slack_files_to_sandbox(
             _slack_file_entries(source_messages),
             thread_id,
-            workspace_slug=thread_environment,
+            workspace_slug=thread_workspace,
         )
         if staged_files:
             operational_context += f"\n\n{_slack_files_section(staged_files)}"
