@@ -5,8 +5,8 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import routes
 from agent.github import merge_pull_request as merges
+from agent.github import pull_request_dashboard_routes as pr_routes
 
 
 def _client(expected_token: str):
@@ -86,10 +86,10 @@ async def test_merge_methods_rejects_invalid_repository():
 
 
 async def test_merge_methods_without_user_token_never_calls_github(monkeypatch):
-    monkeypatch.setattr(routes, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(pr_routes, "get_valid_access_token", AsyncMock(return_value=None))
     methods = AsyncMock()
-    monkeypatch.setattr(routes, "repository_merge_methods", methods)
+    monkeypatch.setattr(pr_routes, "repository_merge_methods", methods)
     with pytest.raises(HTTPException) as error:
-        await routes.api_my_pull_request_merge_methods("acme", "app", {"sub": "octocat"})
+        await pr_routes.api_my_pull_request_merge_methods("acme", "app", {"sub": "octocat"})
     assert error.value.status_code == 401
     methods.assert_not_awaited()

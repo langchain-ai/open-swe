@@ -5,8 +5,8 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import routes
 from agent.github import merge_pull_request as merges
+from agent.github import pull_request_dashboard_routes as pr_routes
 
 
 @pytest.mark.parametrize("status,merged", [(200, True), (200, False), (409, False), (403, False)])
@@ -44,11 +44,11 @@ async def test_merge_requires_github_confirmation(monkeypatch, status, merged):
 
 
 async def test_merge_without_user_token_never_calls_github(monkeypatch):
-    monkeypatch.setattr(routes, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(pr_routes, "get_valid_access_token", AsyncMock(return_value=None))
     merge = AsyncMock()
-    monkeypatch.setattr(routes, "merge_pull_request", merge)
+    monkeypatch.setattr(pr_routes, "merge_pull_request", merge)
     with pytest.raises(HTTPException) as error:
-        await routes.api_merge_my_pull_request(
+        await pr_routes.api_merge_my_pull_request(
             "acme",
             "app",
             1,

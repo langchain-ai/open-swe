@@ -8,14 +8,14 @@ from langgraph_sdk.schema import Thread
 from pydantic import BaseModel, Field
 
 from agent.dashboard.repo_access import require_repo_access_for_user
-from agent.dashboard.threads.access import _ensure_dashboard_github_token
-from agent.dashboard.threads.runs import (
+from agent.dispatch import dispatch_agent_run
+from agent.github.pull_request_status import pull_request_identity
+from agent.threads.access import _ensure_dashboard_github_token
+from agent.threads.runs import (
     _build_dashboard_configurable,
     _create_dashboard_thread_record,
 )
-from agent.dashboard.threads.summary import _assert_thread_postable
-from agent.dispatch import dispatch_agent_run
-from agent.github.pull_request_status import pull_request_identity
+from agent.threads.summary import _assert_thread_postable
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock

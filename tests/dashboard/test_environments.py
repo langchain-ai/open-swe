@@ -5,8 +5,8 @@ import pytest
 from pydantic import ValidationError
 
 from agent import store as agent_store
-from agent.dashboard import environments as env_store
-from agent.dashboard.environments import (
+from agent.environments import store as env_store
+from agent.environments.store import (
     ENVIRONMENTS,
     Environment,
     EnvironmentCreate,

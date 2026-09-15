@@ -100,7 +100,7 @@ ignore = [
 # Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
 # an intra-package import from a cross-package one; names these modules expose
 # to the rest of the codebase are public.
-"agent/dashboard/threads/*" = ["PLC2701"]
+"agent/threads/*" = ["PLC2701"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Do not use postponed annotation evaluation."
@@ -113,7 +113,7 @@ testpaths = ["tests"]
 include = ["agent", "tests"]
 
 [tool.ty.analysis]
-allowed-unresolved-imports = ["langgraph_api.metrics_datadog", "ddtrace", "ddtrace.trace"]
+allowed-unresolved-imports = ["ddtrace", "ddtrace.trace"]
 
 [tool.ty.terminal]
 error-on-warning = false

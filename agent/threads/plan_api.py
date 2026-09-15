@@ -10,7 +10,10 @@ from langgraph_sdk.schema import Run
 from pydantic import BaseModel, Field, model_validator
 
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
-from agent.dashboard.plan_store import (
+from agent.dispatch import dispatch_agent_run
+from agent.slack.client import post_slack_thread_reply
+from agent.source_context import SourceContext
+from agent.threads.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_CANCELLED,
     PLAN_STATUS_READY,
@@ -27,15 +30,12 @@ from agent.dashboard.plan_store import (
     set_plan_status,
     write_plan_to_sandbox,
 )
-from agent.dashboard.threads.summary import (
+from agent.threads.summary import (
     repo_config_from_metadata,
     thread_is_promptable,
     thread_is_readable,
     thread_source,
 )
-from agent.dispatch import dispatch_agent_run
-from agent.slack.client import post_slack_thread_reply
-from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 _plan_approval_locks: dict[str, asyncio.Lock] = {}
@@ -313,6 +313,9 @@ async def reject_plan(
         ):
             raise HTTPException(409, "plan is no longer ready for review")
         await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
+        from agent.analytics.emitter import task_rework
+
+        await task_rework(thread_id, source="dashboard", scope="major", reason="plan_review")
     if rejection is not None and not rejection.dispatch:
         return {"status": PLAN_STATUS_REVISING}
     feedback = format_plan_comments(await list_plan_comments(thread_id, raise_on_error=True))

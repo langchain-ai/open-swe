@@ -8,11 +8,11 @@ import httpx2
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.analytics.usage import record_agent_pr_usage
 from agent.credential_scope import pr_author_login, private_credential_login
-from agent.dashboard.agent_usage import record_agent_pr_usage
-from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
+from agent.github.pull_requests import PullRequest, ThreadLink
 from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -27,6 +27,7 @@ from agent.slack.code_channels import (
     set_context_bar,
     set_view,
 )
+from agent.threads.plan_store import get_plan_content
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 
 logger = logging.getLogger(__name__)
@@ -600,6 +601,14 @@ async def _record_pr_telemetry(
             merged=merged,
             created_at=details.get("created_at") or pr.get("created_at"),
             merged_at=details.get("merged_at") or pr.get("merged_at"),
+            invocation_id=cfg.invocation_id,
+            model_id=cfg.agent_model_id,
+            source=cfg.source,
+            repository_private=(
+                details.get("base", {}).get("repo", {}).get("private")
+                if isinstance(details.get("base"), dict)
+                else None
+            ),
         )
         if isinstance(thread_id, str) and thread_id:
             repo_private = None
@@ -664,6 +673,27 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            try:
+                await PullRequest(
+                    owner=owner,
+                    repo=repo,
+                    number=pr_number,
+                    state=pr_state,
+                    title=pr_title if isinstance(pr_title, str) else "",
+                    head_ref=head,
+                    base_ref=base,
+                    author=author if isinstance(author, str) else "",
+                    resolves_thread=resolves_thread,
+                    threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
+                ).save(repository_private=repo_private)
+            except Exception:  # noqa: BLE001
+                # The PR exists on GitHub either way; failing the tool over the
+                # registry write would lose the agent's work.
+                logger.warning(
+                    "Failed to record pull request",
+                    extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+                    exc_info=True,
+                )
             active = await get_active_slack_thread(
                 get_client(),
                 thread_id,

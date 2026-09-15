@@ -18,17 +18,17 @@ import httpx2
 from fastapi import HTTPException
 
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
-from agent.dashboard.review_api import classify_finding, get_pr_head_sha, get_review
-from agent.dashboard.threads.proxy import (
+from agent.github.app import get_github_app_installation_token
+from agent.review.diff import fetch_pr_diff
+from agent.review.findings import REVIEWER_THREAD_KIND
+from agent.review.reviews import classify_finding, get_pr_head_sha, get_review
+from agent.thread_ids import reviewer_thread_id
+from agent.threads.proxy import (
     langgraph_proxy_headers,
     require_json_content_type,
     stream_thread_events,
 )
-from agent.dashboard.threads.runs import DASHBOARD_STREAM_MODES
-from agent.github.app import get_github_app_installation_token
-from agent.review.diff import fetch_pr_diff
-from agent.review.findings import REVIEWER_THREAD_KIND
-from agent.thread_ids import reviewer_thread_id
+from agent.threads.runs import DASHBOARD_STREAM_MODES
 from agent.utils.json_types import as_json_object
 from agent.utils.thread_ops import langgraph_client, langgraph_url
 

@@ -3,7 +3,8 @@
 from uuid import UUID
 
 from agent.analytics.events import person_uuid, subject_uuid
-from agent.database.analytics import configured, workspace_id
+from agent.database import configured
+from agent.database.analytics import workspace_id
 
 
 def opaque_id(kind: str, value: str | int | None) -> UUID | None:

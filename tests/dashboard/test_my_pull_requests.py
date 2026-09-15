@@ -5,8 +5,9 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import routes
+from agent.github import pull_request_dashboard_routes as pr_routes
 from agent.github import pull_request_status as prs
+from agent.review import routes as review_routes
 
 
 @asynccontextmanager
@@ -165,9 +166,9 @@ async def test_search_pages_through_results_and_reports_incomplete(monkeypatch):
 async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypatch):
     token = AsyncMock(return_value="user-token")
     listing = AsyncMock(return_value={"pullRequests": []})
-    monkeypatch.setattr(routes, "get_valid_access_token", token)
-    monkeypatch.setattr(routes, "list_open_pull_requests", listing)
-    await routes.api_list_my_pull_requests(repo="acme/app", session={"sub": "octocat"})
+    monkeypatch.setattr(pr_routes, "get_valid_access_token", token)
+    monkeypatch.setattr(pr_routes, "list_open_pull_requests", listing)
+    await pr_routes.api_list_my_pull_requests(repo="acme/app", session={"sub": "octocat"})
     listing.assert_awaited_once_with(
         "octocat",
         "user-token",
@@ -179,7 +180,7 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     )
     token.return_value = None
     with pytest.raises(HTTPException) as error:
-        await routes.api_list_my_pull_requests(session={"sub": "another-user"})
+        await pr_routes.api_list_my_pull_requests(session={"sub": "another-user"})
     assert error.value.status_code == 401
     assert listing.await_count == 1
 
@@ -230,15 +231,19 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
 
 async def test_review_indicators_require_repo_access_before_reading(monkeypatch):
     lookup = AsyncMock(return_value={})
-    monkeypatch.setattr(routes, "get_review_summaries", lookup)
+    monkeypatch.setattr(review_routes, "get_review_summaries", lookup)
     monkeypatch.setattr(
-        routes, "accessible_repo_full_names", AsyncMock(return_value=frozenset({"acme/allowed"}))
+        review_routes,
+        "accessible_repo_full_names",
+        AsyncMock(return_value=frozenset({"acme/allowed"})),
     )
-    payload = routes.ReviewSummariesRequest(pullRequests=[{"repo": "acme/private", "number": 1}])
-    assert await routes.api_get_review_summaries(payload, session={"sub": "octocat"}) == {}
+    payload = review_routes.ReviewSummariesRequest(
+        pullRequests=[{"repo": "acme/private", "number": 1}]
+    )
+    assert await review_routes.api_get_review_summaries(payload, session={"sub": "octocat"}) == {}
     lookup.assert_not_awaited()
-    payload = routes.ReviewSummariesRequest(
+    payload = review_routes.ReviewSummariesRequest(
         pullRequests=[{"repo": "acme/allowed", "number": 1}, {"repo": "acme/private", "number": 2}]
     )
-    await routes.api_get_review_summaries(payload, session={"sub": "octocat"})
+    await review_routes.api_get_review_summaries(payload, session={"sub": "octocat"})
     lookup.assert_awaited_once_with([("acme", "allowed", 1)])

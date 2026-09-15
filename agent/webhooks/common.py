@@ -15,14 +15,13 @@ from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from agent.analytics.usage import update_agent_pr_usage_from_webhook
 from agent.config import ENV
 from agent.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
     resolve_login_from_email_async,
 )
-from agent.dashboard.agent_usage import update_agent_pr_usage_from_webhook
-from agent.dashboard.enabled_repos import is_review_repo_enabled
 from agent.dashboard.oauth import build_settings_url
 from agent.dashboard.options import (
     default_vision_model_pair,
@@ -38,7 +37,6 @@ from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_settings,
 )
-from agent.dashboard.threads.summary import thread_is_private, thread_is_promptable
 from agent.dashboard.user_mappings import (
     email_for_login,  # noqa: F401
     login_for_email,  # noqa: F401
@@ -47,7 +45,6 @@ from agent.dashboard.user_mappings import (
 from agent.dashboard.user_mappings import (
     refresh_cache as refresh_user_mapping_cache,  # noqa: F401
 )
-from agent.dashboard.workflow_approval import decide_workflow_push_approval
 from agent.dispatch import dispatch_agent_run
 from agent.github.app import (
     get_github_app_installation_token,  # noqa: F401
@@ -61,7 +58,7 @@ from agent.github.ci import fetch_open_pr_for_branch as github_fetch_open_pr_for
 from agent.github.comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
-    derive_pr_state,
+    derive_pr_state,  # noqa: F401
     describe_open_swe_tags,  # noqa: F401
     extract_pr_context,  # noqa: F401
     fetch_issue_comments,  # noqa: F401
@@ -73,6 +70,7 @@ from agent.github.comments import (
     verify_github_signature,
 )
 from agent.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
+from agent.github.pull_requests import PullRequestEvent
 from agent.github.thread_token import (
     cache_github_token_for_thread,
     invalidate_cached_github_token,
@@ -82,6 +80,7 @@ from agent.github.token import (
 )
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.prompts import render_prompt
+from agent.review.enabled_repos import is_review_repo_enabled
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -141,6 +140,8 @@ from agent.slack.feedback import (
 )
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
+from agent.threads.summary import thread_is_private, thread_is_promptable
+from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.json_types import ThreadLike, as_thread_dict
@@ -1266,15 +1267,8 @@ async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
 
 
 def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
-    pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
-    if not isinstance(pull_request, dict):
-        return None
-    state = pull_request.get("state")
-    return derive_pr_state(
-        state=state if isinstance(state, str) else None,
-        merged=bool(pull_request.get("merged")),
-        draft=bool(pull_request.get("draft")),
-    )
+    event = PullRequestEvent.parse(payload)
+    return event.state if event is not None else None
 
 
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
@@ -1297,54 +1291,35 @@ async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     """Keep an agent thread's tracked PR state in sync with PR lifecycle events.
 
-    The agent thread is located by the PR's html_url persisted in metadata when
-    the PR was opened (``open_pull_request``). Reviewer threads are skipped.
+    Agent threads come from the PR's own record; a PR that predates the record
+    falls back to a one-time scan of ``pr_url`` thread metadata. Reviewer
+    threads are skipped.
 
     A thread auto-resolves only when every tracked PR is merged or closed and the
     agent opened at least one of them with ``resolves_thread=True``. Without that
     flag the thread is instead marked ``attention_reason="prs_closed"`` so a
     person decides whether to resolve it; any PR reopening clears the mark.
     """
-    pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
-    if not isinstance(pull_request, dict):
+    event = PullRequestEvent.parse(payload)
+    pull_request = event.to_pull_request() if event is not None else None
+    if event is None or pull_request is None:
         return
-    pr_url = pull_request.get("html_url")
-    new_state = _pr_state_from_payload(payload)
-    if not isinstance(pr_url, str) or not pr_url or new_state is None:
-        return
+    pr_url = pull_request.url
+    new_state = pull_request.state
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    matching_threads: dict[str, Any] = {}
-    page_size = 50
-    for metadata_filter in ({"pr_url": pr_url}, {"pr_urls": [pr_url]}):
-        offset = 0
-        while True:
-            try:
-                threads = await langgraph_client.threads.search(
-                    metadata=metadata_filter, limit=page_size, offset=offset
-                )
-            except Exception:  # noqa: BLE001
-                logger.debug(
-                    "Could not search threads for PR %s state update", pr_url, exc_info=True
-                )
-                break
-            page = threads or []
-            for thread in page:
-                thread_id = (
-                    (thread.get("thread_id") or thread.get("id"))
-                    if isinstance(thread, dict)
-                    else None
-                )
-                if isinstance(thread_id, str) and thread_id:
-                    matching_threads[thread_id] = thread
-            if len(page) < page_size:
-                break
-            offset += page_size
+    try:
+        saved = await pull_request.save(repository_private=event.repo_private)
+        thread_ids = await saved.linked_threads()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Pull request registry unavailable; scanning thread metadata instead",
+            extra={"pr_url": pr_url},
+            exc_info=True,
+        )
+        thread_ids = list(await pull_request.discover_threads())
 
-    for thread_id, thread in matching_threads.items():
-        metadata = thread.get("metadata")
-        if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
-            continue
+    for thread_id in thread_ids:
         try:
             async with agent_thread_pr_state_lock(langgraph_client, thread_id):
                 current = await langgraph_client.threads.get(thread_id)
@@ -1412,10 +1387,17 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
             continue
         if new_state == "merged":
+            from agent.analytics.emitter import task_marked_complete
+
+            await task_marked_complete(thread_id, source="github", auto=True)
             await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
             from agent.thread_feedback import schedule_pr_feedback
 
             await schedule_pr_feedback(thread_id, metadata, pr_url)
+        elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
+            from agent.analytics.emitter import task_rework
+
+            await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
 
 
 async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:

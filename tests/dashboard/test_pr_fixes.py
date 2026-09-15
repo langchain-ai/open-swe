@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard.threads import pr_fixes
+from agent.threads import pr_fixes
 
 
 @asynccontextmanager
@@ -144,7 +144,7 @@ async def test_open_denied_repo_never_searches_or_creates_threads(setup):
 
 
 async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypatch):
-    from agent.dashboard.threads import runs
+    from agent.threads import runs
 
     setup.threads.search.return_value = []
     await pr_fixes.open_pull_request_thread("acme", "app", 12, "alice", title="Fix broken build")

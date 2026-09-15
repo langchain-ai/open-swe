@@ -5,8 +5,8 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import routes
 from agent.github import close_pull_request as closes
+from agent.github import pull_request_dashboard_routes as pr_routes
 
 
 def _client(expected_token: str):
@@ -60,10 +60,10 @@ async def test_close_rejects_invalid_identity():
 
 
 async def test_close_without_user_token_never_calls_github(monkeypatch):
-    monkeypatch.setattr(routes, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(pr_routes, "get_valid_access_token", AsyncMock(return_value=None))
     close = AsyncMock()
-    monkeypatch.setattr(routes, "close_pull_request", close)
+    monkeypatch.setattr(pr_routes, "close_pull_request", close)
     with pytest.raises(HTTPException) as error:
-        await routes.api_close_my_pull_request("acme", "app", 7, {"sub": "octocat"})
+        await pr_routes.api_close_my_pull_request("acme", "app", 7, {"sub": "octocat"})
     assert error.value.status_code == 401
     close.assert_not_awaited()

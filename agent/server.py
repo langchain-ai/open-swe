@@ -45,6 +45,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from agent.analytics.usage import record_agent_invocation_usage
 from agent.credential_scope import private_credential_login
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
@@ -55,18 +56,12 @@ from agent.dashboard.agent_overrides import (
     profile_model_routing_enabled,
     resolve_github_login,
 )
-from agent.dashboard.agent_usage import record_agent_invocation_usage
-from agent.dashboard.environments import (
-    resolve_environment,
-)
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
-from agent.dashboard.schedules import authorized_admin_schedule
-from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_agent_routing_models,
@@ -74,13 +69,16 @@ from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
+    get_team_fast_alt_probability,
     get_team_model_routing_enabled,
+    get_team_settings,
 )
 from agent.dashboard.user_mappings import email_for_login
-from agent.dashboard.user_mcps import user_mcp_source
-from agent.dashboard.workspace_mcps import workspace_mcp_source
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
+from agent.environments.store import (
+    resolve_environment,
+)
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
@@ -91,6 +89,8 @@ from agent.input_messages import (
     visible_dynamic_context_hashes,
 )
 from agent.mcp import load_mcp_tools
+from agent.mcp.user import user_mcp_source
+from agent.mcp.workspace import workspace_mcp_source
 from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -150,6 +150,8 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
+from agent.schedules.store import authorized_admin_schedule
+from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
@@ -560,6 +562,10 @@ async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     )
 
 
+async def _cached_team_settings() -> dict[str, Any]:
+    return await ttl_cache.cached("team:settings", 60, get_team_settings)
+
+
 async def _cached_agent_routing_models() -> dict[str, tuple[str, str]]:
     return await ttl_cache.cached(
         "team:agent-routing-models",
@@ -848,10 +854,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         invocation_id=cfg.invocation_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
+                        github_user_id=cfg.github_user_id,
                         user_email=self._user_email,
+                        display_name=(
+                            triggering_user_identity.display_name
+                            if triggering_user_identity and triggering_user_identity.github_profile
+                            else None
+                        ),
                         model_id=self._model_id,
                         effort=self._effort,
                         source=self._source,
+                        repository=cfg.repo_full_name or None,
                     )
         except Exception:
             logger.debug(
@@ -956,6 +969,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             "balanced": default_model_pair(),
             "performance": default_model_pair(),
         }
+        fast_alt_probability = 0.0
         title_defaults = team_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
@@ -977,6 +991,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
                 _cached_fable_enabled(),
             )
+            fast_alt_probability = get_team_fast_alt_probability(await _cached_team_settings())
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
@@ -1294,6 +1309,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             route_model_ids={
                 route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
             },
+            fast_alt_probability=fast_alt_probability,
+            thread_id=thread_id,
         )
     subagent_model = _make_model_or_defer(
         subagent_model_id,

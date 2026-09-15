@@ -1,18 +1,24 @@
 """Shared pytest fixtures."""
 
-from collections.abc import Iterator, Sequence
+import os
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from agent import store as agent_store
-from agent.dashboard.threads import access, api, diffs, listing, proxy, runs, summary
+from agent.database import postgres
+from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
 
-_THREAD_MODULES: tuple[ModuleType, ...] = (access, api, diffs, listing, proxy, runs, summary)
+_THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 
 
 def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) -> None:
@@ -89,6 +95,62 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     return client.store
 
 
+_TEST_POSTGRES_URI_SETTING = "TEST_ANALYTICS_POSTGRES_URI"
+
+
+@asynccontextmanager
+async def isolated_schema(uri: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
+    """Point ``agent.database`` at a fresh, fully migrated schema, then drop it.
+
+    The real engine, connection, transaction and session code runs; only the
+    engine and the schema name are swapped, so it does not matter which module a
+    consumer imported the database API through.
+    """
+    monkeypatch.setenv("POSTGRES_URI", uri)
+    engine = create_async_engine(
+        postgres.uri() or uri, connect_args={"server_settings": {"TimeZone": "UTC"}}
+    )
+    schema = f"open_swe_test_{uuid4().hex}"
+    migrations = postgres.load_migrations()
+    async with engine.begin() as conn:
+        await conn.execute(text(f"CREATE SCHEMA {schema}"))
+        await conn.run_sync(postgres.upgrade, migrations, schema)
+    monkeypatch.setattr(postgres, "SCHEMA", schema)
+    monkeypatch.setattr(postgres, "_ENGINE", engine)
+    monkeypatch.setattr(postgres, "_ENGINE_URI", postgres.uri())
+    try:
+        yield
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(text(f"DROP SCHEMA {schema} CASCADE"))
+        await engine.dispose()
+
+
+@pytest.fixture
+async def registry_db(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
+    """A migrated PostgreSQL schema for pull request and repository rows."""
+    uri = os.environ.get(_TEST_POSTGRES_URI_SETTING)
+    if not uri:
+        pytest.skip(f"{_TEST_POSTGRES_URI_SETTING} is required for PostgreSQL regressions")
+    async with isolated_schema(uri, monkeypatch):
+        yield
+
+
+@pytest.fixture
+async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[bool]:
+    """``registry_db`` when a database is configured; otherwise the unconfigured path.
+
+    Lets tests whose code under test degrades without PostgreSQL run both ways.
+    """
+    uri = os.environ.get(_TEST_POSTGRES_URI_SETTING)
+    if not uri:
+        monkeypatch.delenv("POSTGRES_URI", raising=False)
+        yield False
+        return
+    async with isolated_schema(uri, monkeypatch):
+        yield True
+
+
 @pytest.fixture
 def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
     bot = {
@@ -127,7 +189,7 @@ def _reset_ttl_cache() -> Iterator[None]:
 def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat automatic reviews as enabled for every repo by default.
 
-    The dashboard's opt-in list (loaded by :func:`agent.dashboard.enabled_repos.is_review_repo_enabled`)
+    The dashboard's opt-in list (loaded by :func:`agent.review.enabled_repos.is_review_repo_enabled`)
     is empty in the test environment because there is no live LangGraph Store.
 
     Tests targeting the automatic-review gate should override this fixture or set
