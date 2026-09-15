@@ -37,6 +37,7 @@ def upgrade() -> None:
             resolves_thread boolean NOT NULL DEFAULT false,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            legacy_threads_discovered_at timestamptz,
             UNIQUE (repository_id, number)
         )
         """

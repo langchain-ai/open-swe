@@ -143,3 +143,46 @@ async def test_relinking_a_review_updates_the_row_with_the_same_github_id() -> N
     assert saved.reviews[0].finding_count == 1
     assert saved.reviews[0].id == first.reviews[0].id
     assert saved.reviews[0].url == "https://github.com/lc/repo/pull/7#pullrequestreview-11"
+
+
+async def test_backfill_still_runs_after_a_newer_thread_was_linked_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "https://github.com/lc/repo/pull/7"
+    client = _client_returning([{"thread_id": "opener", "metadata": {"pr_url": url}}])
+    monkeypatch.setattr(pull_requests, "langgraph_client", lambda: client)
+
+    linked = await _pr().link_thread("commenter", source="github_pr_comment")
+    threads = await linked.linked_threads()
+
+    assert set(threads) == {"commenter", "opener"}
+    stored = await PullRequest.get("lc", "repo", 7)
+    assert stored is not None and stored.legacy_threads_discovered_at is not None
+
+
+async def test_failed_legacy_scan_is_retried_on_the_next_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.threads.search = AsyncMock(side_effect=RuntimeError("langgraph down"))
+    monkeypatch.setattr(pull_requests, "langgraph_client", lambda: client)
+
+    assert await (await PullRequest.load("lc", "repo", 7)).linked_threads() == []
+    searches = client.threads.search.await_count
+    assert await (await PullRequest.load("lc", "repo", 7)).linked_threads() == []
+
+    assert client.threads.search.await_count > searches
+
+
+async def test_backfill_leaves_existing_reviews_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://github.com/lc/repo/pull/7"
+    saved = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11)
+    published_at = saved.reviews[0].published_at
+    client = _client_returning([{"thread_id": "opener", "metadata": {"pr_url": url}}])
+    monkeypatch.setattr(pull_requests, "langgraph_client", lambda: client)
+
+    assert await saved.linked_threads() == ["opener"]
+
+    stored = await PullRequest.get("lc", "repo", 7)
+    assert stored is not None
+    assert [review.published_at for review in stored.reviews] == [published_at]
