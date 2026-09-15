@@ -664,15 +664,25 @@ class WorkspaceStore:
     """
 
     async def get(self, slug: str) -> Workspace | None:
+        """The workspace stored under ``slug``, or ``None``.
+
+        An unreadable row reads as a missing one, logged at error, the way
+        :meth:`list_all` skips it: a record an older release wrote must not make
+        the workspace unreachable to every caller that resolves one.
+        """
         async with postgres.session() as session:
             row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
             if row is None:
                 return None
-            return to_workspace(
-                row,
-                await _bound_repos(session, row.id),
-                await _bound_channels(session, row.id),
+            repos = await _bound_repos(session, row.id)
+            channels = await _bound_channels(session, row.id)
+        try:
+            return to_workspace(row, repos, channels)
+        except ValidationError:
+            logger.error(
+                "Unreadable workspace record", extra={"workspace_slug": slug}, exc_info=True
             )
+            return None
 
     async def list_all(self) -> list[Workspace]:
         """Every workspace, skipping a row that fails to validate.
@@ -690,8 +700,10 @@ class WorkspaceStore:
             try:
                 records.append(to_workspace(row, repos.get(row.id, []), channels.get(row.id, [])))
             except ValidationError:
-                logger.warning(
-                    "Skipping unreadable workspace record", extra={"workspace_slug": row.slug}
+                logger.error(
+                    "Skipping unreadable workspace record",
+                    extra={"workspace_slug": row.slug},
+                    exc_info=True,
                 )
         return records
 

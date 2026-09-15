@@ -706,6 +706,21 @@ async def test_list_all_skips_a_row_that_fails_to_validate() -> None:
     assert [record.slug for record in await WORKSPACES.list_all()] == ["healthy"]
 
 
+@pytest.mark.usefixtures("registry_db")
+async def test_get_reads_an_unreadable_row_as_a_missing_workspace() -> None:
+    """A corrupt row must not raise at every caller that resolves a workspace."""
+    await WORKSPACES.create(WorkspaceCreate(name="Corrupt", repos=["acme/corrupt"]), "ramon")
+    async with postgres.session() as session:
+        await session.execute(
+            text(
+                "UPDATE workspace SET refresh_steps = '[{\"bogus\": 1}]'::jsonb WHERE slug = :slug"
+            ),
+            {"slug": "corrupt"},
+        )
+
+    assert await WORKSPACES.get("corrupt") is None
+
+
 # --- rows ---
 
 
