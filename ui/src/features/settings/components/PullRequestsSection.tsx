@@ -38,7 +38,7 @@ export function PullRequestsSection() {
   const save = useSaveProfile()
   const teamSettings = useQuery({
     queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryFn: () => api.getTeamSettings(),
   })
   const [error, setError] = useState<string | null>(null)
 

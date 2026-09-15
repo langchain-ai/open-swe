@@ -4,7 +4,12 @@ import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
-import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api"
+import type {
+  ModelOption,
+  TeamSettings,
+  UserMapping,
+  WorkspaceOption,
+} from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,10 +22,11 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { api } from "@/lib/api"
+import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import {
   useAdminCancelAgentThread,
   useThreadsPage,
+  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -45,6 +51,16 @@ function AdminPage() {
     queryFn: api.options,
     enabled: !!session.data?.is_admin,
   })
+  const workspaceOptions = useWorkspaceOptions(!!session.data?.is_admin)
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(
+    null
+  )
+  // Falls back to the deployment default while the workspace list is still
+  // loading, or once the user hasn't picked one yet.
+  const workspace =
+    selectedWorkspace ??
+    workspaceOptions.data?.default_slug ??
+    DEFAULT_WORKSPACE_SLUG
 
   if (session.isLoading) {
     return (
@@ -62,7 +78,13 @@ function AdminPage() {
       title="Admin"
       description="Workspace-wide defaults and user mappings."
     >
+      <WorkspaceSelect
+        workspaces={workspaceOptions.data?.workspaces ?? []}
+        value={workspace}
+        onChange={setSelectedWorkspace}
+      />
       <GlobalDefaultsSection
+        workspace={workspace}
         models={(options.data?.models ?? []).filter(
           (model) => model.can_be_default !== false
         )}
@@ -73,11 +95,16 @@ function AdminPage() {
       >
         <AllowedSlackBotsSection />
       </SlackIntegrationSection>
-      <MCPConnectionsSection scope="workspace" />
+      <WorkspaceSelect
+        workspaces={workspaceOptions.data?.workspaces ?? []}
+        value={workspace}
+        onChange={setSelectedWorkspace}
+      />
+      <MCPConnectionsSection scope="workspace" workspace={workspace} />
 
-      <LLMGatewaySection />
+      <LLMGatewaySection workspace={workspace} />
 
-      <FableSection />
+      <FableSection workspace={workspace} />
 
       <TriggerReviewSection />
 
@@ -107,6 +134,47 @@ function AdminPage() {
 
       <UserMappingsSection enabled={!!session.data.is_admin} />
     </AppShell>
+  )
+}
+
+/**
+ * Picks which workspace's Global defaults and MCP connections are shown.
+ * Hidden with a single workspace — there is nothing to choose between, so the
+ * control would just be noise.
+ */
+function WorkspaceSelect({
+  workspaces,
+  value,
+  onChange,
+}: {
+  workspaces: Array<WorkspaceOption>
+  value: string
+  onChange: (slug: string) => void
+}) {
+  if (workspaces.length < 2) return null
+  return (
+    <div className="flex items-center gap-2 px-1">
+      <span className="text-xs font-medium text-muted-foreground">
+        Workspace
+      </span>
+      <Select
+        value={value}
+        onValueChange={(next) => {
+          if (next) onChange(next)
+        }}
+      >
+        <SelectTrigger className="w-56">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {workspaces.map((workspace) => (
+            <SelectItem key={workspace.slug} value={workspace.slug}>
+              {workspace.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   )
 }
 
@@ -494,18 +562,18 @@ function gatewayModeValue(mode: GatewayMode): boolean | null {
   return null
 }
 
-function LLMGatewaySection() {
+function LLMGatewaySection({ workspace }: { workspace: string }) {
   const qc = useQueryClient()
   const settings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryKey: ["teamSettings", workspace],
+    queryFn: () => api.getTeamSettings(workspace),
   })
   const [error, setError] = useState<string | null>(null)
 
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body, workspace),
     onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved)
+      qc.setQueryData(["teamSettings", workspace], saved)
       setError(null)
     },
     onError: (e: Error) => setError(e.message),
@@ -553,17 +621,17 @@ function LLMGatewaySection() {
   )
 }
 
-function FableSection() {
+function FableSection({ workspace }: { workspace: string }) {
   const qc = useQueryClient()
   const settings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryKey: ["teamSettings", workspace],
+    queryFn: () => api.getTeamSettings(workspace),
   })
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body, workspace),
     onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved)
+      qc.setQueryData(["teamSettings", workspace], saved)
       qc.invalidateQueries({ queryKey: ["options"] }) // refresh pickers so Fable appears/disappears
       setError(null)
     },
@@ -595,19 +663,25 @@ function FableSection() {
   )
 }
 
-function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
+function GlobalDefaultsSection({
+  workspace,
+  models,
+}: {
+  workspace: string
+  models: Array<ModelOption>
+}) {
   const qc = useQueryClient()
   const settings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryKey: ["teamSettings", workspace],
+    queryFn: () => api.getTeamSettings(workspace),
   })
   const repos = useRepos()
   const [error, setError] = useState<string | null>(null)
 
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body, workspace),
     onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved)
+      qc.setQueryData(["teamSettings", workspace], saved)
       setError(null)
     },
     onError: (e: Error) => setError(e.message),

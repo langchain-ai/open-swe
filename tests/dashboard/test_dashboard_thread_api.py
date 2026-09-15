@@ -2355,7 +2355,7 @@ async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata
 
 
 async def test_list_dashboard_thread_projects_discovers_metadata_without_summaries(
-    monkeypatch,
+    monkeypatch, fake_store: FakeStore
 ) -> None:
     threads = _make_threads(5, resolved_before=0)
     cast(dict[str, object], threads[0]["metadata"]).update(
@@ -2394,12 +2394,45 @@ async def test_list_dashboard_thread_projects_discovers_metadata_without_summari
             "repoFullName": "langchain-ai/open-swe",
             "name": "open-swe",
             "updatedAt": 50,
+            "workspace": "default",
         },
         {
             "repoFullName": "langchain-ai/langgraph",
             "name": "langgraph",
             "updatedAt": 30,
+            "workspace": "default",
         },
+    ]
+
+
+async def test_list_dashboard_thread_projects_resolves_workspace_from_repo(
+    monkeypatch, fake_store: FakeStore
+) -> None:
+    threads = _make_threads(1, resolved_before=0)
+    cast(dict[str, object], threads[0]["metadata"]).update(
+        {"repo_owner": "acme", "repo_name": "oss", "updated_at_ms": 10}
+    )
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+    patch_thread_module(
+        monkeypatch,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
+
+    result = await thread_listing.list_dashboard_thread_projects("octocat")
+
+    assert result == [
+        {
+            "repoFullName": "acme/oss",
+            "name": "oss",
+            "updatedAt": 10,
+            "workspace": "oss",
+        }
     ]
 
 

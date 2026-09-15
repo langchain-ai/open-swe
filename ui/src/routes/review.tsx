@@ -42,7 +42,7 @@ function ReviewPage() {
   const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryFn: () => api.getTeamSettings(),
     enabled: !!session.data,
   })
   const [local, setLocal] = useState<TeamSettings>(DEFAULT_SETTINGS)

@@ -472,6 +472,9 @@ export interface WorkspaceRefreshStep {
   log_path?: string | null
 }
 
+/** Slug of the workspace every deployment ships with; matches the backend's `DEFAULT_WORKSPACE_SLUG`. */
+export const DEFAULT_WORKSPACE_SLUG = "default"
+
 export interface WorkspaceOption {
   slug: string
   name: string
@@ -885,7 +888,10 @@ export const api = {
     request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
       method: "DELETE",
     }),
-  getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  getTeamSettings: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
+    request<TeamSettings>(
+      `/team-settings?workspace=${encodeURIComponent(workspace)}`
+    ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
@@ -898,11 +904,17 @@ export const api = {
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
       { method: "DELETE" }
     ),
-  saveTeamSettings: (body: TeamSettings) =>
-    request<TeamSettings>("/team-settings", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
+  saveTeamSettings: (
+    body: TeamSettings,
+    workspace: string = DEFAULT_WORKSPACE_SLUG
+  ) =>
+    request<TeamSettings>(
+      `/team-settings?workspace=${encodeURIComponent(workspace)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
   getWorkspaceMCPs: (workspace: string) =>
     request<MCPConnection[]>(
       `/workspaces/${encodeURIComponent(workspace)}/mcps`

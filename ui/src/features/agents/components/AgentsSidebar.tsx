@@ -1,5 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
+  CaretDownIcon,
+  CaretRightIcon,
   CircleNotchIcon,
   DownloadSimpleIcon,
   FolderIcon,
@@ -13,6 +15,7 @@ import {
   PushPinIcon,
   PushPinSlashIcon,
   SparkleIcon,
+  StackIcon,
 } from "@phosphor-icons/react"
 import { Kanban, Radar } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -27,6 +30,7 @@ import type { AgentThread } from "@/features/agents/lib/types"
 import type {
   SidebarProjectGroup,
   SidebarThreadItem,
+  SidebarWorkspaceGroup,
 } from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
@@ -73,6 +77,7 @@ import {
   useSidebarProjects,
   useSidebarProjectThreads,
   useSidebarRecents,
+  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
@@ -85,6 +90,8 @@ import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
   applyProjectKeyAliases,
   cloudSidebarThread,
+  DEFAULT_SIDEBAR_WORKSPACE_SLUG,
+  groupProjectGroupsByWorkspace,
   groupSidebarThreadsByProject,
   localSidebarThread,
   sidebarProjectKey,
@@ -234,7 +241,12 @@ export function AgentsSidebar({
     )
   }, [updateState])
   const updateInstalling = updateState.status === "installing"
-  const projectMode = prefs.organize === "project"
+  const workspaceMode = prefs.organize === "workspace"
+  // "workspace" mode groups the same project folders as "project" mode; it
+  // only changes how the unpinned ones are laid out (nested under a workspace
+  // header instead of a flat list), so every other project-mode query and
+  // computation below applies to both.
+  const projectMode = prefs.organize === "project" || workspaceMode
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
@@ -251,6 +263,7 @@ export function AgentsSidebar({
     includeResolved: prefs.filters.includeResolved,
     enabled: !localOnly && projectMode,
   })
+  const workspaceOptionsQuery = useWorkspaceOptions(!localOnly && workspaceMode)
   const localThreads = useDesktopLocalThreads({ enabled: isDesktop })
   const localSessions = localThreads.data ?? []
   const activity = useLocalThreadActivity()
@@ -324,13 +337,17 @@ export function AgentsSidebar({
   // Fold a local checkout into the cloud project of the same name so the repo
   // renders as one folder; project keys are otherwise full identities.
   const serverProjects = projectsQuery.data ?? []
-  const activeProject = activeThread?.repoFullName.trim()
-    ? {
-        repoFullName: activeThread.repoFullName,
-        name: activeThread.repo,
-        updatedAt: activeThread.updatedAt,
-      }
-    : undefined
+  const activeProject: SidebarProject | undefined =
+    activeThread?.repoFullName.trim()
+      ? {
+          repoFullName: activeThread.repoFullName,
+          name: activeThread.repo,
+          updatedAt: activeThread.updatedAt,
+          // The server project list hasn't caught up with this thread yet;
+          // it is re-grouped correctly as soon as `projectsQuery` refetches.
+          workspace: DEFAULT_SIDEBAR_WORKSPACE_SLUG,
+        }
+      : undefined
   const cloudProjects =
     activeProject &&
     !serverProjects.some(
@@ -415,6 +432,22 @@ export function AgentsSidebar({
   const unpinnedGroups = projectGroups.filter(
     (group) => !pinnedProjectKeys.has(group.key)
   )
+  // Every repository sits in exactly one workspace, so the unpinned project
+  // folders nest cleanly under workspace headers; local-only folders (no
+  // server-side repo) fall under the default workspace.
+  const projectWorkspaceOptions = cloudProjects.map((project) => ({
+    key: sidebarProjectKey(project.repoFullName)!,
+    label: project.name,
+    workspace: project.workspace,
+  }))
+  const workspaceGroups: Array<SidebarWorkspaceGroup<HydratedProjectGroup>> =
+    workspaceMode
+      ? groupProjectGroupsByWorkspace(
+          unpinnedGroups,
+          projectWorkspaceOptions,
+          workspaceOptionsQuery.data?.workspaces ?? []
+        )
+      : []
 
   const pullRequestFor = useSidebarPullRequests(allItems, !localOnly)
   const isPinned = (item: SidebarThreadItem) =>
@@ -521,6 +554,7 @@ export function AgentsSidebar({
             setView({ organize: value as OrganizeMode })
           }
         >
+          <MenuRadioItem value="workspace">Workspaces</MenuRadioItem>
           <MenuRadioItem value="project">By project</MenuRadioItem>
           <MenuRadioItem value="list">In one list</MenuRadioItem>
         </MenuRadioGroup>
@@ -807,7 +841,7 @@ export function AgentsSidebar({
                 isDesktop) && (
                 <section className="mb-3">
                   <SidebarSectionHeader
-                    label="Projects"
+                    label={workspaceMode ? "Workspaces" : "Projects"}
                     collapsed={sectionCollapsed("projects")}
                     onToggleCollapsed={() => toggleSectionCollapsed("projects")}
                     menu={
@@ -828,7 +862,23 @@ export function AgentsSidebar({
                   />
                   {!sectionCollapsed("projects") && (
                     <>
-                      {unpinnedGroups.map(renderProjectGroup)}
+                      {workspaceMode
+                        ? workspaceGroups.map((workspace) => (
+                            <WorkspaceGroupSection
+                              key={workspace.slug}
+                              workspace={workspace}
+                              collapsed={sectionCollapsed(
+                                `workspace:${workspace.slug}`
+                              )}
+                              onToggleCollapsed={() =>
+                                toggleSectionCollapsed(
+                                  `workspace:${workspace.slug}`
+                                )
+                              }
+                              renderProjectGroup={renderProjectGroup}
+                            />
+                          ))
+                        : unpinnedGroups.map(renderProjectGroup)}
                       {!noProjectPinned &&
                         noProjectAvailable &&
                         renderProjectGroup(noProjectGroup)}
@@ -928,6 +978,48 @@ export function AgentsSidebar({
         )}
       </div>
     </SidebarFrame>
+  )
+}
+
+/**
+ * A workspace header inside the "Workspaces" section, nesting the project
+ * folders that belong to it. Collapse state reuses the sidebar's generic
+ * collapsed-section keys (`workspace:<slug>`), the same mechanism the
+ * Pinned/Projects/Recents headers use.
+ */
+function WorkspaceGroupSection({
+  workspace,
+  collapsed,
+  onToggleCollapsed,
+  renderProjectGroup,
+}: {
+  workspace: SidebarWorkspaceGroup<HydratedProjectGroup>
+  collapsed: boolean
+  onToggleCollapsed: () => void
+  renderProjectGroup: (group: HydratedProjectGroup) => React.ReactNode
+}) {
+  const Caret = collapsed ? CaretRightIcon : CaretDownIcon
+  return (
+    <div className="mb-1">
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-expanded={!collapsed}
+        className="group/workspace flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[13px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
+      >
+        <StackIcon className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+        <Caret
+          className={cn(
+            "size-3.5 shrink-0",
+            collapsed ? "block" : "hidden group-hover/workspace:block"
+          )}
+        />
+      </button>
+      {!collapsed && (
+        <div className="pl-2">{workspace.projects.map(renderProjectGroup)}</div>
+      )}
+    </div>
   )
 }
 
