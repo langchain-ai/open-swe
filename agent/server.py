@@ -226,6 +226,7 @@ from agent.utils.thread_settings import (
     store_thread_settings,
 )
 from agent.workspaces.store import (
+    DEFAULT_WORKSPACE_SLUG,
     load_workspace,
 )
 
@@ -541,9 +542,9 @@ async def _notion_tools_for(profile_login: str | None) -> list[Any]:
     )
 
 
-async def _mcp_tools_for(credential_login: str | None) -> list[Any]:
-    """Load workspace MCPs with private-owner personal overrides."""
-    sources = [workspace_mcp_source]
+async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[Any]:
+    """Load the run's workspace MCPs with private-owner personal overrides."""
+    sources = [workspace_mcp_source(workspace)]
     if credential_login:
         sources.append(user_mcp_source(credential_login))
     return await load_mcp_tools(*sources)
@@ -1165,7 +1166,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             _phase_result(
                 thread_id,
                 "factory.mcp_tools",
-                lambda: _mcp_tools_for(credential_login),
+                lambda: _mcp_tools_for(
+                    credential_login, workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+                ),
             ),
             _phase_result(
                 thread_id,

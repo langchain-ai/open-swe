@@ -42,6 +42,7 @@ def comment_tool() -> str:
 @pytest.fixture
 async def linear_mcp(fake_store, monkeypatch: pytest.MonkeyPatch, comment_tool: str) -> LinearMCP:
     await workspace_mcps.save_workspace_mcp(
+        "default",
         "linear",
         MCPConnectionUpdate(
             name="linear", url="https://mcp.linear.app/mcp", allowed_tools=[comment_tool]
@@ -137,9 +138,10 @@ async def test_rejected_mcp_comment_is_not_reported_as_delivered(linear_mcp: Lin
 @pytest.mark.parametrize("change", ["disabled", "unselected", "deleted"])
 async def test_unavailable_linear_mcp_does_not_send(linear_mcp: LinearMCP, change: str) -> None:
     if change == "deleted":
-        await workspace_mcps.delete_workspace_mcp("linear")
+        await workspace_mcps.delete_workspace_mcp("default", "linear")
     else:
         await workspace_mcps.save_workspace_mcp(
+            "default",
             "linear",
             MCPConnectionUpdate(
                 name="linear",
@@ -163,6 +165,7 @@ async def test_notification_only_discovers_the_linear_connection(
     linear_mcp: LinearMCP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await workspace_mcps.save_workspace_mcp(
+        "default",
         "other",
         MCPConnectionUpdate(
             name="other", url="https://other.example/mcp", allowed_tools=["save_comment"]
@@ -229,6 +232,7 @@ async def test_notification_rechecks_permission_after_discovery(
     async def revoke_during_discovery(record, namespace):
         definitions = await discover(record, namespace)
         await workspace_mcps.save_workspace_mcp(
+            "default",
             "linear",
             MCPConnectionUpdate(name="linear", url="https://mcp.linear.app/mcp", allowed_tools=[]),
         )

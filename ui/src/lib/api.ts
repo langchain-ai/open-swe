@@ -857,24 +857,29 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
-  revealWorkspaceMCPHeaders: (name: string) =>
+  getWorkspaceMCPs: (workspace: string) =>
+    request<MCPConnection[]>(`/workspaces/${encodeURIComponent(workspace)}/mcps`),
+  revealWorkspaceMCPHeaders: (workspace: string, name: string) =>
     request<Record<string, string>>(
-      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}/headers/reveal`,
       { method: "POST", cache: "no-store" }
     ),
-  saveWorkspaceMCP: (body: MCPConnectionUpdate) =>
-    request<MCPConnection>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  deleteWorkspaceMCP: (name: string) =>
-    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    }),
-  discoverWorkspaceMCP: (body: MCPConnectionUpdate) =>
+  saveWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
+    request<MCPConnection>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  deleteWorkspaceMCP: (workspace: string, name: string) =>
+    request<void>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}`,
+      { method: "DELETE" }
+    ),
+  discoverWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
     request<{ name: string; description: string }[]>(
-      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
   getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),
