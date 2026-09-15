@@ -33,6 +33,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.dashboard.admin import configured_admins
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
+    from agent.github.pull_request_sweep import start_sweeper, stop_sweeper
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.users import User
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
@@ -51,9 +52,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await start_worker()
     except Exception:  # noqa: BLE001
         logger.warning("Analytics startup failed", exc_info=True)
+    await start_sweeper()
     try:
         yield
     finally:
+        await stop_sweeper()
         await stop_worker()
         await database.close()
         await close_cached_models()

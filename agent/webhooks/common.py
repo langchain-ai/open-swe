@@ -946,14 +946,30 @@ SUPPORTED_GH_EVENTS = frozenset(
     ]
 )
 SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
+# Every action whose payload carries the pull request object, so the stored row
+# can be refreshed from it. Which of them trigger work is decided by the
+# narrower sets below.
 SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
     [
+        "assigned",
+        "auto_merge_disabled",
+        "auto_merge_enabled",
+        "closed",
+        "converted_to_draft",
+        "dequeued",
+        "edited",
+        "enqueued",
+        "labeled",
+        "locked",
         "opened",
         "ready_for_review",
-        "converted_to_draft",
-        "closed",
         "reopened",
+        "review_request_removed",
+        "review_requested",
         "synchronize",
+        "unassigned",
+        "unlabeled",
+        "unlocked",
     ]
 )
 GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
