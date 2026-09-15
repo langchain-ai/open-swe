@@ -181,6 +181,7 @@ from agent.tools import (
     open_pull_request,
     output_iframe,
     publish_environment,
+    read_only_sql,
     read_user_settings,
     recreate_sandbox,
     refresh_environment_start,
@@ -419,6 +420,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "manage_thread",
         "notify_automation_channel",
         "read_incident",
+        "read_only_sql",
         "read_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -1223,6 +1225,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         submit_thread_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
+        *((read_only_sql,) if admin_thread and source == "dashboard" else ()),
     ]
     if credential_login is None:
         personal_tools = (
