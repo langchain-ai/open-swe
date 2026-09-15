@@ -23,6 +23,10 @@ def _runtime(store: InMemoryStore | None) -> Any:
     return _Runtime()
 
 
+def _config(thread_id: str, **extra: str) -> dict[str, Any]:
+    return {"configurable": {"thread_id": thread_id, **extra}}
+
+
 def _request(messages: list[Any], store: InMemoryStore) -> ModelRequest:
     return ModelRequest(
         model=object(),  # type: ignore[arg-type]
@@ -43,10 +47,7 @@ async def test_before_model_moves_inline_images_to_the_store() -> None:
     )
     plain = HumanMessage(id="m0", content="hello")
 
-    with patch(
-        "agent.middleware.image_offload.get_config",
-        return_value={"configurable": {"thread_id": "thread-1"}},
-    ):
+    with patch("agent.middleware.image_offload.get_config", return_value=_config("thread-1")):
         update = await ImageOffloadMiddleware().abefore_model(
             {"messages": [plain, human]}, _runtime(store)
         )
@@ -103,9 +104,65 @@ async def test_model_call_sees_the_bytes_while_state_keeps_the_reference() -> No
         seen.extend(request.messages)
         return AIMessage(content="ok")
 
-    await ImageOffloadMiddleware().awrap_model_call(_request([human, tool], store), handler)
+    with patch("agent.middleware.image_offload.get_config", return_value=_config("thread-1")):
+        await ImageOffloadMiddleware().awrap_model_call(_request([human, tool], store), handler)
 
     rehydrated_human, rehydrated_tool = seen
     assert rehydrated_human.content == [{"type": "image", "base64": PNG, "mime_type": "image/png"}]
     assert rehydrated_tool.content == [{"type": "text", "text": IMAGE_UNAVAILABLE_TEXT}]
     assert human.content[0] == {"type": "image", "file_id": "0" * 32, "mime_type": "image/png"}
+
+
+async def _model_saw(
+    middleware: ImageOffloadMiddleware, store: InMemoryStore, config: dict[str, Any]
+) -> list[Any]:
+    human = HumanMessage(
+        id="m1", content=[{"type": "image", "file_id": "0" * 32, "mime_type": "image/png"}]
+    )
+    seen: list[Any] = []
+
+    async def handler(request: ModelRequest) -> Any:
+        seen.extend(request.messages)
+        return AIMessage(content="ok")
+
+    with patch("agent.middleware.image_offload.get_config", return_value=config):
+        await middleware.awrap_model_call(_request([human], store), handler)
+    return seen[0].content
+
+
+async def test_a_reference_to_another_threads_image_is_not_rehydrated() -> None:
+    store = InMemoryStore()
+    await store.aput(
+        IMAGE_STORE_NAMESPACE,
+        "0" * 32,
+        {"thread_id": "victim", "mime_type": "image/png", "base64": PNG, "bytes": 48},
+    )
+    middleware = ImageOffloadMiddleware()
+
+    assert await _model_saw(middleware, store, _config("victim")) == [
+        {"type": "image", "base64": PNG, "mime_type": "image/png"}
+    ]
+    # Already cached for the victim's thread, which must not leak it to another.
+    assert await _model_saw(middleware, store, _config("attacker")) == [
+        {"type": "text", "text": IMAGE_UNAVAILABLE_TEXT}
+    ]
+    assert await _model_saw(middleware, store, {"configurable": {}}) == [
+        {"type": "text", "text": IMAGE_UNAVAILABLE_TEXT}
+    ]
+
+
+async def test_a_private_continuation_rehydrates_the_images_it_copied() -> None:
+    store = InMemoryStore()
+    await store.aput(
+        IMAGE_STORE_NAMESPACE,
+        "0" * 32,
+        {"thread_id": "source", "mime_type": "image/png", "base64": PNG, "bytes": 48},
+    )
+
+    content = await _model_saw(
+        ImageOffloadMiddleware(),
+        store,
+        _config("continued", continued_from_thread_id="source"),
+    )
+
+    assert content == [{"type": "image", "base64": PNG, "mime_type": "image/png"}]

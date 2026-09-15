@@ -86,13 +86,34 @@ def _resolve_store(runtime: Runtime | None) -> BaseStore | None:
         return None
 
 
-def _current_thread_id() -> str:
+def _configurable() -> dict[str, object]:
     try:
         configurable = get_config().get("configurable", {})
     except RuntimeError:
-        return ""
-    thread_id = configurable.get("thread_id")
+        return {}
+    return configurable if isinstance(configurable, dict) else {}
+
+
+def _current_thread_id() -> str:
+    thread_id = _configurable().get("thread_id")
     return str(thread_id) if thread_id else ""
+
+
+def image_owner_threads(thread_id: str, continued_from_thread_id: object) -> frozenset[str]:
+    """Threads whose stored images ``thread_id`` may show.
+
+    A private continuation copies the transcript of the collaborative thread it
+    was made from, so its messages reference images stored under that thread.
+    """
+    owners = {thread_id} if thread_id else set[str]()
+    if isinstance(continued_from_thread_id, str) and continued_from_thread_id:
+        owners.add(continued_from_thread_id)
+    return frozenset(owners)
+
+
+def _current_image_owners() -> frozenset[str]:
+    configurable = _configurable()
+    return image_owner_threads(_current_thread_id(), configurable.get("continued_from_thread_id"))
 
 
 def _encoded_bytes(encoded: str) -> int:
@@ -139,7 +160,7 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
 
     def __init__(self) -> None:
         super().__init__()
-        self._rehydrated: OrderedDict[str, ContentBlock | None] = OrderedDict()
+        self._rehydrated: OrderedDict[tuple[str, str], ContentBlock | None] = OrderedDict()
 
     async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict[str, object] | None:
         messages = state.get("messages") or []
@@ -173,16 +194,27 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
         return {"messages": replaced}
 
     async def _inline_block(
-        self, store: BaseStore, block: ContentBlock, file_id: str
+        self,
+        store: BaseStore,
+        block: ContentBlock,
+        file_id: str,
+        *,
+        thread_id: str,
+        owners: frozenset[str],
     ) -> ContentBlock:
-        if file_id in self._rehydrated:
-            self._rehydrated.move_to_end(file_id)
-            cached = self._rehydrated[file_id]
+        # The middleware instance is shared by every thread, so the cache is
+        # scoped to the thread that resolved the image.
+        cache_key = (thread_id, file_id)
+        if cache_key in self._rehydrated:
+            self._rehydrated.move_to_end(cache_key)
+            cached = self._rehydrated[cache_key]
         else:
             cached = None
             item = await store.aget(IMAGE_STORE_NAMESPACE, file_id)
             value = item.value if item is not None else None
-            if isinstance(value, dict):
+            # A reference can be injected into a run's input, so the bytes are
+            # only inlined when the image belongs to a thread this one may show.
+            if isinstance(value, dict) and value.get("thread_id") in owners:
                 encoded = value.get("base64")
                 mime_type = value.get("mime_type")
                 if isinstance(encoded, str) and isinstance(mime_type, str):
@@ -192,7 +224,7 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
                         "mime_type": mime_type,
                     }
                     cached = inline_block
-            self._rehydrated[file_id] = cached
+            self._rehydrated[cache_key] = cached
             while len(self._rehydrated) > _REHYDRATE_CACHE_SIZE:
                 self._rehydrated.popitem(last=False)
         if cached is None:
@@ -203,7 +235,14 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
                 inline[key] = block[key]
         return inline
 
-    async def _rehydrate(self, store: BaseStore, message: AnyMessage) -> AnyMessage:
+    async def _rehydrate(
+        self,
+        store: BaseStore,
+        message: AnyMessage,
+        *,
+        thread_id: str,
+        owners: frozenset[str],
+    ) -> AnyMessage:
         content: list[object] = []
         for item in message.content:
             block = _as_block(item)
@@ -211,7 +250,9 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
             if block is None or file_id is None:
                 content.append(item)
                 continue
-            content.append(await self._inline_block(store, block, file_id))
+            content.append(
+                await self._inline_block(store, block, file_id, thread_id=thread_id, owners=owners)
+            )
         return message.model_copy(update={"content": content})
 
     async def awrap_model_call(
@@ -224,8 +265,12 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
         store = _resolve_store(request.runtime)
         if store is None:
             return await handler(request)
+        thread_id = _current_thread_id()
+        owners = _current_image_owners()
         messages: list[AnyMessage] = [
-            await self._rehydrate(store, message) if _has_reference(message) else message
+            await self._rehydrate(store, message, thread_id=thread_id, owners=owners)
+            if _has_reference(message)
+            else message
             for message in request.messages
         ]
         return await handler(request.override(messages=messages))
