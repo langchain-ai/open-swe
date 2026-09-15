@@ -8,7 +8,12 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, make_url, text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    create_async_engine,
+)
 
 from agent.config import ENV
 
@@ -82,6 +87,15 @@ async def transaction() -> AsyncIterator[AsyncConnection]:
     async with engine().begin() as conn:
         await conn.execute(text(f"SET LOCAL search_path TO {SCHEMA}, public"))
         yield conn
+
+
+@asynccontextmanager
+async def session() -> AsyncIterator[AsyncSession]:
+    """An ORM session joined to one ``transaction()``, flushed before it commits."""
+    async with transaction() as conn:
+        async with AsyncSession(bind=conn, expire_on_commit=False) as orm:
+            yield orm
+            await orm.flush()
 
 
 async def migrate() -> None:

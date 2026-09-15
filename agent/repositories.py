@@ -11,15 +11,15 @@ from typing import Self
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, field_validator
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy import case, func, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.database import postgres
+from agent.database.rows import RepositoryRow
 from agent.review.styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
-
-_COLUMNS = "id, key, full_name, private, default_branch, first_seen_at, last_activity_at"
 
 
 class Repository(BaseModel):
@@ -37,26 +37,17 @@ class Repository(BaseModel):
 
     @classmethod
     async def get(cls, full_name: str) -> Self | None:
-        async with postgres.connection() as conn:
-            row = (
-                (
-                    await conn.execute(
-                        text(f"SELECT {_COLUMNS} FROM repository WHERE key = :key"),
-                        {"key": cls(full_name=full_name).key},
-                    )
-                )
-                .mappings()
-                .one_or_none()
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(RepositoryRow).where(RepositoryRow.key == cls(full_name=full_name).key)
             )
-        return None if row is None else cls.model_validate(dict(row))
+        return None if row is None else cls.model_validate(row, from_attributes=True)
 
     @classmethod
     async def all(cls) -> list[Self]:
-        async with postgres.connection() as conn:
-            rows = (
-                await conn.execute(text(f"SELECT {_COLUMNS} FROM repository ORDER BY key"))
-            ).mappings()
-            return [cls.model_validate(dict(row)) for row in rows]
+        async with postgres.session() as session:
+            rows = await session.scalars(select(RepositoryRow).order_by(RepositoryRow.key))
+            return [cls.model_validate(row, from_attributes=True) for row in rows]
 
     @property
     def key(self) -> str:
@@ -70,37 +61,34 @@ class Repository(BaseModel):
     def name(self) -> str:
         return self.full_name.split("/", 1)[1]
 
-    async def save(self, conn: AsyncConnection | None = None) -> Self:
+    async def save(self, session: AsyncSession | None = None) -> Self:
         """Upsert this row: known values win, unknown (``None``/empty) ones don't.
 
-        Pass ``conn`` to join a caller's transaction; otherwise one is opened.
+        Pass ``session`` to join a caller's transaction; otherwise one is opened.
         """
-        if conn is None:
-            async with postgres.transaction() as own:
+        if session is None:
+            async with postgres.session() as own:
                 return await self.save(own)
-        row = (
-            (
-                await conn.execute(
-                    text(
-                        "INSERT INTO repository (id, key, full_name, private, default_branch) "
-                        "VALUES (:id, :key, :full_name, :private, :default_branch) "
-                        "ON CONFLICT (key) DO UPDATE SET "
-                        "private = COALESCE(EXCLUDED.private, repository.private), "
-                        "default_branch = CASE WHEN EXCLUDED.default_branch <> '' "
-                        "THEN EXCLUDED.default_branch ELSE repository.default_branch END, "
-                        "last_activity_at = clock_timestamp() "
-                        f"RETURNING {_COLUMNS}"
-                    ),
-                    {
-                        "id": self.id or uuid7(),
-                        "key": self.key,
-                        "full_name": self.full_name,
-                        "private": self.private,
-                        "default_branch": self.default_branch,
-                    },
-                )
-            )
-            .mappings()
-            .one()
+        upsert = insert(RepositoryRow).values(
+            id=self.id or uuid7(),
+            key=self.key,
+            full_name=self.full_name,
+            private=self.private,
+            default_branch=self.default_branch,
         )
-        return type(self).model_validate(dict(row))
+        row = (
+            await session.execute(
+                upsert.on_conflict_do_update(
+                    index_elements=[RepositoryRow.key],
+                    set_={
+                        "private": func.coalesce(upsert.excluded.private, RepositoryRow.private),
+                        "default_branch": case(
+                            (upsert.excluded.default_branch != "", upsert.excluded.default_branch),
+                            else_=RepositoryRow.default_branch,
+                        ),
+                        "last_activity_at": func.clock_timestamp(),
+                    },
+                ).returning(RepositoryRow)
+            )
+        ).scalar_one()
+        return type(self).model_validate(row, from_attributes=True)
