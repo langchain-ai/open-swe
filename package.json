@@ -6,6 +6,7 @@
     "dev": "turbo run dev --filter=open-swe-dashboard",
     "dev:desktop": "pnpm --dir desktop run dev",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
+    "dev:prod": "node scripts/dev-prod.mjs",
     "build": "turbo run build",
     "check": "turbo run check",
     "format:check": "oxfmt --check",

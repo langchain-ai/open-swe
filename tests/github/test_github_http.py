@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import pytest
 
 from agent.github.http import (
@@ -30,8 +30,8 @@ def test_github_constants() -> None:
     assert GITHUB_GRAPHQL == "https://api.github.com/graphql"
 
 
-def _make_response(status_code: int, headers: dict[str, str] | None = None) -> httpx.Response:
-    return httpx.Response(status_code, headers=headers or {})
+def _make_response(status_code: int, headers: dict[str, str] | None = None) -> httpx2.Response:
+    return httpx2.Response(status_code, headers=headers or {})
 
 
 class TestIsSecondaryRateLimit:
@@ -40,15 +40,15 @@ class TestIsSecondaryRateLimit:
         assert _is_secondary_rate_limit(resp)
 
     def test_403_with_secondary_rate_limit_body(self) -> None:
-        resp = httpx.Response(403, text="You have exceeded a secondary rate limit")
+        resp = httpx2.Response(403, text="You have exceeded a secondary rate limit")
         assert _is_secondary_rate_limit(resp)
 
     def test_403_with_rate_limit_body(self) -> None:
-        resp = httpx.Response(403, text="API rate limit exceeded")
+        resp = httpx2.Response(403, text="API rate limit exceeded")
         assert _is_secondary_rate_limit(resp)
 
     def test_403_without_rate_limit_indicators(self) -> None:
-        resp = httpx.Response(403, text="Forbidden")
+        resp = httpx2.Response(403, text="Forbidden")
         assert not _is_secondary_rate_limit(resp)
 
     def test_non_403_not_secondary_rate_limit(self) -> None:
@@ -68,7 +68,7 @@ class TestIsRetryableResponse:
         assert not _is_retryable_response(_make_response(status), "POST")
 
     def test_secondary_rate_limit_is_retryable(self) -> None:
-        resp = httpx.Response(403, text="secondary rate limit")
+        resp = httpx2.Response(403, text="secondary rate limit")
         assert _is_retryable_response(resp, "POST")
         assert _is_retryable_response(resp, "GET")
 
@@ -124,7 +124,7 @@ class TestComputeBackoff:
 @pytest.mark.asyncio
 async def test_github_client_yields_client_with_token_headers() -> None:
     async with github_client(token="testtoken") as client:
-        assert isinstance(client, httpx.AsyncClient)
+        assert isinstance(client, httpx2.AsyncClient)
         assert client.headers["Authorization"] == "Bearer testtoken"
         assert client.headers["Accept"] == "application/vnd.github+json"
 
@@ -132,7 +132,7 @@ async def test_github_client_yields_client_with_token_headers() -> None:
 @pytest.mark.asyncio
 async def test_github_client_without_token() -> None:
     async with github_client() as client:
-        assert isinstance(client, httpx.AsyncClient)
+        assert isinstance(client, httpx2.AsyncClient)
         assert "Authorization" not in client.headers
 
 
@@ -171,7 +171,7 @@ async def test_github_request_retries_on_503() -> None:
 @pytest.mark.asyncio
 async def test_github_request_retries_on_secondary_rate_limit() -> None:
     responses = [
-        httpx.Response(403, text="secondary rate limit", headers={}),
+        httpx2.Response(403, text="secondary rate limit", headers={}),
         _make_response(200),
     ]
     client = AsyncMock()
@@ -224,7 +224,7 @@ async def test_github_request_gives_up_after_max_retries() -> None:
 @pytest.mark.asyncio
 async def test_github_request_retries_on_timeout() -> None:
     responses = [
-        httpx.TimeoutException("timeout"),
+        httpx2.TimeoutException("timeout"),
         _make_response(200),
     ]
     client = AsyncMock()
@@ -242,9 +242,9 @@ async def test_github_request_does_not_retry_transport_error_on_post() -> None:
     """Transport errors on POST must not retry — the server may have already
     processed the write, and retrying would duplicate the resource."""
     client = AsyncMock()
-    client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+    client.post = AsyncMock(side_effect=httpx2.TimeoutException("timeout"))
 
-    with pytest.raises(httpx.TimeoutException):
+    with pytest.raises(httpx2.TimeoutException):
         await github_request(client, "POST", "https://api.github.com/test")
 
     assert client.post.await_count == 1
@@ -332,10 +332,10 @@ async def test_github_request_retries_502_on_get() -> None:
 @pytest.mark.asyncio
 async def test_github_request_raises_after_exhausting_transport_retries() -> None:
     client = AsyncMock()
-    client.get = AsyncMock(side_effect=httpx.ConnectTimeout("timeout"))
+    client.get = AsyncMock(side_effect=httpx2.ConnectTimeout("timeout"))
 
     with patch("agent.github.http.asyncio.sleep", new_callable=AsyncMock):
-        with pytest.raises(httpx.ConnectTimeout):
+        with pytest.raises(httpx2.ConnectTimeout):
             await github_request(client, "GET", "https://api.github.com/test", max_retries=1)
 
     assert client.get.await_count == 2
@@ -344,9 +344,9 @@ async def test_github_request_raises_after_exhausting_transport_retries() -> Non
 @pytest.mark.asyncio
 async def test_github_request_propagates_non_retryable_http_error() -> None:
     client = AsyncMock()
-    client.get = AsyncMock(side_effect=httpx.HTTPError("boom"))
+    client.get = AsyncMock(side_effect=httpx2.HTTPError("boom"))
 
-    with pytest.raises(httpx.HTTPError):
+    with pytest.raises(httpx2.HTTPError):
         await github_request(client, "GET", "https://api.github.com/test")
 
     assert client.get.await_count == 1

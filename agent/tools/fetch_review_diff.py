@@ -13,7 +13,7 @@ _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 async def fetch_review_diff() -> dict[str, Any]:
-    """Write the current review diff to a file and return bounded metadata."""
+    """Implement the `fetch_review_diff` tool."""
     cfg = RunConfig.from_runtime()
 
     thread_id = cfg.thread_id

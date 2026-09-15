@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 import pytest
 
 exa_py_stub = types.ModuleType("exa_py")
@@ -56,9 +56,9 @@ class FakeResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            request = httpx.Request("GET", self.url)
-            response = httpx.Response(self.status_code, request=request)
-            raise httpx.HTTPStatusError(
+            request = httpx2.Request("GET", self.url)
+            response = httpx2.Response(self.status_code, request=request)
+            raise httpx2.HTTPStatusError(
                 f"{self.status_code} error", request=request, response=response
             )
 
@@ -67,7 +67,7 @@ class FakeAsyncClient:
     """Records each request and replays programmed responses.
 
     ``responder(method, url, **kwargs)`` returns a ``FakeResponse``. The class is
-    installed in place of ``httpx.AsyncClient`` on the tool module under test.
+    installed in place of ``httpx2.AsyncClient`` on the tool module under test.
     """
 
     last_instance: FakeAsyncClient | None = None
@@ -98,10 +98,10 @@ def _install_client(
 
     fake_httpx = types.SimpleNamespace(
         AsyncClient=factory,
-        HTTPError=httpx.HTTPError,
-        TimeoutException=httpx.TimeoutException,
+        HTTPError=httpx2.HTTPError,
+        TimeoutException=httpx2.TimeoutException,
     )
-    monkeypatch.setattr(module, "httpx", fake_httpx)
+    monkeypatch.setattr(module, "httpx2", fake_httpx)
     return factory
 
 
@@ -437,7 +437,7 @@ async def test_http_request_returns_timeout_result(monkeypatch) -> None:
     monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeResponse:
-        raise httpx.TimeoutException("timed out")
+        raise httpx2.TimeoutException("timed out")
 
     _install_client(monkeypatch, http_request_tool, responder)
 

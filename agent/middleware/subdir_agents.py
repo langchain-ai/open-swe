@@ -6,12 +6,13 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
+from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 
@@ -133,7 +134,7 @@ def _append_reminder(result: ToolMessage | Command, reminder: str | None) -> Too
     return result
 
 
-class SubdirAgentsReadMiddleware(AgentMiddleware):
+class SubdirAgentsReadMiddleware(OpenSWEMiddleware):
     """Append applicable ancestor ``AGENTS.md`` files to ``read_file`` results."""
 
     state_schema = AgentState

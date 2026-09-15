@@ -170,7 +170,7 @@ async def test_workflow_change_does_not_misattribute_preexisting_workflows() -> 
 
 
 def test_workflow_approval_response_serializes_review_fields() -> None:
-    from agent.dashboard.workflow_approval import workflow_push_approval_response
+    from agent.threads.workflow_approval import workflow_push_approval_response
 
     response = workflow_push_approval_response(
         {
@@ -231,6 +231,7 @@ async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
     monkeypatch: pytest.MonkeyPatch, tool_name: str
 ) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
     )

@@ -120,20 +120,7 @@ test("only grants expected permissions to the bundled app", () => {
     isTrustedPermissionRequest("notifications", `${APP_URL}settings`),
     true,
   );
-  assert.equal(
-    isTrustedPermissionRequest("media", APP_URL, { mediaTypes: ["audio"] }),
-    true,
-  );
-  assert.equal(
-    isTrustedPermissionRequest("media", APP_URL, { mediaType: "audio" }),
-    true,
-  );
-  assert.equal(
-    isTrustedPermissionRequest("media", APP_URL, {
-      mediaTypes: ["audio", "video"],
-    }),
-    false,
-  );
+  assert.equal(isTrustedPermissionRequest("media", APP_URL), false);
   assert.equal(isTrustedPermissionRequest("camera", APP_URL), false);
   assert.equal(
     isTrustedPermissionRequest("notifications", "https://dashboard.example"),

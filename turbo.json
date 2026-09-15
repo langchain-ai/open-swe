@@ -3,7 +3,15 @@
   "tasks": {
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": [
+        "DASHBOARD_API_URL",
+        "DASHBOARD_BASE_PATH",
+        "OPEN_SWE_DEV_SESSION",
+        "PORT",
+        "E2E_HARNESS",
+        "VITE_*"
+      ]
     },
     "build": {
       "outputs": [

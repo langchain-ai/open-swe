@@ -1,9 +1,9 @@
-import os
-
 import modal
 from langchain_modal import ModalSandbox
 
-MODAL_APP_NAME = os.getenv("MODAL_APP_NAME", "open-swe")
+from agent.config import ENV
+
+MODAL_APP_NAME = ENV.MODAL_APP_NAME.get()
 
 
 async def create_modal_sandbox(sandbox_id: str | None = None):

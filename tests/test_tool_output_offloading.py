@@ -4,7 +4,7 @@ import sys
 import types
 from typing import Any
 
-sandbox_output = importlib.import_module("agent.tools._sandbox_output")
+sandbox_output = importlib.import_module("agent.tools.sandbox_output")
 web_search_tool = importlib.import_module("agent.tools.web_search")
 
 

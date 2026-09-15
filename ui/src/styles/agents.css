@@ -111,9 +111,7 @@ html.dark[data-agents-theme] {
 
 .agents-ui,
 html[data-agents-theme] {
-  font-family:
-    "IBM Plex Sans Variable", "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
-    sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -141,25 +139,24 @@ html[data-agents-theme] * {
 
 .agents-ui .shimmer-text,
 html[data-agents-theme] .shimmer-text {
-  background: linear-gradient(
-    90deg,
-    var(--muted-foreground) 35%,
-    var(--foreground) 50%,
-    var(--muted-foreground) 65%
-  );
-  background-size: 150% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: agents-shimmer 2s linear infinite;
+  color: var(--muted-foreground);
+}
+
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  .agents-ui .shimmer-text,
+  html[data-agents-theme] .shimmer-text {
+    background: linear-gradient(90deg, transparent, var(--foreground), transparent)
+      -4.5rem 0 / 4.5rem 100% no-repeat var(--muted-foreground);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: agents-shimmer 2.2s linear infinite;
+  }
 }
 
 @keyframes agents-shimmer {
-  0% {
-    background-position: 200% center;
-  }
-  100% {
-    background-position: -200% center;
+  to {
+    background-position: calc(100% + 4.5rem) 0;
   }
 }
 

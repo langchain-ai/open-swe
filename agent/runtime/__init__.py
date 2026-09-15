@@ -4,7 +4,7 @@ from agent.runtime.constants import (
     DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
 )
-from agent.runtime.execution import graph_loaded_for_execution
+from agent.runtime.execution import bindable_config, graph_loaded_for_execution
 from agent.sandboxes.lifecycle import (
     configure_git_identity,
     ensure_sandbox_for_thread,
@@ -19,5 +19,6 @@ __all__ = [
     "configure_git_identity",
     "ensure_sandbox_for_thread",
     "get_cached_sandbox_backend",
+    "bindable_config",
     "graph_loaded_for_execution",
 ]

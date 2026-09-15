@@ -8,6 +8,7 @@ from pathlib import Path
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
 
+from agent.config import ENV
 from agent.run_config import RunConfig
 
 SHELL_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TMPDIR")
@@ -18,7 +19,7 @@ def is_desktop_run(cfg: RunConfig) -> bool:
 
 
 def _allowed_projects() -> set[str]:
-    allowlist_path = os.environ.get("OPEN_SWE_LOCAL_PROJECTS_FILE")
+    allowlist_path = ENV.OPEN_SWE_LOCAL_PROJECTS_FILE.optional()
     if not allowlist_path:
         return set()
     with open(allowlist_path, encoding="utf-8") as file:
@@ -34,7 +35,7 @@ def _allowed_projects() -> set[str]:
 
 def is_desktop_worktree(path: str) -> bool:
     """Whether the path is a worktree the desktop app created for a thread."""
-    worktrees_dir = os.environ.get("OPEN_SWE_LOCAL_WORKTREES_DIR")
+    worktrees_dir = ENV.OPEN_SWE_LOCAL_WORKTREES_DIR.optional()
     if not worktrees_dir:
         return False
     return Path(os.path.realpath(worktrees_dir)) in Path(os.path.realpath(path)).parents
@@ -68,7 +69,7 @@ def create_desktop_backend(cfg: RunConfig) -> LocalShellBackend:
 
 
 def _artifacts_root() -> Path:
-    configured = os.environ.get("OPEN_SWE_LOCAL_ARTIFACTS_DIR")
+    configured = ENV.OPEN_SWE_LOCAL_ARTIFACTS_DIR.optional()
     if configured:
         return Path(configured)
     return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"

@@ -506,10 +506,24 @@ async def _replace_findings_unlocked(thread_id: str, findings: list[Finding]) ->
         await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
     except LangGraphSDKNotFoundError as exc:
         raise ReviewerThreadMissingError(thread_id, exc) from exc
-    from agent.dashboard.agent_usage import record_reviewer_finding_state
+    from agent.analytics.usage import record_reviewer_finding_state
 
+    metadata = await get_thread_metadata(thread_id)
+    pr: dict[str, Any] = metadata["pr"] if isinstance(metadata.get("pr"), dict) else {}
     results = await asyncio.gather(
-        *(record_reviewer_finding_state(thread_id, finding) for finding in findings),
+        *(
+            record_reviewer_finding_state(
+                thread_id,
+                {
+                    **finding,
+                    "pr": pr,
+                    "owner": pr.get("owner"),
+                    "repo": pr.get("name"),
+                    "pr_number": pr.get("number"),
+                },
+            )
+            for finding in findings
+        ),
         return_exceptions=True,
     )
     failures = [result for result in results if isinstance(result, Exception)]
@@ -722,14 +736,14 @@ def filter_findings_for_publish(
     findings: list[Finding],
     *,
     severity_threshold: Severity = "medium",
-    cap: int = REVIEW_FINDING_CAP,
+    cap: int | None = None,
 ) -> list[Finding]:
     """Return findings to surface to GitHub.
 
     - status must be ``open``
     - severity must be at or above ``severity_threshold``
     - sorted by severity descending, then file/start_line for stable ordering
-    - capped at ``cap`` to avoid review spam
+    - optionally capped at ``cap`` for benchmark runs
     """
     severity_rank = SEVERITY_ORDER[severity_threshold]
     eligible = [

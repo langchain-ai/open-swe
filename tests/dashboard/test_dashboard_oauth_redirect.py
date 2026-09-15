@@ -7,7 +7,7 @@ import jwt
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import routes
+from agent.dashboard import auth_routes, routes
 from agent.dashboard.oauth import COOKIE_NAME, decode_session, sanitize_redirect_to
 
 
@@ -100,7 +100,7 @@ def test_auth_callback_preserves_relative_plan_redirect(monkeypatch) -> None:
             "avatar_url": "https://avatars.example/alice.png",
         }, "alice@example.com"
 
-    async def fake_enforce_org_login_gate(login: str) -> None:
+    async def fake_enforce_github_login_gate(login: str) -> None:
         assert login == "alice"
 
     async def fake_upsert_access_token_from_github_response(
@@ -108,11 +108,11 @@ def test_auth_callback_preserves_relative_plan_redirect(monkeypatch) -> None:
     ) -> None:
         persisted.update({"login": login, "email": email, "data": data})
 
-    monkeypatch.setattr(routes, "exchange_code", fake_exchange_code)
-    monkeypatch.setattr(routes, "fetch_github_user", fake_fetch_github_user)
-    monkeypatch.setattr(routes, "enforce_org_login_gate", fake_enforce_org_login_gate)
+    monkeypatch.setattr(auth_routes, "exchange_code", fake_exchange_code)
+    monkeypatch.setattr(auth_routes, "fetch_github_user", fake_fetch_github_user)
+    monkeypatch.setattr(auth_routes, "enforce_github_login_gate", fake_enforce_github_login_gate)
     monkeypatch.setattr(
-        routes,
+        auth_routes,
         "upsert_access_token_from_github_response",
         fake_upsert_access_token_from_github_response,
     )
@@ -158,7 +158,7 @@ def test_auth_callback_cross_origin_redirect(monkeypatch) -> None:
     async def fake_fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
         return {"login": "alice", "avatar_url": "https://avatars.example/alice.png"}, None
 
-    async def fake_enforce_org_login_gate(login: str) -> None:
+    async def fake_enforce_github_login_gate(login: str) -> None:
         pass
 
     async def fake_upsert_access_token_from_github_response(
@@ -166,11 +166,11 @@ def test_auth_callback_cross_origin_redirect(monkeypatch) -> None:
     ) -> None:
         persisted.update({"login": login, "email": email, "data": data})
 
-    monkeypatch.setattr(routes, "exchange_code", fake_exchange_code)
-    monkeypatch.setattr(routes, "fetch_github_user", fake_fetch_github_user)
-    monkeypatch.setattr(routes, "enforce_org_login_gate", fake_enforce_org_login_gate)
+    monkeypatch.setattr(auth_routes, "exchange_code", fake_exchange_code)
+    monkeypatch.setattr(auth_routes, "fetch_github_user", fake_fetch_github_user)
+    monkeypatch.setattr(auth_routes, "enforce_github_login_gate", fake_enforce_github_login_gate)
     monkeypatch.setattr(
-        routes,
+        auth_routes,
         "upsert_access_token_from_github_response",
         fake_upsert_access_token_from_github_response,
     )
@@ -209,7 +209,7 @@ def _desktop_login_env(monkeypatch) -> None:
     async def fake_fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
         return {"login": "alice", "avatar_url": None}, "alice@example.com"
 
-    async def fake_enforce_org_login_gate(login: str) -> None:
+    async def fake_enforce_github_login_gate(login: str) -> None:
         pass
 
     async def fake_upsert_access_token_from_github_response(
@@ -217,11 +217,11 @@ def _desktop_login_env(monkeypatch) -> None:
     ) -> None:
         pass
 
-    monkeypatch.setattr(routes, "exchange_code", fake_exchange_code)
-    monkeypatch.setattr(routes, "fetch_github_user", fake_fetch_github_user)
-    monkeypatch.setattr(routes, "enforce_org_login_gate", fake_enforce_org_login_gate)
+    monkeypatch.setattr(auth_routes, "exchange_code", fake_exchange_code)
+    monkeypatch.setattr(auth_routes, "fetch_github_user", fake_fetch_github_user)
+    monkeypatch.setattr(auth_routes, "enforce_github_login_gate", fake_enforce_github_login_gate)
     monkeypatch.setattr(
-        routes,
+        auth_routes,
         "upsert_access_token_from_github_response",
         fake_upsert_access_token_from_github_response,
     )

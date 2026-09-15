@@ -9,18 +9,14 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
+from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langgraph_sdk import get_client
 
-from agent.dashboard.workflow_approval import (
-    ensure_workflow_push_pending,
-    mark_workflow_push_notified,
-    workflow_push_approved,
-)
+from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.slack.client import (
@@ -29,6 +25,11 @@ from agent.slack.client import (
     post_slack_thread_reply_with_ts,
 )
 from agent.slack.tools.thread_reply import build_workflow_approval_blocks
+from agent.threads.workflow_approval import (
+    ensure_workflow_push_pending,
+    mark_workflow_push_notified,
+    workflow_push_approved,
+)
 from agent.utils.dashboard_links import dashboard_workflow_approval_url
 
 logger = logging.getLogger(__name__)
@@ -567,7 +568,7 @@ async def _approval_state(request: ToolCallRequest, change: WorkflowPushChange) 
         return "approval_error"
 
 
-class WorkflowPushGuardMiddleware(AgentMiddleware):
+class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
     """Require approval before pushing `.github/workflows` changes."""
 
     state_schema = AgentState

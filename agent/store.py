@@ -18,7 +18,6 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, TypeVar
 
-import httpx
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, ValidationError
@@ -43,8 +42,11 @@ def now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
 
-def _is_not_found(exc: httpx.HTTPStatusError) -> bool:
-    return getattr(exc.response, "status_code", None) == 404
+def _is_not_found(exc: BaseException) -> bool:
+    return (
+        getattr(exc, "status_code", None) == 404
+        or getattr(getattr(exc, "response", None), "status_code", None) == 404
+    )
 
 
 def _unwrap(item: Any) -> dict[str, Any] | None:
@@ -58,7 +60,7 @@ def _unwrap(item: Any) -> dict[str, Any] | None:
 async def get_value(namespace: Namespace, key: str) -> dict[str, Any] | None:
     try:
         item = await store_client().store.get_item(list(namespace), key)
-    except httpx.HTTPStatusError as exc:
+    except Exception as exc:
         if _is_not_found(exc):
             return None
         raise
@@ -73,7 +75,7 @@ async def delete_value(namespace: Namespace, key: str) -> None:
     """Delete an item. Deleting one that is already gone is not an error."""
     try:
         await store_client().store.delete_item(list(namespace), key)
-    except httpx.HTTPStatusError as exc:
+    except Exception as exc:
         if not _is_not_found(exc):
             raise
 

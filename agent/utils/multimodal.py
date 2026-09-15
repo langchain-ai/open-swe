@@ -3,11 +3,10 @@
 import base64
 import logging
 import mimetypes
-import os
 import re
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 from langchain_core.messages.content import (
     ImageContentBlock,
     TextContentBlock,
@@ -15,6 +14,7 @@ from langchain_core.messages.content import (
     create_text_block,
 )
 
+from agent.config import ENV
 from agent.utils.url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
@@ -65,16 +65,8 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
     provider = _image_provider(original_url)
     if provider is None or _image_provider(current_url) != provider:
         return None
-    if provider == "linear":
-        linear_api_key = os.environ.get("LINEAR_API_KEY", "")
-        if linear_api_key:
-            return {"Authorization": linear_api_key}
-        logger.warning(
-            "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
-            current_url,
-        )
-    else:
-        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if provider == "slack":
+        slack_bot_token = ENV.SLACK_BOT_TOKEN.get()
         if slack_bot_token:
             return {"Authorization": f"Bearer {slack_bot_token}"}
         logger.warning(
@@ -86,7 +78,7 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
 
 async def fetch_image_block(
     image_url: str,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
 ) -> ImageContentBlock | TextContentBlock | None:
     """Fetch image bytes and build a model content block."""
     try:

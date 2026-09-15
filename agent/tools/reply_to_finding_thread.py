@@ -16,7 +16,7 @@ from agent.run_config import RunConfig
 
 
 async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
-    """Reply to the GitHub review thread for a tracked finding."""
+    """Implement the `reply_to_finding_thread` tool."""
     if not body.strip():
         return {"success": False, "error": "Reply body is required"}
 

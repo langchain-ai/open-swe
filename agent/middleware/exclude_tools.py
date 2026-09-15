@@ -9,12 +9,13 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain.agents.middleware.types import (
-    AgentMiddleware,
     AgentState,
     ModelRequest,
     ModelResponse,
 )
 from langchain_core.tools import BaseTool
+
+from agent.middleware.trace import OpenSWEMiddleware
 
 
 def _tool_name(tool: BaseTool | dict[str, Any] | Any) -> str | None:
@@ -25,7 +26,7 @@ def _tool_name(tool: BaseTool | dict[str, Any] | Any) -> str | None:
     return name if isinstance(name, str) else None
 
 
-class ExcludeToolsMiddleware(AgentMiddleware):
+class ExcludeToolsMiddleware(OpenSWEMiddleware):
     """Strip named tools from each model request.
 
     Place this AFTER tool-injecting middleware (FilesystemMiddleware,

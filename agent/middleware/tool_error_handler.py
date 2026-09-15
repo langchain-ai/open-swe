@@ -12,7 +12,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from langchain.agents.middleware.types import (
-    AgentMiddleware,
     AgentState,
 )
 from langchain_core.messages import ToolMessage
@@ -29,6 +28,7 @@ from agent.middleware.sandbox_circuit_breaker import (
     extract_sandbox_id,
     post_sandbox_unreachable_notification,
 )
+from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
 from agent.sandboxes.retry import is_transient_sandbox_error
 
@@ -153,7 +153,7 @@ def _generic_error_tool_message(e: Exception, request: ToolCallRequest) -> ToolM
     )
 
 
-class ToolErrorMiddleware(AgentMiddleware):
+class ToolErrorMiddleware(OpenSWEMiddleware):
     """Normalize tool execution errors into predictable payloads.
 
     Catches any exception thrown during a tool call and converts it into

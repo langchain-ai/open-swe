@@ -11,7 +11,8 @@ from langgraph.types import Command
 from langgraph_sdk import get_client
 from typing_extensions import TypedDict
 
-from agent.dashboard.plan_store import (
+from agent.run_config import RunConfig
+from agent.threads.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_SHARED,
     format_plan_comments,
@@ -20,7 +21,6 @@ from agent.dashboard.plan_store import (
     make_plan_approver,
     set_plan_status,
 )
-from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +33,7 @@ async def approve_plan(
     state: Annotated[ApprovePlanState | None, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command | dict[str, Any]:
-    """Approve the current plan and exit plan mode.
-
-    Call this when the user approves the plan, asks to leave plan mode, or asks to
-    start implementing the approved plan.
-    """
+    """Implement the `approve_plan` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:

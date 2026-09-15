@@ -43,7 +43,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, client_cls: type) -> None:
     monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
     monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
-    monkeypatch.setattr(github_app.httpx, "AsyncClient", client_cls)
+    monkeypatch.setattr(github_app.httpx2, "AsyncClient", client_cls)
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def test_installation_token_can_be_scoped_to_repository_ids(
     monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
     monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
-    monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(github_app.httpx2, "AsyncClient", _FakeAsyncClient)
 
     token, expires_at = await github_app.get_github_app_installation_token_with_expiry(
         installation_id=3, repository_ids=[123]
@@ -190,7 +190,7 @@ async def test_installation_token_includes_permissions(monkeypatch: pytest.Monke
     monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
     monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
-    monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(github_app.httpx2, "AsyncClient", _FakeAsyncClient)
 
     await github_app.get_github_app_installation_token_with_expiry(
         repositories=["open-swe"], permissions={"workflows": "write", "contents": "write"}
@@ -234,7 +234,7 @@ async def test_installation_token_omits_scope_for_full_installation(
     monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
     monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
-    monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(github_app.httpx2, "AsyncClient", _FakeAsyncClient)
 
     await github_app.get_github_app_installation_token_with_expiry()
 

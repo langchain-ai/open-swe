@@ -3,6 +3,8 @@ from pathlib import Path
 
 from deepagents.backends import LocalShellBackend
 
+from agent.config import ENV
+
 SANDBOX_GITCONFIG = ".gitconfig-sandbox"
 LOCAL_SHELL_ENV_EXCLUDE = {
     "ANTHROPIC_API_KEY",
@@ -49,11 +51,11 @@ def create_local_sandbox(sandbox_id: str | None = None):
     Returns:
         LocalShellBackend instance implementing SandboxBackendProtocol.
     """
-    root_dir = os.getenv("LOCAL_SANDBOX_ROOT_DIR", os.getcwd())
+    root_dir = ENV.LOCAL_SANDBOX_ROOT_DIR.get(os.getcwd())
     os.makedirs(root_dir, exist_ok=True)
 
     env = {key: value for key, value in os.environ.items() if key not in LOCAL_SHELL_ENV_EXCLUDE}
-    if not os.getenv("GIT_CONFIG_GLOBAL"):
+    if not ENV.GIT_CONFIG_GLOBAL.optional():
         env.update(_scoped_git_config_env(root_dir))
 
     return LocalShellBackend(

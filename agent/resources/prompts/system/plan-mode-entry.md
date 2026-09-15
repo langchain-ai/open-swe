@@ -1,0 +1,1 @@
+Call `enter_plan_mode` when the user asks you to plan work (e.g. "plan xxx") or explicitly requests plan mode. Do not enter it based solely on task complexity, size, ambiguity, or an incidental mention of the word "plan".

@@ -20,8 +20,11 @@ export interface MessagesProps extends ApprovalCallbacks {
   messages: Array<Message>
   /** Cloud threads only; enables the git-sourced changed-files card per turn. */
   threadId?: string
+  /** Identity for remembering the scroll position across navigation. */
+  scrollKey?: string
   showPlanArtifact?: boolean
   emptyState?: React.ReactNode
+  footer?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
   isStreaming: boolean
@@ -30,6 +33,7 @@ export interface MessagesProps extends ApprovalCallbacks {
   /** When set, drives the thinking spinner (stream + pending). Falls back to streamIsLoading/isStreaming. */
   isThinking?: boolean
   settingUpSandbox?: boolean
+  isOffloading?: boolean
   project?: Project | null
   contentWidthClass?: string
   /** Horizontal padding on centered content (scroll track stays edge-to-edge). */

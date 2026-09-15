@@ -6,12 +6,14 @@ configuration in one place. Per-repo style prompts live in
 """
 
 import logging
-import os
-import re
+from collections.abc import Mapping
 from typing import Any, Literal
 
+from fastapi import APIRouter
 from pydantic import BaseModel, field_validator, model_validator
 
+from agent.config import ENV
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
@@ -34,43 +36,39 @@ TEAM_SETTINGS_KEY = "default"
 # Cap the org-wide guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
-REVIEW_TRACING_PROJECT_MAX_CHARS = 256
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
 # Titles are a one-shot classification; no extended thinking needed.
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
-DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
-TRANSCRIPTION_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
 
-class TranscriptionSettingsUpdate(BaseModel):
-    transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
-
-    @field_validator("transcription_model")
-    @classmethod
-    def _validate_transcription_model(cls, value: str) -> str:
-        value = value.strip()
-        if not TRANSCRIPTION_MODEL_RE.fullmatch(value):
-            raise ValueError("invalid transcription model")
-        return value
-
-
-class TeamSettingsUpdate(TranscriptionSettingsUpdate):
+class TeamSettingsUpdate(BaseModel):
     review_draft_prs: bool = False
     pr_summaries: bool = True
     review_trace_links: bool = True
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
+    # Tri-state adaptive model routing toggle: True/False is authoritative,
+    # None is off (routing is opt-in until an admin enables it org-wide).
+    model_routing_enabled: bool | None = None
     gateway_enabled: bool | None = None
-    transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
     fable_enabled: bool = False
-    review_tracing_project: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
     default_agent_subagent_reasoning_effort: str | None = None
+    default_agent_routing_fast_model: str | None = None
+    default_agent_routing_fast_reasoning_effort: str | None = None
+    default_agent_routing_fast_alt_model: str | None = None
+    default_agent_routing_fast_alt_reasoning_effort: str | None = None
+    # Probability that a fast-routed turn goes to the fast_alt model instead.
+    default_agent_routing_fast_alt_probability: float | None = None
+    default_agent_routing_balanced_model: str | None = None
+    default_agent_routing_balanced_reasoning_effort: str | None = None
+    default_agent_routing_performance_model: str | None = None
+    default_agent_routing_performance_reasoning_effort: str | None = None
     default_repo: str | None = None
     default_reviewer_model: str | None = None
     default_reviewer_reasoning_effort: str | None = None
@@ -99,23 +97,6 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
             )
         return text
 
-    @field_validator("review_tracing_project", mode="before")
-    @classmethod
-    def _normalize_review_tracing_project(cls, v: object) -> str | None:
-        if v is None:
-            return None
-        if not isinstance(v, str):
-            raise ValueError("review_tracing_project must be a string")
-        text = v.strip()
-        if not text:
-            return None
-        if len(text) > REVIEW_TRACING_PROJECT_MAX_CHARS:
-            raise ValueError(
-                "review_tracing_project must be at most "
-                f"{REVIEW_TRACING_PROJECT_MAX_CHARS} characters"
-            )
-        return text
-
     @model_validator(mode="after")
     def _validate_model_pairs(self) -> TeamSettingsUpdate:
         self.default_agent_model, self.default_agent_reasoning_effort = _normalize_stale_model_pair(
@@ -128,6 +109,22 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
                 self.default_agent_subagent_reasoning_effort,
             )
         )
+        for tier in ("fast", "fast_alt", "balanced", "performance"):
+            model_field = f"default_agent_routing_{tier}_model"
+            effort_field = f"default_agent_routing_{tier}_reasoning_effort"
+            if not hasattr(self, model_field):
+                continue
+            model, effort = _normalize_stale_model_pair(
+                getattr(self, model_field), getattr(self, effort_field)
+            )
+            setattr(self, model_field, model)
+            setattr(self, effort_field, effort)
+        if self.default_agent_routing_fast_alt_model is not None:
+            if self.default_agent_routing_fast_model is None:
+                raise ValueError("fast_alt model set without a fast model")
+            probability = self.default_agent_routing_fast_alt_probability
+            if probability is not None and not 0.0 <= probability <= 1.0:
+                raise ValueError("fast_alt probability must be between 0.0 and 1.0")
         self.default_reviewer_model, self.default_reviewer_reasoning_effort = (
             _normalize_stale_model_pair(
                 self.default_reviewer_model,
@@ -165,6 +162,12 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
             self.default_agent_subagent_reasoning_effort,
             "agent subagent",
         )
+        for tier in ("fast", "fast_alt", "balanced", "performance"):
+            _validate_model_effort_pair(
+                getattr(self, f"default_agent_routing_{tier}_model"),
+                getattr(self, f"default_agent_routing_{tier}_reasoning_effort"),
+                f"agent routing {tier}",
+            )
         _validate_model_effort_pair(
             self.default_reviewer_model, self.default_reviewer_reasoning_effort, "reviewer"
         )
@@ -199,6 +202,18 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
             for model_field, effort_field in (
                 ("default_agent_model", "default_agent_reasoning_effort"),
                 ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
+                (
+                    "default_agent_routing_fast_model",
+                    "default_agent_routing_fast_reasoning_effort",
+                ),
+                (
+                    "default_agent_routing_balanced_model",
+                    "default_agent_routing_balanced_reasoning_effort",
+                ),
+                (
+                    "default_agent_routing_performance_model",
+                    "default_agent_routing_performance_reasoning_effort",
+                ),
                 ("default_reviewer_model", "default_reviewer_reasoning_effort"),
                 ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
                 ("default_grouping_model", "default_grouping_reasoning_effort"),
@@ -240,6 +255,19 @@ def _normalize_stale_model_pair(
 _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
     ("default_agent_model", "default_agent_reasoning_effort"),
     ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
+    ("default_agent_routing_fast_model", "default_agent_routing_fast_reasoning_effort"),
+    (
+        "default_agent_routing_fast_alt_model",
+        "default_agent_routing_fast_alt_reasoning_effort",
+    ),
+    (
+        "default_agent_routing_balanced_model",
+        "default_agent_routing_balanced_reasoning_effort",
+    ),
+    (
+        "default_agent_routing_performance_model",
+        "default_agent_routing_performance_reasoning_effort",
+    ),
     ("default_reviewer_model", "default_reviewer_reasoning_effort"),
     ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
     ("default_grouping_model", "default_grouping_reasoning_effort"),
@@ -262,8 +290,8 @@ def normalize_team_settings_for_response(settings: dict[str, Any]) -> dict[str, 
 
 
 def _env_default_repo() -> str | None:
-    owner = os.environ.get("DEFAULT_REPO_OWNER", "").strip()
-    name = os.environ.get("DEFAULT_REPO_NAME", "").strip()
+    owner = ENV.DEFAULT_REPO_OWNER.get("").strip()
+    name = ENV.DEFAULT_REPO_NAME.get().strip()
     return f"{owner}/{name}" if owner and name else None
 
 
@@ -282,15 +310,24 @@ def _default_settings() -> dict[str, Any]:
         "review_draft_prs": False,
         "pr_summaries": True,
         "review_trace_links": True,
+        "model_routing_enabled": None,
         "gateway_enabled": None,
-        "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
         "fable_enabled": False,
-        "review_tracing_project": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
         "default_agent_subagent_reasoning_effort": fallback_effort,
+        "default_agent_routing_fast_model": "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        "default_agent_routing_fast_reasoning_effort": "high",
+        # A/B experiment: half of fast-routed turns go to Luna.
+        "default_agent_routing_fast_alt_model": "openai:gpt-5.6-luna",
+        "default_agent_routing_fast_alt_reasoning_effort": "high",
+        "default_agent_routing_fast_alt_probability": 0.5,
+        "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
+        "default_agent_routing_balanced_reasoning_effort": "medium",
+        "default_agent_routing_performance_model": "openai:gpt-6-astra",
+        "default_agent_routing_performance_reasoning_effort": "low",
         "default_repo": _env_default_repo(),
         "default_reviewer_model": fallback_model,
         "default_reviewer_reasoning_effort": fallback_effort,
@@ -325,8 +362,13 @@ async def get_team_settings() -> dict[str, Any]:
     if value is None:
         return defaults
     # Skip None-valued model fields so legacy records (or PUTs that cleared the
-    # selection) still surface the hardcoded default instead of a null.
-    overlay = {k: v for k, v in value.items() if v is not None}
+    # selection) still surface the hardcoded default instead of a null, but keep
+    # an explicit 0 fast_alt probability: zero is a valid "experiment off".
+    overlay = {
+        k: v
+        for k, v in value.items()
+        if v is not None or k == "default_agent_routing_fast_alt_probability"
+    }
     merged = {**defaults, **overlay}
     for stale_field in (
         "trigger_mode",
@@ -334,6 +376,8 @@ async def get_team_settings() -> dict[str, Any]:
         "autofix_severity_threshold",
         "autofix_enabled",
         "review_author_context_enabled",
+        "review_tracing_project",
+        "transcription_model",
     ):
         merged.pop(stale_field, None)
     return normalize_team_settings_for_response(merged)
@@ -344,15 +388,27 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
+        "model_routing_enabled": update.model_routing_enabled,
         "gateway_enabled": update.gateway_enabled,
-        "transcription_model": update.transcription_model,
         "fable_enabled": update.fable_enabled,
-        "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
         "default_agent_subagent_model": update.default_agent_subagent_model,
         "default_agent_subagent_reasoning_effort": update.default_agent_subagent_reasoning_effort,
+        "default_agent_routing_fast_model": update.default_agent_routing_fast_model,
+        "default_agent_routing_fast_reasoning_effort": update.default_agent_routing_fast_reasoning_effort,
+        "default_agent_routing_fast_alt_model": update.default_agent_routing_fast_alt_model,
+        "default_agent_routing_fast_alt_reasoning_effort": (
+            update.default_agent_routing_fast_alt_reasoning_effort
+        ),
+        "default_agent_routing_fast_alt_probability": (
+            update.default_agent_routing_fast_alt_probability
+        ),
+        "default_agent_routing_balanced_model": update.default_agent_routing_balanced_model,
+        "default_agent_routing_balanced_reasoning_effort": update.default_agent_routing_balanced_reasoning_effort,
+        "default_agent_routing_performance_model": update.default_agent_routing_performance_model,
+        "default_agent_routing_performance_reasoning_effort": update.default_agent_routing_performance_reasoning_effort,
         "default_repo": update.default_repo,
         "default_reviewer_model": update.default_reviewer_model,
         "default_reviewer_reasoning_effort": update.default_reviewer_reasoning_effort,
@@ -438,6 +494,43 @@ async def get_team_default_model_pair(
     return main, subagent
 
 
+async def get_team_agent_routing_models() -> dict[str, tuple[str, str]]:
+    settings = await get_team_settings()
+    tiers = ("fast", "fast_alt", "balanced", "performance")
+    models = {
+        tier: _resolve_default_pair(
+            settings.get(f"default_agent_routing_{tier}_model"),
+            settings.get(f"default_agent_routing_{tier}_reasoning_effort"),
+        )
+        for tier in tiers
+    }
+    fast_alt_probability = settings.get("default_agent_routing_fast_alt_probability")
+    # An explicit 0 probability is a valid "experiment off" configuration; only
+    # drop the alt model when no probability (or an unparseable one) was stored
+    # or the alt model was explicitly cleared.
+    if (
+        isinstance(fast_alt_probability, bool)
+        or not isinstance(fast_alt_probability, int | float)
+        or not 0.0 <= float(fast_alt_probability) <= 1.0
+        or float(fast_alt_probability) == 0.0
+    ):
+        models.pop("fast_alt", None)
+    return models
+
+
+def get_team_fast_alt_probability(settings: Mapping[str, Any]) -> float:
+    """The stored fast-route split, defaulting to the 50/50 experiment value.
+
+    An explicit ``0`` disables the experiment (no fast turns go to the alt
+    model); a missing or invalid value restores the default 50/50 split.
+    """
+    value = settings.get("default_agent_routing_fast_alt_probability")
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 0.5
+    probability = float(value)
+    return probability if 0.0 <= probability <= 1.0 else 0.5
+
+
 async def get_team_default_grouping_model() -> tuple[str, str]:
     """Return the team-wide default ``(model_id, reasoning_effort)`` for the
     review diff-grouping pass.
@@ -479,9 +572,9 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
         return pair
     from agent.utils.openai_oauth import desktop_openai_oauth_available
 
-    if os.environ.get("OPENAI_API_KEY") or desktop_openai_oauth_available():
+    if ENV.OPENAI_API_KEY.optional() or desktop_openai_oauth_available():
         return pair
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not ENV.ANTHROPIC_API_KEY.optional():
         return pair
     return ANTHROPIC_THREAD_TITLE_MODEL, ANTHROPIC_THREAD_TITLE_REASONING_EFFORT
 
@@ -511,22 +604,11 @@ async def get_team_review_trace_links_enabled() -> bool:
     return bool(settings.get("review_trace_links", True))
 
 
-async def get_team_transcription_model() -> str:
-    value = (await get_team_settings()).get("transcription_model")
-    return (
-        value
-        if isinstance(value, str) and TRANSCRIPTION_MODEL_RE.fullmatch(value)
-        else DEFAULT_TRANSCRIPTION_MODEL
-    )
-
-
-async def update_team_transcription_model(model: str) -> dict[str, Any]:
+async def get_team_model_routing_enabled() -> bool:
+    """Return whether adaptive model routing is enabled org-wide."""
     settings = await get_team_settings()
-    settings["transcription_model"] = TranscriptionSettingsUpdate(
-        transcription_model=model
-    ).transcription_model
-    settings.pop("updated_at", None)
-    return await upsert_team_settings(TeamSettingsUpdate.model_validate(settings))
+    value = settings.get("model_routing_enabled")
+    return value if isinstance(value, bool) else False
 
 
 async def get_team_gateway_enabled() -> bool | None:
@@ -546,15 +628,6 @@ async def get_team_fable_enabled() -> bool:
 async def get_effective_gateway_enabled() -> bool:
     """Resolve whether LLM Gateway routing is on: team setting, else env default."""
     return resolve_gateway_enabled(await get_team_gateway_enabled())
-
-
-async def get_team_review_tracing_project() -> str | None:
-    """Return the LangSmith tracing project used for PR trace resolution."""
-    settings = await get_team_settings()
-    value = settings.get("review_tracing_project")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
 
 
 async def get_org_review_guidelines() -> str | None:
@@ -594,3 +667,21 @@ def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
     if provider_pair is not None:
         return provider_pair
     return default_model_pair()
+
+
+router = APIRouter(tags=["team-settings"])
+
+
+@router.get("/team-settings")
+async def api_get_team_settings(
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_team_settings()
+
+
+@router.put("/team-settings")
+async def api_put_team_settings(
+    update: TeamSettingsUpdate,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, Any]:
+    return await upsert_team_settings(update)

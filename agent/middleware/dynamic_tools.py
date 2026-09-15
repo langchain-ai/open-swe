@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware.types import (
-    AgentMiddleware,
     AgentState,
     ModelRequest,
     ModelResponse,
@@ -19,6 +18,9 @@ from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
 from langgraph.prebuilt import InjectedState
 from langgraph.runtime import Runtime
 from langgraph.types import Command, Overwrite
+
+from agent.middleware.trace import OpenSWEMiddleware
+from agent.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,7 @@ class _Resolved:
     done: bool = False
 
 
-class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
+class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
     """Expose connected integration schemas only after explicit loading."""
 
     state_schema = DynamicToolState
@@ -140,10 +142,7 @@ class DynamicToolMiddleware(AgentMiddleware[DynamicToolState]):
                 }
             )
 
-        description = (
-            "Load connected integration tool schemas before using them. Pass exact tool names "
-            "listed below, then call the loaded tools normally on your next turn."
-        )
+        description = load_prompt("tools/load_integration_tools.md")
         if self._group_of:
             example_name = (
                 "analyzePlan" if "analyzePlan" in self._group_of else next(iter(self._group_of))

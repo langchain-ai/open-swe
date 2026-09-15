@@ -13,6 +13,7 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.thinking import restore_slack_thinking_status
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
@@ -22,35 +23,9 @@ async def slack_thread_reply(
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
+    should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
-    """Post a message to the current Slack thread and the Web UI.
-
-    Use this for clarifying questions, essential progress updates, and the final
-    answer or outcome. For Slack-triggered information-only requests, put the
-    complete answer in `message`, not merely a summary, and do not repeat it in
-    the final assistant response. Make `message` as concise as possible: default
-    to one sentence with only the outcome/status and link, or one blocking
-    question. Omit greetings, preambles, headings, recaps, implementation
-    details, and redundant context; use bullets only when multiple items are
-    essential. End the run by posting a concise final outcome here.
-
-    Format messages using Slack's mrkdwn format, NOT standard Markdown.
-    Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
-    bullet lists with "• ", ```code blocks```, > blockquotes. Code fences must be
-    bare triple backticks; do not add a language identifier such as ```sql.
-    Do NOT use **bold**, [link](url), or other standard Markdown syntax.
-
-    To ask a user to choose from predefined options, pass `options`. Slack will
-    render interactive buttons and the web UI will render the same choices.
-    The user can still reply manually in the Slack thread.
-
-    When a plan is ready, post a concise summary with the dashboard review link and
-    pass `options=["Approve & implement", "Request changes"]`. The user can still
-    reply manually with feedback.
-
-    To mention/tag a user, use Slack's mention format: <@USER_ID>.
-    You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
-    Example: <@U06KD8BFY95> will tag that user in the message."""
+    """Implement the `slack_thread_reply` tool."""
     config = get_config()
     cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)
@@ -108,6 +83,7 @@ async def slack_thread_reply(
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
+            should_ask_for_feedback=should_ask_for_feedback and not options,
         )
     if message_ts is None:
         return {
@@ -117,6 +93,8 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
+    if run_id and not is_code_channel_session(str(thread_ts)):
+        await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
 
 
@@ -229,6 +207,7 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
+    should_ask_for_feedback: bool = False,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -247,5 +226,6 @@ async def _post_and_store_mapping(
             message_ts,
             run_id=run_id,
             triggering_user_id=triggering_user_id,
+            should_ask_for_feedback=should_ask_for_feedback,
         )
     return message_ts, slack_error

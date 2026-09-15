@@ -31,12 +31,15 @@ async def test_timeout_wrapup_starts_clock_lazily(monkeypatch: pytest.MonkeyPatc
 
     await middleware.awrap_model_call(request, handler)
     await middleware.awrap_model_call(request, handler)
+    await middleware.awrap_model_call(seen[1], handler)
 
     assert seen[0].system_message is not None
     assert seen[1].system_message is not None
+    assert seen[2].system_message is not None
     assert seen[0].system_message.content == "base"
     assert isinstance(seen[1].system_message.content, str)
-    assert "time_limit_warning" in seen[1].system_message.content
+    assert seen[1].system_message.content.startswith("base\n\n<time_limit_warning>")
+    assert seen[2].system_message.content == seen[1].system_message.content
 
 
 @pytest.mark.asyncio
@@ -61,9 +64,12 @@ async def test_timeout_wrapup_preserves_structured_system_content(
     )
 
     await middleware.awrap_model_call(request, handler)
+    await middleware.awrap_model_call(seen[0], handler)
 
     assert seen[0].system_message is not None
+    assert seen[1].system_message is not None
     content = seen[0].system_message.content
+    assert seen[1].system_message.content == content
     assert isinstance(content, list)
     assert content[0] == {"type": "text", "text": "base", "cache_control": {"type": "ephemeral"}}
     warning_block = content[1]
