@@ -1091,8 +1091,8 @@ def slack_file_mention(monkeypatch, fake_store):
     class Sandbox:
         id = "sandbox-for-slack-files"
 
-        def __init__(self, environment_slug: str | None) -> None:
-            self.environment_slug = environment_slug
+        def __init__(self, workspace_slug: str | None) -> None:
+            self.workspace_slug = workspace_slug
             self.files: dict[str, bytes] = {}
 
         async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[dict]:
@@ -1101,8 +1101,8 @@ def slack_file_mention(monkeypatch, fake_store):
 
     provisioned: list[Sandbox] = []
 
-    async def provision(_token, *, environment_slug=None, **kwargs):
-        sandbox = Sandbox(environment_slug)
+    async def provision(_token, *, workspace_slug=None, **kwargs):
+        sandbox = Sandbox(workspace_slug)
         provisioned.append(sandbox)
         return sandbox
 
@@ -1118,7 +1118,7 @@ def slack_file_mention(monkeypatch, fake_store):
     monkeypatch.setattr(lifecycle, "get_recorded_proxy_base_config", lambda _: None)
     monkeypatch.setattr(webhook_common, "get_slack_permalink", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_utils, "download_slack_file", AsyncMock(return_value=b"zip"))
-    fake_store.seed(["environments"], "staging", {"slug": "staging", "name": "Staging"})
+    fake_store.seed(["workspaces"], "staging", {"slug": "staging", "name": "Staging"})
     request = SlackRequest(
         channel_id="C123",
         thread_ts="1700000000.000100",
@@ -1178,7 +1178,7 @@ async def test_slack_files_reach_bound_sandbox_with_thread_environment(
     assert threads.metadata["visibility"] == ("private" if private else "public")
     assert threads.metadata["owner_login"] == "mason-gh"
     assert len(provisioned) == 1
-    assert provisioned[0].environment_slug == environment
+    assert provisioned[0].workspace_slug == environment
     assert provisioned[0].files == {"/workspace/.open-swe/slack-files/bundle.zip": b"zip"}
     run = captured["run_create"]["kwargs"]
     assert run["config"]["configurable"].get("environment") == environment

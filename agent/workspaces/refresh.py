@@ -35,12 +35,12 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from agent.config import ENV, EnvVar
-from agent.environments.sandbox_settings import resolve_base_snapshot_id
-from agent.environments.store import (
-    ENVIRONMENTS,
-    Environment,
+from agent.workspaces.sandbox_settings import resolve_base_snapshot_id
+from agent.workspaces.store import (
+    WORKSPACES,
     RefreshKind,
-    capture_environment_snapshot,
+    Workspace,
+    capture_workspace_snapshot,
     require_capture_support,
     script_command,
     script_log_path,
@@ -88,7 +88,7 @@ def _parse_iso(value: str | None) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def is_refresh_in_flight(record: Environment) -> bool:
+def is_refresh_in_flight(record: Workspace) -> bool:
     """Whether another refresh of this environment is still plausibly running."""
     if record.refresh_status != "refreshing":
         return False
@@ -106,7 +106,7 @@ def daily_schedule(slug: str) -> str:
 
 async def ensure_refresh_cron(slug: str) -> str | None:
     """Idempotently register the daily refresh cron for an environment."""
-    record = await ENVIRONMENTS.get(slug)
+    record = await WORKSPACES.get(slug)
     if record is None:
         return None
     if record.refresh_cron_id:
@@ -125,11 +125,11 @@ async def ensure_refresh_cron(slug: str) -> str | None:
     if not (isinstance(cron_id, str) and cron_id):
         return None
     record.refresh_cron_id = cron_id
-    await ENVIRONMENTS.save(record)
+    await WORKSPACES.save(record)
     return cron_id
 
 
-async def remove_refresh_cron(record: Environment | None) -> None:
+async def remove_refresh_cron(record: Workspace | None) -> None:
     """Delete the refresh cron carried by an environment record, if any."""
     if record is None or not record.refresh_cron_id:
         return
@@ -154,7 +154,7 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
         logger.warning("Failed to stop builder sandbox %s", sandbox_id, exc_info=True)
 
 
-async def _create_builder_sandbox(record: Environment, snapshot_id: str | None) -> Any:
+async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
     from agent.github.app import get_github_app_installation_token
     from agent.sandboxes.providers.langsmith import create_langsmith_sandbox
 
@@ -172,7 +172,7 @@ async def _create_builder_sandbox(record: Environment, snapshot_id: str | None) 
     )
 
 
-def _scripts_to_run(record: Environment, kind: RefreshKind) -> list[tuple[str, str, int]]:
+def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str, int]]:
     """The scripts a refresh runs, in order, as ``(label, command, timeout)``.
 
     A full rebuild runs the update script too, so a broken one is caught nightly
@@ -198,7 +198,7 @@ def _scripts_to_run(record: Environment, kind: RefreshKind) -> list[tuple[str, s
     return steps
 
 
-def is_snapshot_stale(record: Environment) -> bool:
+def is_snapshot_stale(record: Workspace) -> bool:
     """Whether the image a new sandbox boots from has aged past the interval.
 
     This gates the update that runs *in the run's own sandbox*, so it keys on
@@ -214,7 +214,7 @@ def is_snapshot_stale(record: Environment) -> bool:
     return (datetime.now(UTC) - captured).total_seconds() >= UPDATE_INTERVAL_SECONDS
 
 
-def is_update_due(record: Environment) -> bool:
+def is_update_due(record: Workspace) -> bool:
     """Whether a new sandbox should also kick off a background snapshot update.
 
     Same staleness test, plus: no refresh already running, and the last attempt
@@ -231,7 +231,7 @@ def is_update_due(record: Environment) -> bool:
     return (datetime.now(UTC) - finished).total_seconds() >= UPDATE_INTERVAL_SECONDS
 
 
-async def maybe_start_update(record: Environment | None) -> str | None:
+async def maybe_start_update(record: Workspace | None) -> str | None:
     """Start a background update for ``record`` if one is due; never raises."""
     if record is None or not is_update_due(record):
         return None
@@ -254,7 +254,7 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
     background run, and none of them should surface a traceback. The same detail
     lands on the environment record.
     """
-    record = await ENVIRONMENTS.get(slug)
+    record = await WORKSPACES.get(slug)
     if record is None:
         return {"status": "unknown_environment", "slug": slug}
     if kind == "full" and not record.setup_script:
@@ -275,30 +275,30 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
         if kind == "update"
         else record.base_snapshot_id or await resolve_base_snapshot_id()
     )
-    await ENVIRONMENTS.mark_refreshing(slug, kind)
+    await WORKSPACES.mark_refreshing(slug, kind)
     started = datetime.now(UTC)
     sandbox_id: str | None = None
     log = ""
     try:
-        await ENVIRONMENTS.start_refresh_step(slug, "boot")
+        await WORKSPACES.start_refresh_step(slug, "boot")
         backend = await _create_builder_sandbox(record, base)
         sandbox_id = str(backend.id)
-        await ENVIRONMENTS.finish_refresh_step(slug, "boot", "success")
+        await WORKSPACES.finish_refresh_step(slug, "boot", "success")
         # Published before the first script so a poll can tail the trace while it
         # runs; cleared when the refresh settles and the builder is released.
-        await ENVIRONMENTS.mark_refresh_builder(slug, sandbox_id)
+        await WORKSPACES.mark_refresh_builder(slug, sandbox_id)
         # Every script runs before the capture, so a snapshot only ships once the
         # whole of what produced it worked.
         for label, command, timeout in _scripts_to_run(record, kind):
-            await ENVIRONMENTS.start_refresh_step(slug, label, log_path=script_log_path(label))
+            await WORKSPACES.start_refresh_step(slug, label, log_path=script_log_path(label))
             result = await backend.aexecute(command, timeout=timeout)
             log = f"{log}\n--- {label} script ---\n{result.output or ''}".strip()
             if result.exit_code != 0:
-                await ENVIRONMENTS.finish_refresh_step(
+                await WORKSPACES.finish_refresh_step(
                     slug, label, "failed", exit_code=result.exit_code
                 )
                 error = f"{label} script exited {result.exit_code}"
-                await ENVIRONMENTS.mark_refresh_settled(slug, "failed", log=log, error=error)
+                await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=error)
                 return {
                     "status": "failed",
                     "slug": slug,
@@ -307,20 +307,20 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
                     "error": error,
                     "log": log,
                 }
-            await ENVIRONMENTS.finish_refresh_step(slug, label, "success", exit_code=0)
-        await ENVIRONMENTS.start_refresh_step(slug, "capture")
-        await capture_environment_snapshot(slug, sandbox_id, timeout=capture_timeout())
-        await ENVIRONMENTS.finish_refresh_step(slug, "capture", "success")
+            await WORKSPACES.finish_refresh_step(slug, label, "success", exit_code=0)
+        await WORKSPACES.start_refresh_step(slug, "capture")
+        await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
+        await WORKSPACES.finish_refresh_step(slug, "capture", "success")
     except Exception as exc:
         logger.warning("Refresh failed for environment %s", slug, exc_info=True)
-        await ENVIRONMENTS.mark_refresh_settled(slug, "failed", log=log, error=str(exc))
+        await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=str(exc))
         return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
     finally:
         if sandbox_id:
             await _release_builder_sandbox(sandbox_id)
 
     elapsed = int((datetime.now(UTC) - started).total_seconds())
-    await ENVIRONMENTS.mark_refresh_settled(slug, "success", log=log)
+    await WORKSPACES.mark_refresh_settled(slug, "success", log=log)
     logger.info("Refreshed environment %s (%s) in %ss", slug, kind, elapsed)
     return {"status": "success", "slug": slug, "kind": kind, "seconds": elapsed, "log": log}
 
@@ -347,10 +347,10 @@ async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None
     if not isinstance(run_id, str):
         return None
     # Recorded so a poll can tell this refresh from a later one that superseded it.
-    record = await ENVIRONMENTS.get(slug)
+    record = await WORKSPACES.get(slug)
     if record is not None:
         record.refresh_run_id = run_id
-        await ENVIRONMENTS.save(record)
+        await WORKSPACES.save(record)
     return run_id
 
 
@@ -376,14 +376,14 @@ def owns_task(task_id: str) -> bool:
     return task_id.startswith(f"{TASK_PREFIX}-")
 
 
-async def _record_for_task(task_id: str) -> Environment | None:
+async def _record_for_task(task_id: str) -> Workspace | None:
     """The environment whose *current* refresh this task id names.
 
     Keyed on the run id rather than the slug so a handle from a superseded
     refresh resolves to nothing instead of reporting a later run's progress.
     """
     run_id = task_id.removeprefix(f"{TASK_PREFIX}-")
-    for record in await ENVIRONMENTS.list_all():
+    for record in await WORKSPACES.list_all():
         if record.refresh_run_id == run_id:
             return record
     return None
@@ -411,7 +411,7 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
     return (result.output or "").strip() or None
 
 
-def _running_step(record: Environment) -> Any:
+def _running_step(record: Workspace) -> Any:
     return next((step for step in record.refresh_steps if step.status == "running"), None)
 
 
@@ -463,7 +463,7 @@ async def task_list() -> list[dict[str, Any]]:
     """
     tasks = [
         await task_status(refresh_task_id(record.refresh_run_id), with_output=False)
-        for record in await ENVIRONMENTS.list_all()
+        for record in await WORKSPACES.list_all()
         if record.refresh_run_id and record.refresh_status != "never"
     ]
     return sorted(tasks, key=lambda task: task.get("started_at") or "", reverse=True)
@@ -482,7 +482,7 @@ async def task_stop(task_id: str) -> dict[str, Any]:
     except Exception:
         logger.warning("Could not cancel refresh run %s", run_id, exc_info=True)
         return {"error": "could not cancel the refresh run", "task_id": task_id}
-    await ENVIRONMENTS.mark_refresh_settled(record.slug, "failed", error="cancelled")
+    await WORKSPACES.mark_refresh_settled(record.slug, "failed", error="cancelled")
     if record.refresh_sandbox_id:
         await _release_builder_sandbox(record.refresh_sandbox_id)
     return await task_status(task_id)
@@ -496,7 +496,7 @@ async def run_environment_refresh_tick(
         return await refresh_environment(slug, kind)
     results = [
         await refresh_environment(record.slug, kind)
-        for record in await ENVIRONMENTS.list_all()
+        for record in await WORKSPACES.list_all()
         if record.setup_script
     ]
     return {"status": "swept", "refreshed": results}

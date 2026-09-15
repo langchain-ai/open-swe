@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.environments import refresh
-from agent.environments import store as env_store
-from agent.environments.store import ENVIRONMENTS, Environment, EnvironmentCreate
+from agent.workspaces import refresh
+from agent.workspaces import store as env_store
+from agent.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate
 from tests.conftest import FakeStore
 
 
@@ -73,9 +73,9 @@ def test_daily_schedule_is_stable_and_staggered() -> None:
 
 
 def test_a_wedged_refresh_does_not_block_forever() -> None:
-    stale = Environment(slug="base", refresh_status="refreshing", refresh_started_at="2020-01-01")
+    stale = Workspace(slug="base", refresh_status="refreshing", refresh_started_at="2020-01-01")
     assert refresh.is_refresh_in_flight(stale) is False
-    assert refresh.is_refresh_in_flight(Environment(slug="base")) is False
+    assert refresh.is_refresh_in_flight(Workspace(slug="base")) is False
 
 
 # --- refresh ---
@@ -91,13 +91,11 @@ async def test_refresh_runs_the_script_then_captures_and_cleans_up(
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
         patch.object(refresh, "_release_builder_sandbox", release),
-        patch.object(refresh, "capture_environment_snapshot", capture),
+        patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
-        )
+        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
         result = await refresh.refresh_environment("base")
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     assert result["status"] == "success"
     assert _scripts_run(backend) == ["make setup"]
@@ -122,14 +120,14 @@ async def test_the_update_script_runs_after_setup_and_gates_the_capture(
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
-        patch.object(refresh, "capture_environment_snapshot", capture),
+        patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"),
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
             "ramon",
         )
         result = await refresh.refresh_environment("base")
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     assert result["status"] == "failed"
     assert result["script"] == "update"
@@ -150,20 +148,18 @@ async def test_a_failing_script_is_never_captured(fake_store: FakeStore) -> None
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
-        patch.object(refresh, "capture_environment_snapshot", capture),
+        patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
-        )
+        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
         # A snapshot from an earlier refresh; runs must keep booting from it.
-        await ENVIRONMENTS.mark_captured(
+        await WORKSPACES.mark_captured(
             "base",
             snapshot_id="snap-1",
             snapshot_name="openswe-environment-base",
             source_sandbox_id="sb-prior",
         )
         result = await refresh.refresh_environment("base")
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     assert result["status"] == "failed"
     capture.assert_not_awaited()
@@ -186,11 +182,9 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure(
         ),
         patch.object(refresh, "_release_builder_sandbox", release),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
-        )
+        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
         result = await refresh.refresh_environment("base")
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     assert result["status"] == "failed"
     assert result["error"] == "no capacity"
@@ -204,10 +198,8 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure(
 async def test_a_refresh_in_flight_blocks_a_second_one(fake_store: FakeStore) -> None:
     create = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
-        )
-        await ENVIRONMENTS.mark_refreshing("base")
+        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.mark_refreshing("base")
         result = await refresh.refresh_environment("base")
 
     assert result["status"] == "already_refreshing"
@@ -221,9 +213,7 @@ async def test_refresh_requires_the_langsmith_provider(
     monkeypatch.setenv("SANDBOX_TYPE", "local")
     create = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
-        )
+        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
         result = await refresh.refresh_environment("base")
 
     assert result["status"] == "unsupported"
@@ -236,10 +226,10 @@ async def test_the_nightly_sweep_only_visits_scripted_environments(
 ) -> None:
     refreshed = AsyncMock(return_value={"status": "success"})
     with patch.object(refresh, "refresh_environment", refreshed):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="scripted", setup_script="make setup"), "ramon"
+        await WORKSPACES.create(
+            WorkspaceCreate(name="scripted", setup_script="make setup"), "ramon"
         )
-        await ENVIRONMENTS.create(EnvironmentCreate(name="bare"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="bare"), "ramon")
         await refresh.run_environment_refresh_tick(None)
 
     assert [call.args[0] for call in refreshed.await_args_list] == ["scripted"]
@@ -258,20 +248,20 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
     with (
         patch.object(refresh, "_create_builder_sandbox", create_builder),
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
-        patch.object(refresh, "capture_environment_snapshot", capture),
+        patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"),
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
             "ramon",
         )
-        await ENVIRONMENTS.mark_captured(
+        await WORKSPACES.mark_captured(
             "base",
             snapshot_id="snap-1",
             snapshot_name="openswe-environment-base",
             source_sandbox_id="sb-prior",
         )
         result = await refresh.refresh_environment("base", "update")
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     assert result["status"] == "success"
     assert result["kind"] == "update"
@@ -288,8 +278,8 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
 async def test_an_update_needs_a_snapshot_to_update(fake_store: FakeStore) -> None:
     create_builder = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create_builder):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"),
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
             "ramon",
         )
         result = await refresh.refresh_environment("base", "update")
@@ -300,7 +290,7 @@ async def test_an_update_needs_a_snapshot_to_update(fake_store: FakeStore) -> No
 
 def test_a_snapshot_is_stale_once_its_capture_ages_out() -> None:
     """Gates the in-sandbox update: every sandbox copies the same stale image."""
-    ready = Environment(
+    ready = Workspace(
         slug="base",
         update_script="git pull",
         snapshot_status="ready",
@@ -336,7 +326,7 @@ def test_a_snapshot_is_stale_once_its_capture_ages_out() -> None:
 
 
 def test_an_update_is_due_only_when_stale_and_idle() -> None:
-    ready = Environment(
+    ready = Workspace(
         slug="base",
         update_script="git pull",
         snapshot_status="ready",
@@ -366,9 +356,7 @@ def test_an_update_is_due_only_when_stale_and_idle() -> None:
 @pytest.mark.asyncio
 async def test_a_new_sandbox_starts_a_background_update_when_one_is_due() -> None:
     start = AsyncMock(return_value="run-1")
-    due = Environment(
-        slug="base", update_script="git pull", snapshot_status="ready", snapshot_id="s"
-    )
+    due = Workspace(slug="base", update_script="git pull", snapshot_status="ready", snapshot_id="s")
     with patch.object(refresh, "start_refresh_run", start):
         assert await refresh.maybe_start_update(due) == "run-1"
         assert await refresh.maybe_start_update(None) is None
@@ -378,9 +366,7 @@ async def test_a_new_sandbox_starts_a_background_update_when_one_is_due() -> Non
 
 @pytest.mark.asyncio
 async def test_a_failed_trigger_never_reaches_the_sandbox_creation() -> None:
-    due = Environment(
-        slug="base", update_script="git pull", snapshot_status="ready", snapshot_id="s"
-    )
+    due = Workspace(slug="base", update_script="git pull", snapshot_status="ready", snapshot_id="s")
     with patch.object(refresh, "start_refresh_run", AsyncMock(side_effect=RuntimeError("down"))):
         assert await refresh.maybe_start_update(due) is None
 
@@ -393,9 +379,7 @@ async def test_cron_registration_is_idempotent(fake_store: FakeStore) -> None:
     client = MagicMock()
     client.crons.create = AsyncMock(return_value={"cron_id": "cron-1"})
     with patch.object(refresh, "_client", return_value=client):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
-        )
+        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
         assert await refresh.ensure_refresh_cron("base") == "cron-1"
         assert await refresh.ensure_refresh_cron("base") == "cron-1"
 
@@ -411,11 +395,9 @@ async def test_deleting_an_environment_removes_its_cron(fake_store: FakeStore) -
         patch.object(refresh, "_client", return_value=client),
         patch.object(env_store, "_delete_snapshot", AsyncMock()),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
-        )
+        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
         await refresh.ensure_refresh_cron("base")
-        assert await ENVIRONMENTS.remove("base") is True
+        assert await WORKSPACES.remove("base") is True
 
     client.crons.delete.assert_awaited_once_with("cron-1")
 
@@ -427,14 +409,14 @@ async def test_a_refresh_records_every_stage_it_reaches(fake_store: FakeStore) -
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
-        patch.object(refresh, "capture_environment_snapshot", AsyncMock()),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup", update_script="git pull"),
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
             "ramon",
         )
         await refresh.refresh_environment("base")
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     assert record is not None
     assert [(step.label, step.status) for step in record.refresh_steps] == [
@@ -455,13 +437,11 @@ async def test_the_step_that_broke_is_the_one_left_failed(fake_store: FakeStore)
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
-        patch.object(refresh, "capture_environment_snapshot", AsyncMock()),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
-        )
+        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
         await refresh.refresh_environment("base")
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     assert record is not None
     assert [(step.label, step.status, step.exit_code) for step in record.refresh_steps] == [
@@ -479,19 +459,17 @@ async def test_the_builder_is_published_while_it_lives_and_cleared_after(
     published: list[str | None] = []
 
     async def _capture(slug: str, sandbox_id: str, **_: object) -> None:
-        record = await ENVIRONMENTS.get(slug)
+        record = await WORKSPACES.get(slug)
         published.append(record.refresh_sandbox_id if record else None)
 
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
-        patch.object(refresh, "capture_environment_snapshot", _capture),
+        patch.object(refresh, "capture_workspace_snapshot", _capture),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", setup_script="make setup"), "ramon"
-        )
+        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
         await refresh.refresh_environment("base")
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     assert published == ["sb-builder"]
     assert record is not None

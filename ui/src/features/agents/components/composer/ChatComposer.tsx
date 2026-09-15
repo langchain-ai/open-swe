@@ -34,7 +34,7 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
+import type { ModelOption, Skill, WorkspaceOption } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
@@ -122,7 +122,7 @@ export interface ChatComposerProps {
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
   /** Environments a new thread can boot from. The picker appears only when there are several. */
-  environments?: Array<EnvironmentOption>
+  environments?: Array<WorkspaceOption>
   selectedEnvironment?: string | null
   onEnvironmentChange?: (slug: string | null) => void
   /** Paths offered by `@` autocomplete — in a thread, the files the agent has touched. */

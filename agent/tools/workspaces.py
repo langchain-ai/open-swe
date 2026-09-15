@@ -6,9 +6,9 @@ Wired into admin threads; each tool rechecks user or system authorization.
 import logging
 from typing import Any
 
-from agent.environments import refresh, store
 from agent.tools.admin_gate import configurable as _configurable
 from agent.tools.admin_gate import require_admin
+from agent.workspaces import refresh, store
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ _SUMMARY_FIELDS = {
 }
 
 
-def _summary(record: store.Environment) -> dict[str, Any]:
+def _summary(record: store.Workspace) -> dict[str, Any]:
     summary = record.model_dump(mode="json", include=_SUMMARY_FIELDS)
     summary["refresh_log_excerpt"] = store.log_excerpt(record.refresh_log)
     return summary
@@ -53,11 +53,11 @@ def _summary(record: store.Environment) -> dict[str, Any]:
 
 async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
     """Enqueue a refresh and describe the handle, or say why it cannot start."""
-    record = await store.ENVIRONMENTS.get(slug)
+    record = await store.WORKSPACES.get(slug)
     if record is None:
         return {
             "status": "error",
-            "error": f"no environment named {name!r}; publish_environment creates one",
+            "error": f"no environment named {name!r}; publish_workspace creates one",
         }
     if not record.setup_script:
         return {"status": "error", "error": f"environment {name!r} has no setup_script to run"}
@@ -74,7 +74,7 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
     return {"status": "started", "task_id": refresh.refresh_task_id(run_id)}
 
 
-async def list_environments() -> dict[str, Any]:
+async def list_workspaces() -> dict[str, Any]:
     """List every environment with its snapshot state.
 
     The one named ``default`` is what runs boot from; the rest are drafts.
@@ -84,17 +84,17 @@ async def list_environments() -> dict[str, Any]:
     """
     if error := await _require_admin():
         return {"ok": False, "error": error}
-    records = await store.ENVIRONMENTS.list_all()
+    records = await store.WORKSPACES.list_all()
     return {
         "ok": True,
         "environments": [
-            {**_summary(record), "is_default": record.slug == store.DEFAULT_ENVIRONMENT_SLUG}
+            {**_summary(record), "is_default": record.slug == store.DEFAULT_WORKSPACE_SLUG}
             for record in records
         ],
     }
 
 
-async def publish_environment(
+async def publish_workspace(
     name: str,
     prompt: str,
     setup_script: str | None = None,
@@ -110,7 +110,7 @@ async def publish_environment(
     create_params: dict[str, Any] | None = None,
     clear_create_params: bool = False,
 ) -> dict[str, Any]:
-    """Implement the `publish_environment` tool."""
+    """Implement the `publish_workspace` tool."""
     if error := await _require_admin():
         return {"ok": False, "error": error}
     sizing = {
@@ -135,10 +135,10 @@ async def publish_environment(
     # limit is refused in milliseconds rather than after minutes of capture.
     try:
         slug = store.slugify(name)
-        existing = await store.ENVIRONMENTS.get(slug)
-        definition: store.EnvironmentCreate | store.EnvironmentUpdate
+        existing = await store.WORKSPACES.get(slug)
+        definition: store.WorkspaceCreate | store.WorkspaceUpdate
         if existing is None:
-            definition = store.EnvironmentCreate(
+            definition = store.WorkspaceCreate(
                 name=name,
                 prompt=prompt,
                 setup_script=setup_script or "",
@@ -172,7 +172,7 @@ async def publish_environment(
                 update_values["base_snapshot_id"] = base_snapshot_id
             elif clear_base_snapshot_id:
                 update_values["base_snapshot_id"] = None
-            definition = store.EnvironmentUpdate(**update_values)
+            definition = store.WorkspaceUpdate(**update_values)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -198,7 +198,7 @@ async def publish_environment(
     # nothing was written — and the image nothing points at is discarded.
     login = _configurable().github_login
     try:
-        record = await store.ENVIRONMENTS.publish(
+        record = await store.WORKSPACES.publish(
             slug,
             definition,
             snapshot_id=snapshot_id,
@@ -219,8 +219,8 @@ async def publish_environment(
     return {"ok": True, "environment": _summary(record), "created": existing is None}
 
 
-async def refresh_environment_start(name: str) -> dict[str, Any]:
-    """Implement the `refresh_environment_start` tool."""
+async def refresh_workspace_start(name: str) -> dict[str, Any]:
+    """Implement the `refresh_workspace_start` tool."""
     if error := await _require_admin():
         return {"status": "error", "error": error}
     try:
@@ -230,8 +230,8 @@ async def refresh_environment_start(name: str) -> dict[str, Any]:
     return await _start_refresh(slug, name)
 
 
-async def delete_environment(name: str) -> dict[str, Any]:
-    """Implement the `delete_environment` tool."""
+async def delete_workspace(name: str) -> dict[str, Any]:
+    """Implement the `delete_workspace` tool."""
     if error := await _require_admin():
         return {"ok": False, "error": error}
     try:
@@ -239,7 +239,7 @@ async def delete_environment(name: str) -> dict[str, Any]:
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     try:
-        deleted = await store.ENVIRONMENTS.remove(slug)
+        deleted = await store.WORKSPACES.remove(slug)
     except Exception as exc:
         logger.exception("Failed to delete environment %s", slug)
         return {"ok": False, "error": f"failed to delete environment: {exc}"}

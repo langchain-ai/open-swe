@@ -30,9 +30,9 @@ function renderSection(isAdmin: boolean) {
 
 describe("EnvironmentsSection", () => {
   it("shows refresh outcomes without edit controls", async () => {
-    vi.spyOn(api, "listEnvironmentOptions").mockResolvedValue({
+    vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
-      environments: [
+      workspaces: [
         {
           slug: "default",
           name: "Default",
@@ -69,9 +69,9 @@ describe("EnvironmentsSection", () => {
   it("never renders a refresh log for non-admins, even if one arrives", async () => {
     // The API already omits it; a `bash -x` trace can carry expanded
     // credentials, so the row refuses to show one regardless.
-    vi.spyOn(api, "listEnvironmentOptions").mockResolvedValue({
+    vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
-      environments: [
+      workspaces: [
         {
           slug: "default",
           name: "Default",
@@ -92,9 +92,9 @@ describe("EnvironmentsSection", () => {
   })
 
   it("says so when an environment has never been refreshed", async () => {
-    vi.spyOn(api, "listEnvironmentOptions").mockResolvedValue({
+    vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
-      environments: [{ slug: "default", name: "Default", has_snapshot: false }],
+      workspaces: [{ slug: "default", name: "Default", has_snapshot: false }],
     })
 
     renderSection(true)
@@ -104,9 +104,9 @@ describe("EnvironmentsSection", () => {
   })
 
   it("directs non-admins to a workspace admin", async () => {
-    vi.spyOn(api, "listEnvironmentOptions").mockResolvedValue({
+    vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
-      environments: [],
+      workspaces: [],
     })
 
     renderSection(false)

@@ -7,7 +7,7 @@ base snapshot (clone the repos, install toolchains, warm caches), and an optiona
 dependency sync — run against the current snapshot at most hourly, and only while
 the environment is actually in use.
 
-:mod:`agent.environments.refresh` runs both scripts in a throwaway
+:mod:`agent.workspaces.refresh` runs both scripts in a throwaway
 sandbox and captures the result, nightly on a cron and on demand. Because the
 scripts are the definition, the snapshot can always be rebuilt, and the refresh
 outcome — status, timestamps, and a capped log — rides on the record for the
@@ -41,8 +41,8 @@ from agent.store import TypedStore, now_iso
 
 logger = logging.getLogger(__name__)
 
-ENVIRONMENTS_NAMESPACE: list[str] = ["environments"]
-DEFAULT_ENVIRONMENT_SLUG = "default"
+WORKSPACES_NAMESPACE: list[str] = ["workspaces"]
+DEFAULT_WORKSPACE_SLUG = "default"
 
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
 RefreshStatus = Literal["never", "refreshing", "success", "failed"]
@@ -328,7 +328,7 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
     return params
 
 
-class EnvironmentCreate(BaseModel):
+class WorkspaceCreate(BaseModel):
     name: str
     prompt: str = ""
     setup_script: str = ""
@@ -377,7 +377,7 @@ class EnvironmentCreate(BaseModel):
         return _validate_create_params(v)
 
 
-class EnvironmentUpdate(BaseModel):
+class WorkspaceUpdate(BaseModel):
     """Partial update: only the fields present are written."""
 
     name: str | None = None
@@ -441,7 +441,7 @@ class RefreshStep(BaseModel):
     log_path: str | None = None
 
 
-class Environment(BaseModel):
+class Workspace(BaseModel):
     # Assignment is validated because the store mutates records in place, and an
     # unvalidated write here is only caught on the next read — by which point the
     # record is already unreadable.
@@ -483,7 +483,7 @@ class Environment(BaseModel):
     @field_validator("create_params", mode="before")
     @classmethod
     def _null_create_params_are_empty(cls, v: Any) -> Any:
-        """``EnvironmentUpdate`` clears create params with an explicit null."""
+        """``WorkspaceUpdate`` clears create params with an explicit null."""
         return {} if v is None else v
 
     @field_validator("setup_script", "update_script", mode="before")
@@ -493,7 +493,7 @@ class Environment(BaseModel):
         return v.strip() if isinstance(v, str) else ("" if v is None else v)
 
     @classmethod
-    def seed(cls, create: EnvironmentCreate, created_by: str) -> Environment:
+    def seed(cls, create: WorkspaceCreate, created_by: str) -> Workspace:
         now = now_iso()
         return cls(
             slug=slugify(create.name),
@@ -583,26 +583,26 @@ class Environment(BaseModel):
         return option
 
 
-class EnvironmentStore(TypedStore[Environment]):
+class WorkspaceStore(TypedStore[Workspace]):
     def __init__(self) -> None:
-        super().__init__(ENVIRONMENTS_NAMESPACE, Environment)
+        super().__init__(WORKSPACES_NAMESPACE, Workspace)
 
-    async def list_all(self) -> list[Environment]:
+    async def list_all(self) -> list[Workspace]:
         records = await self.search_all()
         records.sort(key=lambda record: record.name)
         return records
 
-    async def save(self, record: Environment) -> Environment:
+    async def save(self, record: Workspace) -> Workspace:
         record.updated_at = now_iso()
         return await self.put(record.slug, record)
 
-    async def create(self, create: EnvironmentCreate, created_by: str) -> Environment:
-        record = Environment.seed(create, created_by)
+    async def create(self, create: WorkspaceCreate, created_by: str) -> Workspace:
+        record = Workspace.seed(create, created_by)
         if await self.get(record.slug) is not None:
             raise ValueError(f"environment {create.name!r} already exists")
         return await self.put(record.slug, record)
 
-    async def apply_update(self, slug: str, update: EnvironmentUpdate) -> Environment:
+    async def apply_update(self, slug: str, update: WorkspaceUpdate) -> Workspace:
         record = await self.get(slug)
         if record is None:
             raise ValueError(f"no environment named {slug!r}")
@@ -611,23 +611,23 @@ class EnvironmentStore(TypedStore[Environment]):
     async def publish(
         self,
         slug: str,
-        definition: EnvironmentCreate | EnvironmentUpdate,
+        definition: WorkspaceCreate | WorkspaceUpdate,
         *,
         snapshot_id: str,
         snapshot_name: str,
         source_sandbox_id: str,
         created_by: str,
-    ) -> Environment:
+    ) -> Workspace:
         """Write a definition and the image it was captured from as one store write.
 
         The image already exists by the time this runs; what must not happen is a
         record that carries the new definition but still points at the old image,
         or a new environment with no image at all. One ``put`` cannot land half.
         """
-        if isinstance(definition, EnvironmentCreate):
+        if isinstance(definition, WorkspaceCreate):
             if await self.get(slug) is not None:
                 raise ValueError(f"environment {definition.name!r} already exists")
-            record = Environment.seed(definition, created_by)
+            record = Workspace.seed(definition, created_by)
         else:
             existing = await self.get(slug)
             if existing is None:
@@ -646,13 +646,13 @@ class EnvironmentStore(TypedStore[Environment]):
         if record is None:
             return False
         await self.delete(slug)
-        from agent.environments.refresh import remove_refresh_cron
+        from agent.workspaces.refresh import remove_refresh_cron
 
         await remove_refresh_cron(record)
         await _delete_snapshot(record.snapshot_id)
         return True
 
-    async def mark_capturing(self, slug: str) -> Environment | None:
+    async def mark_capturing(self, slug: str) -> Workspace | None:
         record = await self.get(slug)
         if record is None:
             return None
@@ -662,7 +662,7 @@ class EnvironmentStore(TypedStore[Environment]):
 
     async def mark_capture_settled(
         self, slug: str, status: SnapshotStatus, message: str
-    ) -> Environment | None:
+    ) -> Workspace | None:
         """Land a failed capture on ``status``, keeping a previously ready snapshot."""
         record = await self.get(slug)
         if record is None:
@@ -679,7 +679,7 @@ class EnvironmentStore(TypedStore[Environment]):
         snapshot_name: str,
         source_sandbox_id: str,
         snapshot_tag: str = SNAPSHOT_TAG,
-    ) -> Environment | None:
+    ) -> Workspace | None:
         record = await self.get(slug)
         if record is None:
             return None
@@ -692,7 +692,7 @@ class EnvironmentStore(TypedStore[Environment]):
         )
         return await self.save(record)
 
-    async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Environment | None:
+    async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Workspace | None:
         record = await self.get(slug)
         if record is None:
             return None
@@ -708,7 +708,7 @@ class EnvironmentStore(TypedStore[Environment]):
 
     async def start_refresh_step(
         self, slug: str, label: str, *, log_path: str | None = None
-    ) -> Environment | None:
+    ) -> Workspace | None:
         """Open a step, replacing any earlier one with the same label."""
         record = await self.get(slug)
         if record is None:
@@ -721,7 +721,7 @@ class EnvironmentStore(TypedStore[Environment]):
 
     async def finish_refresh_step(
         self, slug: str, label: str, status: StepStatus, *, exit_code: int | None = None
-    ) -> Environment | None:
+    ) -> Workspace | None:
         record = await self.get(slug)
         if record is None:
             return None
@@ -735,7 +735,7 @@ class EnvironmentStore(TypedStore[Environment]):
         ]
         return await self.save(record)
 
-    async def mark_refresh_builder(self, slug: str, sandbox_id: str | None) -> Environment | None:
+    async def mark_refresh_builder(self, slug: str, sandbox_id: str | None) -> Workspace | None:
         """Publish (or clear) the builder a poll may read the live trace from."""
         record = await self.get(slug)
         if record is None:
@@ -750,7 +750,7 @@ class EnvironmentStore(TypedStore[Environment]):
         *,
         log: str | None = None,
         error: str | None = None,
-    ) -> Environment | None:
+    ) -> Workspace | None:
         """Record how the last rebuild went, without touching snapshot state.
 
         Snapshot state answers "is there something to boot from"; this answers
@@ -776,7 +776,7 @@ class EnvironmentStore(TypedStore[Environment]):
         return await self.save(record)
 
 
-def _apply(record: Environment, update: EnvironmentUpdate) -> Environment:
+def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
     if update.name is not None and slugify(update.name) != record.slug:
         raise ValueError("renaming an environment across slugs is not supported; create a new one")
@@ -804,7 +804,7 @@ def _apply(record: Environment, update: EnvironmentUpdate) -> Environment:
 
 
 def _stamp_captured(
-    record: Environment,
+    record: Workspace,
     *,
     snapshot_id: str,
     snapshot_name: str,
@@ -820,10 +820,10 @@ def _stamp_captured(
     record.last_captured_at = now_iso()
 
 
-ENVIRONMENTS = EnvironmentStore()
+WORKSPACES = WorkspaceStore()
 
 
-async def resolve_default_environment() -> Environment | None:
+async def load_default_workspace() -> Workspace | None:
     """Return the environment named ``default``, or ``None``.
 
     Fail-soft on purpose: this runs while a sandbox is being created, and a
@@ -831,41 +831,41 @@ async def resolve_default_environment() -> Environment | None:
     prompt rather than fail the run.
     """
     try:
-        return await ENVIRONMENTS.get(DEFAULT_ENVIRONMENT_SLUG)
+        return await WORKSPACES.get(DEFAULT_WORKSPACE_SLUG)
     except Exception:
         logger.warning("default environment resolution failed", exc_info=True)
         return None
 
 
-async def resolve_environment(slug: str | None) -> Environment | None:
+async def load_workspace(slug: str | None) -> Workspace | None:
     """Return the environment a run uses: the one it selected, else ``default``.
 
     Never raises, and a selection that no longer exists falls back to ``default``
     rather than failing the run.
     """
-    if not slug or slug == DEFAULT_ENVIRONMENT_SLUG:
-        return await resolve_default_environment()
+    if not slug or slug == DEFAULT_WORKSPACE_SLUG:
+        return await load_default_workspace()
     try:
-        record = await ENVIRONMENTS.get(slug)
+        record = await WORKSPACES.get(slug)
     except Exception:
         logger.warning("environment resolution failed for %s", slug, exc_info=True)
         record = None
     if record is None:
         logger.info("Environment %s is not configured; falling back to the default", slug)
-        return await resolve_default_environment()
+        return await load_default_workspace()
     return record
 
 
-async def list_environment_options(*, include_logs: bool = False) -> list[dict[str, Any]]:
+async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str, Any]]:
     """Every environment's picker/settings view; ``include_logs`` only for admins.
 
     Prompts and snapshot ids never appear here; picking an environment needs
     neither.
     """
-    return [record.option(include_log=include_logs) for record in await ENVIRONMENTS.list_all()]
+    return [record.option(include_log=include_logs) for record in await WORKSPACES.list_all()]
 
 
-def parse_environment_tag(text: str) -> tuple[str | None, str]:
+def parse_workspace_tag(text: str) -> tuple[str | None, str]:
     """Split a leading-or-inline ``env:<name>`` tag off a message.
 
     Returns ``(slug, text_without_the_tag)``; ``(None, text)`` when there is no
@@ -905,12 +905,12 @@ async def _delete_snapshot(snapshot_id: object) -> None:
         logger.warning("failed to delete superseded snapshot %s", snapshot_id, exc_info=True)
 
 
-async def capture_environment_snapshot(
+async def capture_workspace_snapshot(
     slug: str,
     sandbox_id: str,
     *,
     timeout: int = 600,
-) -> Environment:
+) -> Workspace:
     """Capture ``sandbox_id``'s filesystem as this environment's ``name:tag``.
 
     The name belongs to the environment and never moves; each capture publishes
@@ -926,26 +926,26 @@ async def capture_environment_snapshot(
     """
     require_capture_support()
 
-    record = await ENVIRONMENTS.get(slug)
+    record = await WORKSPACES.get(slug)
     if record is None:
         raise ValueError(f"no environment named {slug!r}")
 
     snapshot_name = record.published_snapshot_name
     previous_snapshot_id = record.snapshot_id
     previous_was_ready = record.ready_snapshot_id is not None
-    await ENVIRONMENTS.mark_capturing(slug)
+    await WORKSPACES.mark_capturing(slug)
     try:
         snapshot_id = await capture_sandbox_snapshot(sandbox_id, snapshot_name, timeout=timeout)
     except Exception as exc:
         logger.warning("snapshot capture failed for environment %s", slug, exc_info=True)
-        await ENVIRONMENTS.mark_capture_settled(
+        await WORKSPACES.mark_capture_settled(
             slug,
             "ready" if previous_was_ready else "failed",
             str(exc)[:1000],
         )
         raise
 
-    updated = await ENVIRONMENTS.mark_captured(
+    updated = await WORKSPACES.mark_captured(
         slug,
         snapshot_id=snapshot_id,
         snapshot_name=snapshot_name,
@@ -989,7 +989,7 @@ async def discard_unreferenced_snapshot(slug: str, snapshot_id: str) -> None:
     Re-reads first so a capture that *did* land — by this caller or a concurrent
     one — is never deleted from under it.
     """
-    current = await ENVIRONMENTS.get(slug)
+    current = await WORKSPACES.get(slug)
     if current is not None and current.snapshot_id == snapshot_id:
         return
     await _delete_snapshot(snapshot_id)
@@ -1003,6 +1003,6 @@ async def retire_superseded_snapshot(slug: str, previous_id: str | None, current
     """
     if not previous_id or previous_id == current_id:
         return
-    current = await ENVIRONMENTS.get(slug)
+    current = await WORKSPACES.get(slug)
     if current is not None and current.snapshot_id == current_id:
         await _delete_snapshot(previous_id)

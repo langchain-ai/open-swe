@@ -3,7 +3,7 @@
 Two things run in the background and both take long enough that the model has to
 be able to ask "how far has it got": a command launched with
 ``background_execute``, and an environment refresh started by
-``refresh_environment_start`` or the nightly cron. They keep their state in
+``refresh_workspace_start`` or the nightly cron. They keep their state in
 different places — a command's in the thread sandbox's own filesystem, a
 refresh's on the environment record plus a live trace on its builder — so each
 kind owns a provider that knows how to read it, and this tool routes by the
@@ -19,8 +19,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, NamedTuple
 
-from agent.environments import refresh as environment_refresh
 from agent.tools.admin_gate import require_admin
+from agent.workspaces import refresh as environment_refresh
 
 logger = logging.getLogger(__name__)
 

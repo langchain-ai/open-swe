@@ -454,14 +454,14 @@ export interface SandboxSettings {
 }
 
 /** What a non-admin needs to pick an environment for a new thread. */
-export type EnvironmentRefreshStatus =
+export type WorkspaceRefreshStatus =
   | "never"
   | "refreshing"
   | "success"
   | "failed"
 
 /** One stage of a rebuild: booting the builder, a script, the capture. */
-export interface EnvironmentRefreshStep {
+export interface WorkspaceRefreshStep {
   label: string
   status: "running" | "success" | "failed"
   started_at?: string
@@ -470,20 +470,20 @@ export interface EnvironmentRefreshStep {
   log_path?: string | null
 }
 
-export interface EnvironmentOption {
+export interface WorkspaceOption {
   slug: string
   name: string
   has_snapshot: boolean
-  refresh_status?: EnvironmentRefreshStatus
+  refresh_status?: WorkspaceRefreshStatus
   refresh_kind?: "full" | "update" | null
   refresh_finished_at?: string | null
   refresh_error?: string | null
   refresh_log_excerpt?: string | null
-  refresh_steps?: Array<EnvironmentRefreshStep>
+  refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
-export interface EnvironmentOptionList {
-  environments: Array<EnvironmentOption>
+export interface WorkspaceOptionList {
+  workspaces: Array<WorkspaceOption>
   default_slug: string
 }
 
@@ -837,8 +837,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ base_snapshot_id }),
     }),
-  listEnvironmentOptions: () =>
-    request<EnvironmentOptionList>("/environments/options"),
+  listWorkspaceOptions: () =>
+    request<WorkspaceOptionList>("/workspaces/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),

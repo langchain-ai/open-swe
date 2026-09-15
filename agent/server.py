@@ -76,9 +76,6 @@ from agent.dashboard.team_settings import (
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
-from agent.environments.store import (
-    resolve_environment,
-)
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
@@ -162,16 +159,16 @@ from agent.tools import (
     create_sandbox_file_download_url,
     create_sandbox_service_url,
     delete_automation,
-    delete_environment,
     delete_organization_skill,
     delete_user_skill,
+    delete_workspace,
     enter_plan_mode,
     fetch_url,
     get_thread,
     http_request,
     list_automations,
-    list_environments,
     list_threads,
+    list_workspaces,
     manage_baby_sit,
     manage_code_channel,
     manage_incident,
@@ -180,10 +177,10 @@ from agent.tools import (
     notify_automation_channel,
     open_pull_request,
     output_iframe,
-    publish_environment,
+    publish_workspace,
     read_user_settings,
     recreate_sandbox,
-    refresh_environment_start,
+    refresh_workspace_start,
     report_platform_issue,
     request_pr_review,
     sandbox_reset,
@@ -227,6 +224,9 @@ from agent.utils.thread_settings import (
     load_thread_settings,
     normalize_thread_settings,
     store_thread_settings,
+)
+from agent.workspaces.store import (
+    load_workspace,
 )
 
 client = get_client()
@@ -355,9 +355,9 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_start_new_thread",
-        "publish_environment",
-        "refresh_environment_start",
-        "delete_environment",
+        "publish_workspace",
+        "refresh_workspace_start",
+        "delete_workspace",
         "create_automation",
         "update_automation",
         "trigger_automation",
@@ -480,16 +480,16 @@ ADMIN_TOOLS = (
     update_automation,
     trigger_automation,
     delete_automation,
-    list_environments,
-    publish_environment,
-    refresh_environment_start,
-    delete_environment,
+    list_workspaces,
+    publish_workspace,
+    refresh_workspace_start,
+    delete_workspace,
     save_organization_skill,
     delete_organization_skill,
 )
 
 
-def environment_slug(cfg: RunConfig) -> str | None:
+def workspace_slug(cfg: RunConfig) -> str | None:
     """The environment this thread selected, if any."""
     return (cfg.environment or "").strip() or None
 
@@ -804,7 +804,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         async with aphase(self._thread_id, "prepare.environment"):
-            environment = await resolve_environment(environment_slug(cfg))
+            environment = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.sender_context"):
             sender_instructions, participant_identities = await asyncio.gather(
                 _resolve_user_custom_instructions(self._credential_login),
@@ -943,7 +943,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             return create_desktop_backend(_cfg)
         return await ensure_sandbox_for_thread(
             _thread_id,
-            environment_slug=environment_slug(_cfg),
+            workspace_slug=workspace_slug(_cfg),
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)

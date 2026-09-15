@@ -4,13 +4,13 @@ import { SettingsSection } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   api,
-  type EnvironmentOption,
-  type EnvironmentRefreshStatus,
-  type EnvironmentRefreshStep,
+  type WorkspaceOption,
+  type WorkspaceRefreshStatus,
+  type WorkspaceRefreshStep,
 } from "@/lib/api"
 import { formatRelativeTime } from "@/lib/utils"
 
-const REFRESH_LABEL: Record<EnvironmentRefreshStatus, string> = {
+const REFRESH_LABEL: Record<WorkspaceRefreshStatus, string> = {
   never: "Never refreshed",
   refreshing: "Refreshing…",
   success: "Refreshed",
@@ -20,8 +20,8 @@ const REFRESH_LABEL: Record<EnvironmentRefreshStatus, string> = {
 // A nightly rebuild from the base image and an hourly update of the current
 // snapshot read differently to a person deciding whether to trust the image.
 function refreshLabel(
-  status: EnvironmentRefreshStatus,
-  kind: EnvironmentOption["refresh_kind"]
+  status: WorkspaceRefreshStatus,
+  kind: WorkspaceOption["refresh_kind"]
 ): string {
   if (status === "success" && kind === "update") return "Updated"
   if (status === "success" && kind === "full") return "Rebuilt"
@@ -30,7 +30,7 @@ function refreshLabel(
   return REFRESH_LABEL[status]
 }
 
-const REFRESH_CLASS: Record<EnvironmentRefreshStatus, string> = {
+const REFRESH_CLASS: Record<WorkspaceRefreshStatus, string> = {
   never: "text-muted-foreground",
   refreshing: "text-muted-foreground",
   success: "text-muted-foreground",
@@ -43,13 +43,13 @@ function refreshedAt(timestamp: string | null | undefined): string | null {
   return Number.isNaN(parsed) ? null : formatRelativeTime(parsed)
 }
 
-const STEP_MARK: Record<EnvironmentRefreshStep["status"], string> = {
+const STEP_MARK: Record<WorkspaceRefreshStep["status"], string> = {
   running: "…",
   success: "✓",
   failed: "✕",
 }
 
-const STEP_CLASS: Record<EnvironmentRefreshStep["status"], string> = {
+const STEP_CLASS: Record<WorkspaceRefreshStep["status"], string> = {
   running: "border-border text-foreground",
   success: "border-border text-muted-foreground",
   failed: "border-destructive/40 text-destructive",
@@ -57,7 +57,7 @@ const STEP_CLASS: Record<EnvironmentRefreshStep["status"], string> = {
 
 // A rebuild runs for minutes to an hour; which stage it reached is the only
 // thing that separates slow from wedged while it is still going.
-function RefreshSteps({ steps }: { steps: Array<EnvironmentRefreshStep> }) {
+function RefreshSteps({ steps }: { steps: Array<WorkspaceRefreshStep> }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {steps.map((step) => (
@@ -78,7 +78,7 @@ function EnvironmentRow({
   isDefault,
   isAdmin,
 }: {
-  environment: EnvironmentOption
+  environment: WorkspaceOption
   isDefault: boolean
   isAdmin: boolean
 }) {
@@ -132,7 +132,7 @@ function EnvironmentRow({
 export function EnvironmentsSection({ isAdmin }: { isAdmin: boolean }) {
   const environments = useQuery({
     queryKey: ["environment-options"],
-    queryFn: api.listEnvironmentOptions,
+    queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     refetchInterval: 5000,
   })
@@ -155,12 +155,12 @@ export function EnvironmentsSection({ isAdmin }: { isAdmin: boolean }) {
         <p className="px-4 py-3.5 text-xs text-destructive">
           Could not load environments.
         </p>
-      ) : !options || options.environments.length === 0 ? (
+      ) : !options || options.workspaces.length === 0 ? (
         <p className="px-4 py-3.5 text-xs text-muted-foreground">
           No environments are configured.
         </p>
       ) : (
-        options.environments.map((environment) => (
+        options.workspaces.map((environment) => (
           <EnvironmentRow
             key={environment.slug}
             environment={environment}
