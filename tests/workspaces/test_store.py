@@ -550,6 +550,9 @@ async def test_environment_options_omit_admin_only_settings(fake_store: FakeStor
         {
             "slug": "default",
             "name": "default",
+            "repos": [],
+            "slack_channel_ids": [],
+            "is_default": True,
             "has_snapshot": True,
             "refresh_status": "success",
             "refresh_kind": None,

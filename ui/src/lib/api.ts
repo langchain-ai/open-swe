@@ -100,6 +100,7 @@ export interface SessionUser {
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
+  default_workspace: string | null
 }
 
 export interface ModelOption {
@@ -473,6 +474,9 @@ export interface WorkspaceRefreshStep {
 export interface WorkspaceOption {
   slug: string
   name: string
+  repos: Array<string>
+  slack_channel_ids: Array<string>
+  is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
   refresh_kind?: "full" | "update" | null

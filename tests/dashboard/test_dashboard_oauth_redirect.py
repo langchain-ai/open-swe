@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from agent.dashboard import auth_routes, routes
 from agent.dashboard.oauth import COOKIE_NAME, GithubUser, decode_session, sanitize_redirect_to
 from agent.users import User
+from tests.conftest import FakeStore
 
 
 def _stub_sign_in(monkeypatch: pytest.MonkeyPatch, user: User) -> AsyncMock:
@@ -456,3 +457,21 @@ def test_web_auth_callback_rejects_missing_state_cookie(monkeypatch) -> None:
 
     assert callback_response.status_code == 400
     assert "oauth state mismatch" in callback_response.json()["detail"]
+
+
+async def test_me_reports_default_workspace_from_preferences(fake_store: FakeStore) -> None:
+    fake_store.seed(
+        ["user_preferences"],
+        "alice",
+        {"default_visibility": "private", "default_workspace": "oss"},
+    )
+
+    result = await auth_routes.me({"sub": "alice", "email": "alice@example.com"})
+
+    assert result["default_workspace"] == "oss"
+
+
+async def test_me_reports_no_default_workspace_when_unset(fake_store: FakeStore) -> None:
+    result = await auth_routes.me({"sub": "bob", "email": "bob@example.com"})
+
+    assert result["default_workspace"] is None

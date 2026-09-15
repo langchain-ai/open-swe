@@ -613,6 +613,9 @@ class Workspace(BaseModel):
         option = {
             "slug": self.slug,
             "name": self.name,
+            "repos": list(self.repos),
+            "slack_channel_ids": list(self.slack_channel_ids),
+            "is_default": self.slug == DEFAULT_WORKSPACE_SLUG,
             "has_snapshot": self.snapshot_status == "ready",
             "refresh_status": self.refresh_status,
             "refresh_kind": self.refresh_kind,

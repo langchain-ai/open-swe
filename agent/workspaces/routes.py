@@ -106,7 +106,8 @@ async def api_update_environment(
     try:
         record = await WORKSPACES.apply_update(_normalized_slug(slug), body)
     except ValueError as e:
-        raise HTTPException(400, str(e)) from e
+        status = 409 if "already belongs to workspace" in str(e) else 400
+        raise HTTPException(status, str(e)) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
     return record
