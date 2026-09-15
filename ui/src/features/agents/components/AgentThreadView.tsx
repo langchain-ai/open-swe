@@ -265,7 +265,7 @@ export function AgentThreadView({
     setHydrateError(null)
     stream.hydrationPromise.catch((error: unknown) => {
       if (!active) return
-      setHydrateError(error ?? new Error("Message loading failed."))
+      setHydrateError(error)
       threadHydrationFailed(thread.id)
     })
     return () => {

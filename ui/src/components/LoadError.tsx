@@ -6,13 +6,11 @@ export function LoadError({
   title = "Something went wrong",
   context,
   retry = () => window.location.reload(),
-  back = { label: "Back to threads", href: "agents" },
 }: {
   error: unknown
   title?: string
   context?: string
   retry?: () => void
-  back?: { label: string; href: string }
 }) {
   const details = [
     context,
@@ -43,11 +41,9 @@ export function LoadError({
           <Button onClick={retry}>Try again</Button>
           <Button
             variant="outline"
-            onClick={() =>
-              window.location.assign(import.meta.env.BASE_URL + back.href)
-            }
+            onClick={() => window.location.assign(import.meta.env.BASE_URL)}
           >
-            {back.label}
+            Back to home
           </Button>
         </div>
       </div>

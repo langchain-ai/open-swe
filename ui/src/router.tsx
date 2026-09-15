@@ -16,9 +16,7 @@ export function getRouter() {
 
     scrollRestoration: true,
     defaultPreload: "intent",
-    defaultErrorComponent: ({ error }) => (
-      <LoadError error={error} back={{ label: "Back to home", href: "" }} />
-    ),
+    defaultErrorComponent: ({ error }) => <LoadError error={error} />,
     defaultPreloadStaleTime: 0,
   })
 

@@ -85,9 +85,7 @@ function AgentThreadContent({
         context={`Thread: ${threadId}`}
         error={
           threadQuery.error ??
-          (timedOut
-            ? "Loading took longer than 30 seconds. Check your connection and try again."
-            : "No thread data was returned.")
+          "Loading took longer than 30 seconds. Check your connection and try again."
         }
       />
     )
