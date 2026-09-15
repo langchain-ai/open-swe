@@ -507,6 +507,26 @@ describe("My PRs", () => {
     expect(bulkButton("Merge").disabled).toBe(true)
   })
 
+  it("does not offer a merge while the checks could not be read", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, {
+          reviewDecision: "approved",
+          ci: "unknown",
+          headSha: "b".repeat(40),
+        }),
+      ],
+    })
+    mount()
+    const row = (await screen.findByText("Change 1")).closest("tr")!
+    expect(within(row).getByText("Approved")).toBeTruthy()
+    expect(within(row).queryByRole("button", { name: "Merge" })).toBeNull()
+    fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
+    await screen.findByRole("group", { name: bulk })
+    expect(bulkButton("Merge").disabled).toBe(true)
+  })
+
   it("offers the merge method used last time", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,

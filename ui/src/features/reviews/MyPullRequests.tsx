@@ -83,11 +83,14 @@ function isFixable(pr: OpenPullRequest) {
 }
 
 // Approved is a review verdict, so it can stand while GitHub is still deciding
-// whether the branch merges. Merging needs that decision to have landed.
+// whether the branch merges or while the checks could not be read. Merging
+// needs both of those answers: GitHub blocks only required checks, so an
+// unread check could be a failing one.
 function isMergeable(pr: OpenPullRequest) {
   return (
     overallStatus(pr) === "Approved" &&
     pr.mergeable === true &&
+    (pr.ci === "passing" || pr.ci === "none") &&
     Boolean(pr.headSha)
   )
 }
