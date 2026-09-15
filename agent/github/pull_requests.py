@@ -41,7 +41,7 @@ from agent.database import postgres
 from agent.database.orm import NOW, Base
 from agent.github.comments import PrState, derive_pr_state
 from agent.github.pull_request_status import pull_request_identity
-from agent.repositories import Repository
+from agent.github.repositories import Repository
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client

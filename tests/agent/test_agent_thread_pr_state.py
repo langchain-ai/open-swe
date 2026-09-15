@@ -6,7 +6,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent import pull_requests
+from agent.github import pull_requests
 from agent.webhooks import common as webhook_common
 
 

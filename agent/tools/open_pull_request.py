@@ -12,8 +12,8 @@ from agent.analytics.usage import record_agent_pr_usage
 from agent.credential_scope import pr_author_login, private_credential_login
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
+from agent.github.pull_requests import PullRequest, ThreadLink
 from agent.github.token import GitHubUserAuthRequired
-from agent.pull_requests import PullRequest, ThreadLink
 from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,

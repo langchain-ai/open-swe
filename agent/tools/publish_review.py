@@ -10,12 +10,12 @@ from langgraph.prebuilt import InjectedState
 from agent.analytics.usage import record_reviewer_publication
 from agent.dashboard.team_settings import get_team_review_trace_links_enabled
 from agent.github.checks import review_check_conclusion
+from agent.github.pull_requests import PullRequest
 from agent.github.thread_token import (
     GitHubAuthError,
     get_github_token,
     invalidate_cached_github_token,
 )
-from agent.pull_requests import PullRequest
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
     REVIEW_FINDING_CAP,

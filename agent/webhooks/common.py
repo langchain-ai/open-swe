@@ -70,6 +70,7 @@ from agent.github.comments import (
     verify_github_signature,
 )
 from agent.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
+from agent.github.pull_requests import PullRequestEvent
 from agent.github.thread_token import (
     cache_github_token_for_thread,
     invalidate_cached_github_token,
@@ -79,7 +80,6 @@ from agent.github.token import (
 )
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.prompts import render_prompt
-from agent.pull_requests import PullRequestEvent
 from agent.review.enabled_repos import is_review_repo_enabled
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,

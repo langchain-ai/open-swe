@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent import pull_requests
-from agent.pull_requests import PullRequest, ThreadLink
-from agent.repositories import Repository
+from agent.github import pull_requests
+from agent.github.pull_requests import PullRequest, ThreadLink
+from agent.github.repositories import Repository
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
