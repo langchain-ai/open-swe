@@ -1146,13 +1146,18 @@ async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_th
     assert "admin_thread" not in configurable
 
 
+@pytest.mark.parametrize("trigger", ["schedule", "github_issue_opened"])
 async def test_launch_scheduled_agent_run_connects_slack_thread(
-    fake_client, auth, monkeypatch
-) -> None:  # noqa: ANN001, ARG001
+    fake_client: _FakeClient,
+    auth: None,
+    monkeypatch: pytest.MonkeyPatch,
+    trigger: schedules.AutomationTrigger,
+) -> None:
     record = {
         "id": "sched_1",
         "name": "Linear queue",
         "prompt": "Work the next Linear issue",
+        "trigger": trigger,
         "schedule": "*/15 * * * *",
         "repo": {"owner": "langchain-ai", "name": "open-swe"},
         "slack_channel_id": "C0123456789",
@@ -1176,13 +1181,23 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
 
     monkeypatch.setattr(schedules, "post_slack_top_level_message_with_ts", fake_post)
 
-    result = await schedules.launch_scheduled_agent_run("sched_1")
+    if trigger == "github_issue_opened":
+        results = await schedules.launch_github_issue_automations(
+            {
+                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "issue": {"number": 42, "title": "Bug"},
+            },
+            "delivery-1",
+        )
+        result = results[0]
+    else:
+        result = await schedules.launch_scheduled_agent_run("sched_1")
 
     expected_thread_id = result["thread_id"]
     assert uuid.UUID(expected_thread_id).version == 4
     assert posted["channel_id"] == "C0123456789"
     assert "Linear queue" in posted["text"]
-    metadata = fake_client.threads.created[0]["metadata"]
+    metadata = (await fake_client.threads.get(expected_thread_id))["metadata"]
     slack_thread = metadata["source_context"]["slack_thread"]
     assert slack_thread["channel_id"] == "C0123456789"
     assert slack_thread["thread_ts"] == "1784302353.900029"
@@ -1202,13 +1217,18 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     assert mapping["run_id"] == "run_123"
 
 
+@pytest.mark.parametrize("trigger", ["schedule", "github_issue_opened"])
 async def test_launch_conditional_slack_schedule_starts_silently(
-    fake_client, auth, monkeypatch
-) -> None:  # noqa: ANN001, ARG001
+    fake_client: _FakeClient,
+    auth: None,
+    monkeypatch: pytest.MonkeyPatch,
+    trigger: schedules.AutomationTrigger,
+) -> None:
     record = {
         "id": "sched_1",
         "name": "Dependency check",
         "prompt": "Open a PR if dependencies need updates",
+        "trigger": trigger,
         "schedule": "0 9 * * 1",
         "repo": {"owner": "langchain-ai", "name": "open-swe"},
         "slack_channel_id": "C0123456789",
@@ -1231,7 +1251,17 @@ async def test_launch_conditional_slack_schedule_starts_silently(
 
     monkeypatch.setattr(schedules, "post_slack_top_level_message_with_ts", fail_if_posted)
 
-    result = await schedules.launch_scheduled_agent_run("sched_1")
+    if trigger == "github_issue_opened":
+        results = await schedules.launch_github_issue_automations(
+            {
+                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "issue": {"number": 42, "title": "Bug"},
+            },
+            "delivery-1",
+        )
+        result = results[0]
+    else:
+        result = await schedules.launch_scheduled_agent_run("sched_1")
 
     assert result["status"] == "started"
     run = fake_client.runs.created[0]
@@ -1245,7 +1275,7 @@ async def test_launch_conditional_slack_schedule_starts_silently(
     }
     prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
     assert "notify_automation_channel" in (prompt.findtext("content") or "")
-    metadata = fake_client.threads.created[0]["metadata"]
+    metadata = (await fake_client.threads.get(result["thread_id"]))["metadata"]
     assert "source_context" not in metadata
 
 

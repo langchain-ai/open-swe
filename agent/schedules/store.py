@@ -489,8 +489,10 @@ def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> st
     )
 
 
-def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | None) -> str:
-    prompt = str(record["prompt"])
+def _scheduled_prompt(
+    record: dict[str, Any], slack_thread: dict[str, Any] | None, *, prompt: str | None = None
+) -> str:
+    prompt = str(record["prompt"]) if prompt is None else prompt
     if slack_thread:
         return render_prompt("runs/scheduled-slack-thread.md", prompt=prompt)
     slack_channel_id = record.get("slack_channel_id")
@@ -711,7 +713,7 @@ async def _launch_agent_schedule_record(
         thread_id,
         _AGENT_ASSISTANT_ID,
         input=build_run_input(
-            prompt or _scheduled_prompt(record, slack_thread),
+            _scheduled_prompt(record, slack_thread, prompt=prompt),
             input_context,
             systems=[
                 {
