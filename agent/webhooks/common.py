@@ -1320,7 +1320,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             extra={"pr_url": pr_url},
             exc_info=True,
         )
-        thread_ids = list(await pull_request.discover_threads())
+        thread_ids = list(await pull_request.discover_threads() or [])
 
     for thread_id in thread_ids:
         try:
