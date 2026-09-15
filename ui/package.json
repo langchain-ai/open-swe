@@ -42,6 +42,7 @@
     "react-icons": "^5.7.0",
     "shadcn": "^4.19.0",
     "shiki": "^4.4.3",
+    "sonner": "^2.0.8",
     "streamdown": "^2.6.0",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",

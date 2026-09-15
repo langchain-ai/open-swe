@@ -3,9 +3,11 @@
 import asyncio
 import re
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx2
+from fastapi import HTTPException
 
 from agent.github.http import (
     GITHUB_API_BASE,
@@ -16,6 +18,9 @@ from agent.github.http import (
 
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
+_SEARCH_PAGE_SIZE = 100
+# GitHub search returns at most 1000 results per query.
+_SEARCH_MAX_PAGES = 10
 _SHA_PATTERN = re.compile(r"[0-9a-fA-F]{40,64}")
 _FAILING_CHECK_CONCLUSIONS = frozenset(
     {"failure", "timed_out", "action_required", "startup_failure"}
@@ -359,3 +364,213 @@ async def get_pull_request_statuses(records: Sequence[object], token: str) -> li
     """Return live status for every tracked pull request record."""
     async with github_client(token=token) as client:
         return [await _pull_request_status(client, record) for record in records]
+
+
+async def _fetch_review_decision(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
+) -> str | None:
+    latest: dict[str, tuple[int, str]] = {}
+    page = 1
+    try:
+        while True:
+            response = await github_request(
+                client,
+                "GET",
+                f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/reviews",
+                params={"per_page": "100", "page": str(page)},
+            )
+            response.raise_for_status()
+            reviews = response.json()
+            if not isinstance(reviews, list):
+                return None
+            for review in reviews:
+                if not isinstance(review, dict):
+                    continue
+                state = review.get("state")
+                user = review.get("user")
+                login = user.get("login") if isinstance(user, dict) else None
+                review_id = review.get("id")
+                if state not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+                    continue
+                if isinstance(login, str) and isinstance(review_id, int):
+                    key = login.lower()
+                    if review_id > latest.get(key, (-1, ""))[0]:
+                        latest[key] = (review_id, state)
+            if len(reviews) < 100:
+                break
+            page += 1
+    except httpx2.HTTPError, ValueError:
+        return None
+    decisions = {state for _, state in latest.values()}
+    if "CHANGES_REQUESTED" in decisions:
+        return "changes_requested"
+    return "approved" if "APPROVED" in decisions else "none"
+
+
+async def list_open_pull_requests(
+    login: str,
+    token: str,
+    repo: str = "",
+    *,
+    lightweight: bool = False,
+    sort: str = "updated",
+    direction: str = "desc",
+    page: int = 1,
+) -> dict[str, Any]:
+    """Read the caller's open PRs and current-head checks using their own token."""
+    if not _OWNER_PATTERN.fullmatch(login):
+        raise HTTPException(422, "invalid GitHub login")
+    if not 1 <= page <= _SEARCH_MAX_PAGES:
+        raise HTTPException(422, "invalid PR page")
+    repositories = list(dict.fromkeys(repo.split(","))) if repo else []
+    if any(
+        pull_request_identity({"repo_full_name": name, "number": 1}) is None
+        for name in repositories
+    ):
+        raise HTTPException(422, "repository must be owner/repo")
+    if sort not in {"created", "updated"} or direction not in {"asc", "desc"}:
+        raise HTTPException(422, "invalid PR sort")
+    query = f"is:pr is:open author:{login}"
+    for name in repositories:
+        query += f" repo:{name}"
+    async with github_client(token=token) as client:
+        try:
+            response = await github_request(
+                client,
+                "GET",
+                f"{GITHUB_API_BASE}/search/issues",
+                params={
+                    "q": query,
+                    "per_page": str(_SEARCH_PAGE_SIZE),
+                    "page": str(page),
+                    "sort": sort,
+                    "order": direction,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx2.HTTPError, ValueError) as exc:
+            raise HTTPException(502, "Could not load open PRs from GitHub") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise HTTPException(502, "Invalid GitHub PR search response")
+        # A timed-out search answers with an arbitrary subset of the matches, so
+        # any list built from it would silently hide most of a user's PRs.
+        if payload.get("incomplete_results") is True:
+            return {
+                "pullRequests": [],
+                "nextPage": None,
+                "incomplete": True,
+                "updatedAt": datetime.now(UTC).isoformat(),
+            }
+        semaphore = asyncio.Semaphore(4)
+
+        async def load(item: object) -> dict[str, Any] | None:
+            async with semaphore:
+                return await load_open_pull_request(client, item, details=not lightweight)
+
+        items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
+    total = payload.get("total_count")
+    has_more = (
+        isinstance(total, int) and page * _SEARCH_PAGE_SIZE < total and page < _SEARCH_MAX_PAGES
+    )
+    return {
+        "pullRequests": [item for item in items if item is not None],
+        "nextPage": page + 1 if has_more else None,
+        "incomplete": payload.get("incomplete_results") is True,
+        "updatedAt": datetime.now(UTC).isoformat(),
+    }
+
+
+async def load_open_pull_request(
+    client: httpx2.AsyncClient, item: object, details: bool = True
+) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    repository_url = item.get("repository_url")
+    prefix = f"{GITHUB_API_BASE}/repos/"
+    full_name = item.get("repo_full_name")
+    if not isinstance(full_name, str):
+        full_name = (
+            repository_url.removeprefix(prefix)
+            if isinstance(repository_url, str) and repository_url.startswith(prefix)
+            else ""
+        )
+    identity = pull_request_identity({"repo_full_name": full_name, "number": item.get("number")})
+    if identity is None:
+        return None
+    owner, name, number = identity
+    pull = await _fetch_pull_request(client, owner, name, number) if details else None
+    if pull is not None and _live_state(pull) != "open":
+        return None
+    result: dict[str, Any] = {
+        "repo": full_name,
+        "number": number,
+        "title": item.get("title", ""),
+        "createdAt": item.get("created_at"),
+        "updatedAt": item.get("updated_at"),
+        "draft": item.get("draft"),
+        "detailsLoading": not details,
+        "additions": None,
+        "deletions": None,
+        "mergeable": None,
+        "mergeState": "unknown",
+        "headSha": None,
+        "headRef": None,
+        "statusAvailable": pull is not None,
+        "ci": "unknown",
+        "reviewDecision": None,
+        "failingChecks": [],
+        "pendingChecks": [],
+    }
+    if pull is None:
+        return result
+    result.update(
+        title=pull.get("title", ""),
+        createdAt=pull.get("created_at"),
+        updatedAt=pull.get("updated_at"),
+        draft=pull.get("draft"),
+        additions=pull.get("additions"),
+        deletions=pull.get("deletions"),
+        mergeable=pull.get("mergeable"),
+        mergeState=pull.get("mergeable_state", "unknown"),
+    )
+    head = pull.get("head")
+    result["headRef"] = head.get("ref") if isinstance(head, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
+        return result
+    result["headSha"] = sha
+    runs, statuses, decision = await asyncio.gather(
+        _fetch_check_runs(client, owner, name, sha),
+        _fetch_commit_statuses(client, owner, name, sha),
+        _fetch_review_decision(client, owner, name, number),
+    )
+    result["reviewDecision"] = decision
+    if runs is None or statuses is None:
+        return result
+    failed, _, _ = _normalize_checks(runs, statuses)
+    failures = [check["name"] for check in failed]
+    failures.extend(
+        run.get("name", "Unnamed check")
+        for run in runs
+        if run.get("status") == "completed" and run.get("conclusion") in {"cancelled", "stale"}
+    )
+    pending = [
+        run.get("name", "Unnamed check") for run in runs if run.get("status") != "completed"
+    ] + [
+        status.get("context", "Unnamed status")
+        for status in statuses
+        if status.get("state") == "pending"
+    ]
+    result.update(
+        failingChecks=failures,
+        pendingChecks=pending,
+        ci="failing"
+        if failures
+        else "pending"
+        if pending
+        else "passing"
+        if runs or statuses
+        else "none",
+    )
+    return result
