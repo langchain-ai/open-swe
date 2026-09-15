@@ -264,6 +264,20 @@
         "title": "DesktopHandoffExchange",
         "type": "object"
       },
+      "DuplicateIncidentResponse": {
+        "properties": {
+          "status": {
+            "const": "duplicate",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DuplicateIncidentResponse",
+        "type": "object"
+      },
       "EnabledReviewRepoUpdate": {
         "properties": {
           "enabled": {
@@ -897,6 +911,68 @@
           "message"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "IncidentCommandBody": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "ask",
+              "investigate_again",
+              "pause",
+              "resume",
+              "complete",
+              "reopen"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 8000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "request_id",
+          "action"
+        ],
+        "title": "IncidentCommandBody",
+        "type": "object"
+      },
+      "IncidentSettingsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "policy": {
+            "additionalProperties": true,
+            "title": "Policy",
+            "type": "object"
+          }
+        },
+        "required": [
+          "expected_version",
+          "policy"
+        ],
+        "title": "IncidentSettingsBody",
         "type": "object"
       },
       "JsonObject": {
@@ -1744,10 +1820,17 @@
             "title": "Repo"
           },
           "schedule": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Schedule",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule"
           },
           "slack_channel_id": {
             "anyOf": [
@@ -1768,11 +1851,19 @@
             ],
             "title": "Slack Notification Mode",
             "type": "string"
+          },
+          "trigger": {
+            "default": "schedule",
+            "enum": [
+              "schedule",
+              "github_issue_opened"
+            ],
+            "title": "Trigger",
+            "type": "string"
           }
         },
         "required": [
-          "prompt",
-          "schedule"
+          "prompt"
         ],
         "title": "ScheduleCreateBody",
         "type": "object"
@@ -1897,6 +1988,21 @@
               }
             ],
             "title": "Slack Notification Mode"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "enum": [
+                  "schedule",
+                  "github_issue_opened"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger"
           }
         },
         "title": "ScheduleUpdateBody",
@@ -2661,7 +2767,8 @@
         ],
         "summary": "Admin Get Reviewer Eval",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -2710,7 +2817,8 @@
         ],
         "summary": "Admin Cancel Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -2770,7 +2878,8 @@
         ],
         "summary": "Admin List User Mappings",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-mappings"
         ]
       }
     },
@@ -2821,7 +2930,8 @@
         ],
         "summary": "Admin Delete User Mapping",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-mappings"
         ]
       }
     },
@@ -2851,7 +2961,8 @@
         ],
         "summary": "Api List Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       },
       "post": {
@@ -2895,7 +3006,8 @@
         ],
         "summary": "Api Create Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       }
     },
@@ -2940,7 +3052,8 @@
         ],
         "summary": "Api Delete Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       },
       "get": {
@@ -2985,7 +3098,8 @@
         ],
         "summary": "Api Get Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       },
       "put": {
@@ -3040,7 +3154,8 @@
         ],
         "summary": "Api Update Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       }
     },
@@ -3071,8 +3186,26 @@
             "required": false,
             "schema": {
               "default": 10,
+              "maximum": 100,
+              "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],
@@ -3107,7 +3240,142 @@
         ],
         "summary": "Api Agent Usage Leaderboard",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/outbox-status": {
+      "get": {
+        "operationId": "api_analytics_outbox_status_dashboard_api_analytics_outbox_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Analytics Outbox Status Dashboard Api Analytics Outbox Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Analytics Outbox Status",
+        "tags": [
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/pr-merge-rate-by-model": {
+      "get": {
+        "operationId": "api_pr_merge_rate_by_model_dashboard_api_analytics_pr_merge_rate_by_model_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "30d",
+              "title": "Period"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maturity_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 365,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Maturity Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Pr Merge Rate By Model Dashboard Api Analytics Pr Merge Rate By Model Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Pr Merge Rate By Model",
+        "tags": [
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/readiness": {
+      "get": {
+        "operationId": "api_analytics_readiness_dashboard_api_analytics_readiness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Analytics Readiness Dashboard Api Analytics Readiness Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Analytics Readiness",
+        "tags": [
+          "dashboard",
+          "analytics"
         ]
       }
     },
@@ -3156,7 +3424,8 @@
         },
         "summary": "Auth Callback",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -3199,7 +3468,8 @@
         },
         "summary": "Auth Desktop Exchange",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -3290,7 +3560,8 @@
         },
         "summary": "Auth Login",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -3309,7 +3580,8 @@
         },
         "summary": "Auth Logout",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -3342,7 +3614,8 @@
         ],
         "summary": "Api List Enabled Review Repos",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "put": {
@@ -3393,7 +3666,8 @@
         ],
         "summary": "Api Set Enabled Review Repo",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -3421,7 +3695,8 @@
         ],
         "summary": "Api List Environments",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "environments"
         ]
       },
       "post": {
@@ -3465,7 +3740,8 @@
         ],
         "summary": "Api Create Environment",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "environments"
         ]
       }
     },
@@ -3494,7 +3770,8 @@
         ],
         "summary": "Api Environment Options",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "environments"
         ]
       }
     },
@@ -3539,7 +3816,8 @@
         ],
         "summary": "Api Delete Environment",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "environments"
         ]
       },
       "get": {
@@ -3584,7 +3862,8 @@
         ],
         "summary": "Api Get Environment",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "environments"
         ]
       },
       "put": {
@@ -3639,7 +3918,8 @@
         ],
         "summary": "Api Update Environment",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "environments"
         ]
       }
     },
@@ -3689,7 +3969,435 @@
         ],
         "summary": "Api Refresh Environment",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "environments"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/documents/history": {
+      "get": {
+        "operationId": "search_history_dashboard_api_incidents_documents_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Search History Dashboard Api Incidents Documents History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Search History",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/documents/{incident_id}": {
+      "get": {
+        "operationId": "get_document_dashboard_api_incidents_documents__incident_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Document Dashboard Api Incidents Documents  Incident Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Document",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/records": {
+      "get": {
+        "operationId": "list_incidents_dashboard_api_incidents_records_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "inactive",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "View"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Incidents Dashboard Api Incidents Records Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "List Incidents",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/records/{incident_id}": {
+      "get": {
+        "operationId": "get_incident_dashboard_api_incidents_records__incident_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Incident Dashboard Api Incidents Records  Incident Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Incident",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/records/{incident_id}/commands": {
+      "post": {
+        "operationId": "submit_command_dashboard_api_incidents_records__incident_id__commands_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentCommandBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit Command Dashboard Api Incidents Records  Incident Id  Commands Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Submit Command",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/settings": {
+      "get": {
+        "operationId": "get_settings_dashboard_api_incidents_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Settings Dashboard Api Incidents Settings Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Settings",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      },
+      "patch": {
+        "operationId": "update_settings_dashboard_api_incidents_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentSettingsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Settings Dashboard Api Incidents Settings Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Update Settings",
+        "tags": [
+          "dashboard",
+          "incidents"
         ]
       }
     },
@@ -3717,7 +4425,8 @@
         ],
         "summary": "Me",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -3741,7 +4450,8 @@
         ],
         "summary": "Api Delete My Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-instructions"
         ]
       },
       "get": {
@@ -3767,7 +4477,8 @@
         ],
         "summary": "Api Get My Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-instructions"
         ]
       },
       "put": {
@@ -3813,7 +4524,68 @@
         ],
         "summary": "Api Put My Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-instructions"
+        ]
+      }
+    },
+    "/dashboard/api/me/local-trace-url/{thread_id}": {
+      "get": {
+        "operationId": "api_get_local_trace_url_dashboard_api_me_local_trace_url__thread_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Api Get Local Trace Url Dashboard Api Me Local Trace Url  Thread Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Local Trace Url",
+        "tags": [
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -3841,7 +4613,8 @@
         ],
         "summary": "Api Get My Preferences",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-preferences"
         ]
       },
       "put": {
@@ -3887,7 +4660,8 @@
         ],
         "summary": "Api Put My Preferences",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-preferences"
         ]
       }
     },
@@ -3915,7 +4689,8 @@
         ],
         "summary": "Disconnect My Notion",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       },
       "get": {
@@ -3941,7 +4716,8 @@
         ],
         "summary": "Get My Notion Status",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       }
     },
@@ -3970,7 +4746,8 @@
         ],
         "summary": "Get My Mapping",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-mappings"
         ]
       }
     },
@@ -4296,7 +5073,8 @@
         },
         "summary": "Notion Callback",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       }
     },
@@ -4345,7 +5123,8 @@
         ],
         "summary": "Notion Desktop Exchange",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       }
     },
@@ -4415,7 +5194,8 @@
         ],
         "summary": "Notion Login",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       }
     },
@@ -4438,7 +5218,8 @@
         },
         "summary": "Options",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "options"
         ]
       }
     },
@@ -5069,7 +5850,8 @@
         ],
         "summary": "Get My Profile",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "profiles"
         ]
       },
       "put": {
@@ -5115,7 +5897,8 @@
         ],
         "summary": "Put My Profile",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "profiles"
         ]
       }
     },
@@ -5166,7 +5949,8 @@
         ],
         "summary": "List Repos",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "github"
         ]
       }
     },
@@ -5196,7 +5980,8 @@
         ],
         "summary": "Api List Review Styles",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "post": {
@@ -5240,7 +6025,8 @@
         ],
         "summary": "Api Create Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5285,7 +6071,8 @@
         ],
         "summary": "Api Delete Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "get": {
@@ -5330,7 +6117,8 @@
         ],
         "summary": "Api Get Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "put": {
@@ -5385,7 +6173,8 @@
         ],
         "summary": "Api Update Review Style Prompt",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5432,7 +6221,8 @@
         ],
         "summary": "Api Analyze Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5479,7 +6269,8 @@
         ],
         "summary": "Api Cancel Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5539,7 +6330,8 @@
         ],
         "summary": "Api List Reviews",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5606,7 +6398,8 @@
         ],
         "summary": "Api Get Review",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5673,7 +6466,8 @@
         ],
         "summary": "Api Get Review Chat",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5740,7 +6534,8 @@
         ],
         "summary": "Api List Review Chat Threads",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5812,7 +6607,8 @@
         ],
         "summary": "Api Delete Review Chat Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5884,7 +6680,8 @@
         ],
         "summary": "Api Review Chat Commands",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5956,7 +6753,8 @@
         ],
         "summary": "Api Review Chat History",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6028,7 +6826,8 @@
         ],
         "summary": "Api Review Chat State",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6100,7 +6899,8 @@
         ],
         "summary": "Api Review Chat Stream Events",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6167,7 +6967,8 @@
         ],
         "summary": "Api List Review Comments",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "post": {
@@ -6242,7 +7043,8 @@
         ],
         "summary": "Api Create Review Comment",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6328,7 +7130,8 @@
         ],
         "summary": "Api Update Review Comment",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6395,7 +7198,8 @@
         ],
         "summary": "Api Get Review Diff",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6467,7 +7271,8 @@
         ],
         "summary": "Api Get Review Image",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6534,7 +7339,8 @@
         ],
         "summary": "Api Re Review",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6565,7 +7371,8 @@
         ],
         "summary": "Api Get Sandbox Settings",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "environments"
         ]
       },
       "put": {
@@ -6614,7 +7421,8 @@
         ],
         "summary": "Api Set Sandbox Settings",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "environments"
         ]
       }
     },
@@ -7083,7 +7891,8 @@
         ],
         "summary": "Api List Allowed Slack Bots",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "slack"
         ]
       },
       "post": {
@@ -7127,7 +7936,8 @@
         ],
         "summary": "Api Allow Slack Bot",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "slack"
         ]
       }
     },
@@ -7187,7 +7997,8 @@
         ],
         "summary": "Api Remove Allowed Slack Bot",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "slack"
         ]
       }
     },
@@ -7217,7 +8028,8 @@
         ],
         "summary": "Api List Slack Bots",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "slack"
         ]
       }
     },
@@ -7267,7 +8079,9 @@
         },
         "summary": "Slack Callback",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "slack",
+          "slack"
         ]
       }
     },
@@ -7316,7 +8130,9 @@
         ],
         "summary": "Slack Desktop Exchange",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "slack",
+          "slack"
         ]
       }
     },
@@ -7387,7 +8203,9 @@
         ],
         "summary": "Slack Login",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "slack",
+          "slack"
         ]
       }
     },
@@ -7415,7 +8233,8 @@
         ],
         "summary": "Api Get Team Settings",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "team-settings"
         ]
       },
       "put": {
@@ -7461,7 +8280,8 @@
         ],
         "summary": "Api Put Team Settings",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "team-settings"
         ]
       }
     },
@@ -7514,7 +8334,8 @@
         ],
         "summary": "Api List Threads",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7735,7 +8556,8 @@
         ],
         "summary": "Api List Threads Page",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7766,7 +8588,8 @@
         ],
         "summary": "Api List Pinned Threads",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7839,7 +8662,8 @@
         ],
         "summary": "Api List Thread Projects",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7889,7 +8713,8 @@
         ],
         "summary": "Api Get Pull Request Checks",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7919,7 +8744,8 @@
         ],
         "summary": "Api Resolve All Threads",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7964,7 +8790,8 @@
         ],
         "summary": "Api Delete Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       },
       "get": {
@@ -7994,11 +8821,7 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Thread Dashboard Api Threads  Thread Id  Get",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
@@ -8021,7 +8844,8 @@
         ],
         "summary": "Api Get Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       },
       "patch": {
@@ -8078,7 +8902,8 @@
         ],
         "summary": "Api Rename Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8127,7 +8952,8 @@
         ],
         "summary": "Api Get Thread Branch Diff",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8176,7 +9002,8 @@
         ],
         "summary": "Api Cancel Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8221,7 +9048,8 @@
         ],
         "summary": "Api Thread Commands",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8270,7 +9098,8 @@
         ],
         "summary": "Api Continue Thread Privately",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8318,6 +9147,7 @@
         "summary": "Get Thread Feedback",
         "tags": [
           "dashboard",
+          "threads",
           "thread-feedback"
         ]
       },
@@ -8374,6 +9204,7 @@
         "summary": "Submit Thread Feedback",
         "tags": [
           "dashboard",
+          "threads",
           "thread-feedback"
         ]
       }
@@ -8419,7 +9250,8 @@
         ],
         "summary": "Api Thread History",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8478,7 +9310,8 @@
         ],
         "summary": "Api Send Thread Message",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8518,7 +9351,8 @@
         ],
         "summary": "Api Unpin Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       },
       "post": {
@@ -8556,7 +9390,8 @@
         ],
         "summary": "Api Pin Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8605,7 +9440,8 @@
         ],
         "summary": "Api Get Thread Pr Diff",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8672,7 +9508,8 @@
         ],
         "summary": "Api Get Thread Pull Request Context",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8721,7 +9558,8 @@
         ],
         "summary": "Api Get Thread Pull Request Status",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8766,7 +9604,8 @@
         ],
         "summary": "Api Get Thread Recovery Patch",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8825,7 +9664,8 @@
         ],
         "summary": "Api Resolve Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8899,7 +9739,8 @@
         ],
         "summary": "Api Cancel Thread Run",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8960,7 +9801,9 @@
         ],
         "summary": "Api Thread Service Url",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads",
+          "threads"
         ]
       }
     },
@@ -9005,7 +9848,8 @@
         ],
         "summary": "Api Get Thread State",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -9050,7 +9894,8 @@
         ],
         "summary": "Api Thread Stream Events",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -9101,7 +9946,9 @@
         ],
         "summary": "Api Thread Terminal Connection",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads",
+          "threads"
         ]
       }
     },
@@ -9150,7 +9997,8 @@
         ],
         "summary": "Api Get Thread Working Tree Diff",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -9698,6 +10546,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/ChallengeResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DuplicateIncidentResponse"
                     }
                   ],
                   "title": "Response Slack Webhook Webhooks Slack Post"
