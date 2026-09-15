@@ -1390,7 +1390,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     kwargs = run_create["kwargs"]
     assert kwargs["if_not_exists"] == "create"
     assert kwargs["multitask_strategy"] == "interrupt"
-    assert kwargs["durability"] == "sync"
+    assert kwargs["durability"] == "exit"
     slack_thread_context = kwargs["config"]["configurable"]["slack_thread"]
     assert slack_thread_context["thread_ts"] == thread_ts
     assert slack_thread_context["triggering_user_timezone"] == "America/New_York"
