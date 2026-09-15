@@ -1,8 +1,8 @@
 """Approve and Reject clicks, the GitHub reviews they become, and the merge.
 
-A voter is a Slack user whose linked GitHub account has write access to the
-repository. A non-author approval is submitted to GitHub as that user's own
-``APPROVE`` review before it counts. The second distinct approval merges the
+A voter is a person (``users`` row) reached through their Slack identity whose
+GitHub identity has write access to the repository. A non-author approval is
+submitted to GitHub as that person's own ``APPROVE`` review before it counts. The second distinct approval merges the
 pull request with the GitHub App's token, conditional on the reviewed head SHA.
 GitHub's answer is final: there is no admin bypass.
 """
@@ -21,6 +21,7 @@ from agent.expedited_review.approvals import (
     ApprovalVote,
     ExpeditedApproval,
     VoteDecision,
+    github_login_of,
 )
 from agent.expedited_review.readiness import Readiness, assess_readiness
 from agent.expedited_review.watch import (
@@ -42,6 +43,7 @@ from agent.slack.client import (
     post_slack_thread_reply,
     slack_thread_mutation_lock,
 )
+from agent.users import User
 from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.thread_ops import langgraph_client
 
@@ -63,12 +65,27 @@ def _reconnect_hint() -> str:
     return "Sign in to the Open SWE dashboard with GitHub first."
 
 
-async def _resolve_voter(
-    approval: ExpeditedApproval, slack_user_id: str
-) -> tuple[str, str] | VoteOutcome:
-    """``(github_login, app_token)`` for an authorized voter, or why they are not one."""
+@dataclass(frozen=True, slots=True)
+class Voter:
+    user: User
+    github_login: str
+    app_token: str
+
+
+async def _user_for_slack(slack_user_id: str) -> User | None:
+    """The person behind a Slack member id; legacy Slack→GitHub mappings are honoured."""
+    user = await User.for_identity("slack", slack_user_id)
+    if user is not None:
+        return user
     login = await login_for_slack_id(slack_user_id)
-    if not login:
+    return await User.for_login("github", login) if login else None
+
+
+async def _resolve_voter(approval: ExpeditedApproval, slack_user_id: str) -> Voter | VoteOutcome:
+    """The authorized voter behind a click, or why they are not one."""
+    user = await _user_for_slack(slack_user_id)
+    login = github_login_of(user) if user is not None else ""
+    if user is None or not any(identity.provider == "github" for identity in user.identities):
         return VoteOutcome(f"Your Slack account is not linked to GitHub. {_reconnect_hint()}")
     pr = approval.pull_request
     token = await repo_token(pr.owner, pr.repo)
@@ -78,7 +95,14 @@ async def _resolve_voter(
         owner=pr.owner, repo=pr.repo, username=login, token=token
     ):
         return VoteOutcome(f"@{login} does not have write access to {pr.owner}/{pr.repo}.")
-    return login, token
+    return Voter(user=user, github_login=login, app_token=token)
+
+
+def _is_author(approval: ExpeditedApproval, voter: Voter) -> bool:
+    pr = approval.pull_request
+    if pr.author_user_id is not None:
+        return pr.author_user_id == voter.user.id
+    return bool(pr.author) and pr.author.lower() == voter.github_login.lower()
 
 
 async def _submit_github_approval(approval: ExpeditedApproval, login: str) -> int | VoteOutcome:
@@ -132,20 +156,19 @@ async def handle_vote(
     """Record one click. Slow work runs unlocked; the row lock covers only the write."""
     if approval.state != "open":
         return VoteOutcome("This expedited review is no longer accepting votes.")
-    resolved = await _resolve_voter(approval, slack_user_id)
-    if isinstance(resolved, VoteOutcome):
-        return resolved
-    login, app_token = resolved
+    voter = await _resolve_voter(approval, slack_user_id)
+    if isinstance(voter, VoteOutcome):
+        return voter
+    login, app_token = voter.github_login, voter.app_token
     pr = approval.pull_request
 
     if decision == "reject":
-        return await _reject(approval, login=login, slack_user_id=slack_user_id, feedback=feedback)
+        return await _reject(approval, voter=voter, feedback=feedback)
 
-    if approval.vote_by(login) is not None:
+    if approval.vote_by(voter.user.id) is not None:
         return VoteOutcome("You already approved this revision.")
-    is_author = bool(pr.author) and pr.author.lower() == login.lower()
     review_id: int | None = None
-    if not is_author:
+    if not _is_author(approval, voter):
         submitted = await _submit_github_approval(approval, login)
         if isinstance(submitted, VoteOutcome):
             return submitted
@@ -154,16 +177,13 @@ async def handle_vote(
     async with ExpeditedApproval.locked(approval.id) as (_, row):
         if row is None or row.state != "open" or row.head_sha != approval.head_sha:
             return VoteOutcome("This expedited review closed before your vote was recorded.")
-        if row.vote_by(login) is None:
+        if row.vote_by(voter.user.id) is None:
             row.votes.append(
                 ApprovalVote(
-                    github_login=login,
-                    slack_user_id=slack_user_id,
-                    decision="approve",
-                    github_review_id=review_id,
+                    voter_user_id=voter.user.id, decision="approve", github_review_id=review_id
                 )
             )
-        quorum = len(row.approvers) >= REQUIRED_APPROVALS
+        quorum = len(row.approvals) >= REQUIRED_APPROVALS
         if quorum:
             row.state = "merging"
     current = await ExpeditedApproval.get(approval.id)
@@ -186,21 +206,15 @@ async def handle_vote(
     return VoteOutcome("Approval recorded; see the card for the merge outcome.")
 
 
-async def _reject(
-    approval: ExpeditedApproval, *, login: str, slack_user_id: str, feedback: str
-) -> VoteOutcome:
+async def _reject(approval: ExpeditedApproval, *, voter: Voter, feedback: str) -> VoteOutcome:
     clean_feedback = " ".join(feedback.split())[:3000]
+    login = voter.github_login
     async with ExpeditedApproval.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
             return VoteOutcome("This expedited review is no longer accepting votes.")
-        row.votes = [vote for vote in row.votes if vote.github_login.lower() != login.lower()]
+        row.votes = [vote for vote in row.votes if vote.voter_user_id != voter.user.id]
         row.votes.append(
-            ApprovalVote(
-                github_login=login,
-                slack_user_id=slack_user_id,
-                decision="reject",
-                feedback=clean_feedback,
-            )
+            ApprovalVote(voter_user_id=voter.user.id, decision="reject", feedback=clean_feedback)
         )
     outcome = f"Rejected by @{login}." + (f" Feedback: {clean_feedback}" if clean_feedback else "")
     pr = approval.pull_request

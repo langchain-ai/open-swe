@@ -11,10 +11,17 @@ from agent.expedited_review import voting, watch
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
 from agent.github.pull_requests import PullRequest
+from agent.users import User
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
-_LOGINS = {"U_ADA": "ada", "U_GRACE": "grace", "U_LINUS": "linus"}
+_PEOPLE = {"U_ADA": ("ada", "1"), "U_GRACE": ("grace", "2"), "U_LINUS": ("linus", "3")}
+
+
+async def _register_people() -> None:
+    for slack_id, (login, github_id) in _PEOPLE.items():
+        user = await User.sign_in("slack", slack_id, team_id="T1")
+        await user.link("github", github_id, login=login)
 
 
 def _ready(head_sha: str = "abc123") -> Readiness:
@@ -62,7 +69,7 @@ class _Harness:
 @pytest.fixture
 def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     h = _Harness()
-    monkeypatch.setattr(voting, "login_for_slack_id", AsyncMock(side_effect=_LOGINS.get))
+    monkeypatch.setattr(voting, "login_for_slack_id", AsyncMock(return_value=None))
     monkeypatch.setattr(voting, "repo_token", AsyncMock(return_value="app-token"))
     monkeypatch.setattr(voting, "has_repo_write_permission", AsyncMock(return_value=True))
     monkeypatch.setattr(voting, "_submit_github_approval", h.submit_review)
@@ -79,7 +86,9 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
 
 
 async def _open_approval() -> ExpeditedApproval:
+    await _register_people()
     pr = await PullRequest(owner="lc", repo="repo", number=7, author="ada").save()
+    assert pr.author_user_id is not None
     approval = ExpeditedApproval(
         pull_request_id=pr.id,
         head_sha="abc123",
@@ -128,8 +137,9 @@ async def test_the_author_counts_without_a_github_review(harness: _Harness) -> N
     assert stored is not None
     assert stored.state == "merged"
     assert harness.github_reviews == ["grace"]
-    ada = stored.vote_by("ada")
-    assert ada is not None and ada.github_review_id is None
+    ada = next(vote for vote in stored.votes if vote.github_login == "ada")
+    assert ada.github_review_id is None
+    assert ada.voter_user_id == stored.pull_request.author_user_id
 
 
 async def test_one_person_cannot_approve_twice(harness: _Harness) -> None:

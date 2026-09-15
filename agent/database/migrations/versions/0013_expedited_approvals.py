@@ -42,13 +42,12 @@ def upgrade() -> None:
         """
         CREATE TABLE expedited_approval_vote (
             approval_id uuid NOT NULL REFERENCES expedited_approval (id) ON DELETE CASCADE,
-            github_login text NOT NULL,
-            slack_user_id text NOT NULL DEFAULT '',
+            voter_user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
             decision text NOT NULL CHECK (decision IN ('approve', 'reject')),
             github_review_id bigint,
             feedback text NOT NULL DEFAULT '',
             voted_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            PRIMARY KEY (approval_id, github_login)
+            PRIMARY KEY (approval_id, voter_user_id)
         )
         """
     )

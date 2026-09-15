@@ -63,8 +63,9 @@ votes.
 
 ### Voting
 
-- Voter: Slack account linked to a GitHub login with write or higher on the repo.
-  Distinct GitHub logins.
+- Voter: a person in the users table, reached through their Slack identity, whose
+  GitHub identity has write or higher on the repo. Votes are keyed by user id, so
+  one person cannot vote twice through two handles.
 - The author may approve; that click counts in Slack but is not sent to GitHub.
 - Every non-author approve submits a GitHub `APPROVE` review at `commit_id` with that
   user's own token, and counts only after GitHub confirms. No token → sign in to the
@@ -96,8 +97,9 @@ The thread resolves through the existing merged-PR handling.
 
 ### Storage
 
-PostgreSQL, alongside the pull request tables: one row per approval, one per vote,
-both auditable.
+PostgreSQL, alongside the pull request and users tables: one row per approval, one
+per vote. Votes reference `users.id`, never a GitHub or Slack handle; handles are
+looked up for display only.
 
 ### Non-goals
 
