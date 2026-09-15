@@ -732,32 +732,45 @@ async def _launch_agent_schedule_record(
         stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
+    # The run is durable now; bookkeeping failures must not release delivery claims.
+    log_context = {"schedule_id": schedule_id, "thread_id": thread_id, "run_id": run_id}
     if slack_thread and isinstance(run_id, str) and run_id:
-        await store_slack_run_mapping(
-            client,
-            slack_thread["channel_id"],
-            slack_thread["thread_ts"],
-            run_id,
-            message_ts=slack_thread["thread_ts"],
+        try:
+            await store_slack_run_mapping(
+                client,
+                slack_thread["channel_id"],
+                slack_thread["thread_ts"],
+                run_id,
+                message_ts=slack_thread["thread_ts"],
+            )
+        except Exception:
+            logger.exception(
+                "Failed to save dispatched automation Slack mapping", extra=log_context
+            )
+    try:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={
+                "latest_run_id": run_id,
+                "latest_run_status": "pending",
+                "updated_at_ms": now_ms(),
+            },
         )
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={
-            "latest_run_id": run_id,
-            "latest_run_status": "pending",
-            "updated_at_ms": now_ms(),
-        },
-    )
-    await _put_run_state(
-        record,
-        {
-            "last_thread_id": thread_id,
-            "last_run_id": run_id,
-            "last_triggered_at": now_iso(),
-            "last_error": None,
-            "last_error_at": None,
-        },
-    )
+    except Exception:
+        logger.exception("Failed to save dispatched automation thread metadata", extra=log_context)
+    try:
+        await _put_run_state(
+            record,
+            {
+                "last_thread_id": thread_id,
+                "last_run_id": run_id,
+                "last_triggered_at": now_iso(),
+                "last_error": None,
+                "last_error_at": None,
+            },
+        )
+    except Exception:
+        logger.exception("Failed to save dispatched automation run state", extra=log_context)
     return {
         "status": "started",
         "schedule_id": schedule_id,

@@ -1,5 +1,5 @@
 import uuid
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
@@ -782,6 +782,72 @@ async def test_launch_github_issue_automations_deduplicates_delivery(fake_client
 
     assert first[0]["status"] == "started"
     assert duplicate == []
+    assert len(fake_client.runs.created) == 1
+
+
+@pytest.mark.parametrize("failure", ["slack_mapping", "thread_metadata", "run_state"])
+async def test_issue_delivery_stays_claimed_after_dispatched_run_bookkeeping_failure(
+    fake_client: _FakeClient,
+    auth: None,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Literal["slack_mapping", "thread_metadata", "run_state"],
+) -> None:
+    await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            prompt="Triage issues",
+            trigger="github_issue_opened",
+            repo="langchain-ai/open-swe",
+            slack_channel_id="C0123456789",
+        ),
+    )
+    monkeypatch.setattr(
+        schedules,
+        "post_slack_top_level_message_with_ts",
+        AsyncMock(return_value=("1784302353.900029", None)),
+    )
+    error = RuntimeError("bookkeeping unavailable")
+    if failure == "slack_mapping":
+        monkeypatch.setattr(schedules, "store_slack_run_mapping", AsyncMock(side_effect=error))
+    elif failure == "thread_metadata":
+        monkeypatch.setattr(fake_client.threads, "update", AsyncMock(side_effect=[None, error]))
+    else:
+        monkeypatch.setattr(schedules, "_put_run_state", AsyncMock(side_effect=error))
+    payload = {
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+        "issue": {"number": 42},
+    }
+
+    first = await schedules.launch_github_issue_automations(payload, "delivery-1")
+    duplicate = await schedules.launch_github_issue_automations(payload, "delivery-1")
+
+    assert first[0]["status"] == "started"
+    assert first[0]["run_id"] == "run_123"
+    assert duplicate == []
+    assert len(fake_client.runs.created) == 1
+
+
+async def test_issue_delivery_can_retry_failed_dispatch(
+    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            prompt="Triage issues", trigger="github_issue_opened", repo="langchain-ai/open-swe"
+        ),
+    )
+    payload = {
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+        "issue": {"number": 42},
+    }
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            fake_client.runs, "create", AsyncMock(side_effect=RuntimeError("dispatch unavailable"))
+        )
+        assert await schedules.launch_github_issue_automations(payload, "delivery-1") == []
+
+    retried = await schedules.launch_github_issue_automations(payload, "delivery-1")
+    assert retried[0]["status"] == "started"
     assert len(fake_client.runs.created) == 1
 
 
