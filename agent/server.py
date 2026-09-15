@@ -185,6 +185,7 @@ from agent.tools import (
     recreate_sandbox,
     refresh_workspace_start,
     report_platform_issue,
+    request_pr_media_upload,
     request_pr_review,
     sandbox_reset,
     save_organization_skill,
@@ -1171,6 +1172,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             else ()
         ),
         read_user_settings,
+        request_pr_media_upload,
         request_pr_review,
         recreate_sandbox,
         report_platform_issue,
