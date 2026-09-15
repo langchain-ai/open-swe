@@ -13,10 +13,10 @@ from agent.tools.admin_gate import configurable, require_admin
 
 logger = logging.getLogger(__name__)
 
-_MAX_QUERY_CHARS = 20_000
-_MAX_ROWS = 100
-_MAX_OUTPUT_BYTES = 100_000
-_STATEMENT_TIMEOUT_MS = 10_000
+_MAX_QUERY_CHARS = 200_000
+_MAX_ROWS = 1_000
+_MAX_OUTPUT_BYTES = 1_000_000
+_STATEMENT_TIMEOUT_MS = 60_000
 
 
 def _json_value(value: object) -> object:

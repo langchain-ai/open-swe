@@ -79,7 +79,7 @@ async def test_read_only_sql_returns_json_safe_limited_rows(
         "truncated": False,
     }
     conn.execute.assert_awaited_once()
-    assert str(conn.execute.await_args.args[0]) == "SET LOCAL statement_timeout = 10000"
+    assert str(conn.execute.await_args.args[0]) == "SET LOCAL statement_timeout = 60000"
     conn.stream.assert_awaited_once()
     assert str(conn.stream.await_args.args[0]) == "SELECT created_at, cost FROM usage"
 

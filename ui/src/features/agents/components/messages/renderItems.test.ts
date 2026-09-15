@@ -38,6 +38,25 @@ describe("buildRenderItems", () => {
     ])
   })
 
+  it("keeps SQL results as a dedicated inline reply item", () => {
+    const chunk: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "call-sql",
+      title: "Read only sql",
+      toolKind: "sql",
+      status: "completed",
+      output:
+        '{"ok":true,"columns":["id"],"rows":[[1]],"row_count":1,"truncated":false}',
+    }
+
+    expect(buildRenderItems([chunk])).toEqual([
+      { type: "sql-item", key: "tool-call-sql", chunk },
+    ])
+    expect(
+      splitWorkAndReply(buildRenderItems([chunk])).replyItems
+    ).toHaveLength(1)
+  })
+
   it("keeps sent replies visible when later work runs", () => {
     const sentReply: ToolExecutionChunk = {
       kind: "tool-execution",

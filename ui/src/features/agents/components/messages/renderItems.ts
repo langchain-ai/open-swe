@@ -23,12 +23,14 @@ export type RenderItem =
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "iframe-item",
+  "sql-item",
 ])
 
 export function splitWorkAndReply(items: Array<RenderItem>): {
@@ -48,6 +50,7 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
     if (
       item.type === "reply-item" ||
       item.type === "iframe-item" ||
+      item.type === "sql-item" ||
       index >= trailingReplyIndex
     ) {
       replyItems.push(item)
@@ -165,6 +168,10 @@ function isShellTool(chunk: ToolExecutionChunk): boolean {
   return chunk.toolKind === "execute"
 }
 
+function isSqlTool(chunk: ToolExecutionChunk): boolean {
+  return chunk.toolKind === "sql"
+}
+
 function isReplyTool(chunk: ToolExecutionChunk): boolean {
   return chunk.toolKind === "slack" || chunk.toolKind === "linear"
 }
@@ -262,6 +269,12 @@ export function buildRenderItems(
       } else if (isShellTool(chunk)) {
         items.push({
           type: "shell-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+      } else if (isSqlTool(chunk)) {
+        items.push({
+          type: "sql-item",
           key: `tool-${chunk.toolCallId}`,
           chunk,
         })
