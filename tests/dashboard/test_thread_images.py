@@ -3,10 +3,10 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from conftest import patch_thread_module
 from fastapi import HTTPException
 
 from agent.threads import images
+from tests.conftest import patch_thread_module
 
 IMAGE_ID = "a" * 32
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 8
