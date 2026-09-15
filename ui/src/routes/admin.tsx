@@ -42,11 +42,6 @@ export const Route = createFileRoute("/admin")({ component: AdminPage })
 function AdminPage() {
   const session = useSession()
 
-  const options = useQuery({
-    queryKey: ["options"],
-    queryFn: api.options,
-    enabled: !!session.data?.is_admin,
-  })
   const workspaceOptions = useWorkspaceOptions(!!session.data?.is_admin)
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(
     null
@@ -57,6 +52,13 @@ function AdminPage() {
     selectedWorkspace ??
     workspaceOptions.data?.default_slug ??
     DEFAULT_WORKSPACE_SLUG
+  // The selectable models follow the workspace being edited, since the Fable
+  // flag that gates them is one of its settings.
+  const options = useQuery({
+    queryKey: ["options", workspace],
+    queryFn: () => api.options(workspace),
+    enabled: !!session.data?.is_admin,
+  })
 
   if (session.isLoading) {
     return (

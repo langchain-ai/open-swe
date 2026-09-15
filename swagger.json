@@ -4847,7 +4847,20 @@
     },
     "/dashboard/api/options": {
       "get": {
+        "description": "The models and defaults a composer may offer for ``workspace``.\n\nModel defaults and the Fable flag are per workspace, so a picker that asked\nwithout one would advertise ``default``'s settings wherever the run will\nnot land there.",
         "operationId": "options_dashboard_api_options_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "workspace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4860,6 +4873,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Options",

@@ -159,7 +159,7 @@ async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(m
 
 
 async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
@@ -170,7 +170,7 @@ async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> N
 
 
 async def test_resolve_agent_model_id_applies_profile_override(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
@@ -185,7 +185,7 @@ async def test_resolve_agent_model_id_applies_profile_override(monkeypatch) -> N
 
 
 async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
@@ -196,7 +196,7 @@ async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -
 
 
 async def test_resolve_agent_model_id_deprecated_override_uses_team_default(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)

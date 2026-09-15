@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError, api } from "./api"
+import { ApiError, api, DEFAULT_WORKSPACE_SLUG } from "./api"
 import {
   REPOS_CACHE_MAX_AGE_MS,
   readCachedRepos,
@@ -19,10 +19,15 @@ export function useProfile() {
   })
 }
 
-export function useOptions() {
+/**
+ * Selectable models and defaults for the workspace a run will land in; model
+ * defaults and the Fable flag are per workspace, so the key carries the slug.
+ */
+export function useOptions(workspace?: string | null) {
+  const slug = workspace ?? DEFAULT_WORKSPACE_SLUG
   return useQuery({
-    queryKey: ["options"],
-    queryFn: api.options,
+    queryKey: ["options", slug],
+    queryFn: () => api.options(slug),
   })
 }
 

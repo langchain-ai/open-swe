@@ -923,12 +923,32 @@ async def _process_slack_mention_impl(
     mapped_login = await _slack_login(user_id, user_email) if allowed_bot is None else None
     thread_model_choice = await common.get_thread_model_choice(thread_id)
 
+    # Routing comes before the run's repository: a repository nobody named
+    # must not outrank the channel's binding, and once a workspace has won, a
+    # default repository another workspace owns has to give way to its own.
+    # Later mentions carry no tag, so the thread's workspace comes back from
+    # metadata — a follow-up must not be told about `default` while its sandbox
+    # was built from the workspace the opening message resolved to. It is
+    # resolved here, before the model is, because the model default and the
+    # Fable flag are the resolved workspace's.
+    if is_first_mention:
+        thread_workspace = (
+            await resolve_workspace(
+                tag=tagged_slug,
+                repo=resolution.routing_repo,
+                slack_channel_id=channel_id,
+                login=mapped_login,
+            )
+        ).slug
+    else:
+        thread_workspace = await common.get_thread_workspace(thread_id)
+
     image_model_override: tuple[str, str] | None = None
     if image_urls:
         resolved_model_id = (
             thread_model_choice[0]
             if thread_model_choice
-            else await common.resolve_agent_model_id(mapped_login)
+            else await common.resolve_agent_model_id(mapped_login, workspace=thread_workspace)
         )
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
@@ -1016,23 +1036,6 @@ async def _process_slack_mention_impl(
     if code_channel and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
-    # Routing comes before the run's repository: a repository nobody named
-    # must not outrank the channel's binding, and once a workspace has won, a
-    # default repository another workspace owns has to give way to its own.
-    # Later mentions carry no tag, so the thread's workspace comes back from
-    # metadata — a follow-up must not be told about `default` while its sandbox
-    # was built from the workspace the opening message resolved to.
-    if is_first_mention:
-        thread_workspace = (
-            await resolve_workspace(
-                tag=tagged_slug,
-                repo=resolution.routing_repo,
-                slack_channel_id=channel_id,
-                login=mapped_login,
-            )
-        ).slug
-    else:
-        thread_workspace = await common.get_thread_workspace(thread_id)
     if repo is not None and not resolution.explicit:
         repo = await _workspace_scoped_default_repo(repo, thread_workspace)
     repo_dict = repo.model_dump() if repo else None

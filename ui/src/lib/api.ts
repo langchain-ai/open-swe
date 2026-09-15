@@ -755,7 +755,11 @@ export interface ReviewerEvalStatus {
 
 export const api = {
   me: () => request<SessionUser>("/me"),
-  options: () => request<OptionsPayload>("/options"),
+  /** Model list and defaults for one workspace; model defaults are per workspace. */
+  options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
+    request<OptionsPayload>(
+      `/options?workspace=${encodeURIComponent(workspace)}`
+    ),
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),

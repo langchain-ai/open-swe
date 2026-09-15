@@ -2,6 +2,8 @@ import pytest
 from fastapi import HTTPException
 
 from agent.dashboard import team_settings, team_settings_cache
+from agent.dashboard.options import FABLE_MODEL_IDS
+from agent.dashboard.options_routes import options
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     get_team_settings,
@@ -57,6 +59,41 @@ async def test_cached_reads_do_not_leak_across_workspaces(fake_store: FakeStore)
     assert (await team_settings_cache.cached_team_settings("default"))[
         "org_guidelines"
     ] == "internal only"
+
+
+async def test_options_report_the_requested_workspaces_defaults(fake_store: FakeStore) -> None:
+    """The composer's model picker is scoped to the workspace it composes in."""
+    await upsert_team_settings(
+        TeamSettingsUpdate(
+            default_agent_model="anthropic:claude-sonnet-5",
+            default_agent_reasoning_effort="high",
+        ),
+        workspace="default",
+    )
+    await upsert_team_settings(
+        TeamSettingsUpdate(
+            default_agent_model="openai:gpt-6-astra",
+            default_agent_reasoning_effort="low",
+            fable_enabled=True,
+        ),
+        workspace="oss",
+    )
+
+    scoped = await options(workspace="oss")
+    unscoped = await options()
+
+    assert scoped["default_agent_model"] == "openai:gpt-6-astra"
+    assert scoped["default_agent_reasoning_effort"] == "low"
+    assert unscoped["default_agent_model"] == "anthropic:claude-sonnet-5"
+    # The Fable flag is per workspace as well, so the selectable list follows it.
+    assert [m["id"] for m in scoped["models"] if m["id"] in FABLE_MODEL_IDS]
+    assert not [m["id"] for m in unscoped["models"] if m["id"] in FABLE_MODEL_IDS]
+
+
+async def test_options_refuse_a_workspace_name_that_does_not_slugify() -> None:
+    with pytest.raises(HTTPException) as refused:
+        await options(workspace="!!!")
+    assert refused.value.status_code == 400
 
 
 async def test_a_workspace_name_that_does_not_slugify_is_refused(fake_store: FakeStore) -> None:

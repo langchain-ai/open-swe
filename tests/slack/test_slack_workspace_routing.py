@@ -116,6 +116,74 @@ async def test_a_bound_channel_outranks_a_defaulted_repository(
     assert configurable["repo"] == {"owner": "acme", "name": "oss"}
 
 
+async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    """An image in a bound channel is checked against that workspace's model.
+
+    `default` here runs a model that takes images and `oss` one that does not,
+    so reading the wrong workspace's default would skip the fallback entirely.
+    """
+    captured: dict[str, Any] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    async def fake_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "ts": "1700000000.000200",
+                "text": "<@UBOT> look at https://example.com/shot.png",
+                "user": "U123",
+            }
+        ]
+
+    async def no_image_block(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webhook_common, "fetch_slack_thread_messages", fake_thread_messages)
+    monkeypatch.setattr(webhook_common, "fetch_image_block", no_image_block)
+
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
+    )
+    await upsert_team_settings(
+        TeamSettingsUpdate(
+            default_agent_model="anthropic:claude-opus-5",
+            default_agent_reasoning_effort="high",
+        ),
+        workspace="default",
+    )
+    await upsert_team_settings(
+        TeamSettingsUpdate(
+            default_agent_model="fireworks:accounts/fireworks/models/kimi-k3",
+            default_agent_reasoning_effort="high",
+        ),
+        workspace="oss",
+    )
+
+    request = SlackRequest.model_validate(
+        {
+            "channel_id": "C0SS",
+            "thread_ts": "1700000000.000100",
+            "event_ts": "1700000000.000200",
+            "user_id": "U123",
+            "text": "<@UBOT> look at https://example.com/shot.png",
+            "bot_user_id": "UBOT",
+        }
+    )
+
+    await slack_webhooks._process_slack_mention_impl(request, None)
+
+    configurable = captured["run_create"]["kwargs"]["config"]["configurable"]
+    assert configurable["workspace"] == "oss"
+    assert (configurable["agent_model_id"], configurable["agent_effort"]) == (
+        webhook_common.default_vision_model_pair()
+    )
+
+
 async def test_a_named_repository_still_outranks_a_bound_channel(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:

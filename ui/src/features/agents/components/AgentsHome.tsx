@@ -77,10 +77,8 @@ export function AgentsHome({
   const routePending = useRouterState({
     select: (state) => state.status === "pending",
   })
-  const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
-  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
@@ -185,6 +183,11 @@ export function AgentsHome({
     (workspaces.some((workspace) => workspace.slug === defaultWorkspaceSlug)
       ? defaultWorkspaceSlug
       : null)
+
+  // The picker offers the workspace being composed in its own models and
+  // default, not the deployment default's.
+  const { models, defaultSelection } = useModelOptions(selectedWorkspace)
+  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
 
   // Holds the just-submitted prompt until the SDK mints the thread id.
   const draftRef = useRef<CreateAgentThreadVariables | null>(null)
