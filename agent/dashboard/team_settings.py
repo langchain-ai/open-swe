@@ -14,7 +14,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, field_validator, model_validator
 
 from agent.config import ENV
-from agent.dashboard.deps import ADMIN_DEP
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
@@ -694,7 +694,7 @@ router = APIRouter(tags=["team-settings"])
 
 @router.get("/team-settings")
 async def api_get_team_settings(
-    workspace: str = DEFAULT_WORKSPACE_SLUG, _admin: dict[str, Any] = ADMIN_DEP
+    workspace: str = DEFAULT_WORKSPACE_SLUG, _session: dict[str, Any] = SESSION_DEP
 ) -> dict[str, Any]:
     return await get_team_settings(workspace)
 
