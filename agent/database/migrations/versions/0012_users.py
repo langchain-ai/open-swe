@@ -61,6 +61,20 @@ def upgrade() -> None:
         """
     )
 
+    op.execute(
+        """
+        ALTER TABLE pull_request
+            ADD COLUMN author_user_id uuid REFERENCES users (id) ON DELETE SET NULL
+        """
+    )
+
+    op.execute(
+        """
+        CREATE INDEX pull_request_author_user_idx
+            ON pull_request (author_user_id) WHERE author_user_id IS NOT NULL
+        """
+    )
+
 
 def downgrade() -> None:
     raise NotImplementedError

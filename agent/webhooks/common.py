@@ -1309,7 +1309,10 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
-        saved = await pull_request.save(repository_private=event.repo_private)
+        saved = await pull_request.save(
+            repository_private=event.repo_private,
+            author_github_id=event.pull_request.author_id,
+        )
         thread_ids = await saved.linked_threads()
     except Exception:  # noqa: BLE001
         logger.warning(

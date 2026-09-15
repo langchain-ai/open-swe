@@ -43,6 +43,7 @@ from agent.github.comments import PrState, derive_pr_state
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repositories import Repository
 from agent.review.findings import REVIEWER_THREAD_KIND
+from agent.users.models import UserIdentity
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
@@ -104,6 +105,9 @@ class PullRequest(Base):
     head_ref: Mapped[str] = mapped_column(server_default="", default="")
     base_ref: Mapped[str] = mapped_column(server_default="", default="")
     author: Mapped[str] = mapped_column(server_default="", default="")
+    author_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
     resolves_thread: Mapped[bool] = mapped_column(default=False)
     threads: Mapped[list[ThreadLink]] = relationship(
         default_factory=list,
@@ -164,13 +168,19 @@ class PullRequest(Base):
             link.thread_id for link in self.threads if link.role != "primary"
         ]
 
-    async def save(self, *, repository_private: bool | None = None) -> Self:
+    async def save(
+        self, *, repository_private: bool | None = None, author_github_id: int | None = None
+    ) -> Self:
         """Write the PR as GitHub describes it and register its repository.
 
         Overwrites the GitHub-owned columns; ``resolves_thread`` can only be set,
-        never cleared. Queued ``threads``/``reviews`` are linked as well.
+        never cleared. Queued ``threads``/``reviews`` are linked as well. The
+        author is linked to a registered user when one matches their GitHub id
+        or, failing that, their login; an unregistered author leaves it unset.
         """
-        return await self._write(overwrite=True, repository_private=repository_private)
+        return await self._write(
+            overwrite=True, repository_private=repository_private, author_github_id=author_github_id
+        )
 
     async def link_thread(self, thread_id: str, *, source: str = "") -> Self:
         """Associate a thread with this PR, as primary when it has none yet."""
@@ -274,11 +284,19 @@ class PullRequest(Base):
     def _with_links(cls, statement):  # noqa: ANN001, ANN206
         return statement.options(selectinload(cls.threads), selectinload(cls.reviews))
 
-    async def _write(self, *, overwrite: bool, repository_private: bool | None = None) -> Self:
+    async def _write(
+        self,
+        *,
+        overwrite: bool,
+        repository_private: bool | None = None,
+        author_github_id: int | None = None,
+    ) -> Self:
         async with postgres.session() as session:
             repository = await Repository(
                 full_name=self.repo_full_name, private=repository_private
             ).save(session)
+            if overwrite and self.author_user_id is None:
+                self.author_user_id = await self._author_user_id(session, author_github_id)
             row = await self._upsert(session, repository.id, overwrite=overwrite)
             for link in self.threads:
                 if all(existing.thread_id != link.thread_id for existing in row.threads):
@@ -313,6 +331,22 @@ class PullRequest(Base):
             raise RuntimeError(f"pull request {self.url} vanished during save")
         return stored
 
+    async def _author_user_id(
+        self, session: AsyncSession, author_github_id: int | None
+    ) -> UUID | None:
+        if author_github_id is not None:
+            matches = UserIdentity.external_id == str(author_github_id)
+        elif self.author:
+            matches = func.lower(UserIdentity.login) == self.author.lower()
+        else:
+            return None
+        return await session.scalar(
+            select(UserIdentity.user_id)
+            .where(UserIdentity.provider == "github", matches)
+            .order_by(UserIdentity.last_seen_at.desc())
+            .limit(1)
+        )
+
     async def _upsert(self, session: AsyncSession, repository_id: UUID, *, overwrite: bool) -> Self:
         """Insert or update the row and return it locked for the transaction."""
         cls = type(self)
@@ -323,11 +357,13 @@ class PullRequest(Base):
             owner=self.owner,
             repo=self.repo,
             **{column: getattr(self, column) for column in _GITHUB_COLUMNS},
+            author_user_id=self.author_user_id,
             resolves_thread=self.resolves_thread,
         )
         github_changes = (
             {
                 **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
+                "author_user_id": func.coalesce(upsert.excluded.author_user_id, cls.author_user_id),
                 "resolves_thread": or_(cls.resolves_thread, upsert.excluded.resolves_thread),
             }
             if overwrite
@@ -356,6 +392,7 @@ class PullRequestPayload(BaseModel):
     draft: bool = False
     merged: bool = False
     author: str = Field("", validation_alias=AliasPath("user", "login"))
+    author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
     base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
 
