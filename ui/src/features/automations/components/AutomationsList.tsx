@@ -263,7 +263,9 @@ function AutomationRow({
               <ClockIcon className="size-3.5" />
               {schedule.trigger === "github_issue_opened"
                 ? "GitHub issue opened"
-                : describeCron(schedule.schedule!)}
+                : schedule.schedule
+                  ? describeCron(schedule.schedule)
+                  : "No trigger"}
             </span>
             {schedule.repo && <span>{schedule.repo}</span>}
             {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
