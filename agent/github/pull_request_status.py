@@ -21,6 +21,8 @@ _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _SEARCH_PAGE_SIZE = 100
 # GitHub search returns at most 1000 results per query.
 _SEARCH_MAX_PAGES = 10
+_MERGEABILITY_ATTEMPTS = 3
+_MERGEABILITY_DELAY_SECONDS = 0.7
 _SHA_PATTERN = re.compile(r"[0-9a-fA-F]{40,64}")
 _FAILING_CHECK_CONCLUSIONS = frozenset(
     {"failure", "timed_out", "action_required", "startup_failure"}
@@ -120,6 +122,24 @@ async def _fetch_pull_request(
     except httpx2.HTTPError, ValueError:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+async def _fetch_mergeable_pull_request(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
+) -> dict[str, Any] | None:
+    """Read a pull request, waiting for GitHub to decide whether it merges.
+
+    GitHub computes mergeability in the background and answers `null` until it
+    finishes; the first read only asks it to start.
+    """
+    for attempt in range(_MERGEABILITY_ATTEMPTS):
+        pull = await _fetch_pull_request(client, owner, repo, number)
+        if pull is None or pull.get("mergeable") is not None:
+            return pull
+        if _live_state(pull) != "open" or attempt + 1 == _MERGEABILITY_ATTEMPTS:
+            return pull
+        await asyncio.sleep(_MERGEABILITY_DELAY_SECONDS * (attempt + 1))
+    return None
 
 
 async def _fetch_check_runs(
@@ -499,7 +519,7 @@ async def load_open_pull_request(
     if identity is None:
         return None
     owner, name, number = identity
-    pull = await _fetch_pull_request(client, owner, name, number) if details else None
+    pull = await _fetch_mergeable_pull_request(client, owner, name, number) if details else None
     if pull is not None and _live_state(pull) != "open":
         return None
     result: dict[str, Any] = {

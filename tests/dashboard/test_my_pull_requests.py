@@ -188,6 +188,38 @@ async def test_a_timed_out_search_returns_no_pull_requests(monkeypatch):
     assert result["incomplete"] is True and result["nextPage"] is None
 
 
+async def test_pending_mergeability_is_awaited_rather_than_reported_unknown(monkeypatch):
+    """GitHub answers `mergeable: null` until it finishes computing the merge."""
+    monkeypatch.setattr(prs, "_MERGEABILITY_DELAY_SECONDS", 0)
+    open_pull = {"state": "open", "head": {"sha": "a" * 40}}
+    fetches = AsyncMock(
+        side_effect=[
+            {**open_pull, "mergeable": None, "mergeable_state": "unknown"},
+            {**open_pull, "mergeable": None, "mergeable_state": "unknown"},
+            {**open_pull, "mergeable": True, "mergeable_state": "clean"},
+        ]
+    )
+    monkeypatch.setattr(prs, "_fetch_pull_request", fetches)
+    monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
+    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
+    assert fetches.await_count == 3
+    assert result["mergeable"] is True and result["mergeState"] == "clean"
+
+
+async def test_mergeability_is_not_awaited_forever(monkeypatch):
+    monkeypatch.setattr(prs, "_MERGEABILITY_DELAY_SECONDS", 0)
+    fetches = AsyncMock(
+        return_value={"state": "open", "mergeable": None, "mergeable_state": "unknown"}
+    )
+    monkeypatch.setattr(prs, "_fetch_pull_request", fetches)
+    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="none"))
+    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
+    assert fetches.await_count == prs._MERGEABILITY_ATTEMPTS
+    assert result["statusAvailable"] is True and result["mergeable"] is None
+
+
 async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypatch):
     token = AsyncMock(return_value="user-token")
     listing = AsyncMock(return_value={"pullRequests": []})

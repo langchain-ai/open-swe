@@ -485,6 +485,28 @@ describe("My PRs", () => {
     ).toEqual(["acme/other"])
   })
 
+  it("keeps the review verdict while GitHub decides whether the branch merges", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, {
+          reviewDecision: "approved",
+          mergeable: null,
+          mergeState: "unknown",
+        }),
+      ],
+    })
+    mount()
+    const row = (await screen.findByText("Change 1")).closest("tr")!
+    expect(within(row).getByText("Approved")).toBeTruthy()
+    expect(within(row).queryByText("Status unavailable")).toBeNull()
+    // Merging needs the decision GitHub has not made yet.
+    expect(within(row).queryByRole("button", { name: "Merge" })).toBeNull()
+    fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
+    await screen.findByRole("group", { name: bulk })
+    expect(bulkButton("Merge").disabled).toBe(true)
+  })
+
   it("rediscovers a reopened PR on manual refresh", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,

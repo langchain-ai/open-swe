@@ -78,6 +78,16 @@ function isFixable(pr: OpenPullRequest) {
   )
 }
 
+// Approved is a review verdict, so it can stand while GitHub is still deciding
+// whether the branch merges. Merging needs that decision to have landed.
+function isMergeable(pr: OpenPullRequest) {
+  return (
+    overallStatus(pr) === "Approved" &&
+    pr.mergeable === true &&
+    Boolean(pr.headSha)
+  )
+}
+
 async function runBulkAction(
   action: BulkAction,
   pr: OpenPullRequest,
@@ -146,9 +156,7 @@ function overallStatus(pr: OpenPullRequest) {
   if (pr.ci === "pending") return "Pending"
   if (
     !pr.statusAvailable ||
-    pr.mergeable === null ||
-    pr.ci === "unknown" ||
-    pr.reviewDecision === null
+    (pr.ci === "unknown" && pr.reviewDecision === null)
   )
     return "Status unavailable"
   if (pr.reviewDecision === "changes_requested") return "Changes Requested"
@@ -486,9 +494,7 @@ function BulkActions({
   })
   const active = bulk.isPending ? bulk.variables.action : null
   const fixable = selected.every((pr) => isFixable(pr) && !pr.detailsLoading)
-  const mergeable = selected.every(
-    (pr) => overallStatus(pr) === "Approved" && Boolean(pr.headSha)
-  )
+  const mergeable = selected.every(isMergeable)
   return (
     <div
       role="group"
@@ -1048,7 +1054,7 @@ export function MyPullRequests({
                           pr.ci === "failing") && (
                           <FixPullRequest pr={pr} login={login} />
                         )}
-                        {overallStatus(pr) === "Approved" && (
+                        {isMergeable(pr) && (
                           <MergePullRequest
                             pr={pr}
                             onMerged={() => {
