@@ -44,6 +44,7 @@ from agent.threads.listing import (
     pin_dashboard_thread,
     unpin_dashboard_thread,
 )
+from agent.threads.message_fetch import get_dashboard_thread_message
 from agent.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
@@ -424,6 +425,21 @@ async def api_get_thread_image(
     return await get_dashboard_thread_image(
         thread_id, image_id, session["sub"], email=session.get("email")
     )
+
+
+@router.get("/threads/{thread_id}/messages/{message_id}")
+async def api_get_thread_message(
+    thread_id: str,
+    message_id: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    timings: dict[str, float] = {}
+    started = perf_counter()
+    payload = await get_dashboard_thread_message(
+        thread_id, message_id, session["sub"], email=session.get("email"), timings=timings
+    )
+    timings["total"] = (perf_counter() - started) * 1000
+    return JSONResponse(payload, headers={"Server-Timing": server_timing_header(timings)})
 
 
 @router.post("/threads/{thread_id}/stream/events")
