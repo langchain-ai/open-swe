@@ -7,7 +7,10 @@ your branch with `git push origin <branch>` BEFORE calling this.
 For everything else — updating an existing PR, marking it ready for review,
 commenting, reading status — keep using `gh`. If a PR already
 exists for the branch, this returns that PR's URL without creating a
-duplicate; switch to `gh pr edit` for updates.
+duplicate; switch to `gh pr edit` for updates. For description edits that fail
+specifically with the Projects (classic) `projectCards` deprecation error, use
+the existing-PR REST PATCH fallback in the committing instructions instead of
+retrying the same command.
 
 Args:
     owner: Repository owner/org (e.g. "langchain-ai").
