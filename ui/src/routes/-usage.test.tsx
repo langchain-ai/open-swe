@@ -460,6 +460,138 @@ const costRow: UsageLeaderboardRow = {
   avg_invocation_seconds: 90,
 }
 
+const sortableRows: Array<UsageLeaderboardRow> = [
+  {
+    ...costRow,
+    rank: 1,
+    user: { name: "Alpha One", github_login: "alpha", email: null },
+    favorite_model: "model-a",
+    invocations: 30,
+    total_tokens: 3000,
+    total_cost_usd: 3,
+    prs_opened: 5,
+    merged_prs: 4,
+    agent_loc: 100,
+  },
+  {
+    ...costRow,
+    rank: 2,
+    user: { name: "Beta Two", github_login: "beta", email: null },
+    favorite_model: "model-b",
+    invocations: 10,
+    total_tokens: 1000,
+    total_cost_usd: 1,
+    prs_opened: 2,
+    merged_prs: 1,
+    agent_loc: 20,
+  },
+]
+
+function rowCells(row: HTMLElement): Array<string> {
+  return Array.from(
+    row.querySelectorAll("td"),
+    (cell) => cell.textContent ?? ""
+  )
+}
+
+it("sorts the leaderboard by a column, then toggles direction on repeat clicks", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 2,
+    rows: sortableRows,
+  })
+  const client = mountReport()
+  await screen.findByText("Alpha One")
+
+  const invocationsHeader = screen.getByRole("columnheader", {
+    name: /Invocations/,
+  })
+  expect(invocationsHeader.getAttribute("aria-sort")).toBeNull()
+
+  fireEvent.click(screen.getByRole("button", { name: /Invocations/ }))
+  expect(invocationsHeader.getAttribute("aria-sort")).toBe("descending")
+  const table = screen.getByRole("table")
+  const body = within(table).getAllByRole("row").slice(1)
+  expect(rowCells(body[0]!)[3]).toBe("30")
+  expect(rowCells(body[1]!)[3]).toBe("10")
+
+  fireEvent.click(screen.getByRole("button", { name: /Invocations/ }))
+  expect(invocationsHeader.getAttribute("aria-sort")).toBe("ascending")
+  const sortedBody = within(screen.getByRole("table"))
+    .getAllByRole("row")
+    .slice(1)
+  expect(rowCells(sortedBody[0]!)[3]).toBe("10")
+  expect(rowCells(sortedBody[1]!)[3]).toBe("30")
+
+  fireEvent.click(screen.getByRole("button", { name: /Cost/ }))
+  expect(
+    screen.getByRole("columnheader", { name: /Cost/ }).getAttribute("aria-sort")
+  ).toBe("descending")
+  expect(
+    screen
+      .getByRole("columnheader", { name: /Invocations/ })
+      .getAttribute("aria-sort")
+  ).toBeNull()
+  const costBody = within(screen.getByRole("table"))
+    .getAllByRole("row")
+    .slice(1)
+  expect(rowCells(costBody[0]!)[5]).toBe("$3.00")
+  expect(rowCells(costBody[1]!)[5]).toBe("$1.00")
+  client.clear()
+})
+
+it("sorts textual columns case-insensitively and defaults new columns to descending", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 2,
+    rows: sortableRows,
+  })
+  const client = mountReport()
+  await screen.findByText("Alpha One")
+
+  fireEvent.click(screen.getByRole("button", { name: /Favorite Model/ }))
+  const body = within(screen.getByRole("table")).getAllByRole("row").slice(1)
+  expect(rowCells(body[0]!)[2]).toBe("model-b")
+  expect(rowCells(body[1]!)[2]).toBe("model-a")
+
+  fireEvent.click(screen.getByRole("button", { name: /Favorite Model/ }))
+  const reversed = within(screen.getByRole("table"))
+    .getAllByRole("row")
+    .slice(1)
+  expect(rowCells(reversed[0]!)[2]).toBe("model-a")
+  expect(rowCells(reversed[1]!)[2]).toBe("model-b")
+  client.clear()
+})
+
+it("sorts users by their displayed name instead of their login", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 2,
+    rows: [
+      {
+        ...sortableRows[0]!,
+        user: { name: "Zoe User", github_login: "aardvark", email: null },
+      },
+      {
+        ...sortableRows[1]!,
+        user: { name: "Alice User", github_login: "zebra", email: null },
+      },
+    ],
+  })
+  const client = mountReport()
+  await screen.findByText("Zoe User")
+
+  fireEvent.click(screen.getByRole("button", { name: /^User/ }))
+  fireEvent.click(screen.getByRole("button", { name: /^User/ }))
+  const body = within(screen.getByRole("table")).getAllByRole("row").slice(1)
+  expect(rowCells(body[0]!)[1]).toContain("Alice User")
+  expect(rowCells(body[1]!)[1]).toContain("Zoe User")
+  client.clear()
+})
+
 it.each([
   {
     name: "confirmed zero",

@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
+import {
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
+  ArrowUpDown,
+} from "lucide-react"
+import { useMemo, useState } from "react"
 
 import type {
   AnalyticsMetadata,
@@ -35,6 +40,15 @@ export const Route = createFileRoute("/usage")({
 })
 
 const PAGE_SIZES = [10, 25, 50, 100] as const
+
+type SortDirection = "asc" | "desc"
+
+interface SortableColumn {
+  key: string
+  label: string
+  align: "left" | "right"
+  sortValue: (row: UsageLeaderboardRow) => number | string
+}
 
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "7d": "Last 7 days",
@@ -507,6 +521,122 @@ function PRMergeRateTable({
   )
 }
 
+const USAGE_COLUMNS: Array<SortableColumn> = [
+  {
+    key: "rank",
+    label: "Rank",
+    align: "left",
+    sortValue: (row) => row.rank,
+  },
+  {
+    key: "user",
+    label: "User",
+    align: "left",
+    sortValue: (row) => row.user.name.toLowerCase(),
+  },
+  {
+    key: "favorite_model",
+    label: "Favorite Model",
+    align: "left",
+    sortValue: (row) => row.favorite_model.toLowerCase(),
+  },
+  {
+    key: "invocations",
+    label: "Invocations",
+    align: "right",
+    sortValue: (row) => row.invocations,
+  },
+  {
+    key: "total_tokens",
+    label: "Tokens",
+    align: "right",
+    sortValue: (row) => row.total_tokens,
+  },
+  {
+    key: "total_cost_usd",
+    label: "Cost",
+    align: "right",
+    sortValue: (row) => row.total_cost_usd,
+  },
+  {
+    key: "avg_invocation_seconds",
+    label: "Avg Invocation Duration",
+    align: "right",
+    sortValue: (row) => row.avg_invocation_seconds,
+  },
+  {
+    key: "prs_opened",
+    label: "PRs Opened",
+    align: "right",
+    sortValue: (row) => row.prs_opened,
+  },
+  {
+    key: "merged_prs",
+    label: "Merged PRs",
+    align: "right",
+    sortValue: (row) => row.merged_prs,
+  },
+  {
+    key: "agent_loc",
+    label: "Agent LOC",
+    align: "right",
+    sortValue: (row) => row.agent_loc,
+  },
+]
+
+function compareSortValues(a: number | string, b: number | string): number {
+  if (typeof a === "number" && typeof b === "number") return a - b
+  return String(a).localeCompare(String(b))
+}
+
+function SortableHeader({
+  column,
+  sortKey,
+  sortDirection,
+  onSort,
+  className,
+}: {
+  column: SortableColumn
+  sortKey: string | null
+  sortDirection: SortDirection
+  onSort: (key: string) => void
+  className: string
+}) {
+  const isActive = sortKey === column.key
+  const Icon = isActive
+    ? sortDirection === "asc"
+      ? ArrowUpNarrowWide
+      : ArrowDownNarrowWide
+    : ArrowUpDown
+  const ariaSort = isActive
+    ? sortDirection === "asc"
+      ? "ascending"
+      : "descending"
+    : undefined
+
+  return (
+    <th
+      scope="col"
+      aria-sort={ariaSort}
+      className={`${className} p-0 font-normal`}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(column.key)}
+        className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+          column.align === "right" ? "justify-end" : "justify-start"
+        } ${isActive ? "text-foreground" : ""}`}
+      >
+        {column.label}
+        <Icon
+          className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
+          aria-hidden
+        />
+      </button>
+    </th>
+  )
+}
+
 function UsageTable({
   models,
   rows,
@@ -524,27 +654,46 @@ function UsageTable({
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
+  const [sortKey, setSortKey] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+    } else {
+      setSortKey(key)
+      setSortDirection("desc")
+    }
+  }
+
+  const sortedRows = useMemo(() => {
+    const column = USAGE_COLUMNS.find((col) => col.key === sortKey)
+    if (!column) return rows
+    const sorted = [...rows].sort((a, b) =>
+      compareSortValues(column.sortValue(a), column.sortValue(b))
+    )
+    return sortDirection === "desc" ? sorted.reverse() : sorted
+  }, [rows, sortKey, sortDirection])
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1040px] text-xs">
         <thead className="border-b border-border text-xs text-muted-foreground">
           <tr>
-            <th className="w-14 px-4 py-3 text-left font-normal">Rank</th>
-            <th className="px-2 py-3 text-left font-normal">User</th>
-            <th className="px-2 py-3 text-left font-normal">Favorite Model</th>
-            <th className="px-2 py-3 text-right font-normal">Invocations</th>
-            <th className="px-2 py-3 text-right font-normal">Tokens</th>
-            <th className="px-2 py-3 text-right font-normal">Cost</th>
-            <th className="px-2 py-3 text-right font-normal">
-              Avg Invocation Duration
-            </th>
-            <th className="px-2 py-3 text-right font-normal">PRs Opened</th>
-            <th className="px-2 py-3 text-right font-normal">Merged PRs</th>
-            <th className="px-4 py-3 text-right font-normal">Agent LOC</th>
+            {USAGE_COLUMNS.map((column, index) => (
+              <SortableHeader
+                key={column.key}
+                column={column}
+                sortKey={sortKey}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                className={`${index === 0 ? "w-14 pr-0 pl-4" : index === USAGE_COLUMNS.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
+              />
+            ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {rows.map((row) => (
+          {sortedRows.map((row) => (
             <tr
               key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
             >
