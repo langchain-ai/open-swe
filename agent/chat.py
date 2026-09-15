@@ -38,10 +38,10 @@ from agent.dashboard.options import (
     gate_fable_model,
     model_supports_effort,
 )
-from agent.dashboard.team_settings import (
-    get_effective_gateway_enabled,
-    get_team_default_model,
-    get_team_fable_enabled,
+from agent.dashboard.team_settings import get_team_fable_enabled
+from agent.dashboard.team_settings_cache import (
+    cached_gateway_enabled,
+    cached_team_default_model,
 )
 from agent.github.app import get_github_app_installation_token
 from agent.middleware import (
@@ -70,7 +70,6 @@ from agent.tools import (
     search_repo_code,
     web_search,
 )
-from agent.utils import ttl_cache
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
@@ -105,22 +104,6 @@ def _chat_general_purpose_subagent() -> SubAgent:
 
 
 CHAT_PROMPT = load_prompt("chat/main.md")
-
-
-async def _cached_gateway_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:gateway-enabled",
-        60,
-        get_effective_gateway_enabled,
-    )
-
-
-async def _cached_team_chat_model() -> tuple[str, str]:
-    return await ttl_cache.cached(
-        "team-default-model:chat",
-        60,
-        lambda: get_team_default_model("chat"),
-    )
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
@@ -177,7 +160,7 @@ async def _resolve_chat_model(cfg: RunConfig) -> tuple[str, str]:
     if canonical is not None:
         return canonical
     # Team review-chat default, which itself inherits the Agent default if unset.
-    return await _cached_team_chat_model()
+    return await cached_team_default_model("chat", cfg.workspace_slug)
 
 
 async def get_chat_agent(config: RunnableConfig) -> Pregel:
@@ -193,9 +176,9 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
 
     model_id, effort = await _resolve_chat_model(cfg)
     model_id, effort = gate_fable_model(
-        model_id, effort, fable_enabled=await get_team_fable_enabled()
+        model_id, effort, fable_enabled=await get_team_fable_enabled(cfg.workspace_slug)
     )
-    use_gateway = await _cached_gateway_enabled()
+    use_gateway = await cached_gateway_enabled(cfg.workspace_slug)
     model_kwargs = provider_model_kwargs(
         model_id,
         effort,

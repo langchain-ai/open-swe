@@ -36,6 +36,7 @@ from agent.store import delete_value, get_value, now_iso, now_ms, put_value, sea
 from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
+from agent.webhooks.common import workspace_for_repo_config
 
 logger = logging.getLogger(__name__)
 
@@ -606,6 +607,9 @@ async def _agent_run_config(
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     if repo and repo.get("owner") and repo.get("name"):
         configurable["repo"] = repo
+    workspace = await workspace_for_repo_config(repo)
+    configurable["workspace"] = workspace
+    configurable["environment"] = workspace
     if slack_thread:
         configurable["slack_thread"] = slack_thread
     if admin_thread:
@@ -625,7 +629,7 @@ async def _agent_run_config(
     model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
-            model, effort, fable_enabled=await get_team_fable_enabled()
+            model, effort, fable_enabled=await get_team_fable_enabled(workspace)
         )
         configurable["agent_model_id"] = model
         configurable["agent_effort"] = effort

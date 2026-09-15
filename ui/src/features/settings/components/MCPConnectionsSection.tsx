@@ -34,11 +34,12 @@ const scopes: Record<MCPScope, MCPScopeConfig> = {
     description:
       "Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them.",
     queryKey: ["workspaceMCPs"],
-    list: api.getWorkspaceMCPs,
-    save: api.saveWorkspaceMCP,
-    remove: api.deleteWorkspaceMCP,
-    revealHeaders: api.revealWorkspaceMCPHeaders,
-    discover: api.discoverWorkspaceMCP,
+    // Hard-coded to the default workspace until a workspace selector lands.
+    list: () => api.getWorkspaceMCPs("default"),
+    save: (body) => api.saveWorkspaceMCP("default", body),
+    remove: (name) => api.deleteWorkspaceMCP("default", name),
+    revealHeaders: (name) => api.revealWorkspaceMCPHeaders("default", name),
+    discover: (body) => api.discoverWorkspaceMCP("default", body),
   },
   user: {
     title: "Personal MCPs",

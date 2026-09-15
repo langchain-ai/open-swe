@@ -93,12 +93,25 @@ def _notification(task: dict[str, Any]) -> str:
     )
 
 
+def _thread_workspace(metadata: dict[str, Any]) -> str | None:
+    """The workspace to carry into a follow-up run; ``environment`` is the pre-workspace key."""
+    for key in ("workspace", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _dispatch_config(metadata: dict[str, Any], thread_id: str) -> dict[str, Any]:
     configurable: dict[str, Any] = {"thread_id": thread_id}
-    for key in ("source", "repo", "github_login", "triggering_user_email", "environment"):
+    for key in ("source", "repo", "github_login", "triggering_user_email"):
         value = metadata.get(key)
         if value is not None:
             configurable["user_email" if key == "triggering_user_email" else key] = value
+    workspace = _thread_workspace(metadata)
+    if workspace is not None:
+        configurable["workspace"] = workspace
+        configurable["environment"] = workspace
     configurable.update(SourceContext.from_metadata(metadata).dump())
     return configurable
 

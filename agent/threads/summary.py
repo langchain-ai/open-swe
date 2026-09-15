@@ -384,6 +384,7 @@ async def _thread_summary(
         "ownerLogin": metadata.get("owner_login"),
         "continuedFromThreadId": metadata.get("continued_from_thread_id"),
         "environment": metadata.get("environment"),
+        "workspace": metadata.get("workspace") or metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": thread_source(metadata),
         "origin": origin,

@@ -176,11 +176,14 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # store Slack uses, so PRs open *as the triggering user* and the thread is
     # tagged for the dashboard.
     mapped_login = await common.resolve_login_from_email_async(user_email) if user_email else None
+    # The repository's workspace is the one this run lands in, so its team
+    # default model and Fable flag are the ones the vision fallback checks.
+    workspace = await common.workspace_for_repo_config(repo_config)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
         image_urls = common.dedupe_urls(image_urls)
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
+        resolved_model_id = await common.resolve_agent_model_id(mapped_login, workspace=workspace)
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
             common.logger.info(
@@ -234,6 +237,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
 
+    configurable["workspace"] = workspace
+    configurable["environment"] = workspace
+
     await common.upsert_agent_thread_metadata(
         thread_id,
         source="linear",
@@ -242,6 +248,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         user_email=user_email or "",
         title=title or identifier or "Linear issue",
         source_context=SourceContext.parse({"linear_issue": configurable["linear_issue"]}),
+        workspace=workspace,
     )
 
     run_messages = [

@@ -12,8 +12,11 @@ from pydantic import ValidationError
 
 from agent import store as agent_store
 from agent.dashboard import repo_access
+from agent.dashboard.options import fable_disabled_fallback
+from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
 from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 class _FakeStore:
@@ -1135,6 +1138,78 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert stored["scope"] == "workspace"
 
 
+async def test_launch_scheduled_agent_run_stamps_workspace_owning_repo(
+    fake_client, auth, monkeypatch, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    workspace = await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice"
+    )
+    record = {
+        "id": "sched_1",
+        "name": "Weekly dependencies",
+        "prompt": "Check dependencies and open a PR if needed",
+        "schedule": "0 9 * * 1",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "model": "Default",
+        "effort": None,
+        "base_branch": "main",
+        "branch_prefix": "open-swe",
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result["status"] == "started"
+    run = fake_client.runs.created[0]
+    assert run["config"]["configurable"]["workspace"] == workspace.slug
+    assert run["config"]["configurable"]["environment"] == workspace.slug
+
+
+async def test_launch_scheduled_agent_run_gates_fable_by_the_repos_workspace(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    """Fable is a per-workspace kill switch, so the run's own workspace decides.
+
+    `default` leaves it on here and the workspace owning the schedule's
+    repository does not, so a flag read from `default` would let the Fable
+    model through.
+    """
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    await upsert_team_settings(TeamSettingsUpdate(fable_enabled=True), workspace="default")
+    record = {
+        "id": "sched_1",
+        "name": "Weekly dependencies",
+        "prompt": "Check dependencies and open a PR if needed",
+        "schedule": "0 9 * * 1",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "model": "anthropic:claude-fable-5-1",
+        "effort": "high",
+        "base_branch": "main",
+        "branch_prefix": "open-swe",
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
+
+    configurable = fake_client.runs.created[0]["config"]["configurable"]
+    assert configurable["workspace"] == "oss"
+    assert (configurable["agent_model_id"], configurable["agent_effort"]) == (
+        fable_disabled_fallback("high")
+    )
+
+
 @pytest.mark.parametrize("creator", [None, "alice"])
 @pytest.mark.parametrize("github_status", [None, 200, 401, 403, 404])
 async def test_system_schedule_can_run_without_user_credentials(
@@ -1193,7 +1268,7 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
 ) -> None:  # noqa: ANN001, ARG001
     from agent import server
     from agent.run_config import RunConfig
-    from agent.tools import automations, environments, organization_skills
+    from agent.tools import automations, organization_skills, workspaces
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
@@ -1212,8 +1287,8 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     assert await server._admin_thread(run_config, None) is True
     assert RunConfig.from_config(run_config).github_login is None
     assert RunConfig.from_config(run_config).user_email is None
-    monkeypatch.setattr(environments.store.ENVIRONMENTS, "list_all", AsyncMock(return_value=[]))
-    assert (await environments.list_environments())["ok"] is True
+    monkeypatch.setattr(workspaces.store.WORKSPACES, "list_all", AsyncMock(return_value=[]))
+    assert (await workspaces.list_workspaces())["ok"] is True
     assert (await automations.list_automations())["ok"] is True
     await organization_skills.save_organization_skill("system-check", "Check", "instructions")
     assert (await organization_skills.delete_organization_skill("system-check"))["ok"] is True
@@ -1247,17 +1322,17 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     ):
         run_config["configurable"] = {**original, **patch}
         assert await server._admin_thread(run_config, None) is False
-        assert (await environments.list_environments())["ok"] is False
+        assert (await workspaces.list_workspaces())["ok"] is False
 
     run_config["configurable"] = original
     metadata = fake_client.threads.created[0]["metadata"]
     metadata["owner_type"] = "user"
     assert await server._admin_thread(run_config, None) is False
-    assert (await environments.list_environments())["ok"] is False
+    assert (await workspaces.list_workspaces())["ok"] is False
     metadata["owner_type"] = "system"
     monkeypatch.setenv("CONFIGURED_ADMINS", "bob")
     assert await server._admin_thread(run_config, None) is False
-    assert (await environments.list_environments())["ok"] is False
+    assert (await workspaces.list_workspaces())["ok"] is False
 
 
 async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_thread(
