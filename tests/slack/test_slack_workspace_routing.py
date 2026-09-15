@@ -20,9 +20,9 @@ from agent.workspaces.store import WORKSPACES, WorkspaceCreate, parse_workspace_
 from tests.conftest import FakeStore
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
-# Workspaces are rows; team settings are still Store records, so the test that
-# reads one keeps the store double as well.
-pytestmark = pytest.mark.usefixtures("registry_db")
+# Workspaces are rows; team settings are still Store records, so the tests that
+# read one keep the store double as well.
+_needs_workspace_rows = pytest.mark.usefixtures("registry_db")
 
 
 def test_workspace_tag_accepts_both_spellings() -> None:
@@ -31,6 +31,7 @@ def test_workspace_tag_accepts_both_spellings() -> None:
     assert parse_workspace_tag("fix the bug") == (None, "fix the bug")
 
 
+@_needs_workspace_rows
 async def test_first_mention_in_bound_channel_dispatches_with_its_workspace(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
@@ -69,6 +70,7 @@ async def test_first_mention_in_bound_channel_dispatches_with_its_workspace(
     assert configurable["environment"] == "oss"
 
 
+@_needs_workspace_rows
 async def test_a_bound_channel_outranks_a_defaulted_repository(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
@@ -116,6 +118,7 @@ async def test_a_bound_channel_outranks_a_defaulted_repository(
     assert configurable["repo"] == {"owner": "acme", "name": "oss"}
 
 
+@_needs_workspace_rows
 async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
@@ -184,6 +187,7 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
     )
 
 
+@_needs_workspace_rows
 async def test_a_named_repository_still_outranks_a_bound_channel(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:

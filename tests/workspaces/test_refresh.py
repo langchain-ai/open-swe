@@ -8,9 +8,6 @@ from agent.workspaces import refresh
 from agent.workspaces import store as env_store
 from agent.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate
 
-# Most tests here create workspaces, which now live in PostgreSQL.
-pytestmark = pytest.mark.usefixtures("registry_db")
-
 
 class _Result:
     def __init__(self, output: str, exit_code: int) -> None:
@@ -83,6 +80,7 @@ def test_a_wedged_refresh_does_not_block_forever() -> None:
 # --- refresh ---
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_refresh_runs_the_script_then_captures_and_cleans_up() -> None:
     backend = _backend(_Result("cloning acme/repo\ndone", 0))
@@ -112,6 +110,7 @@ async def test_refresh_runs_the_script_then_captures_and_cleans_up() -> None:
     assert record.refresh_finished_at
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_the_update_script_runs_after_setup_and_gates_the_capture() -> None:
     """A broken update script must be caught here, not by the next hourly update."""
@@ -146,6 +145,7 @@ async def test_the_update_script_runs_after_setup_and_gates_the_capture() -> Non
     assert "fatal: not a git repository" in record.refresh_log
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_a_failing_script_is_never_captured() -> None:
     backend = _backend(_Result("gcc: fatal error", 2))
@@ -176,6 +176,7 @@ async def test_a_failing_script_is_never_captured() -> None:
     assert record.ready_snapshot_id == "snap-1"
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
     release = AsyncMock()
@@ -200,7 +201,7 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
     assert record.refresh_error == "no capacity"
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
     create = AsyncMock()
@@ -215,6 +216,7 @@ async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
     create.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_refresh_requires_the_langsmith_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANDBOX_TYPE", "local")
@@ -229,6 +231,7 @@ async def test_refresh_requires_the_langsmith_provider(monkeypatch: pytest.Monke
     create.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_the_nightly_sweep_only_visits_scripted_environments() -> None:
     refreshed = AsyncMock(return_value={"status": "success"})
@@ -246,6 +249,7 @@ async def test_the_nightly_sweep_only_visits_scripted_environments() -> None:
 # --- update kind + lazy trigger ---
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_update_script() -> None:
     backend = _backend(_Result("Already up to date.", 0))
@@ -285,6 +289,7 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
     assert record.refresh_kind == "update"
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_an_update_needs_a_snapshot_to_update() -> None:
     create_builder = AsyncMock()
@@ -390,6 +395,7 @@ async def test_a_failed_trigger_never_reaches_the_sandbox_creation() -> None:
 # --- cron ---
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_cron_registration_is_idempotent() -> None:
     client = MagicMock()
@@ -404,6 +410,7 @@ async def test_cron_registration_is_idempotent() -> None:
     client.crons.create.assert_awaited_once()
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_deleting_an_environment_removes_its_cron() -> None:
     client = MagicMock()
@@ -422,6 +429,7 @@ async def test_deleting_an_environment_removes_its_cron() -> None:
     client.crons.delete.assert_awaited_once_with("cron-1")
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_a_refresh_records_every_stage_it_reaches() -> None:
     """A rebuild runs for minutes to an hour; the stage list is how it is followed."""
@@ -456,6 +464,7 @@ async def test_a_refresh_records_every_stage_it_reaches() -> None:
     assert paths["boot"] is None
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_the_step_that_broke_is_the_one_left_failed() -> None:
     backend = _backend(_Result("gcc: fatal error", 2))
@@ -477,6 +486,7 @@ async def test_the_step_that_broke_is_the_one_left_failed() -> None:
     ]
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
 async def test_the_builder_is_published_while_it_lives_and_cleared_after() -> None:
     """A poll reads the running trace off the builder, so its id must be current."""

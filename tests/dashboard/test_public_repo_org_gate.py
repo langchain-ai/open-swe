@@ -1,50 +1,22 @@
 """Tests for the public-repo org-membership gate on GitHub webhooks."""
 
-import hashlib
-import hmac
-import json
 from typing import Any, cast
 
-import httpx
 import pytest
 from httpx2 import Response
 
-from agent.api.app import app
 from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
+from tests.conftest import post_signed_github_webhook
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 
 
-def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
-    sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return f"sha256={sig}"
-
-
 async def _post_github_webhook(event_type: str, payload: dict[str, Any]) -> Response:
-    """Send a signed GitHub webhook POST request.
-
-    Uses an in-process ``httpx.AsyncClient`` rather than ``TestClient`` so the
-    request runs on the test's own event loop: the public-repo gate reads
-    workspace ownership through ``registry_db``'s engine, which is bound to
-    that loop.
-    """
-    body = json.dumps(payload, separators=(",", ":")).encode()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        return cast(
-            Response,
-            await client.post(
-                "/webhooks/github",
-                content=body,
-                headers={
-                    "X-GitHub-Event": event_type,
-                    "X-Hub-Signature-256": _sign_body(body),
-                    "Content-Type": "application/json",
-                },
-            ),
-        )
+    return cast(
+        Response,
+        await post_signed_github_webhook(event_type, payload, secret=_TEST_WEBHOOK_SECRET),
+    )
 
 
 def _install_membership_stub(monkeypatch, members: set[str]) -> dict[str, list[str]]:

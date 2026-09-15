@@ -20,6 +20,7 @@ from agent.slack.request import SlackRequest
 from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
 from agent.webhooks import common as webhook_common
+from tests.conftest import post_signed_github_webhook
 
 request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
 
@@ -52,32 +53,8 @@ def _slack_routing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "claim_slack_event", claim)
 
 
-def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
-    """Compute the X-Hub-Signature-256 header value for raw bytes."""
-    sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return f"sha256={sig}"
-
-
 async def _post_github_webhook(event_type: str, payload: dict[object, object]) -> httpx.Response:
-    """Send a signed GitHub webhook POST request.
-
-    Uses an in-process ``httpx.AsyncClient`` rather than ``TestClient`` so the
-    request runs on the test's own event loop: a workspace-backed route needs
-    ``registry_db``'s engine, which is bound to that loop.
-    """
-    body = json.dumps(payload, separators=(",", ":")).encode()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        return await client.post(
-            "/webhooks/github",
-            content=body,
-            headers={
-                "X-GitHub-Event": event_type,
-                "X-Hub-Signature-256": _sign_body(body),
-                "Content-Type": "application/json",
-            },
-        )
+    return await post_signed_github_webhook(event_type, payload, secret=_TEST_WEBHOOK_SECRET)
 
 
 def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:

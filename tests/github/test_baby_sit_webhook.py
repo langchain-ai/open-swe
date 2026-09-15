@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 from typing import Any
 
@@ -10,32 +8,17 @@ from fastapi.testclient import TestClient
 from agent.api.app import app
 from agent.github import webhook as github
 from agent.webhooks import common
+from tests.conftest import post_signed_github_webhook
 
 _SECRET = "baby-sit-webhook-secret"
 
 
-async def _post(event_type: str, payload: dict[str, Any], *, delivery_id: str = "delivery-1"):
-    """Send a signed webhook POST on the test's own event loop.
-
-    An in-process ``httpx.AsyncClient`` rather than ``TestClient``: the route
-    reads workspace ownership through ``registry_db``'s engine, which is bound
-    to this loop, and ``TestClient`` would run the request on a different one.
-    """
-    body = json.dumps(payload, separators=(",", ":")).encode()
-    signature = hmac.new(_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        return await client.post(
-            "/webhooks/github",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-GitHub-Event": event_type,
-                "X-GitHub-Delivery": delivery_id,
-                "X-Hub-Signature-256": f"sha256={signature}",
-            },
-        )
+async def _post(
+    event_type: str, payload: dict[str, Any], *, delivery_id: str = "delivery-1"
+) -> httpx.Response:
+    return await post_signed_github_webhook(
+        event_type, payload, secret=_SECRET, delivery_id=delivery_id
+    )
 
 
 @pytest.mark.parametrize("event_type", ["check_run", "check_suite", "workflow_run", "status"])

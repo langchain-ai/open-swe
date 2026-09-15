@@ -1,47 +1,21 @@
 """GitHub webhook events are dropped for repos no workspace owns when policy says so."""
 
-import hashlib
-import hmac
-import json
 from typing import Any
 
 import httpx
 import pytest
 
-from agent.api.app import app
 from agent.github import routes as github_routes
 from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
 from agent.workspaces.routing import WorkspaceLookupError
+from tests.conftest import post_signed_github_webhook
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-workspace-routing"
 
 
-def _sign_body(body: bytes) -> str:
-    sig = hmac.new(_TEST_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    return f"sha256={sig}"
-
-
 async def _post_github_webhook(event_type: str, payload: dict[str, Any]) -> httpx.Response:
-    """Send a signed GitHub webhook POST request.
-
-    Uses an in-process ``httpx.AsyncClient`` rather than ``TestClient`` so the
-    request runs on the test's own event loop: a workspace-backed route needs
-    ``registry_db``'s engine, which is bound to that loop.
-    """
-    body = json.dumps(payload, separators=(",", ":")).encode()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        return await client.post(
-            "/webhooks/github",
-            content=body,
-            headers={
-                "X-GitHub-Event": event_type,
-                "X-Hub-Signature-256": _sign_body(body),
-                "Content-Type": "application/json",
-            },
-        )
+    return await post_signed_github_webhook(event_type, payload, secret=_TEST_WEBHOOK_SECRET)
 
 
 def _unowned_repo_issue_comment_payload() -> dict[str, Any]:

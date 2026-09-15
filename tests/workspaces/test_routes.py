@@ -7,19 +7,19 @@ from fastapi import FastAPI
 
 from agent.dashboard import deps, oauth, routes
 
-# Workspaces created through the HTTP API now live in PostgreSQL.
-pytestmark = pytest.mark.usefixtures("registry_db")
-
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 
 
 @pytest.fixture
-async def admin_client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[httpx.AsyncClient]:
+async def admin_client(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> AsyncIterator[httpx.AsyncClient]:
     """A client hitting the real dashboard app, signed in as an admin.
 
     Uses the aggregate dashboard router (mounted at ``/dashboard/api``, same as
     ``tests/dashboard/test_workspace_mcps.py``) rather than the workspaces
     router alone, so origin-checked mutations behave as they do in production.
+    Carries ``registry_db`` because every workspace this writes is a row.
     """
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     app = FastAPI()
