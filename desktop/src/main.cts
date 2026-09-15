@@ -1535,6 +1535,10 @@ if (!hasSingleInstanceLock) {
     if (process.platform !== "darwin") app.quit();
   });
 
+  // `before-quit` waits for a clean stop; these cover relaunches and crashes,
+  // where an orphaned backend would keep writing the shared state directory.
+  app.on("will-quit", () => backendSupervisor?.killSync());
+  process.on("exit", () => backendSupervisor?.killSync());
   app.on("before-quit", (event) => {
     if (quitting) return;
     event.preventDefault();

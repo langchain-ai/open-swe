@@ -208,3 +208,39 @@ test("packaged target runs the bundled backend", () => {
     target,
   );
 });
+
+test("concurrent starts share one backend and a replaced child cannot fail it", async () => {
+  const { EventEmitter } = require("node:events");
+  const children = [];
+  const supervisor = new BackendSupervisor({
+    projectsFile: "/tmp/projects.json",
+    worktreesDir: path.join(__dirname, "..", "build", "test-worktrees"),
+    repoRoot: "/work/open-swe",
+    reservePort: async () => 49152,
+    fetch: async () => new Response(null, { status: 200 }),
+    spawn: () => {
+      const child = Object.assign(new EventEmitter(), {
+        exitCode: null,
+        signalCode: null,
+        kill() {
+          this.exitCode = 0;
+          this.emit("exit", 0, null);
+        },
+      });
+      children.push(child);
+      return child;
+    },
+  });
+
+  await Promise.all([supervisor.start(), supervisor.start()]);
+  assert.equal(children.length, 1);
+
+  const stale = Object.assign(new EventEmitter(), { exitCode: 1 });
+  supervisor.child = children[0];
+  stale.emit("exit", 1, null);
+  assert.equal(supervisor.failure, null);
+
+  await supervisor.close();
+  assert.equal(children[0].exitCode, 0);
+  assert.equal(supervisor.child, null);
+});
