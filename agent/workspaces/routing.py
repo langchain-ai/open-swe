@@ -4,6 +4,13 @@ Resolution order, first match wins: the thread's recorded workspace, a
 ``workspace:<slug>`` tag on the opening message, the repository's owner, the
 Slack channel's owner, the user's default, then ``default``. The order is the
 one OEP-0003 specifies; callers never guess on their own.
+
+A store failure is not an answer. Every lookup here raises
+:class:`WorkspaceLookupError` rather than reporting an empty workspace list,
+because "nothing owns this repository" and "we could not find out" lead to
+opposite decisions: the first may be a deliberate drop, the second must be
+retried. Callers that can retry — the GitHub webhook route — propagate it;
+callers that cannot fall back to ``default`` and log at error.
 """
 
 import logging
@@ -24,6 +31,10 @@ logger = logging.getLogger(__name__)
 ResolvedBy = Literal["thread", "tag", "repo", "channel", "user_default", "instance_default"]
 
 
+class WorkspaceLookupError(RuntimeError):
+    """The workspace list could not be read, so ownership is unknown."""
+
+
 @dataclass(frozen=True)
 class WorkspaceResolution:
     slug: str
@@ -40,9 +51,8 @@ async def _all_workspaces() -> list[Workspace]:
         return await ttl_cache.cached(
             WORKSPACE_LIST_CACHE_KEY, WORKSPACE_LIST_CACHE_TTL_SECONDS, WORKSPACES.list_all
         )
-    except Exception:
-        logger.warning("workspace listing failed; routing to default", exc_info=True)
-        return []
+    except Exception as exc:
+        raise WorkspaceLookupError("workspace listing failed") from exc
 
 
 async def _slug_exists(slug: str) -> bool:
@@ -75,22 +85,24 @@ def _unassigned_policy() -> str:
 
 
 async def repo_is_routable(owner: str, name: str) -> bool:
-    """Whether a GitHub event for this repository should be handled at all."""
+    """Whether a GitHub event for this repository should be handled at all.
+
+    Raises :class:`WorkspaceLookupError` when ownership cannot be read: under
+    the ``ignore`` policy a false answer drops the delivery for good, and
+    GitHub only retries a 5xx.
+    """
     if await workspace_for_repo(owner, name) is not None:
         return True
     return _unassigned_policy() == "default"
 
 
-async def resolve_workspace(
+async def _resolve_from_store(
     *,
-    thread_workspace: str | None = None,
-    tag: str | None = None,
-    repo: tuple[str, str] | None = None,
-    slack_channel_id: str | None = None,
-    login: str | None = None,
-) -> WorkspaceResolution:
-    if thread_workspace and thread_workspace.strip():
-        return WorkspaceResolution(thread_workspace.strip(), "thread")
+    tag: str | None,
+    repo: tuple[str, str] | None,
+    slack_channel_id: str | None,
+    login: str | None,
+) -> WorkspaceResolution | None:
     if tag:
         try:
             tagged = slugify(tag)
@@ -110,4 +122,27 @@ async def resolve_workspace(
         preferred = (await get_user_preferences(login)).get("default_workspace")
         if isinstance(preferred, str) and preferred and await _slug_exists(preferred):
             return WorkspaceResolution(preferred, "user_default")
-    return WorkspaceResolution(DEFAULT_WORKSPACE_SLUG, "instance_default")
+    return None
+
+
+async def resolve_workspace(
+    *,
+    thread_workspace: str | None = None,
+    tag: str | None = None,
+    repo: tuple[str, str] | None = None,
+    slack_channel_id: str | None = None,
+    login: str | None = None,
+) -> WorkspaceResolution:
+    if thread_workspace and thread_workspace.strip():
+        return WorkspaceResolution(thread_workspace.strip(), "thread")
+    try:
+        resolved = await _resolve_from_store(
+            tag=tag, repo=repo, slack_channel_id=slack_channel_id, login=login
+        )
+    except WorkspaceLookupError:
+        # Fail soft here on purpose: this decides where work runs, and a run in
+        # `default` beats no run. The GitHub route fails closed instead, since a
+        # delivery it drops is never retried.
+        logger.error("workspace routing failed; using the instance default", exc_info=True)
+        return WorkspaceResolution(DEFAULT_WORKSPACE_SLUG, "instance_default")
+    return resolved or WorkspaceResolution(DEFAULT_WORKSPACE_SLUG, "instance_default")
