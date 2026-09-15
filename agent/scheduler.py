@@ -35,6 +35,7 @@ class SchedulerState(BaseModel):
     run_id: str | None = None
     invocation_id: str | None = None
     prepare_run_id: str | None = None
+    invocation_started_at: str | None = None
     channel_id: str | None = None
     thread_ts: str | None = None
     attempt: int | None = None

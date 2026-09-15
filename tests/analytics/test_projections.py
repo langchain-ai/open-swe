@@ -90,7 +90,6 @@ async def test_emitted_finding_links_to_published_review(analytics_db, monkeypat
             return DAY
 
     monkeypatch.setattr(emitter, "datetime", FixedDatetime)
-    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
     monkeypatch.setattr(emitter, "enqueue", ingestion.ingest)
     await emitter.review_published(
         thread_key="thread",
@@ -128,7 +127,6 @@ async def test_directory_preserves_immutable_identity_after_login_change(analyti
     from agent.analytics import directory
 
     workspace, transaction = analytics_db
-    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
     monkeypatch.setattr(directory, "transaction", transaction)
     current_person = identity.opaque_person("github", 123)
     other_person = identity.opaque_person("github", 456)

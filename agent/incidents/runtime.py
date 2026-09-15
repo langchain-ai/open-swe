@@ -4,6 +4,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
+from datetime import datetime, timedelta
 from typing import Any
 
 import langgraph_sdk
@@ -17,7 +18,13 @@ from agent.incidents import documents, service
 from agent.incidents.evidence_tools import EvidenceCollector, source_url
 from agent.incidents.models import Incident, IncidentPolicy, IncidentReportRecord
 from agent.incidents.presentation import report_message
-from agent.incidents.report import INCIDENT_PROMPT, ReportDraft, context_evidence, finalize_report
+from agent.incidents.report import (
+    INCIDENT_PROMPT,
+    ReportDraft,
+    context_evidence,
+    digest_fields,
+    finalize_report,
+)
 from agent.incidents.turns import SESSION_TS
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
@@ -30,6 +37,22 @@ logger = logging.getLogger(__name__)
 
 INCIDENT_SOURCE = "incidents_agent"
 INCIDENT_TOOL_NAMES = frozenset({"record_incident_report", "search_incidents", "read_incident"})
+# How long an unprompted report waits after the last post before speaking again. Findings
+# change wording from turn to turn without changing what they say, so the digest alone lets
+# a quiet incident repeat itself every time an alerting bot pings the channel. A question
+# from a responder is never delayed by this.
+UNPROMPTED_POST_INTERVAL = timedelta(minutes=30)
+
+
+def _quiet_period_elapsed(posted_at: str) -> bool:
+    """True when the last post is old enough for the agent to speak unprompted again."""
+    if not posted_at:
+        return True
+    try:
+        since = datetime.fromisoformat(now_iso()) - datetime.fromisoformat(posted_at)
+    except ValueError:
+        return True
+    return since >= UNPROMPTED_POST_INTERVAL
 
 
 def current_run_id() -> str:
@@ -94,8 +117,9 @@ class IncidentSession:
                 description=(
                     "Record this turn's incident report. Every claim needs evidence_ids from the "
                     "incident context blocks or tool results. Stores the report, updates the "
-                    "postmortem summary, and posts the channel update when the findings changed "
-                    "or a responder asked a question. Call it exactly once at the end of the turn."
+                    "postmortem summary, and posts the channel update when a responder asked a "
+                    "question, or, unprompted, when the findings changed and the channel has been "
+                    "quiet long enough. Call it exactly once at the end of the turn."
                 ),
                 args_schema=ReportDraft,
             ),
@@ -136,7 +160,7 @@ class IncidentSession:
         draft = ReportDraft.model_validate(kwargs)
         report = finalize_report(draft, self.collector)
         record = self.record
-        digest = service.fingerprint(report_message(report, report.summary, None)[0])
+        digest = service.fingerprint(digest_fields(report))
         previous = await service.REPORTS.get(record.id)
         run_id = current_run_id()
         # The postmortem update runs first: if it fails, nothing is recorded and the agent
@@ -149,6 +173,7 @@ class IncidentSession:
             run_id=run_id,
             posted_digest=previous.posted_digest if previous else "",
             posted_run_id=previous.posted_run_id if previous else "",
+            posted_at=previous.posted_at if previous else "",
             updated_at=now_iso(),
             activity=previous.activity if previous else [],
         )
@@ -157,8 +182,15 @@ class IncidentSession:
         explicit = self.explicit_request is not None
         delivered = latest.posted_digest == digest
         delivered_this_run = delivered and bool(run_id) and latest.posted_run_id == run_id
+        if explicit:
+            # A responder is waiting on an answer, so say it once per run and never hold it back.
+            should_post = not delivered_this_run
+        else:
+            # Nobody asked: the findings must have moved on, and the channel must have been
+            # quiet long enough. A held finding is not lost; the next turn offers it again.
+            should_post = not delivered and _quiet_period_elapsed(latest.posted_at)
         posted = False
-        if (not delivered or (explicit and not delivered_this_run)) and not record.is_archived:
+        if should_post and not record.is_archived:
             text, blocks = report_message(
                 report,
                 report.summary,
@@ -177,6 +209,7 @@ class IncidentSession:
             if posted:
                 # Only a confirmed delivery suppresses the next post of the same digest.
                 latest.posted_digest, latest.posted_run_id = digest, run_id
+                latest.posted_at = now_iso()
                 await service.REPORTS.put(record.id, latest)
             elif error:
                 logger.warning(

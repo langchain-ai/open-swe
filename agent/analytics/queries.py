@@ -11,7 +11,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.config import ENV
-from agent.database.analytics import connection, reporting_metadata, workspace_id
+from agent.database import connection
+from agent.database.analytics import reporting_metadata, workspace_id
 
 
 def period_start(period: str | None) -> datetime:

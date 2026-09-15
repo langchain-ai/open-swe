@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from operator import attrgetter
@@ -8,9 +9,16 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, make_url, text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    create_async_engine,
+)
 
 from agent.config import ENV
+
+logger = logging.getLogger(__name__)
 
 _ENGINE: AsyncEngine | None = None
 _ENGINE_URI: str | None = None
@@ -45,6 +53,13 @@ def configured() -> bool:
     return uri() is not None
 
 
+def require_configured() -> None:
+    if not configured():
+        raise RuntimeError(
+            "POSTGRES_URI is required: pull request and repository records are stored in PostgreSQL"
+        )
+
+
 def engine() -> AsyncEngine:
     global _ENGINE, _ENGINE_URI
     database_uri = uri()
@@ -77,12 +92,29 @@ async def transaction() -> AsyncIterator[AsyncConnection]:
         yield conn
 
 
+@asynccontextmanager
+async def session() -> AsyncIterator[AsyncSession]:
+    """An ORM session joined to one ``transaction()``, flushed before it commits."""
+    async with transaction() as conn:
+        async with AsyncSession(bind=conn, expire_on_commit=False) as orm:
+            yield orm
+            await orm.flush()
+
+
 async def migrate() -> None:
+    logger.info(
+        "Initializing database",
+        extra={"database_setting": "POSTGRES_URI", "database_schema": SCHEMA},
+    )
     migrations = await asyncio.to_thread(load_migrations)
     async with engine().begin() as conn:
         await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK})
         await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}"))
         await conn.run_sync(upgrade, migrations)
+    logger.info(
+        "Database initialized",
+        extra={"database_setting": "POSTGRES_URI", "database_schema": SCHEMA},
+    )
 
 
 def load_migrations() -> ScriptDirectory:

@@ -28,20 +28,25 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from agent import database
     from agent.analytics.worker import start_worker, stop_worker
+    from agent.dashboard.admin import configured_admins
     from agent.dashboard.oauth import validate_github_login_allowlist
-    from agent.database.analytics import activate_reporting
-    from agent.database.analytics import close as close_analytics
-    from agent.database.analytics import migrate as migrate_analytics
+    from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from agent.users import User
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
 
     pin_single_event_loop()
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    database.require_configured()
+    await database.migrate()
+    if admins := configured_admins():
+        await User.sync_admins(admins)
     try:
-        await migrate_analytics()
+        await load_workspace()
         await activate_reporting()
         await start_worker()
     except Exception:  # noqa: BLE001
@@ -50,7 +55,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await stop_worker()
-        await close_analytics()
+        await database.close()
         await close_cached_models()
 
 
