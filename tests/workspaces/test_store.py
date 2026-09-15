@@ -258,7 +258,7 @@ async def test_update_writes_only_provided_fields(fake_store: FakeStore) -> None
 @pytest.mark.asyncio
 async def test_update_rejects_a_rename_across_slugs(fake_store: FakeStore) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="draft", repos=["acme/draft"]), "ramon")
-    with pytest.raises(ValueError, match="renaming an environment"):
+    with pytest.raises(ValueError, match="renaming a workspace"):
         await WORKSPACES.apply_update("draft", WorkspaceUpdate(name="default"))
 
 
@@ -647,16 +647,6 @@ async def test_slack_channel_ids_are_normalized(fake_store: FakeStore) -> None:
     assert record.slack_channel_ids == ["C123"]
 
 
-async def test_owner_lookups(fake_store: FakeStore) -> None:
-    await WORKSPACES.create(
-        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["C123"]), "alice"
-    )
-    assert await WORKSPACES.owner_of_repo("Acme/API") == "core"
-    assert await WORKSPACES.owner_of_repo("acme/other") is None
-    assert await WORKSPACES.owner_of_slack_channel("C123") == "core"
-    assert await WORKSPACES.owner_of_slack_channel("C999") is None
-
-
 async def test_legacy_environment_records_are_migrated_on_list(fake_store: FakeStore) -> None:
     fake_store.seed(
         LEGACY_ENVIRONMENTS_NAMESPACE,
@@ -667,3 +657,19 @@ async def test_legacy_environment_records_are_migrated_on_list(fake_store: FakeS
     assert [r.slug for r in records] == ["default"]
     assert fake_store.values(WORKSPACES_NAMESPACE)["default"]["prompt"] == "hi"
     assert (await WORKSPACES.get("default")) is not None
+    # The legacy record is consumed, not merely copied.
+    assert fake_store.values(LEGACY_ENVIRONMENTS_NAMESPACE) == {}
+
+
+async def test_deleting_a_migrated_workspace_does_not_resurrect_it(fake_store: FakeStore) -> None:
+    fake_store.seed(
+        LEGACY_ENVIRONMENTS_NAMESPACE,
+        "oss",
+        {"slug": "oss", "name": "OSS", "prompt": "hi", "repos": ["acme/oss"]},
+    )
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["oss"]
+
+    assert await WORKSPACES.remove("oss") is True
+
+    assert await WORKSPACES.list_all() == []
+    assert await WORKSPACES.get("oss") is None

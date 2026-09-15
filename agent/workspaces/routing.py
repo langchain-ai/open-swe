@@ -13,13 +13,15 @@ from typing import Literal
 from agent.config import ENV
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.utils import ttl_cache
+from agent.workspaces.cache import (
+    WORKSPACE_LIST_CACHE_KEY,
+    WORKSPACE_LIST_CACHE_TTL_SECONDS,
+)
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, Workspace, slugify
 
 logger = logging.getLogger(__name__)
 
 ResolvedBy = Literal["thread", "tag", "repo", "channel", "user_default", "instance_default"]
-_CACHE_KEY = "workspaces:all"
-_CACHE_TTL_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -29,13 +31,15 @@ class WorkspaceResolution:
 
 
 def invalidate_routing_cache() -> None:
-    ttl_cache.invalidate(_CACHE_KEY)
+    ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
 
 
 async def _all_workspaces() -> list[Workspace]:
     """Every workspace, cached briefly: webhooks call this on every delivery."""
     try:
-        return await ttl_cache.cached(_CACHE_KEY, _CACHE_TTL_SECONDS, WORKSPACES.list_all)
+        return await ttl_cache.cached(
+            WORKSPACE_LIST_CACHE_KEY, WORKSPACE_LIST_CACHE_TTL_SECONDS, WORKSPACES.list_all
+        )
     except Exception:
         logger.warning("workspace listing failed; routing to default", exc_info=True)
         return []

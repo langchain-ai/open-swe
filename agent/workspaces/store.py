@@ -42,8 +42,9 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, f
 
 from agent.config import ENV
 from agent.review.styles import normalize_repo_full_name
-from agent.store import TypedStore, now_iso, search_all_values
+from agent.store import TypedStore, delete_value, now_iso, search_all_values
 from agent.utils import ttl_cache
+from agent.workspaces.cache import WORKSPACE_LIST_CACHE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ _ENV_TAG_RE = re.compile(r"(?:(?<=\s)|^)(?:env|workspace):([A-Za-z0-9][A-Za-z0-9
 
 
 def slugify(name: str) -> str:
-    """Return the storage key for an environment name.
+    """Return the storage key for a workspace name.
 
     Also the snapshot name stem, so it is restricted to what a Docker-style tag
     accepts: lowercase alphanumerics and single hyphens.
@@ -165,21 +166,25 @@ def snapshot_name_prefix() -> str:
     prefix = ENV.ENVIRONMENT_SNAPSHOT_PREFIX.get("").strip()
     if ":" in prefix:
         logger.warning(
-            "ENVIRONMENT_SNAPSHOT_PREFIX %r contains a colon, which snapshot names "
-            "may not; falling back to the default prefix",
-            prefix,
+            "snapshot prefix contains a colon, which snapshot names may not; "
+            "falling back to the default prefix",
+            extra={"snapshot_prefix": prefix},
         )
         prefix = ""
     return prefix or "openswe"
 
 
 def default_snapshot_name_for(slug: str) -> str:
-    """``<prefix>-environment-<slug>``: the name an environment publishes under."""
+    """``<prefix>-environment-<slug>``: the name a workspace publishes under.
+
+    The ``-environment-`` infix is deliberate: renaming it would orphan every
+    snapshot captured before workspaces existed.
+    """
     return f"{snapshot_name_prefix()}-environment-{slug}"
 
 
 def script_root() -> str:
-    """Where an environment's scripts and their logs live inside a sandbox.
+    """Where a workspace's scripts and their logs live inside a sandbox.
 
     ``/open-swe/environment`` in a real sandbox, where the agent runs as root.
     Configurable
@@ -206,7 +211,7 @@ def script_log_paths() -> dict[str, str]:
 
 
 def script_command(script: str, label: str) -> str:
-    """Shell command that writes one of an environment's scripts, runs it, and logs it.
+    """Shell command that writes one of a workspace's scripts, runs it, and logs it.
 
     Base64 so nothing in the script body — quotes, heredocs, newlines — can break
     out of the command carrying it.
@@ -300,7 +305,7 @@ def _validate_repos(value: list[str] | None) -> list[str]:
     if not value:
         return []
     if len(value) > MAX_REPOS:
-        raise ValueError(f"at most {MAX_REPOS} repositories per environment")
+        raise ValueError(f"at most {MAX_REPOS} repositories per workspace")
     return list(dict.fromkeys(normalize_repo_full_name(entry) for entry in value))
 
 
@@ -579,9 +584,9 @@ class Workspace(BaseModel):
 
     @property
     def published_snapshot_name(self) -> str:
-        """The name this environment publishes under, stored or derived.
+        """The name this workspace publishes under, stored or derived.
 
-        Stable for the life of the environment: every refresh re-captures under
+        Stable for the life of the workspace: every refresh re-captures under
         it and moves the tag, so the name is an address callers can hold.
         """
         return self.snapshot_name or default_snapshot_name_for(self.slug)
@@ -605,11 +610,11 @@ class Workspace(BaseModel):
         try:
             return _validate_create_params(self.create_params)
         except ValueError:
-            logger.warning("Ignoring invalid sandbox create params for environment %s", self.slug)
+            logger.warning("Ignoring invalid sandbox create params", extra={"workspace": self.slug})
             return {}
 
     def option(self, *, include_log: bool = False) -> dict[str, Any]:
-        """Name/slug/refresh-state for the environment picker and the settings page.
+        """Name/slug/refresh-state for the workspace picker and the settings page.
 
         The log excerpt is admin-only: scripts run under ``bash -x``, whose trace
         expands every argument, so a script that put a credential on a command
@@ -651,34 +656,33 @@ class WorkspaceStore(TypedStore[Workspace]):
         return record
 
     async def _migrate_legacy(self) -> None:
-        """Copy environment records forward once; the legacy namespace is left in place."""
+        """Copy pre-workspace environment records forward, then delete them.
+
+        Deleting each one as it lands makes this self-cleaning and idempotent:
+        there is nothing left to migrate after the first run, so the legacy
+        namespace cannot resurrect a workspace an admin has since deleted, and
+        the double lookup does not become permanent.
+        """
         legacy = await search_all_values(LEGACY_ENVIRONMENTS_NAMESPACE)
         if not legacy:
             return
         existing = {record.slug for record in await self.search_all()}
+        migrated = False
         for value in legacy:
             slug = value.get("slug")
-            if isinstance(slug, str) and slug and slug not in existing:
-                try:
-                    record = Workspace.model_validate(value)
-                except ValidationError:
-                    logger.warning("skipping unreadable legacy environment", extra={"slug": slug})
-                    continue
+            if not (isinstance(slug, str) and slug):
+                continue
+            try:
+                record = Workspace.model_validate(value)
+            except ValidationError:
+                logger.warning("skipping unreadable legacy environment", extra={"slug": slug})
+                continue
+            if record.slug not in existing:
                 await self.put(record.slug, record)
-
-    async def owner_of_repo(self, full_name: str) -> str | None:
-        wanted = full_name.strip().lower()
-        for record in await self.list_all():
-            if any(repo.lower() == wanted for repo in record.repos):
-                return record.slug
-        return None
-
-    async def owner_of_slack_channel(self, channel_id: str) -> str | None:
-        wanted = channel_id.strip().upper()
-        for record in await self.list_all():
-            if wanted in record.slack_channel_ids:
-                return record.slug
-        return None
+                migrated = True
+            await delete_value(LEGACY_ENVIRONMENTS_NAMESPACE, record.slug)
+        if migrated:
+            ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
 
     async def _assert_unique(self, record: Workspace) -> None:
         if record.slug != DEFAULT_WORKSPACE_SLUG and not record.repos:
@@ -701,25 +705,47 @@ class WorkspaceStore(TypedStore[Workspace]):
     async def save(self, record: Workspace) -> Workspace:
         record.updated_at = now_iso()
         result = await self.put(record.slug, record)
-        ttl_cache.invalidate("workspaces:all")
+        ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
         return result
 
     async def create(self, create: WorkspaceCreate, created_by: str) -> Workspace:
         record = Workspace.seed(create, created_by)
         await self._assert_unique(record)
         if await self.get(record.slug) is not None:
-            raise ValueError(f"environment {create.name!r} already exists")
+            raise ValueError(f"workspace {create.name!r} already exists")
         result = await self.put(record.slug, record)
-        ttl_cache.invalidate("workspaces:all")
+        ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
         return result
 
     async def apply_update(self, slug: str, update: WorkspaceUpdate) -> Workspace:
         record = await self.get(slug)
         if record is None:
-            raise ValueError(f"no environment named {slug!r}")
+            raise ValueError(f"no workspace named {slug!r}")
         record = _apply(record, update)
         await self._assert_unique(record)
         return await self.save(record)
+
+    async def assert_publishable(
+        self, slug: str, definition: WorkspaceCreate | WorkspaceUpdate
+    ) -> None:
+        """Run the save-time checks now, before an expensive snapshot capture.
+
+        ``publish`` repeats them: minutes of capture pass in between, and
+        another workspace may claim a repository while they do.
+        """
+        await self._assert_unique(await self._publishable_record(slug, definition, "open-swe"))
+
+    async def _publishable_record(
+        self, slug: str, definition: WorkspaceCreate | WorkspaceUpdate, created_by: str
+    ) -> Workspace:
+        if isinstance(definition, WorkspaceCreate):
+            if await self.get(slug) is not None:
+                raise ValueError(f"workspace {definition.name!r} already exists")
+            return Workspace.seed(definition, created_by)
+        existing = await self.get(slug)
+        if existing is None:
+            raise ValueError(f"no workspace named {slug!r}")
+        return _apply(existing, definition)
 
     async def publish(
         self,
@@ -735,17 +761,9 @@ class WorkspaceStore(TypedStore[Workspace]):
 
         The image already exists by the time this runs; what must not happen is a
         record that carries the new definition but still points at the old image,
-        or a new environment with no image at all. One ``put`` cannot land half.
+        or a new workspace with no image at all. One ``put`` cannot land half.
         """
-        if isinstance(definition, WorkspaceCreate):
-            if await self.get(slug) is not None:
-                raise ValueError(f"environment {definition.name!r} already exists")
-            record = Workspace.seed(definition, created_by)
-        else:
-            existing = await self.get(slug)
-            if existing is None:
-                raise ValueError(f"no environment named {slug!r}")
-            record = _apply(existing, definition)
+        record = await self._publishable_record(slug, definition, created_by)
         await self._assert_unique(record)
         _stamp_captured(
             record,
@@ -753,9 +771,7 @@ class WorkspaceStore(TypedStore[Workspace]):
             snapshot_name=snapshot_name,
             source_sandbox_id=source_sandbox_id,
         )
-        result = await self.save(record)
-        ttl_cache.invalidate("workspaces:all")
-        return result
+        return await self.save(record)
 
     async def remove(self, slug: str) -> bool:
         record = await self.get(slug)
@@ -766,7 +782,7 @@ class WorkspaceStore(TypedStore[Workspace]):
 
         await remove_refresh_cron(record)
         await _delete_snapshot(record.snapshot_id)
-        ttl_cache.invalidate("workspaces:all")
+        ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
         return True
 
     async def mark_capturing(self, slug: str) -> Workspace | None:
@@ -896,7 +912,7 @@ class WorkspaceStore(TypedStore[Workspace]):
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
     if update.name is not None and slugify(update.name) != record.slug:
-        raise ValueError("renaming an environment across slugs is not supported; create a new one")
+        raise ValueError("renaming a workspace across slugs is not supported; create a new one")
     if update.name is not None:
         record.name = update.name.strip()
     if update.prompt is not None:
@@ -943,21 +959,21 @@ WORKSPACES = WorkspaceStore()
 
 
 async def load_default_workspace() -> Workspace | None:
-    """Return the environment named ``default``, or ``None``.
+    """Return the workspace named ``default``, or ``None``.
 
     Fail-soft on purpose: this runs while a sandbox is being created, and a
-    store failure must fall back to the base snapshot with no environment
-    prompt rather than fail the run.
+    store failure must fall back to the base snapshot with no workspace prompt
+    rather than fail the run.
     """
     try:
         return await WORKSPACES.get(DEFAULT_WORKSPACE_SLUG)
     except Exception:
-        logger.warning("default environment resolution failed", exc_info=True)
+        logger.warning("default workspace resolution failed", exc_info=True)
         return None
 
 
 async def load_workspace(slug: str | None) -> Workspace | None:
-    """Return the environment a run uses: the one it selected, else ``default``.
+    """Return the workspace a run uses: the one it selected, else ``default``.
 
     Never raises, and a selection that no longer exists falls back to ``default``
     rather than failing the run.
@@ -967,29 +983,33 @@ async def load_workspace(slug: str | None) -> Workspace | None:
     try:
         record = await WORKSPACES.get(slug)
     except Exception:
-        logger.warning("environment resolution failed for %s", slug, exc_info=True)
+        logger.warning("workspace resolution failed", extra={"workspace": slug}, exc_info=True)
         record = None
     if record is None:
-        logger.info("Environment %s is not configured; falling back to the default", slug)
+        logger.info(
+            "Workspace is not configured; falling back to the default",
+            extra={"workspace": slug},
+        )
         return await load_default_workspace()
     return record
 
 
 async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str, Any]]:
-    """Every environment's picker/settings view; ``include_logs`` only for admins.
+    """Every workspace's picker/settings view; ``include_logs`` only for admins.
 
-    Prompts and snapshot ids never appear here; picking an environment needs
+    Prompts and snapshot ids never appear here; picking a workspace needs
     neither.
     """
     return [record.option(include_log=include_logs) for record in await WORKSPACES.list_all()]
 
 
 def parse_workspace_tag(text: str) -> tuple[str | None, str]:
-    """Split a leading-or-inline ``env:<name>`` tag off a message.
+    """Split a leading-or-inline ``workspace:<name>`` tag off a message.
 
-    Returns ``(slug, text_without_the_tag)``; ``(None, text)`` when there is no
-    tag. The caller decides whether the slug names a real environment — an
-    unresolvable tag should be left in the text rather than silently dropped.
+    ``env:<name>`` is still accepted as an alias. Returns
+    ``(slug, text_without_the_tag)``; ``(None, text)`` when there is no tag. The
+    caller decides whether the slug names a real workspace — an unresolvable tag
+    should be left in the text rather than silently dropped.
     """
     match = _ENV_TAG_RE.search(text or "")
     if match is None:
@@ -1007,7 +1027,7 @@ def require_capture_support() -> None:
     sandbox_type = ENV.SANDBOX_TYPE.get()
     if sandbox_type != "langsmith":
         raise RuntimeError(
-            f"capturing an environment snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"
+            f"capturing a workspace snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"
         )
 
 
@@ -1021,7 +1041,11 @@ async def _delete_snapshot(snapshot_id: object) -> None:
         async with get_async_sandbox_client() as client:
             await client.delete_snapshot(snapshot_id)
     except Exception:  # noqa: BLE001
-        logger.warning("failed to delete superseded snapshot %s", snapshot_id, exc_info=True)
+        logger.warning(
+            "failed to delete superseded snapshot",
+            extra={"snapshot_id": snapshot_id},
+            exc_info=True,
+        )
 
 
 async def capture_workspace_snapshot(
@@ -1030,9 +1054,9 @@ async def capture_workspace_snapshot(
     *,
     timeout: int = 600,
 ) -> Workspace:
-    """Capture ``sandbox_id``'s filesystem as this environment's ``name:tag``.
+    """Capture ``sandbox_id``'s filesystem as this workspace's ``name:tag``.
 
-    The name belongs to the environment and never moves; each capture publishes
+    The name belongs to the workspace and never moves; each capture publishes
     new content under it and the tag is repointed, which is why nothing here
     handles a name collision — re-using a tag is the documented way to move it.
 
@@ -1047,7 +1071,7 @@ async def capture_workspace_snapshot(
 
     record = await WORKSPACES.get(slug)
     if record is None:
-        raise ValueError(f"no environment named {slug!r}")
+        raise ValueError(f"no workspace named {slug!r}")
 
     snapshot_name = record.published_snapshot_name
     previous_snapshot_id = record.snapshot_id
@@ -1056,7 +1080,7 @@ async def capture_workspace_snapshot(
     try:
         snapshot_id = await capture_sandbox_snapshot(sandbox_id, snapshot_name, timeout=timeout)
     except Exception as exc:
-        logger.warning("snapshot capture failed for environment %s", slug, exc_info=True)
+        logger.warning("snapshot capture failed", extra={"workspace": slug}, exc_info=True)
         await WORKSPACES.mark_capture_settled(
             slug,
             "ready" if previous_was_ready else "failed",
@@ -1079,7 +1103,7 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
     """Capture ``sandbox_id`` as ``snapshot_name:latest`` and return the new snapshot id.
 
     Touches no record: callers that must not write anything until the image
-    exists — publishing an environment from a live sandbox — capture first and
+    exists — publishing a workspace from a live sandbox — capture first and
     record second.
     """
     from agent.sandboxes.providers.langsmith import (
@@ -1093,11 +1117,13 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
             client, sandbox_id, snapshot_name, SNAPSHOT_TAG, timeout=timeout
         )
     logger.info(
-        "Captured snapshot %s as %s:%s from sandbox %s",
-        snapshot.id,
-        snapshot_name,
-        SNAPSHOT_TAG,
-        sandbox_id,
+        "Captured snapshot",
+        extra={
+            "snapshot_id": str(snapshot.id),
+            "snapshot_name": snapshot_name,
+            "snapshot_tag": SNAPSHOT_TAG,
+            "sandbox_id": sandbox_id,
+        },
     )
     return str(snapshot.id)
 
