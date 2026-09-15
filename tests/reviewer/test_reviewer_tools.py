@@ -148,6 +148,63 @@ async def test_add_finding_accepts_left_side_anchor_on_old_line() -> None:
     assert result["success"] is True
 
 
+_LEFT_ANCHOR_DIFF = """diff --git a/foo.py b/foo.py
+index 1111111..2222222 100644
+--- a/foo.py
++++ b/foo.py
+@@ -50,4 +50,1 @@ def cleanup():
+-    release_resources()
+-    close_handles()
+-    flush_buffers()
++    pass
+"""
+
+
+async def test_add_finding_captures_the_diff_hunk_for_a_left_side_anchor() -> None:
+    """The stored diff_hunk is what the review UI renders, so a LEFT finding
+    must carry the hunk its deleted line came from. add_finding validates the
+    range against the old side; it has to look the hunk up on the same side."""
+    captured: list[Any] = []
+
+    async def fake_append(_thread_id: str, finding: Any) -> dict[str, Any]:
+        captured.append(finding)
+        return {"finding": finding, "created": True}
+
+    config = {
+        "configurable": {
+            "thread_id": "tid-1",
+            "head_sha": "sha-head",
+            "diff_text": _LEFT_ANCHOR_DIFF,
+            "diff_line_set": {
+                "foo.py": {"RIGHT": {50}, "LEFT": {50, 51, 52, 53}},
+            },
+        },
+        "metadata": {},
+    }
+    with (
+        patch("agent.tools.add_finding.get_config", return_value=config),
+        patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = await add_finding(
+            severity="high",
+            confidence="high",
+            category="correctness",
+            file="foo.py",
+            title="Cleanup no longer releases resources",
+            description="release_resources() was dropped",
+            start_line=52,
+            end_line=52,
+            side="LEFT",
+        )
+
+    assert result["success"] is True
+    assert len(captured) == 1
+    diff_hunk = captured[0]["diff_hunk"]
+    assert diff_hunk is not None
+    assert "release_resources()" in diff_hunk
+
+
 async def test_add_finding_left_anchor_outside_old_side_set_rejected() -> None:
     """A LEFT anchor on a line that's not in the old-side hunk is rejected —
     out-of-diff findings are disabled, validated on the correct side."""
