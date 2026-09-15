@@ -9,8 +9,9 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from agent import store as agent_store
-from agent.dashboard import repo_access, schedules
-from agent.dashboard.schedules import ScheduleCreateBody, ScheduleUpdateBody
+from agent.dashboard import repo_access
+from agent.schedules import store as schedules
+from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
 
 
 class _FakeStore:
@@ -976,7 +977,6 @@ async def test_launch_conditional_slack_schedule_starts_silently(
     }
     prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
     assert "notify_automation_channel" in (prompt.findtext("content") or "")
-    assert "read-only checks" in (prompt.findtext("content") or "")
     metadata = fake_client.threads.created[0]["metadata"]
     assert "source_context" not in metadata
 

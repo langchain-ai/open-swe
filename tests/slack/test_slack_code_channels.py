@@ -1,6 +1,6 @@
 import json
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from urllib.parse import urlencode
 
 import pytest
@@ -197,6 +197,7 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     slack_events.reset_slack_event_claims()
+    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
         return {"is_ext_shared": False, "is_pending_ext_shared": False}
@@ -245,18 +246,85 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     assert request.reply_thread_ts == "1786573300.000000"
 
 
-async def test_code_channel_replies_are_posted_top_level(monkeypatch: pytest.MonkeyPatch) -> None:
-    response = MagicMock(status_code=200)
-    response.json.return_value = {"ok": True, "ts": "1786573400.000000"}
-    client = AsyncMock()
-    client.__aenter__.return_value = client
-    client.post.return_value = response
+async def test_code_channel_replies_are_posted_top_level(slack_api):
+    assert await slack_utils._post_slack_message_with_ts("C-code", "done", thread_ts="0") == (
+        "1.0",
+        None,
+    )
+    assert "thread_ts" not in slack_api.calls[0][1]
 
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setattr(slack_utils.httpx2, "AsyncClient", lambda **_kwargs: client)
 
-    await slack_utils._post_slack_message_with_ts(
-        "C-code", "done", thread_ts=webhook_common.CODE_CHANNEL_SESSION_TS
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (["U06KD8BFY95"], ["U06KD8BFY95"]),
+        (["<@U1>", "<@U2|ramon>"], ["U1", "U2"]),
+        (["u1", "U1", " U1 "], ["U1"]),
+        (["W123"], ["W123"]),
+        (["", "not-an-id", "@ramon", "C123"], []),
+    ],
+)
+def test_slack_user_ids_reads_ids_however_they_were_written(
+    values: list[str], expected: list[str]
+) -> None:
+    assert slack_utils.slack_user_ids(values) == expected
+
+
+@pytest.fixture
+def invite_call(slack_api) -> dict[str, Any]:
+    captured: dict[str, Any] = {"payload": None, "response": {"ok": True}}
+
+    def handle(method, params, headers):
+        assert method == "conversations.invite"
+        captured["payload"] = params
+        return 200, captured["response"], {}
+
+    slack_api.handler = handle
+    return captured
+
+
+async def test_an_invite_forces_past_the_ids_slack_refuses(invite_call: dict[str, Any]) -> None:
+    """Without `force` Slack drops the whole batch when one user fails."""
+    invited, error = await slack_utils.invite_to_slack_channel("C1", ["U1", "U2"])
+
+    assert invite_call["payload"] == {"channel": "C1", "users": "U1,U2", "force": "1"}
+    assert (invited, error) == (["U1", "U2"], "")
+
+
+async def test_a_stale_id_costs_only_itself(invite_call: dict[str, Any]) -> None:
+    invite_call["response"] = {
+        "ok": True,
+        "errors": [{"user": "U2", "ok": False, "error": "user_not_found"}],
+    }
+
+    invited, error = await slack_utils.invite_to_slack_channel("C1", ["U1", "U2", "U3"])
+
+    assert invited == ["U1", "U3"]
+    assert error == "U2 (user_not_found)"
+
+
+async def test_someone_already_in_the_channel_counts_as_invited(
+    invite_call: dict[str, Any],
+) -> None:
+    invite_call["response"] = {
+        "ok": True,
+        "errors": [{"user": "U1", "ok": False, "error": "already_in_channel"}],
+    }
+
+    assert await slack_utils.invite_to_slack_channel("C1", ["U1"]) == (["U1"], "")
+
+
+async def test_a_refused_call_names_everyone_it_could_not_invite(
+    invite_call: dict[str, Any],
+) -> None:
+    invite_call["response"] = {"ok": False, "error": "missing_scope"}
+
+    assert await slack_utils.invite_to_slack_channel("C1", ["U1", "U2"]) == (
+        [],
+        "U1, U2: missing_scope",
     )
 
-    assert "thread_ts" not in client.post.await_args.kwargs["json"]
+
+async def test_no_usable_ids_never_reaches_slack(invite_call: dict[str, Any]) -> None:
+    assert await slack_utils.invite_to_slack_channel("C1", ["nope"]) == ([], "no_users")
+    assert invite_call["payload"] is None

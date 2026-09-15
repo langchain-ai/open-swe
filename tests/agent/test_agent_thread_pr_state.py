@@ -14,6 +14,11 @@ async def _unlocked(*args, **kwargs):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_feedback_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agent.thread_feedback.schedule_pr_feedback", AsyncMock())
+
+
 def _pr_payload(*, state: str, merged: bool = False, draft: bool = False) -> dict[str, Any]:
     return {
         "pull_request": {

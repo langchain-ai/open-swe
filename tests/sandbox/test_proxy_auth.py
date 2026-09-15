@@ -12,11 +12,9 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.dashboard.environments import Environment
+from agent.environments.store import Environment
 from agent.sandboxes.providers.langsmith import (
     PROXY_GH_TOKEN_PLACEHOLDER,
-    PROXY_MODEL_KEY_PLACEHOLDER,
-    _stagehand_proxy_rules,
     configure_github_proxy,
 )
 from agent.sandboxes.state import SandboxBackendProxy
@@ -76,19 +74,6 @@ class TestSandboxFactoryLoading:
             fs_capacity_bytes=128,
             create_params={"_internal_runtime": "v2"},
         )
-
-
-def test_stagehand_proxy_rule_keeps_model_key_opaque() -> None:
-    with patch.dict(
-        "os.environ",
-        {"STAGEHAND_MODEL": "anthropic/claude-sonnet-4-5", "STAGEHAND_MODEL_API_KEY": "secret"},
-        clear=True,
-    ):
-        rule = _stagehand_proxy_rules()[0]
-
-    assert rule["headers"] == [{"name": "x-api-key", "type": "opaque", "value": "secret"}]
-    assert rule["env_vars"] == {"MODEL_API_KEY": PROXY_MODEL_KEY_PLACEHOLDER}
-    assert "secret" not in rule["env_vars"].values()
 
 
 class TestConfigureGithubProxy:
@@ -165,8 +150,9 @@ class TestConfigureGithubProxy:
         assert proxy_config["rules"][0] == custom_rule
         assert [rule["name"] for rule in proxy_config["rules"][1:3]] == ["github-api", "github"]
 
-    async def test_removes_retired_langsmith_rule(self) -> None:
-        stale_rule = {"name": "open-swe-langsmith", "headers": [{"value": "old-secret"}]}
+    @pytest.mark.parametrize("rule_name", ["open-swe-langsmith", "stagehand-model"])
+    async def test_removes_retired_provider_rule(self, rule_name: str) -> None:
+        stale_rule = {"name": rule_name, "headers": [{"value": "old-secret"}]}
         with (
             patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "control-key"}, clear=True),
@@ -183,7 +169,7 @@ class TestConfigureGithubProxy:
             )
 
         rules = mock_client.patch.call_args.kwargs["json"]["proxy_config"]["rules"]
-        assert "open-swe-langsmith" not in [rule["name"] for rule in rules]
+        assert rule_name not in [rule["name"] for rule in rules]
         assert "old-secret" not in str(rules)
         assert "LANGSMITH_API_KEY" not in str(rules)
         assert "control-key" not in str(rules)

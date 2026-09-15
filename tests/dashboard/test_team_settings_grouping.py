@@ -104,6 +104,67 @@ def test_team_settings_update_accepts_grouping_pair() -> None:
     assert update.default_grouping_reasoning_effort == _GROUPING_PAIR[1]
 
 
+@pytest.mark.asyncio
+async def test_fast_alt_experiment_off_when_probability_is_zero() -> None:
+    settings = {
+        "default_agent_routing_fast_model": "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        "default_agent_routing_fast_reasoning_effort": "high",
+        "default_agent_routing_fast_alt_model": "openai:gpt-5.6-luna",
+        "default_agent_routing_fast_alt_reasoning_effort": "high",
+        "default_agent_routing_fast_alt_probability": 0,
+    }
+    with patch(
+        "agent.dashboard.team_settings.get_team_settings",
+        new_callable=AsyncMock,
+        return_value=settings,
+    ):
+        models = await get_team_agent_routing_models()
+
+    assert "fast_alt" not in models
+
+
+@pytest.mark.asyncio
+async def test_fast_alt_experiment_runs_at_half_probability() -> None:
+    settings = {
+        "default_agent_routing_fast_model": "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        "default_agent_routing_fast_reasoning_effort": "high",
+        "default_agent_routing_fast_alt_model": "openai:gpt-5.6-luna",
+        "default_agent_routing_fast_alt_reasoning_effort": "high",
+        "default_agent_routing_fast_alt_probability": 0.5,
+    }
+    with patch(
+        "agent.dashboard.team_settings.get_team_settings",
+        new_callable=AsyncMock,
+        return_value=settings,
+    ):
+        models = await get_team_agent_routing_models()
+
+    assert models["fast_alt"] == ("openai:gpt-5.6-luna", "high")
+
+
+def test_team_settings_update_preserves_explicit_zero_probability() -> None:
+    update = TeamSettingsUpdate(
+        default_agent_routing_fast_model="fireworks:accounts/fireworks/models/glm-5p3-flash",
+        default_agent_routing_fast_reasoning_effort="high",
+        default_agent_routing_fast_alt_model="openai:gpt-5.6-luna",
+        default_agent_routing_fast_alt_reasoning_effort="high",
+        default_agent_routing_fast_alt_probability=0,
+    )
+
+    assert update.default_agent_routing_fast_alt_probability == 0
+
+
+def test_team_settings_update_rejects_out_of_range_probability() -> None:
+    with pytest.raises(ValidationError):
+        TeamSettingsUpdate(
+            default_agent_routing_fast_model="fireworks:accounts/fireworks/models/glm-5p3-flash",
+            default_agent_routing_fast_reasoning_effort="high",
+            default_agent_routing_fast_alt_model="openai:gpt-5.6-luna",
+            default_agent_routing_fast_alt_reasoning_effort="high",
+            default_agent_routing_fast_alt_probability=1.5,
+        )
+
+
 def test_team_settings_update_rejects_grouping_effort_without_model() -> None:
     with pytest.raises(ValidationError):
         TeamSettingsUpdate(default_grouping_reasoning_effort="high")

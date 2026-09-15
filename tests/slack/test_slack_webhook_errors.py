@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.dashboard import plan_api
 from agent.run_config import Repo
 from agent.slack import failures as slack_failures
 from agent.slack import webhook as slack_webhook
 from agent.slack.request import SlackRequest
+from agent.threads import plan_api
 
 
 class _FakeThreads:
@@ -473,6 +473,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     fetch_messages = AsyncMock(return_value=[{"ts": "1.0", "user": "U1", "text": "old text"}])
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     store_mapping = AsyncMock()
+    monkeypatch.setattr(slack_webhook.common, "authorize_github_thread", AsyncMock(return_value={}))
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(slack_webhook.common, "refresh_user_mapping_cache", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value=None))
@@ -495,7 +496,11 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
         slack_webhook.common, "get_thread_environment", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_webhook.common, "get_thread_model_choice", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock())
+    monkeypatch.setattr(slack_webhook, "queue_message_for_thread", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
     thinking = AsyncMock()
     thinking_status = AsyncMock()
@@ -536,32 +541,24 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     assert store_args.kwargs["agent_thread_id"] == "t1"
 
 
-def test_untagged_prompt_tells_the_agent_it_was_not_tagged() -> None:
-    preamble = slack_webhook._slack_prompt_preamble(untagged_reply=True)
-
-    assert "You were NOT tagged" in preamble
-    assert "end your turn without calling any tool and post nothing" in preamble
-    assert "Staying silent is the right" in preamble
-    assert slack_webhook._slack_request_heading(untagged_reply=True) == "## Untagged Message"
-
-
-def test_tagged_prompt_keeps_the_mention_wording() -> None:
+def test_tagged_prompt_omits_untagged_wording() -> None:
     preamble = slack_webhook._slack_prompt_preamble(untagged_reply=False)
 
-    assert preamble == "You were mentioned in Slack.\n\n"
     assert "NOT tagged" not in preamble
-    assert slack_webhook._slack_request_heading(untagged_reply=False) == "## Latest Mention Request"
 
 
 @pytest.mark.asyncio
 async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(slack_webhook.common, "authorize_github_thread", AsyncMock(return_value={}))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: _FakeClient())
     monkeypatch.setattr(slack_webhook.common, "refresh_user_mapping_cache", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_webhook.common, "fetch_slack_thread_messages", AsyncMock([]))
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=[])
+    )
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_names", AsyncMock(return_value={}))
     monkeypatch.setattr(
         slack_webhook.common, "resolve_slack_links_in_context", AsyncMock(return_value=("", []))
@@ -575,6 +572,9 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
         slack_webhook.common, "get_thread_environment", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_webhook.common, "get_thread_model_choice", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(
         slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock(return_value=False)
     )

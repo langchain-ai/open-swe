@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from agent.dashboard import skills as store
+from agent.skill_store import store
 from agent.tools.admin_gate import require_admin
 
 _ACTION = "manage organization skills"

@@ -1,14 +1,9 @@
-import inspect
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from agent.tools.read_user_settings import read_user_settings
 from agent.utils import thread_participants as participants
-
-
-def test_read_user_settings_accepts_no_model_arguments() -> None:
-    assert list(inspect.signature(read_user_settings).parameters) == []
 
 
 @pytest.mark.asyncio

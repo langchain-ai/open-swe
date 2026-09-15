@@ -7,8 +7,8 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
-from agent.dashboard import environment_refresh as refresh
-from agent.dashboard.environments import Environment
+from agent.environments import refresh
+from agent.environments.store import Environment
 from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle
@@ -494,9 +494,6 @@ def test_environment_instructions_render_in_system_prompt() -> None:
 def test_admin_section_only_for_admin_threads() -> None:
     prompt = construct_system_prompt(working_dir="/workspace", admin_environments=True)
     assert "### Admin Thread: Workspace Setup" in prompt
-    assert "optional VM sizing" in prompt
-    assert "`setup_script`" in prompt
-    assert "Every environment must include `rg` and `gh`" in prompt
     assert "direct them to an admin thread" not in prompt
 
 

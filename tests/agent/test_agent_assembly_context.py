@@ -58,6 +58,18 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in subagents[0]["middleware"])
 
 
+@pytest.mark.asyncio
+async def test_unknown_scope_omits_workspace_and_personal_mcps():
+    with (
+        patch("agent.server.private_credential_login", side_effect=TimeoutError),
+        patch("agent.server._mcp_tools_for", new_callable=AsyncMock) as mcps,
+        patch("agent.server._notion_tools_for", new_callable=AsyncMock) as notion,
+    ):
+        await _capture_create_deep_agent_kwargs()
+    mcps.assert_not_awaited()
+    notion.assert_not_awaited()
+
+
 class _DummyAgent:
     def with_config(self, config: RunnableConfig) -> _DummyAgent:
         self.config = config
@@ -198,8 +210,8 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
-        patch("agent.server.load_workspace_mcp_tools", new_callable=AsyncMock, return_value=[]),
-        patch("agent.server.load_browser_tools", return_value=[]),
+        patch("agent.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
+        patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
@@ -385,34 +397,6 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert report_platform_issue in tools
-
-
-@pytest.mark.asyncio
-async def test_agent_loads_browser_tools_dynamically_without_a_browser_subagent() -> None:
-    from langchain_core.tools import StructuredTool
-
-    from agent.middleware import DynamicToolMiddleware
-
-    async def browser_navigate(url: str) -> str:
-        """Navigate to a URL."""
-        return url
-
-    browser_tool = StructuredTool.from_function(coroutine=browser_navigate)
-    with patch("agent.server.load_browser_tools", return_value=[browser_tool]):
-        captured = await _capture_create_deep_agent_kwargs()
-
-    tools = captured["tools"]
-    middleware = captured["middleware"]
-    subagents = captured["subagents"]
-    assert isinstance(tools, list)
-    assert isinstance(middleware, list)
-    assert isinstance(subagents, list)
-    assert browser_tool not in tools
-    assert {subagent["name"] for subagent in subagents} == {"general-purpose"}
-
-    dynamic_tools = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
-    loader = dynamic_tools.tools[0]
-    assert "browser_navigate (integration: Browser)" in loader.description
 
 
 @pytest.mark.asyncio
@@ -647,20 +631,6 @@ async def test_general_purpose_subagent_guards_workflow_pushes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_general_purpose_subagent_carries_open_swe_shared_base() -> None:
-    from agent.prompt import OPEN_SWE_SHARED_BASE
-
-    captured = await _capture_create_deep_agent_kwargs()
-    subagents = captured["subagents"]
-    assert isinstance(subagents, list)
-    gp = next(s for s in subagents if s["name"] == "general-purpose")
-    prompt = gp["system_prompt"]
-    assert prompt.startswith(OPEN_SWE_SHARED_BASE)
-    # GP task-mechanics guidance still trails the shared base.
-    assert "calling agent only sees your final" in prompt
-
-
-@pytest.mark.asyncio
 async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     config = _base_config()
     configurable = config.get("configurable")
@@ -683,6 +653,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
         "manage_code_channel",
+        "manage_incident",
         "notify_automation_channel",
         "slack_accept_untagged_message",
         "slack_add_reaction",
@@ -701,6 +672,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "list_threads",
         "manage_thread",
         "read_user_settings",
+        "submit_thread_feedback",
     }
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)

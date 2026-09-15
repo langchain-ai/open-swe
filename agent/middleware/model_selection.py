@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, NotRequired
@@ -5,6 +6,7 @@ from typing import Any, Literal, NotRequired
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
+from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
@@ -14,7 +16,13 @@ from agent.prompts import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
 
-Route = Literal["fast", "balanced", "performance"]
+Route = Literal["fast", "fast_alt", "balanced", "performance"]
+
+# A/B experiment: "fast" sends a share of fast-routed turns to a second model
+# (``fast_alt``) so the two can be compared under real traffic. The share is
+# drawn from a hash of the thread id, so a thread always lands on the same side
+# and the split is fully repeatable.
+_FAST_ALT_SPLIT = 0.5
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 _PLAN_APPROVED_PREFIX = "Plan mode is now inactive because the plan was approved."
@@ -53,6 +61,31 @@ class ModelSelectionState(AgentState):
     plan_mode: NotRequired[bool]
 
 
+def fast_alt_bucket(thread_id: str | None) -> float:
+    """Deterministic [0, 1) bucket for a thread, from the first 8 hex digits of SHA-256."""
+    digest = hashlib.sha256((thread_id or "").encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) / float(0xFFFF_FFFF)
+
+
+async def _emit_routed_model(
+    models: Mapping[str, BaseChatModel],
+    route_model_ids: Mapping[str, str],
+    route: Route,
+) -> None:
+    """Stream the routed model's id so the UI can show it next to `Auto`."""
+    model_id = route_model_ids.get(route)
+    if model_id is None:
+        model = models.get(route)
+        model_id = getattr(model, "model_id", None)
+    if not isinstance(model_id, str) or not model_id:
+        return
+    try:
+        get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
+    except Exception:
+        # Routing display is cosmetic; never fail a run over it.
+        logger.debug("Failed to emit model_routed event", exc_info=True)
+
+
 class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     state_schema = ModelSelectionState
 
@@ -60,8 +93,15 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         self,
         models: Mapping[str, BaseChatModel],
         classifier: BaseChatModel,
+        *,
+        route_model_ids: Mapping[str, str] | None = None,
+        fast_alt_probability: float = _FAST_ALT_SPLIT,
+        thread_id: str | None = None,
     ) -> None:
         self._models = dict(models)
+        self._route_model_ids = dict(route_model_ids or {})
+        self._fast_alt_probability = fast_alt_probability
+        self._thread_id = thread_id
         # `nostream` keeps the routing decision out of the user-facing message
         # stream; it stays visible in traces, unlike the offloading summarizer.
         hidden_classifier = classifier.model_copy(
@@ -71,16 +111,17 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             RouteDecision, method="json_schema"
         )
 
-    async def abefore_model(
+    async def select_route(
         self,
         state: ModelSelectionState,
-        runtime: Runtime,
-    ) -> dict[str, Route]:
-        del runtime
+        *,
+        plan_mode: bool | None = None,
+    ) -> Route:
+        """Select the model route for a turn."""
+        if state.get("plan_mode") if plan_mode is None else plan_mode:
+            return "performance"
         if model_route := state.get("model_route"):
-            return {"model_route": model_route}
-        if state.get("plan_mode"):
-            return {}
+            return model_route
         messages = state.get("messages", [])
         approved_plan = next(
             (
@@ -101,6 +142,24 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
                 route = decision.model_route
         except Exception:  # noqa: BLE001
             logger.exception("Model routing classifier failed")
+        if (
+            route == "fast"
+            and "fast_alt" in self._models
+            and fast_alt_bucket(self._thread_id) < self._fast_alt_probability
+        ):
+            return "fast_alt"
+        return route
+
+    async def abefore_model(
+        self,
+        state: ModelSelectionState,
+        runtime: Runtime,
+    ) -> dict[str, Route]:
+        del runtime
+        route = await self.select_route(state)
+        await _emit_routed_model(self._models, self._route_model_ids, route)
+        if state.get("plan_mode"):
+            return {}
         return {"model_route": route}
 
     async def awrap_model_call(
@@ -113,5 +172,9 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             if request.state.get("plan_mode")
             else request.state.get("model_route", "balanced")
         )
-        model = self._models.get(route, self._models["balanced"])
+        model = self._models.get(route) or self._models.get(
+            "fast" if route == "fast_alt" else "balanced"
+        )
+        if model is None:
+            model = self._models["balanced"]
         return await handler(request.override(model=model))

@@ -8,11 +8,11 @@ from typing import Any
 import pytest
 
 from agent import store as agent_store
-from agent.dashboard.threads import access, api, diffs, listing, proxy, runs, summary
+from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
 
-_THREAD_MODULES: tuple[ModuleType, ...] = (access, api, diffs, listing, proxy, runs, summary)
+_THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 
 
 def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) -> None:
@@ -89,6 +89,21 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     return client.store
 
 
+@pytest.fixture
+def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
+    bot = {
+        "team_id": "T123",
+        "bot_id": "B123",
+        "user_id": "U123",
+        "app_id": "A123",
+        "name": "Release bot",
+        "created_by": "alice",
+        "created_at": "2026-09-09",
+    }
+    fake_store.seed(["allowed_slack_bots"], "T123:B123", bot)
+    return bot
+
+
 @pytest.fixture(autouse=True)
 def _default_github_login_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "test-user,trusted-user,reviewer")
@@ -112,7 +127,7 @@ def _reset_ttl_cache() -> Iterator[None]:
 def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat automatic reviews as enabled for every repo by default.
 
-    The dashboard's opt-in list (loaded by :func:`agent.dashboard.enabled_repos.is_review_repo_enabled`)
+    The dashboard's opt-in list (loaded by :func:`agent.review.enabled_repos.is_review_repo_enabled`)
     is empty in the test environment because there is no live LangGraph Store.
 
     Tests targeting the automatic-review gate should override this fixture or set
@@ -123,3 +138,15 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
         return True
 
     monkeypatch.setattr(webhook_common, "is_review_repo_enabled", _enabled)
+
+
+@pytest.fixture
+def slack_api(monkeypatch: pytest.MonkeyPatch):
+    from agent.slack import client, code_channels, http
+    from tests.support.slack_api import slack_api_server
+
+    with slack_api_server() as api:
+        monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url)
+        monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "test-slack-token")
+        monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
+        yield api

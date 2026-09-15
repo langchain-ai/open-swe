@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from agent.dashboard import environment_refresh as refresh
-from agent.dashboard.environments import Environment, RefreshStep
+from agent.environments import refresh
+from agent.environments.store import Environment, RefreshStep
 from agent.tools.background_task import background_task
 
 

@@ -18,6 +18,8 @@ class SlackRequest(BaseModel):
     text: str = ""
     attachments: list[JsonObject] = Field(default_factory=list)
     bot_user_id: str = ""
+    triggering_bot_id: str = ""
+    triggering_bot_app_id: str = ""
     thread_id: str | None = None
     channel_context: SlackChannelContext | None = None
     team_id: str = ""
