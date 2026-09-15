@@ -851,11 +851,20 @@ async def launch_github_issue_automations(
     repo: dict[str, Any] = repo_value if isinstance(repo_value, dict) else {}
     owner_value = repo.get("owner")
     owner: dict[str, Any] = owner_value if isinstance(owner_value, dict) else {}
-    full_name = f"{owner.get('login', '')}/{repo.get('name', '')}".lower()
+    resolved_name = _repo_full_name({"owner": owner.get("login"), "name": repo.get("name")})
+    if not resolved_name:
+        logger.error(
+            "GitHub issue automation payload is missing repository identity",
+            extra={"github_delivery": delivery_id},
+        )
+        return []
+    full_name = resolved_name.lower()
     results: list[dict[str, Any]] = []
+    matched = 0
     for record in await search_all_values(SCHEDULES_NAMESPACE):
         if not _matches_issue_automation(record, full_name):
             continue
+        matched += 1
         schedule_id = record.get("id")
         if not isinstance(schedule_id, str) or not schedule_id:
             continue
@@ -868,6 +877,10 @@ async def launch_github_issue_automations(
             )
             continue
         if claim_thread_id is None:
+            logger.info(
+                "Skipping already-claimed GitHub issue automation delivery",
+                extra={"schedule_id": schedule_id, "github_delivery": delivery_id},
+            )
             continue
         try:
             result = await _launch_agent_schedule_record(
@@ -881,8 +894,21 @@ async def launch_github_issue_automations(
             await _release_issue_delivery_claim(claim_thread_id, schedule_id)
             continue
         if result.get("status") != "started":
+            logger.error(
+                "GitHub issue automation did not start",
+                extra={
+                    "schedule_id": schedule_id,
+                    "github_delivery": delivery_id,
+                    "launch_status": result.get("status"),
+                },
+            )
             await _release_issue_delivery_claim(claim_thread_id, schedule_id)
         results.append(result)
+    if not matched:
+        logger.info(
+            "No GitHub issue automations matched the delivery",
+            extra={"github_delivery": delivery_id, "github_repo": full_name},
+        )
     return results
 
 

@@ -13,7 +13,10 @@ async def _launch_issue_automations(payload: dict[str, object], delivery_id: str
     try:
         await schedules.launch_github_issue_automations(payload, delivery_id)
     except Exception:
-        common.logger.exception("Failed to launch GitHub issue automations")
+        common.logger.exception(
+            "Failed to launch GitHub issue automations",
+            extra={"github_delivery": delivery_id},
+        )
 
 
 @router.post("/webhooks/github")

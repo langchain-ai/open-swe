@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Any, Literal
 from unittest.mock import AsyncMock
@@ -922,6 +923,19 @@ async def test_launch_github_issue_automations_isolates_launch_failures(
     )
 
     assert retried == []
+
+
+async def test_launch_github_issue_automations_reports_unusable_payload(
+    fake_client: _FakeClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.ERROR, logger=schedules.logger.name):
+        results = await schedules.launch_github_issue_automations(
+            {"repository": {"owner": {}, "name": ""}, "issue": {"number": 42}},
+            "delivery-unusable",
+        )
+
+    assert results == []
+    assert "missing repository identity" in caplog.text
 
 
 async def test_switching_to_issue_trigger_clears_the_cron_expression(
