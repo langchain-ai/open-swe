@@ -64,6 +64,7 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE pull_request
+            ADD COLUMN author_github_id bigint,
             ADD COLUMN author_user_id uuid REFERENCES users (id) ON DELETE SET NULL
         """
     )
