@@ -9,6 +9,7 @@ import {
   FolderIcon,
   GitMergeIcon,
   GitPullRequestIcon,
+  LockIcon,
   PushPinIcon,
   PushPinSlashIcon,
   WarningCircleIcon,
@@ -376,13 +377,7 @@ export function SidebarThreadRow({
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
     "text-foreground",
-    isActive
-      ? thread?.adminThread
-        ? "bg-destructive/10"
-        : "bg-accent"
-      : thread?.adminThread
-        ? "bg-destructive/5 group-hover/row:bg-destructive/10"
-        : "group-hover/row:bg-sidebar-row-hover"
+    isActive ? "bg-accent" : "group-hover/row:bg-sidebar-row-hover"
   )
 
   const link =
@@ -486,6 +481,12 @@ function ThreadHoverCard({
         <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
           {item.title}
         </span>
+        {item.location === "cloud" && item.thread.visibility === "private" && (
+          <LockIcon
+            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            aria-label="Private thread"
+          />
+        )}
         <EnvironmentIcon
           className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
           aria-label={environmentLabel}
