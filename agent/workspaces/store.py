@@ -1274,6 +1274,7 @@ async def import_store_records() -> int:
     empty table it may have left behind as "nobody owns this repository".
     """
     imported = 0
+    skipped = 0
     for namespace in (WORKSPACES_NAMESPACE, LEGACY_ENVIRONMENTS_NAMESPACE):
         for value in await search_all_values(namespace):
             slug = value.get("slug")
@@ -1282,7 +1283,8 @@ async def import_store_records() -> int:
             try:
                 record = Workspace.model_validate(value)
             except ValidationError:
-                logger.warning(
+                skipped += 1
+                logger.error(
                     "Skipping an unreadable stored workspace record",
                     extra={"workspace": slug, "store_namespace": namespace},
                     exc_info=True,
@@ -1294,7 +1296,8 @@ async def import_store_records() -> int:
                 except ValueError, IntegrityError:
                     # One record another workspace has since claimed, or one a
                     # constraint refuses, must not cost the rest their import.
-                    logger.warning(
+                    skipped += 1
+                    logger.error(
                         "Could not import a stored workspace record",
                         extra={"workspace": record.slug, "store_namespace": namespace},
                         exc_info=True,
@@ -1303,6 +1306,11 @@ async def import_store_records() -> int:
                 imported += 1
             await delete_value(namespace, record.slug)
     WORKSPACES.import_completed = True
+    log = logger.error if skipped else logger.info
+    log(
+        "Stored workspace records processed",
+        extra={"imported_workspaces": imported, "skipped_workspaces": skipped},
+    )
     return imported
 
 
