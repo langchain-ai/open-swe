@@ -200,7 +200,7 @@ __all__ = [
     "get_or_resolve_thread_github_token",
     "resolve_slack_channel_context",
     "get_thread_metadata_safe",
-    "get_thread_environment",
+    "get_thread_workspace",
     "get_thread_model_choice",
     "get_thread_plan_mode",
     "is_not_found_error",
@@ -531,7 +531,7 @@ async def upsert_agent_thread_metadata(
     user_email: str = "",
     title: str = "",
     source_context: SourceContext | None = None,
-    environment: str | None = None,
+    workspace: str | None = None,
     slack_participant_user_ids: Collection[str] = (),
     visibility: str = "public",
     owner_login: str = "",
@@ -569,8 +569,8 @@ async def upsert_agent_thread_metadata(
         metadata["repo_name"] = repo_config["name"]
     if title:
         metadata["title"] = title[:80]
-    if environment:
-        metadata["environment"] = environment
+    if workspace:
+        metadata["workspace"] = workspace
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -830,20 +830,23 @@ async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
     return (model_id, effort) if model_id and effort else None
 
 
-async def get_thread_environment(thread_id: str) -> str | None:
-    """Return the environment slug persisted for a thread, or ``None`` if unset."""
+async def get_thread_workspace(thread_id: str) -> str | None:
+    """The workspace a thread was created in; ``environment`` is the pre-workspace key."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
         thread = await langgraph_client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         if not is_not_found_error(exc):
-            logger.warning("Failed to fetch environment metadata for thread %s", thread_id)
+            logger.warning("Failed to fetch workspace metadata for thread %s", thread_id)
         return None
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     if not isinstance(metadata, dict):
         return None
-    value = metadata.get("environment")
-    return value.strip() or None if isinstance(value, str) else None
+    for key in ("workspace", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 async def set_thread_plan_mode(thread_id: str, enabled: bool) -> None:

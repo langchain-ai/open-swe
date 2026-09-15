@@ -20,7 +20,8 @@ from agent.threads import proxy as thread_proxy
 from agent.threads import routes as thread_routes
 from agent.threads import runs as thread_runs
 from agent.threads import summary as thread_summary
-from tests.conftest import patch_thread_module
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.conftest import FakeStore, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -300,6 +301,35 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"
+
+
+async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
+    monkeypatch, fake_store: FakeStore
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
+
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "config": {"configurable": {"repo": "acme/oss"}},
+        },
+    }
+
+    await thread_runs._enrich_run_start_command(
+        "new-tid",
+        "octocat",
+        command,
+        metadata={},
+        creating=True,
+    )
+
+    created_metadata = created["metadata"]
+    assert isinstance(created_metadata, dict)
+    assert created_metadata["workspace"] == "oss"
 
 
 @pytest.mark.parametrize(

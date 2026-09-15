@@ -1941,13 +1941,13 @@ def test_get_slack_permalink_without_token_returns_none(monkeypatch: pytest.Monk
     assert result is None
 
 
-def test_thread_environment_round_trips_through_metadata(
+def test_thread_workspace_round_trips_through_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A tagged opening message persists the environment; follow-ups read it back.
+    """A tagged opening message persists the workspace; follow-ups read it back.
 
     Without this, a follow-up (which carries no `env:` tag) would resolve the
-    default environment while reusing the sandbox built from the tagged one.
+    default workspace while reusing the sandbox built from the tagged one.
     """
     threads = _FakeThreadsClient({"metadata": {}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
@@ -1956,12 +1956,12 @@ def test_thread_environment_round_trips_through_metadata(
         webhook_common.upsert_agent_thread_metadata(
             "thread-id",
             source="slack",
-            environment="staging",
+            workspace="staging",
         )
     )
     assert threads.thread is not None
-    assert threads.thread["metadata"]["environment"] == "staging"
-    assert asyncio.run(webhook_common.get_thread_environment("thread-id")) == "staging"
+    assert threads.thread["metadata"]["workspace"] == "staging"
+    assert asyncio.run(webhook_common.get_thread_workspace("thread-id")) == "staging"
 
 
 def test_thread_model_choice_round_trips_explicit_metadata(
@@ -2001,18 +2001,18 @@ def test_thread_model_choice_is_none_for_auto_selection(
     assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) is None
 
 
-def test_thread_environment_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_thread_workspace_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     threads = _FakeThreadsClient({"metadata": {}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
-    assert asyncio.run(webhook_common.get_thread_environment("thread-id")) is None
+    assert asyncio.run(webhook_common.get_thread_workspace("thread-id")) is None
 
 
-def test_thread_environment_is_none_for_a_missing_thread(
+def test_thread_workspace_is_none_for_a_missing_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads = _FakeThreadsClient(raise_not_found=True)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
-    assert asyncio.run(webhook_common.get_thread_environment("thread-id")) is None
+    assert asyncio.run(webhook_common.get_thread_workspace("thread-id")) is None
 
 
 def _context_input(messages: list[dict], **kwargs: object) -> list[str]:

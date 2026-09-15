@@ -1020,7 +1020,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     # Later mentions carry no tag, so the thread's environment comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
     # was built from the environment the opening message picked.
-    thread_environment = workspace_slug or await common.get_thread_environment(thread_id)
+    thread_environment = workspace_slug or await common.get_thread_workspace(thread_id)
     if thread_environment:
         configurable["environment"] = thread_environment
     if image_model_override:
@@ -1049,7 +1049,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
-        environment=workspace_slug,
+        workspace=workspace_slug,
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes
         # the whole set rather than only the latest sender.
