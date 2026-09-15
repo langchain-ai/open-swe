@@ -241,12 +241,12 @@ export function AgentsSidebar({
     )
   }, [updateState])
   const updateInstalling = updateState.status === "installing"
-  const workspaceMode = prefs.organize === "workspace"
+  const workspaceOrganize = prefs.organize === "workspace"
   // "workspace" mode groups the same project folders as "project" mode; it
   // only changes how the unpinned ones are laid out (nested under a workspace
   // header instead of a flat list), so every other project-mode query and
   // computation below applies to both.
-  const projectMode = prefs.organize === "project" || workspaceMode
+  const projectMode = prefs.organize === "project" || workspaceOrganize
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
@@ -263,7 +263,15 @@ export function AgentsSidebar({
     includeResolved: prefs.filters.includeResolved,
     enabled: !localOnly && projectMode,
   })
-  const workspaceOptionsQuery = useWorkspaceOptions(!localOnly && workspaceMode)
+  const workspaceOptionsQuery = useWorkspaceOptions(
+    !localOnly && workspaceOrganize
+  )
+  // One workspace — or none yet, while the list loads — has nothing to group
+  // by, so the header would add a level of nesting that says nothing. The
+  // composer's workspace picker and the admin page hide themselves the same way.
+  const workspaceMode =
+    workspaceOrganize &&
+    (workspaceOptionsQuery.data?.workspaces.length ?? 0) > 1
   const localThreads = useDesktopLocalThreads({ enabled: isDesktop })
   const localSessions = localThreads.data ?? []
   const activity = useLocalThreadActivity()
@@ -357,6 +365,12 @@ export function AgentsSidebar({
     )
       ? [activeProject, ...serverProjects]
       : serverProjects
+  // A project whose repository name is blank has no stable key, which is what
+  // `sidebarProjectKey` reports with a null; it cannot be grouped or pinned.
+  const keyedCloudProjects = cloudProjects.flatMap((project) => {
+    const key = sidebarProjectKey(project.repoFullName)
+    return key ? [{ project, key }] : []
+  })
   const aliases = cloudProjectAliases(cloudProjects)
   const alignedLocalItems = applyProjectKeyAliases(localItems, aliases)
   const pinnedItems = [
@@ -390,8 +404,7 @@ export function AgentsSidebar({
     : []
   const projectGroups: Array<HydratedProjectGroup> = projectMode
     ? [
-        ...cloudProjects.map((project) => {
-          const key = sidebarProjectKey(project.repoFullName)!
+        ...keyedCloudProjects.map(({ project, key }) => {
           return {
             key,
             label: project.name,
@@ -409,11 +422,7 @@ export function AgentsSidebar({
         }),
         ...localGroups
           .filter(
-            (group) =>
-              !cloudProjects.some(
-                (project) =>
-                  sidebarProjectKey(project.repoFullName) === group.key
-              )
+            (group) => !keyedCloudProjects.some(({ key }) => key === group.key)
           )
           .map((group) => ({
             ...group,
@@ -435,11 +444,13 @@ export function AgentsSidebar({
   // Every repository sits in exactly one workspace, so the unpinned project
   // folders nest cleanly under workspace headers; local-only folders (no
   // server-side repo) fall under the default workspace.
-  const projectWorkspaceOptions = cloudProjects.map((project) => ({
-    key: sidebarProjectKey(project.repoFullName)!,
-    label: project.name,
-    workspace: project.workspace,
-  }))
+  const projectWorkspaceOptions = keyedCloudProjects.map(
+    ({ project, key }) => ({
+      key,
+      label: project.name,
+      workspace: project.workspace,
+    })
+  )
   const workspaceGroups: Array<SidebarWorkspaceGroup<HydratedProjectGroup>> =
     workspaceMode
       ? groupProjectGroupsByWorkspace(
