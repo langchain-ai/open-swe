@@ -37,7 +37,6 @@ from agent.dashboard.oauth import (
     valid_handoff_challenge,
 )
 from agent.dashboard.profiles import upsert_access_token_from_github_response
-from agent.dashboard.user_preferences import get_user_preferences
 from agent.slack.oauth import slack_base_url, slack_oauth_configured
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_api_base_url
@@ -180,7 +179,6 @@ async def auth_logout() -> Response:
 
 @router.get("/me")
 async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
-    preferences = await get_user_preferences(session["sub"])
     return {
         "login": session["sub"],
         "email": session.get("email"),
@@ -190,5 +188,4 @@ async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
         "slack_oauth_enabled": slack_oauth_configured(),
         "api_base_url": dashboard_api_base_url(),
         "slack_base_url": slack_base_url(),
-        "default_workspace": preferences["default_workspace"],
     }

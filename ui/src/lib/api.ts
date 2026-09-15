@@ -100,7 +100,6 @@ export interface SessionUser {
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
-  default_workspace: string | null
 }
 
 export interface ModelOption {
