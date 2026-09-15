@@ -223,6 +223,28 @@ it("resets leaderboard pagination when the period changes outside the selector",
   client.clear()
 })
 
+it("hides pagination controls until there is more than one page worth of rows", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 10,
+    rows: [costRow],
+  })
+  const client = mountReport()
+  expect(await screen.findByText("Cost Reader")).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Next" })).toBeNull()
+  expect(screen.queryByLabelText("Rows per page")).toBeNull()
+
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 11,
+    rows: [costRow],
+  })
+  await act(() => client.invalidateQueries({ queryKey: ["usageLeaderboard"] }))
+  expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
+  client.clear()
+})
+
 it("distinguishes unavailable usage from empty usage and recovers without duplicate coverage notices", async () => {
   vi.mocked(api.usageLeaderboard).mockRejectedValue(
     new ApiError(503, "unavailable")
