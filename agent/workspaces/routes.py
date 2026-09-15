@@ -52,7 +52,7 @@ def _normalized_slug(raw: str) -> str:
 
 
 @router.get("/workspaces")
-async def api_list_environments(
+async def api_list_workspaces(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
     return {
@@ -62,7 +62,7 @@ async def api_list_environments(
 
 
 @router.post("/workspaces")
-async def api_create_environment(
+async def api_create_workspace(
     body: WorkspaceCreate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
@@ -76,7 +76,7 @@ async def api_create_environment(
 
 
 @router.get("/workspaces/options")
-async def api_environment_options(
+async def api_workspace_options(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     """Pickable environments for any signed-in user; refresh logs only for admins."""
@@ -87,7 +87,7 @@ async def api_environment_options(
 
 
 @router.get("/workspaces/{slug}")
-async def api_get_environment(
+async def api_get_workspace(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
@@ -98,7 +98,7 @@ async def api_get_environment(
 
 
 @router.put("/workspaces/{slug}")
-async def api_update_environment(
+async def api_update_workspace(
     slug: str,
     body: WorkspaceUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -114,7 +114,7 @@ async def api_update_environment(
 
 
 @router.post("/workspaces/{slug}/refresh")
-async def api_refresh_environment(
+async def api_refresh_workspace(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
@@ -138,7 +138,7 @@ async def api_refresh_environment(
 
 
 @router.delete("/workspaces/{slug}")
-async def api_delete_environment(
+async def api_delete_workspace(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:

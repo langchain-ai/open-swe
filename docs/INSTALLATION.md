@@ -61,7 +61,7 @@ After deployment, look for `Analytics database initialized` in startup logs. A s
 
 Create a [LangSmith](https://smith.langchain.com/) API key under **Settings → API Keys** and save it as `LANGSMITH_API_KEY`. LangGraph Platform injects it into the deployment for you, along with `LANGSMITH_TRACING` and `LANGSMITH_PROJECT`; standalone deployments set it themselves.
 
-The same key is used for tracing, sandboxes, and trace links. Trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override). Sandboxes boot from LangSmith's root snapshot, which ships `git`, `gh`, Python, `uv`, and Node, so there is nothing to configure; when your repositories need more, admins capture an **Environment** from the dashboard later (see step 6). Other sandbox providers are covered in [CUSTOMIZATION.md](CUSTOMIZATION.md).
+The same key is used for tracing, sandboxes, and trace links. Trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override). Sandboxes boot from LangSmith's root snapshot, which ships `git`, `gh`, Python, `uv`, and Node, so there is nothing to configure; when your repositories need more, admins capture a sandbox image for a workspace from the **Workspaces** page later (see step 6). Other sandbox providers are covered in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 ## 3. Create a GitHub App
 
@@ -243,11 +243,13 @@ On LangGraph Platform, set them under the deployment's environment variables; sa
 
 ## 7. Verify it works
 
-**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Global defaults, User mappings, Sandbox, Environments, …) appear. Set **Admin → Global defaults → Default Repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
+**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Global defaults, User mappings, Sandbox, …) appear, along with the **Workspaces** page at `/workspaces` that every signed-in user can see. Set **Admin → Global defaults → Default Repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it from the **Workspaces** page into the `default` workspace, which later runs boot from.
 
 **Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Public runs use the workspace GitHub App for agent operations, and user-owned PRs are opened as the thread's initiating GitHub user. Link the Slack user to a GitHub login before starting the thread, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
 
 **GitHub.** GitHub-triggered conversations are public. Agent GitHub operations use the App installation identity, while PRs use the initiating commenter's OAuth. The commenter must have a linked account; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
+
+**How a run picks its workspace.** A workspace owns repositories, Slack channels, MCP connections, and team settings, and carries the sandbox prompt/snapshot/scripts described above. New work is routed to a workspace in this order, first match wins: the thread it belongs to already has one; the message that opened the thread carries a `workspace:<slug>` tag (`env:<slug>` still works as an alias); the repository belongs to a workspace; the Slack channel it was posted in is bound to a workspace; the user has a default workspace set under **My settings**; otherwise it falls back to `default`. GitHub events for a repository that no workspace owns follow `OPEN_SWE_UNASSIGNED_REPO_WORKSPACE`: `default` (the default) routes them to the `default` workspace, and `ignore` drops them without creating a run.
 
 ---
 
@@ -344,6 +346,7 @@ ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"                        # org membe
 ALLOWED_GITHUB_USERS="octocat,hubot"                                 # individual users allowed to log in
 ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"  # specific owner/repo pairs
 PUBLIC_REPO_ORG_GATE=""   # single org whose members may trigger runs on *public* repos; empty = no gate
+OPEN_SWE_UNASSIGNED_REPO_WORKSPACE="default"   # GitHub events for a repo no workspace owns: "default" (the default) routes to the default workspace, "ignore" drops them
 ```
 
 Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS`; an empty value in both stops the server. The desktop app's authenticated private local backend is exempt because it supports local mode without GitHub. When both are configured, they form a union: dashboard login accepts an explicitly listed user **or** an active member of a listed organization. Organization membership is verified server-side with the installation token and fails closed on any API error; install the App in every listed organization and grant **Organization → Members: Read-only**. A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`; both repository allowlists empty allows every installed repository. For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level guard: editing a repository outside those orgs requires the user to name it with its full `https://github.com/<owner>/<repo>` URL. When team LangSmith credentials are connected, every active member of a listed organization can use the read-only LangSmith trace tools, so only list organizations whose full membership may see team-level trace data.
@@ -424,7 +427,7 @@ User identity and membership checks still apply to public runs.
 
 - `LANGSMITH_API_KEY` must be set and valid, and the workspace must have sandbox access (403 on the sandbox endpoints means it does not; contact LangSmith support).
 - Check LangSmith sandbox quotas in your workspace settings.
-- `Failed to create sandbox from snapshot '<id>'` means an admin-captured environment or base snapshot no longer exists or is not `ready` in that workspace; delete or recapture it under **Admin → Environments** (or clear **Admin → Sandbox → Base snapshot**) to fall back to the root snapshot.
+- `Failed to create sandbox from snapshot '<id>'` means a workspace's captured snapshot or the base snapshot no longer exists or is not `ready`; delete or recapture it from the **Workspaces** page (or clear **Admin → Sandbox → Base snapshot**) to fall back to the root snapshot.
 
 ### Agent not responding to comments
 

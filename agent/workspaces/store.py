@@ -1,11 +1,13 @@
-"""Named environments: a prompt plus the scripts that build and boot their sandboxes.
+"""Workspaces: repos, Slack channels, and team settings, plus the sandbox they boot.
 
-An environment is a definition, not a frozen image. It holds a prompt appended to
-the agent's system prompt, a ``setup_script`` that provisions a sandbox from the
-base snapshot (clone the repos, install toolchains, warm caches), and an optional
-``update_script`` that freshens what goes stale in an image — a ``git pull``, a
-dependency sync — run against the current snapshot at most hourly, and only while
-the environment is actually in use.
+A workspace owns one or more repositories (a repo belongs to exactly one
+workspace), zero or more Slack channels, its MCP connections, and its team
+settings. It also carries the former "environment" fields: a prompt appended
+to the agent's system prompt, a ``setup_script`` that provisions a sandbox from
+the base snapshot (clone the repos, install toolchains, warm caches), and an
+optional ``update_script`` that freshens what goes stale in an image — a
+``git pull``, a dependency sync — run against the current snapshot at most
+hourly, and only while the workspace is actually in use.
 
 :mod:`agent.workspaces.refresh` runs both scripts in a throwaway
 sandbox and captures the result, nightly on a cron and on demand. Because the
@@ -13,16 +15,19 @@ scripts are the definition, the snapshot can always be rebuilt, and the refresh
 outcome — status, timestamps, and a capped log — rides on the record for the
 dashboard to show.
 
-Snapshots are Docker-style: an environment owns a name (its own, or
-``<prefix>-environment-<slug>`` from ``ENVIRONMENT_SNAPSHOT_PREFIX``) and each
+Snapshots are Docker-style: a workspace owns a name (its own, or
+``<prefix>-environment-<slug>`` from ``ENVIRONMENT_SNAPSHOT_PREFIX`` — the
+snapshot name keeps the legacy "environment" form intentionally) and each
 refresh publishes under ``name:latest``, moving the tag to the new content. Runs
 boot from the immutable snapshot id on the record, not from the tag, so a refresh
 mid-run cannot change what a reconnecting sandbox comes back to. The superseded
-snapshot is deleted once the new one is ready, so one environment costs one image.
+snapshot is deleted once the new one is ready, so one workspace costs one image.
 
-A run uses the environment it selected — from the dashboard picker, or an
-``env:<name>`` tag on the Slack message that opened the thread — and otherwise
-the one named ``default``. Nothing here is required: with no environment, or one
+Routing for new work picks a workspace in this order, first match wins: the
+existing thread's workspace, a ``workspace:<slug>`` tag on the opening message
+(``env:<slug>`` remains an accepted alias), the repository's owning workspace,
+the Slack channel's bound workspace, the user's default workspace preference,
+then ``default``. Nothing here is required: with no workspace resolved, or one
 whose snapshot is not ready, runs fall back to the configured base snapshot.
 """
 
