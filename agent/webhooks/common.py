@@ -1084,7 +1084,12 @@ async def trigger_or_queue_run(
 ) -> None:
     """Create a new agent run or queue the message if the thread is busy."""
     await authorize_github_thread(thread_id, github_login)
-    workspace = await workspace_for_repo_config(repo_config)
+    # An existing thread keeps the workspace it started in even if its
+    # repository has since moved: the settings and MCP connections a
+    # conversation began with must not change under it.
+    workspace = await get_thread_workspace(thread_id) or await workspace_for_repo_config(
+        repo_config
+    )
     await upsert_agent_thread_metadata(
         thread_id,
         source="github",

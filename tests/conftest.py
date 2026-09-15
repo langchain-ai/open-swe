@@ -231,6 +231,7 @@ def _workspace_store_import_completed(monkeypatch: pytest.MonkeyPatch) -> None:
     path sets the flag back to ``False`` itself.
     """
     monkeypatch.setattr(WORKSPACES, "import_completed", True)
+    monkeypatch.setattr(WORKSPACES, "unimported_repos", frozenset())
 
 
 @pytest.fixture(autouse=True)

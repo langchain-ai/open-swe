@@ -9,6 +9,7 @@ from agent.database import postgres
 from agent.github.repositories import Repository
 from agent.store import now_iso
 from agent.workspaces import store as env_store
+from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable, workspace_for_repo
 from agent.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
 from agent.workspaces.store import (
     LEGACY_ENVIRONMENTS_NAMESPACE,
@@ -639,7 +640,10 @@ async def test_slack_channel_ids_are_normalized() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_stored_records_are_imported_from_both_namespaces(fake_store: FakeStore) -> None:
+async def test_stored_records_are_imported_from_both_namespaces(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(WORKSPACES, "import_completed", False)
     fake_store.seed(
         LEGACY_ENVIRONMENTS_NAMESPACE,
         "default",
@@ -653,6 +657,7 @@ async def test_stored_records_are_imported_from_both_namespaces(fake_store: Fake
 
     assert await import_store_records() == 2
 
+    assert WORKSPACES.import_completed is True
     stored = {record.slug: record for record in await WORKSPACES.list_all()}
     assert sorted(stored) == ["default", "oss"]
     assert stored["default"].prompt == "hi"
@@ -664,7 +669,10 @@ async def test_stored_records_are_imported_from_both_namespaces(fake_store: Fake
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_one_unimportable_record_does_not_stop_the_others(fake_store: FakeStore) -> None:
+async def test_one_unimportable_record_does_not_stop_the_others(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(WORKSPACES, "import_completed", False)
     await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
     fake_store.seed(
         WORKSPACES_NAMESPACE, "taken", {"slug": "taken", "name": "Taken", "repos": ["acme/api"]}
@@ -676,8 +684,43 @@ async def test_one_unimportable_record_does_not_stop_the_others(fake_store: Fake
     assert await import_store_records() == 1
 
     assert sorted(record.slug for record in await WORKSPACES.list_all()) == ["core", "oss"]
-    # The one whose repository another workspace owns stays where it is.
+    # The one whose repository another workspace owns stays where it is, and the
+    # import is not complete until it is dealt with.
     assert sorted(fake_store.values(WORKSPACES_NAMESPACE)) == ["taken"]
+    assert WORKSPACES.import_completed is False
+    # Its repository already has an owner, so that owner still wins.
+    assert await workspace_for_repo("acme", "api") == "core"
+    assert await repo_is_routable("acme", "api") is True
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_repositories_of_an_unreadable_record_fail_closed_until_it_imports(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(WORKSPACES, "import_completed", False)
+    monkeypatch.setenv("OPEN_SWE_UNASSIGNED_REPO_WORKSPACE", "default")
+    broken = {"slug": "legacy", "name": "Legacy", "repos": ["acme/legacy"], "snapshot_status": "?"}
+    fake_store.seed(WORKSPACES_NAMESPACE, "legacy", broken)
+    fake_store.seed(
+        WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}
+    )
+
+    assert await import_store_records() == 1
+
+    assert WORKSPACES.import_completed is False
+    assert sorted(fake_store.values(WORKSPACES_NAMESPACE)) == ["legacy"]
+    # GitHub deliveries for the stranded repository are retried, not routed to
+    # ``default`` or dropped; everything else routes as usual.
+    with pytest.raises(WorkspaceLookupError):
+        await repo_is_routable("acme", "legacy")
+    assert await workspace_for_repo("acme", "legacy") is None
+    assert await repo_is_routable("acme", "oss") is True
+    assert await repo_is_routable("acme", "unrelated") is True
+
+    fake_store.seed(WORKSPACES_NAMESPACE, "legacy", {**broken, "snapshot_status": "none"})
+    assert await import_store_records() == 1
+    assert WORKSPACES.import_completed is True
+    assert await workspace_for_repo("acme", "legacy") == "legacy"
 
 
 @pytest.mark.usefixtures("registry_db")

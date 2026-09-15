@@ -49,11 +49,19 @@ async def _slug_exists(slug: str) -> bool:
 
 
 async def _repo_owner(owner: str, name: str) -> str | None:
-    """The workspace owning this repository; raises when ownership is unreadable."""
+    """The workspace owning this repository; raises when ownership is unreadable.
+
+    A repository that no workspace owns but a not-yet-imported Store record
+    names is unreadable too: its owner exists, just not in PostgreSQL yet.
+    """
+    full_name = f"{owner}/{name}"
     try:
-        return await WORKSPACES.owner_of_repo(f"{owner}/{name}")
+        found = await WORKSPACES.owner_of_repo(full_name)
     except Exception as exc:
         raise WorkspaceLookupError("workspace repository lookup failed") from exc
+    if found is None and WORKSPACES.repo_import_is_pending(full_name):
+        raise WorkspaceLookupError("the workspace owning this repository has not been imported yet")
+    return found
 
 
 async def _channel_owner(channel_id: str) -> str | None:

@@ -110,7 +110,10 @@ right after migrations run, `import_store_records()` reads both namespaces once,
 that has no PostgreSQL row yet, and deletes the Store record once it has been dealt with — so this
 runs exactly once per record, resurrects nothing an admin has since deleted, and a later release
 can drop the whole path. A Store outage at that moment is logged and simply retried on the next
-boot; nothing blocks startup on it.
+boot; nothing blocks startup on it. A record the import cannot bring over — one that no longer
+validates, or one claiming a repository another workspace owns — stays in the Store for the next
+boot, the import does not count as complete, and GitHub deliveries for the repositories it names
+are answered 503 so GitHub retries them rather than routing them to `default` or dropping them.
 
 ### Non-goals
 

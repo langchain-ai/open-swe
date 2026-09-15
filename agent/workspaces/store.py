@@ -694,6 +694,9 @@ class WorkspaceStore:
         # mean this process failed to populate it, which
         # :meth:`routing_is_populated` refuses to read as "nobody owns this".
         self.import_completed = False
+        # Repositories named by Store records the import could not bring over,
+        # so routing fails closed on them instead of reading them as unowned.
+        self.unimported_repos: frozenset[str] = frozenset()
 
     async def get(self, slug: str) -> Workspace | None:
         """The workspace stored under ``slug``, or ``None``.
@@ -727,6 +730,21 @@ class WorkspaceStore:
             return (
                 await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
             ) is not None
+
+    def repo_import_is_pending(self, full_name: str) -> bool:
+        """Whether a Store record naming this repository still awaits import."""
+        if not self.unimported_repos:
+            return False
+        try:
+            key = normalize_repo_full_name(full_name).lower()
+        except ValueError:
+            logger.debug(
+                "Repository name cannot be normalized; treating it as not pending import",
+                extra={"repository": full_name},
+                exc_info=True,
+            )
+            return False
+        return key in self.unimported_repos
 
     async def routing_is_populated(self) -> bool:
         """Whether an "unowned repository" answer can be trusted.
@@ -1266,15 +1284,19 @@ async def import_store_records() -> int:
     and means a later release can drop this entirely.
 
     A record the Store cannot be made sense of, or one whose repositories are
-    claimed by another workspace, stays where it is rather than being dropped
-    on the floor.
+    claimed by another workspace, stays where it is for the next startup rather
+    than being dropped on the floor. Until then the import does not count as
+    complete, and the repositories such a record names are remembered so
+    :func:`agent.workspaces.routing.repo_is_routable` fails closed on them
+    instead of reading them as unowned.
 
-    Raising leaves ``WorkspaceStore.import_completed`` unset, which is what
-    keeps :func:`agent.workspaces.routing.repo_is_routable` from reading the
-    empty table it may have left behind as "nobody owns this repository".
+    Raising leaves ``WorkspaceStore.import_completed`` unset as well, which is
+    what keeps that check from reading the empty table it may have left behind
+    as "nobody owns this repository".
     """
     imported = 0
     skipped = 0
+    pending: set[str] = set()
     for namespace in (WORKSPACES_NAMESPACE, LEGACY_ENVIRONMENTS_NAMESPACE):
         for value in await search_all_values(namespace):
             slug = value.get("slug")
@@ -1284,6 +1306,7 @@ async def import_store_records() -> int:
                 record = Workspace.model_validate(value)
             except ValidationError:
                 skipped += 1
+                pending |= _repo_keys(value.get("repos"))
                 logger.error(
                     "Skipping an unreadable stored workspace record",
                     extra={"workspace": slug, "store_namespace": namespace},
@@ -1297,6 +1320,7 @@ async def import_store_records() -> int:
                     # One record another workspace has since claimed, or one a
                     # constraint refuses, must not cost the rest their import.
                     skipped += 1
+                    pending |= _repo_keys(record.repos)
                     logger.error(
                         "Could not import a stored workspace record",
                         extra={"workspace": record.slug, "store_namespace": namespace},
@@ -1305,13 +1329,37 @@ async def import_store_records() -> int:
                     continue
                 imported += 1
             await delete_value(namespace, record.slug)
-    WORKSPACES.import_completed = True
+    WORKSPACES.unimported_repos = frozenset(pending)
+    WORKSPACES.import_completed = skipped == 0
     log = logger.error if skipped else logger.info
     log(
         "Stored workspace records processed",
-        extra={"imported_workspaces": imported, "skipped_workspaces": skipped},
+        extra={
+            "imported_workspaces": imported,
+            "skipped_workspaces": skipped,
+            "pending_repositories": sorted(pending),
+        },
     )
     return imported
+
+
+def _repo_keys(entries: object) -> set[str]:
+    """Normalized keys of the repositories a raw Store record names, ignoring junk."""
+    keys: set[str] = set()
+    if not isinstance(entries, list):
+        return keys
+    for entry in entries:
+        if not isinstance(entry, str):
+            continue
+        try:
+            keys.add(normalize_repo_full_name(entry).lower())
+        except ValueError:
+            logger.warning(
+                "Stored workspace record names a malformed repository; it cannot be guarded",
+                extra={"repository": entry},
+                exc_info=True,
+            )
+    return keys
 
 
 async def load_default_workspace() -> Workspace | None:
