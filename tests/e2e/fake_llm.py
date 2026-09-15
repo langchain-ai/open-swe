@@ -594,9 +594,9 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
 
 def _environment_poll_step(messages: list[BaseMessage]) -> AIMessage:
     """Follow the reproducibility rebuild through the one poll tool."""
-    task_id = _tool_payload(messages, "refresh_environment_start").get("task_id")
+    task_id = _tool_payload(messages, "refresh_workspace_start").get("task_id")
     if not isinstance(task_id, str):
-        raise ValueError("refresh_environment_start did not return a task id")
+        raise ValueError("refresh_workspace_start did not return a task id")
     return AIMessage(
         content="Following the rebuild.",
         tool_calls=[
@@ -969,7 +969,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _tool_step(
             "Publishing this sandbox as the environment.",
-            "publish_environment",
+            "publish_workspace",
             {
                 "name": ENVIRONMENT_NAME,
                 "prompt": ENVIRONMENT_PROMPT,
@@ -982,7 +982,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         # Then prove the script reproduces it, the way the nightly cron will.
         _tool_step(
             "Checking the setup script reproduces the image.",
-            "refresh_environment_start",
+            "refresh_workspace_start",
             {"name": ENVIRONMENT_NAME},
             "call-env-refresh",
         ),

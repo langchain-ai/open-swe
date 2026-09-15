@@ -14,7 +14,6 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
-from agent.environments.store import ENVIRONMENTS, parse_environment_tag
 from agent.input_messages import (
     InputMessageContext,
     MessageKind,
@@ -42,6 +41,7 @@ from agent.utils.thread_ops import (
 )
 from agent.utils.thread_ops import queue_message_for_thread
 from agent.webhooks import common
+from agent.workspaces.store import WORKSPACES, parse_workspace_tag
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
@@ -328,7 +328,7 @@ def _sanitize_slack_filename(name: str, url: str) -> str:
 
 
 async def _download_slack_files_to_sandbox(
-    entries: list[SlackFileEntry], thread_id: str, *, environment_slug: str | None = None
+    entries: list[SlackFileEntry], thread_id: str, *, workspace_slug: str | None = None
 ) -> list[StagedSlackFile]:
     """Download Slack files and stage them in the thread's sandbox.
 
@@ -339,7 +339,7 @@ async def _download_slack_files_to_sandbox(
     try:
         from agent.sandboxes.lifecycle import ensure_sandbox_for_thread
 
-        backend = await ensure_sandbox_for_thread(thread_id, environment_slug=environment_slug)
+        backend = await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace_slug)
     except Exception:
         common.logger.warning(
             "Could not reach sandbox for thread %s; skipping Slack file attachments",
@@ -856,11 +856,11 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     # once, so honoring a later tag would change the prompt but not the image. The
     # tag is stripped only when it resolves, so a typo stays visible in the
     # transcript instead of vanishing.
-    environment_slug: str | None = None
+    workspace_slug: str | None = None
     if is_first_mention:
-        tagged_slug, text_without_tag = parse_environment_tag(clean_text)
-        if tagged_slug and await ENVIRONMENTS.get(tagged_slug) is not None:
-            environment_slug = tagged_slug
+        tagged_slug, text_without_tag = parse_workspace_tag(clean_text)
+        if tagged_slug and await WORKSPACES.get(tagged_slug) is not None:
+            workspace_slug = tagged_slug
             clean_text = text_without_tag or "(no text in mention)"
         elif tagged_slug:
             common.logger.info(
@@ -1020,7 +1020,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     # Later mentions carry no tag, so the thread's environment comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
     # was built from the environment the opening message picked.
-    thread_environment = environment_slug or await common.get_thread_environment(thread_id)
+    thread_environment = workspace_slug or await common.get_thread_environment(thread_id)
     if thread_environment:
         configurable["environment"] = thread_environment
     if image_model_override:
@@ -1049,7 +1049,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
-        environment=environment_slug,
+        environment=workspace_slug,
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes
         # the whole set rather than only the latest sender.
@@ -1076,7 +1076,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         staged_files = await _download_slack_files_to_sandbox(
             _slack_file_entries(source_messages),
             thread_id,
-            environment_slug=thread_environment,
+            workspace_slug=thread_environment,
         )
         if staged_files:
             operational_context += f"\n\n{_slack_files_section(staged_files)}"

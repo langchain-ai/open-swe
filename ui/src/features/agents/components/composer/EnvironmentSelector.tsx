@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 import { CaretDownIcon, StackIcon } from "@phosphor-icons/react"
 
-import type { EnvironmentOption } from "@/lib/api"
+import type { WorkspaceOption } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 interface EnvironmentSelectorProps {
-  environments: Array<EnvironmentOption>
+  environments: Array<WorkspaceOption>
   selectedSlug: string | null
   onChange: (slug: string | null) => void
   disabled?: boolean
