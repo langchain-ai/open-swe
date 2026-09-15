@@ -20,6 +20,13 @@ const {
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { BackendSupervisor } = require("./backend-supervisor.cjs");
+const {
+  ConsoleLogBuffer,
+  buildDiagnosticsReport,
+  captureProcessConsole,
+  diagnosticsFileName,
+  normalizeConsoleMessage,
+} = require("./diagnostics.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   addWorktree,
@@ -102,6 +109,11 @@ protocol.registerSchemesAsPrivileged([
 
 let backendUrl = null;
 let mainWindow = null;
+
+// Installed builds have no terminal; "Save Diagnostics Report…" exports these.
+const rendererConsole = new ConsoleLogBuffer(2000);
+const mainConsole = new ConsoleLogBuffer(500);
+captureProcessConsole(mainConsole);
 let setupWindow = null;
 let loginFlow = null;
 const connectFlows = new Map();
@@ -602,6 +614,37 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return backendSupervisor.credentialStatus(modelId);
   });
+  ipcMain.handle("desktop:open-local-trace", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    try {
+      if (!backendUrl || typeof threadId !== "string" || !threadId)
+        throw new Error("The local trace is unavailable.");
+      const response = await backendFetch(
+        new URL(
+          `/dashboard/api/me/local-trace-url/${encodeURIComponent(threadId)}`,
+          backendUrl,
+        ).toString(),
+      );
+      if (!response.ok) throw new Error("Could not load the local trace.");
+      const payload = await response.json();
+      if (typeof payload?.trace_url !== "string" || !payload.trace_url)
+        throw new Error("No trace is available for this thread yet.");
+      const url = new URL(payload.trace_url);
+      if (url.protocol !== "http:" && url.protocol !== "https:")
+        throw new Error("The trace URL must use HTTP or HTTPS.");
+      await shell.openExternal(url.href);
+      return true;
+    } catch (error) {
+      await dialog.showMessageBox({
+        type: "error",
+        title: "Open trace",
+        message: "Unable to open trace",
+        detail: error instanceof Error ? error.message : "Please try again.",
+      });
+      return false;
+    }
+  });
+
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
     if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");
@@ -1098,7 +1141,8 @@ function createMenu() {
             else void loadApp(mainWindow);
           },
         },
-        ...(isDevelopment ? [{ role: "toggleDevTools" }] : []),
+        // Installed builds too: the renderer is sandboxed with no Node access.
+        { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" },
         { role: "zoomIn" },
@@ -1127,6 +1171,11 @@ function createMenu() {
           label: "Open SWE on GitHub",
           click: () =>
             void shell.openExternal("https://github.com/langchain-ai/open-swe"),
+        },
+        { type: "separator" },
+        {
+          label: "Save Diagnostics Report…",
+          click: () => void saveDiagnosticsReport(),
         },
       ],
     },
@@ -1353,9 +1402,62 @@ function createWindow() {
   window.on("leave-full-screen", () =>
     window.webContents.send("desktop:fullscreen-change", false),
   );
+  window.webContents.on("console-message", (_event, details) =>
+    rendererConsole.push(normalizeConsoleMessage(details)),
+  );
   mainWindow = window;
   void loadApp(window);
   return window;
+}
+
+async function collectPerfSpans(window) {
+  if (!window || window.isDestroyed()) return null;
+  try {
+    const exported = await window.webContents.executeJavaScript(
+      "window.__openSwePerf ? window.__openSwePerf.export() : null",
+      true,
+    );
+    return typeof exported === "string" ? exported : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveDiagnosticsReport() {
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const report = buildDiagnosticsReport({
+    app: {
+      name: appRuntime.name,
+      version: app.getVersion(),
+      isPackaged: app.isPackaged,
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+      arch: process.arch,
+      osRelease: require("node:os").release(),
+      locale: app.getLocale(),
+    },
+    backendHost: backendUrl ? new URL(backendUrl).host : null,
+    renderer: rendererConsole.entries(),
+    main: mainConsole.entries(),
+    perf: await collectPerfSpans(window),
+  });
+  const options = {
+    title: "Save diagnostics report",
+    defaultPath: path.join(app.getPath("downloads"), diagnosticsFileName()),
+    filters: [{ name: "Text", extensions: ["txt"] }],
+  };
+  const result = window
+    ? await dialog.showSaveDialog(window, options)
+    : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) return;
+  try {
+    fs.writeFileSync(result.filePath, report, "utf8");
+    shell.showItemInFolder(result.filePath);
+  } catch (error) {
+    dialog.showErrorBox("Could not save the diagnostics report", error.message);
+  }
 }
 
 function createSetupWindow() {

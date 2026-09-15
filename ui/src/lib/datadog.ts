@@ -4,6 +4,16 @@ type PublicEnv = Record<string, string | boolean | undefined>
 type RumClient = {
   init: (configuration: RumInitConfiguration) => void
   getInternalContext: () => { session_id?: string } | undefined
+  addDurationVital?: (
+    name: string,
+    options: {
+      /** Epoch milliseconds. */
+      startTime: number
+      duration: number
+      context?: Record<string, string | number | boolean | null>
+    }
+  ) => void
+  setGlobalContextProperty?: (key: string, value: string) => void
 }
 type RumLoader = () => Promise<RumClient>
 
@@ -44,6 +54,10 @@ export function getDatadogSessionLink(): string | undefined {
 
 export function isDatadogRumInitialized(): boolean {
   return initializedRum !== undefined
+}
+
+export function getDatadogRum(): RumClient | undefined {
+  return initializedRum
 }
 
 export function subscribeToDatadogInitialization(

@@ -59,6 +59,26 @@ it("shows only Good/Bad and saves Good without a comment form", async () => {
   expect(screen.queryByRole("button")).toBeNull()
 })
 
+it("removes the confirmation after a short delay", async () => {
+  renderCard()
+  const good = await screen.findByRole("button", { name: "Good" })
+  vi.useFakeTimers()
+
+  try {
+    fireEvent.click(good)
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.queryByText("Thanks for your feedback.")).not.toBeNull()
+
+    act(() => vi.advanceTimersByTime(5000))
+    expect(screen.queryByText("Thanks for your feedback.")).toBeNull()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 it("saves Bad before offering an optional comment and keeps the draft on failure", async () => {
   renderCard()
   fireEvent.click(await screen.findByRole("button", { name: "Bad" }))
@@ -104,14 +124,17 @@ it("keeps the rating controls available when saving the rating fails", async () 
   await screen.findByRole("textbox")
 })
 
-it("does not reopen the comment form for previously completed feedback", async () => {
+it("does not show a confirmation for previously completed feedback", async () => {
   api.getThreadFeedback.mockResolvedValue({
     status: "completed",
     rating: "bad",
     comment: "",
   })
   renderCard()
-  await screen.findByText("Thanks for your feedback.")
+  await act(async () => {
+    await Promise.resolve()
+  })
+  expect(screen.queryByText("Thanks for your feedback.")).toBeNull()
   expect(screen.queryByRole("textbox")).toBeNull()
 })
 

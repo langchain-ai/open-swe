@@ -433,6 +433,9 @@ export function SidebarThreadRow({
             <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
               <ThreadMenuItems
                 thread={thread}
+                localThread={
+                  item.location === "local" ? item.thread : undefined
+                }
                 pinned={pinned}
                 archived={archived}
                 isDeleting={isDeleting}

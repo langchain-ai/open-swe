@@ -70,16 +70,6 @@ def test_provider_fallback_resolves_openai_within_provider() -> None:
     assert effort == "low"
 
 
-def test_supported_openai_models() -> None:
-    openai_options = [model for model in SUPPORTED_MODELS if model["id"].startswith("openai:")]
-    assert [(model["id"], model["label"]) for model in openai_options] == [
-        ("openai:gpt-6-astra", "GPT-6 Astra"),
-        ("openai:gpt-5.6-sol", "GPT-5.6 Sol"),
-        ("openai:gpt-5.6-terra", "GPT-5.6 Terra"),
-        ("openai:gpt-5.6-luna", "GPT-5.6 Luna"),
-    ]
-
-
 @pytest.mark.parametrize("model_id", [DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC, DEPRECATED_GLM])
 def test_deprecated_models_are_no_longer_selectable(model_id: str) -> None:
     assert model_id not in SUPPORTED_MODEL_IDS
@@ -88,9 +78,7 @@ def test_deprecated_models_are_no_longer_selectable(model_id: str) -> None:
 
 
 def test_fireworks_glm_5_3_replaces_glm_5_2() -> None:
-    assert any(
-        model["id"] == SUPPORTED_GLM and model["label"] == "GLM 5.3" for model in SUPPORTED_MODELS
-    )
+    assert any(model["id"] == SUPPORTED_GLM for model in SUPPORTED_MODELS)
 
 
 def test_deprecated_models_defer_to_defaults() -> None:

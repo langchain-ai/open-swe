@@ -358,7 +358,7 @@ async def control_login(request: Request) -> JSONResponse:
     form = await request.json()
     login = str(form.get("login", "dev-user"))
     email = str(form.get("email", "dev@example.com"))
-    token = issue_session(login=login, email=email, avatar_url=None)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid.uuid7()))
     resp = JSONResponse({"ok": True, "login": login, "email": email})
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -391,7 +391,7 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
     if not email:
         match = next((u for u in TEST_USERS if u["login"] == login), None)
         email = match["email"] if match else f"{login}@example.com"
-    token = issue_session(login=login, email=email, avatar_url=None)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid.uuid7()))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -439,7 +439,7 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
-    token = issue_session(login=login, email=email, avatar_url=None)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid.uuid7()))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp

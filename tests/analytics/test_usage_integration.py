@@ -23,7 +23,6 @@ from tests.analytics.helpers import DAY
 @pytest.fixture(autouse=True)
 async def usage_storage(analytics_db, monkeypatch):
     _, transaction = analytics_db
-    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
     for module in (directory, ingestion, outbox):
         monkeypatch.setattr(module, "transaction", transaction)
     monkeypatch.setattr(queries, "connection", transaction)

@@ -14,7 +14,6 @@ from tests.analytics.helpers import DAY, event
 @pytest.fixture(autouse=True)
 async def usage_storage(analytics_db, monkeypatch):
     _, transaction = analytics_db
-    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
     monkeypatch.setattr(ingestion, "transaction", transaction)
     monkeypatch.setattr(directory, "transaction", transaction)
     monkeypatch.setattr(emitter, "enqueue", ingestion.ingest)

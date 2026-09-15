@@ -12,7 +12,7 @@ interface StreamOptions {
   threadId: string | null
   onThreadId: (threadId: string) => void
   onCreated: () => void
-  onCompleted: () => void
+  onCompleted: (info: { reason: "success" }) => void
 }
 
 const mocks = vi.hoisted(() => ({
@@ -23,10 +23,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@langchain/react", () => ({
   useChannelEffect: (
     _stream: unknown,
-    _channels: unknown,
+    channels: Array<string>,
     options: { onEvent: (event: unknown) => void }
   ) => {
-    mocks.onEvent = options.onEvent
+    // The provider also subscribes lifecycle/messages for perf tracking.
+    if (channels.includes("custom")) mocks.onEvent = options.onEvent
   },
   useStream: (options: StreamOptions) => {
     mocks.streams.push(options)
@@ -105,7 +106,7 @@ describe("AgentStreamProvider", () => {
       expect(view.container.textContent).toBe("idle")
     }
     emit("started")
-    act(() => mocks.streams.at(-1)?.onCompleted())
+    act(() => mocks.streams.at(-1)?.onCompleted({ reason: "success" }))
     expect(view.container.textContent).toBe("idle")
   })
 

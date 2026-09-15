@@ -5,6 +5,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import httpx2
 
@@ -72,13 +73,17 @@ def _github_noreply_email(login: str, user_id: Any = None) -> str:
     return f"{normalized_login}@users.noreply.github.com"
 
 
-def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
+def _identity_from_github_token(
+    github_token: str | None, github_login: str | None = None
+) -> CollaboratorIdentity | None:
     if not github_token:
         return None
 
+    requested_login = _normalize_text(github_login)
+    endpoint = f"users/{quote(requested_login, safe='')}" if requested_login else "user"
     try:
         response = httpx2.get(
-            "https://api.github.com/user",
+            f"https://api.github.com/{endpoint}",
             headers={
                 "Authorization": f"Bearer {github_token}",
                 "Accept": "application/vnd.github+json",
@@ -162,7 +167,11 @@ def resolve_triggering_user_identity(
     Slack/Linear supplied an explicit user name and email.
     """
 
-    return _identity_from_github_token(github_token) or _identity_from_config(config)
+    configurable = config.get("configurable", {})
+    login = configurable.get("github_login")
+    return _identity_from_github_token(
+        github_token, login if isinstance(login, str) else None
+    ) or _identity_from_config(config)
 
 
 async def resolve_participant_identities(logins: Iterable[str]) -> list[CollaboratorIdentity]:

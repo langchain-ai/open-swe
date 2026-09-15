@@ -9,12 +9,14 @@ from sqlalchemy import text
 from agent.analytics import outbox, queries
 from agent.analytics.events import EventName, PROpenedPayload, make_event
 from agent.database import analytics as database
+from agent.database import postgres
+from tests.analytics.conftest import initialize_database
 
 
 @pytest.fixture
 async def reporting_db(deployment_db):
-    await database.migrate()
-    async with database.transaction() as conn:
+    await initialize_database()
+    async with postgres.transaction() as conn:
         await conn.execute(
             text("UPDATE deployment_metadata SET reporting_cutover_at = :cutover"),
             {"cutover": datetime(2026, 1, 1, tzinfo=UTC)},
@@ -49,12 +51,12 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     assert report["last_processed_at"] is None
     assert report["has_pending_events"]
 
-    async with database.transaction() as conn:
+    async with postgres.transaction() as conn:
         await conn.execute(text("UPDATE outbox SET state = 'dead_letter'"))
     report = await queries.pr_merge_rate_by_model(period="all")
     assert report["has_failed_events"]
     assert not report["has_pending_events"]
-    async with database.transaction() as conn:
+    async with postgres.transaction() as conn:
         await conn.execute(text("UPDATE outbox SET state = 'pending'"))
     before_delivery = datetime.now(UTC)
     assert await outbox.deliver_batch() == 1
@@ -75,12 +77,12 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     assert report["status"] == "ready"
     assert report["cohorts"][0]["cohort_size"] == 1
 
-    async with database.transaction() as conn:
+    async with postgres.transaction() as conn:
         await conn.execute(text("DELETE FROM events"))
         await conn.execute(text("DELETE FROM ingestion_receipts"))
         await conn.execute(text("DELETE FROM outbox"))
-    await database.close()
-    await database.migrate()
+    await postgres.close()
+    await initialize_database()
     report = await queries.pr_merge_rate_by_model(period="all", admin=True)
     assert report["status"] == "ready"
     assert datetime.fromisoformat(report["last_processed_at"]) == processed_at

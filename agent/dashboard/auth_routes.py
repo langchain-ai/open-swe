@@ -9,11 +9,13 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from agent.config import ENV
+from agent.dashboard.admin import configured_admins, is_admin
 from agent.dashboard.deps import SESSION_DEP, session_is_admin
 from agent.dashboard.oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
+    GithubUser,
     clear_state_cookie,
     cookie_security,
     decode_state,
@@ -36,6 +38,7 @@ from agent.dashboard.oauth import (
 )
 from agent.dashboard.profiles import upsert_access_token_from_github_response
 from agent.slack.oauth import slack_base_url, slack_oauth_configured
+from agent.users import User
 from agent.utils.dashboard_links import dashboard_api_base_url
 
 router = APIRouter(tags=["auth"])
@@ -106,13 +109,14 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     if not isinstance(access_token, str):
         raise HTTPException(400, "oauth exchange missing access_token")
     user, email = await fetch_github_user(access_token)
-    login = user.get("login")
+    login = user.login
     if not login:
         raise HTTPException(400, "could not resolve GitHub login")
 
     await enforce_github_login_gate(login)
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
+    user_id = await _signed_in_user_id(user, email)
 
     if handoff is not None:
         # Desktop login runs in the user's own browser, so the session belongs to
@@ -122,18 +126,34 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
         handoff_code = issue_desktop_handoff(
             login=login,
             email=email,
-            avatar_url=user.get("avatar_url"),
+            avatar_url=user.avatar_url,
             challenge=challenge,
+            user_id=user_id,
         )
         response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
         clear_state_cookie(response)
         return response
 
-    session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
+    session_jwt = issue_session(
+        login=login, email=email, avatar_url=user.avatar_url, user_id=user_id
+    )
     response = RedirectResponse(redirect_to, status_code=302)
     set_session_cookie(response, session_jwt)
     clear_state_cookie(response)
     return response
+
+
+async def _signed_in_user_id(user: GithubUser, email: str | None) -> str:
+    signed_in = await User.sign_in(
+        "github",
+        str(user.id),
+        login=user.login,
+        email=email or "",
+        display_name=user.name or "",
+        avatar_url=user.avatar_url or "",
+        admin=is_admin(email, login=user.login) if configured_admins() else None,
+    )
+    return str(signed_in.id)
 
 
 class DesktopHandoffExchange(BaseModel):
@@ -163,6 +183,7 @@ async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
         "login": session["sub"],
         "email": session.get("email"),
         "avatar_url": session.get("avatar_url"),
+        "user_id": session.get("user_id"),
         "is_admin": session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
         "api_base_url": dashboard_api_base_url(),
