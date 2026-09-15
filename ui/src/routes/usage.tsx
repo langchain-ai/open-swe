@@ -583,6 +583,8 @@ function TablePagination({
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
+  if (total <= 10) return null
+
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const start = total ? (page - 1) * pageSize + 1 : 0
   const end = Math.min(page * pageSize, total)
