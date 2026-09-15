@@ -12,6 +12,12 @@ from agent.users import User
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
+@pytest.fixture(autouse=True)
+def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "Ada")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+
+
 def _pr() -> PullRequest:
     return PullRequest(owner="lc", repo="repo", number=7)
 

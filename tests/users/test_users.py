@@ -6,9 +6,15 @@ import pytest
 from sqlalchemy import func, select
 
 from agent.database import postgres
-from agent.users import User
+from agent.users import UnauthorizedUser, User
 
 pytestmark = pytest.mark.usefixtures("registry_db")
+
+
+@pytest.fixture(autouse=True)
+def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "OctoCat,Octo-Cat,ada,bob,carol,Ada,renamed")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
 
 
 async def _user_count() -> int:
@@ -97,7 +103,8 @@ async def test_for_identity_is_none_for_an_unknown_account() -> None:
 
 
 async def test_linking_a_claimed_identity_moves_it_to_the_new_owner() -> None:
-    first = await User.sign_in("slack", "U0123", login="octo", team_id="T9")
+    first = await User.sign_in("github", "2002", login="ada")
+    await first.link("slack", "U0123", team_id="T9")
     second = await User.sign_in("github", "1001", login="OctoCat")
     moved = await second.link("slack", "U0123")
 
@@ -105,7 +112,34 @@ async def test_linking_a_claimed_identity_moves_it_to_the_new_owner() -> None:
     owner = await User.for_identity("slack", "U0123")
     assert owner is not None and owner.id == second.id
     reloaded_first = await User.get(first.id)
-    assert reloaded_first is not None and reloaded_first.identities == []
+    assert reloaded_first is not None
+    assert [i.provider for i in reloaded_first.identities] == ["github"]
+
+
+async def test_an_unauthorized_github_login_gets_no_user_row() -> None:
+    with pytest.raises(UnauthorizedUser):
+        await User.sign_in("github", "666", login="outsider")
+
+    assert await _user_count() == 0
+    assert await User.for_identity("github", "666") is None
+
+
+async def test_a_slack_account_cannot_establish_a_user_on_its_own() -> None:
+    with pytest.raises(UnauthorizedUser):
+        await User.sign_in("slack", "U0123", login="octo", team_id="T9")
+
+    assert await _user_count() == 0
+
+
+async def test_an_existing_user_signs_in_without_re_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = await User.sign_in("github", "1001", login="OctoCat")
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "")
+
+    again = await User.sign_in("github", "1001", login="OctoCat", display_name="Octo")
+
+    assert (again.id, again.display_name) == (created.id, "Octo")
 
 
 async def test_concurrent_first_sign_ins_settle_on_one_user() -> None:
