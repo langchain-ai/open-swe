@@ -71,6 +71,32 @@ async def test_a_repository_can_belong_to_only_one_workspace() -> None:
             )
 
 
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [("refresh_status", "'wat'"), ("refresh_kind", "'sideways'"), ("snapshot_status", "'wat'")],
+)
+async def test_a_status_the_record_model_rejects_cannot_be_stored(column: str, value: str) -> None:
+    """The Literal types in the store and the columns must not drift apart."""
+    workspace_id = uuid7()
+    with pytest.raises(IntegrityError):
+        async with postgres.transaction() as conn:
+            await _insert_workspace(conn, workspace_id, "team-a")
+            await conn.execute(
+                text(f"UPDATE workspace SET {column} = {value} WHERE id = :id"),
+                {"id": workspace_id},
+            )
+
+
+async def test_a_refresh_kind_is_optional_until_a_refresh_runs() -> None:
+    workspace_id = uuid7()
+    async with postgres.transaction() as conn:
+        await _insert_workspace(conn, workspace_id, "team-a")
+        stored = await conn.scalar(
+            text("SELECT refresh_kind FROM workspace WHERE id = :id"), {"id": workspace_id}
+        )
+    assert stored is None
+
+
 async def test_a_slack_channel_can_belong_to_only_one_workspace() -> None:
     channel_id = "C0123456789"
     workspace_a = uuid7()
