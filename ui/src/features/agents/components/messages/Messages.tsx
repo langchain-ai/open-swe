@@ -160,7 +160,7 @@ export const Messages = memo(function MessagesComponent({
               )
             })}
             {threadId && showPlanArtifact && (
-              <InlinePlanArtifact threadId={threadId} />
+              <InlinePlanArtifact key={threadId} threadId={threadId} />
             )}
             {threadId && (
               <WorkflowApprovalCard
