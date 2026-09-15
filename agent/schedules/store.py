@@ -843,6 +843,15 @@ async def launch_github_issue_automations(
                         exc_info=True,
                     )
                 continue
+            if result.get("status") != "started":
+                try:
+                    await langgraph_client().threads.delete(claim_thread_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to release GitHub issue automation delivery claim",
+                        extra={"schedule_id": schedule_id},
+                        exc_info=True,
+                    )
             results.append(result)
     return results
 

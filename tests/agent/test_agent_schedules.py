@@ -753,6 +753,36 @@ async def test_launch_github_issue_automations_deduplicates_delivery(fake_client
     assert len(fake_client.runs.created) == 1
 
 
+async def test_launch_github_issue_automations_retries_non_started_delivery(
+    fake_client, monkeypatch
+) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "prompt": "Triage the issue",
+        "trigger": "github_issue_opened",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "enabled": True,
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+    launch = AsyncMock(
+        side_effect=[
+            {"status": "error", "schedule_id": "sched_1"},
+            {"status": "started", "schedule_id": "sched_1"},
+        ]
+    )
+    monkeypatch.setattr(schedules, "_launch_agent_schedule_record", launch)
+    payload = {
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+        "issue": {"number": 42},
+    }
+
+    first = await schedules.launch_github_issue_automations(payload, "delivery-1")
+    retried = await schedules.launch_github_issue_automations(payload, "delivery-1")
+
+    assert first == [{"status": "error", "schedule_id": "sched_1"}]
+    assert retried == [{"status": "started", "schedule_id": "sched_1"}]
+
+
 async def test_launch_github_issue_automations_isolates_launch_failures(
     fake_client, monkeypatch
 ) -> None:  # noqa: ANN001
