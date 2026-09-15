@@ -1,5 +1,4 @@
 import asyncio
-from typing import Any
 
 from langgraph.config import get_config
 
@@ -12,7 +11,7 @@ _THINKING_STATUS = "Thinking..."
 _status_tasks: set[asyncio.Task[None]] = set()
 
 
-async def slack_accept_untagged_message() -> dict[str, Any]:
+async def slack_accept_untagged_message() -> dict[str, bool | str]:
     """Accept an untagged Slack message and display the thinking status."""
     config = get_config()
     cfg = RunConfig.from_config(config)
