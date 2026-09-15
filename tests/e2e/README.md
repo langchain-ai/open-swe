@@ -110,6 +110,11 @@ contains `playwright-report/` and `test-results/`. Download the relevant artifac
 then `pnpm exec playwright show-report <unzipped-dir>` (or drag a `trace.zip` onto
 <https://trace.playwright.dev>) to replay.
 
+The backend requires PostgreSQL: export `POSTGRES_URI` before running the suite
+or `langgraph dev` (a throwaway `docker run -d -p 5433:5432 -e POSTGRES_PASSWORD=postgres postgres:16`
+with `POSTGRES_URI=postgresql://postgres:postgres@localhost:5433/postgres` is enough).
+CI provides one as a job service.
+
 Poke at it by hand (from the repo root):
 
 ```bash
