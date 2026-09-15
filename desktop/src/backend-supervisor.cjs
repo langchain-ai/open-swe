@@ -177,7 +177,9 @@ class BackendSupervisor {
   }
 
   start() {
-    if (this.ready && this.child && !this.failure) return this.ready;
+    // A start still awaiting its port or tracing settings has no child yet;
+    // callers in that window must join it rather than spawn a second backend.
+    if (this.ready && !this.failure) return this.ready;
     this.ready = this.startOnce().catch((error) => {
       this.ready = null;
       throw error;
