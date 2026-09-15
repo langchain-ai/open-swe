@@ -818,6 +818,14 @@ async def _claim_issue_delivery(delivery_id: str, schedule_id: str) -> str | Non
     return claim_thread_id
 
 
+def _matches_issue_automation(record: dict[str, Any], repo_full_name: str) -> bool:
+    if not record.get("enabled") or record.get("trigger") != "github_issue_opened":
+        return False
+    repo = record.get("repo")
+    record_full_name = _repo_full_name(repo if isinstance(repo, dict) else None)
+    return (record_full_name or "").lower() == repo_full_name
+
+
 async def launch_github_issue_automations(
     payload: dict[str, Any], delivery_id: str
 ) -> list[dict[str, Any]]:
@@ -829,47 +837,44 @@ async def launch_github_issue_automations(
     owner_value = repo.get("owner")
     owner: dict[str, Any] = owner_value if isinstance(owner_value, dict) else {}
     full_name = f"{owner.get('login', '')}/{repo.get('name', '')}".lower()
-    results = []
+    results: list[dict[str, Any]] = []
     for record in await search_all_values(SCHEDULES_NAMESPACE):
-        if (
-            record.get("enabled")
-            and record.get("trigger") == "github_issue_opened"
-            and (_repo_full_name(record.get("repo")) or "").lower() == full_name
-        ):
-            schedule_id = record.get("id")
-            if not isinstance(schedule_id, str) or not schedule_id:
-                continue
-            claim_thread_id = await _claim_issue_delivery(delivery_id, schedule_id)
-            if claim_thread_id is None:
-                continue
+        if not _matches_issue_automation(record, full_name):
+            continue
+        schedule_id = record.get("id")
+        if not isinstance(schedule_id, str) or not schedule_id:
+            continue
+        claim_thread_id = await _claim_issue_delivery(delivery_id, schedule_id)
+        if claim_thread_id is None:
+            continue
+        try:
+            result = await _launch_agent_schedule_record(
+                record, prompt=_github_issue_prompt(record, payload)
+            )
+        except Exception:
+            logger.exception(
+                "Failed to launch GitHub issue automation",
+                extra={"schedule_id": schedule_id},
+            )
             try:
-                result = await _launch_agent_schedule_record(
-                    record, prompt=_github_issue_prompt(record, payload)
-                )
+                await langgraph_client().threads.delete(claim_thread_id)
             except Exception:
-                logger.exception(
-                    "Failed to launch GitHub issue automation",
+                logger.warning(
+                    "Failed to release GitHub issue automation delivery claim",
                     extra={"schedule_id": schedule_id},
+                    exc_info=True,
                 )
-                try:
-                    await langgraph_client().threads.delete(claim_thread_id)
-                except Exception:
-                    logger.warning(
-                        "Failed to release GitHub issue automation delivery claim",
-                        extra={"schedule_id": schedule_id},
-                        exc_info=True,
-                    )
-                continue
-            if result.get("status") != "started":
-                try:
-                    await langgraph_client().threads.delete(claim_thread_id)
-                except Exception:
-                    logger.warning(
-                        "Failed to release GitHub issue automation delivery claim",
-                        extra={"schedule_id": schedule_id},
-                        exc_info=True,
-                    )
-            results.append(result)
+            continue
+        if result.get("status") != "started":
+            try:
+                await langgraph_client().threads.delete(claim_thread_id)
+            except Exception:
+                logger.warning(
+                    "Failed to release GitHub issue automation delivery claim",
+                    extra={"schedule_id": schedule_id},
+                    exc_info=True,
+                )
+        results.append(result)
     return results
 
 

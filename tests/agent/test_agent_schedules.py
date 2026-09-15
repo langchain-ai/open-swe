@@ -924,6 +924,40 @@ async def test_launch_github_issue_automations_isolates_launch_failures(
     assert retried == []
 
 
+async def test_launch_github_issue_automations_skips_malformed_repo_records(
+    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for schedule_id, repo in (
+        ("malformed", "langchain-ai/open-swe"),
+        ("working", {"owner": "langchain-ai", "name": "open-swe"}),
+    ):
+        await fake_client.store.put_item(
+            schedules.SCHEDULES_NAMESPACE,
+            schedule_id,
+            {
+                "id": schedule_id,
+                "prompt": "Triage the issue",
+                "trigger": "github_issue_opened",
+                "repo": repo,
+                "enabled": True,
+            },
+        )
+
+    async def launch(record: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        return {"status": "started", "schedule_id": record["id"]}
+
+    monkeypatch.setattr(schedules, "_launch_agent_schedule_record", launch)
+    results = await schedules.launch_github_issue_automations(
+        {
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "issue": {"number": 42},
+        },
+        "delivery-malformed",
+    )
+
+    assert results == [{"status": "started", "schedule_id": "working"}]
+
+
 async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     fake_client, auth, monkeypatch
 ) -> None:  # noqa: ANN001, ARG001
