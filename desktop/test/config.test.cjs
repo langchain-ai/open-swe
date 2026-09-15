@@ -14,6 +14,7 @@ const {
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
+  localImageFile,
   resolveBackendUrl,
   resolveAppRuntime,
   staticFilePath,
@@ -233,4 +234,35 @@ test("keeps static file resolution inside the bundled UI root", () => {
     path.join(root, "assets/app.js"),
   );
   assert.equal(staticFilePath(root, `${APP_URL}%2e%2e%2fsecret`), null);
+});
+
+test("serves offloaded thread images only from inside the artifacts root", () => {
+  const root = path.join(path.sep, "state", "artifacts");
+  const name = `${"a".repeat(32)}.png`;
+  const image = localImageFile(root, `${APP_URL}local-images/thread-1/${name}`);
+  assert.deepEqual(image, {
+    threadId: "thread-1",
+    filePath: path.join(root, "thread-1", "images", name),
+    contentType: "image/png",
+  });
+  assert.equal(
+    localImageFile(
+      root,
+      `${APP_URL}local-images/thread-1/${"b".repeat(32)}.jpg`,
+    )?.contentType,
+    "image/jpeg",
+  );
+  for (const url of [
+    `${APP_URL}local-images/${name}`,
+    `${APP_URL}local-images/thread-1/${"a".repeat(32)}.svg`,
+    `${APP_URL}local-images/thread-1/${"a".repeat(32)}`,
+    `${APP_URL}local-images/..%2F..%2Fthread-1/${name}`,
+    `${APP_URL}local-images/thread-1/..%2F${name}`,
+    `${APP_URL}local-images/.hidden/${name}`,
+    `${APP_URL}local-images/thread-1/${name}/extra`,
+    `${APP_URL}assets/${name}`,
+    `https://example.com/local-images/thread-1/${name}`,
+  ]) {
+    assert.equal(localImageFile(root, url), null, url);
+  }
 });

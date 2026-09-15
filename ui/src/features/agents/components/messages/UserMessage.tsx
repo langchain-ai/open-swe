@@ -10,14 +10,8 @@ import type { ImageChunk, Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
-function UserImage({
-  image,
-  threadId,
-}: {
-  image: ImageChunk
-  threadId?: string
-}) {
-  const src = useImageChunkSrc(image, threadId)
+function UserImage({ image }: { image: ImageChunk }) {
+  const src = useImageChunkSrc(image)
   return (
     <div className="overflow-hidden rounded-lg border border-border/80 bg-background/70">
       {src ? (
@@ -36,13 +30,7 @@ function UserImage({
   )
 }
 
-export function UserMessage({
-  message,
-  threadId,
-}: {
-  message: Message
-  threadId?: string
-}) {
+export function UserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
@@ -123,11 +111,7 @@ export function UserMessage({
             {images.length > 0 && (
               <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                 {images.map((img, i) => (
-                  <UserImage
-                    key={img.fileId ?? i}
-                    image={img}
-                    threadId={threadId}
-                  />
+                  <UserImage key={img.fileId ?? i} image={img} />
                 ))}
               </div>
             )}

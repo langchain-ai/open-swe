@@ -407,14 +407,14 @@ async def api_get_thread_state(
     return JSONResponse(payload, headers={"Server-Timing": header})
 
 
-@router.get("/threads/{thread_id}/images/{image_id}")
+@router.get("/threads/{thread_id}/images/{image_name}")
 async def api_get_thread_image(
     thread_id: str,
-    image_id: str,
+    image_name: str,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
     return await get_dashboard_thread_image(
-        thread_id, image_id, session["sub"], email=session.get("email")
+        thread_id, image_name, session["sub"], email=session.get("email")
     )
 
 

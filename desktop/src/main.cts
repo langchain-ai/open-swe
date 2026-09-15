@@ -74,6 +74,7 @@ const {
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
+  localImageFile,
   resolveBackendUrl,
   resolveAppRuntime,
   staticFilePath,
@@ -1021,6 +1022,8 @@ async function serveBundledUi(request) {
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response("Method not allowed", { status: 405 });
   }
+  if (url.pathname.startsWith("/local-images/"))
+    return serveLocalImage(request);
 
   const root = bundledUiPath();
   let filePath = staticFilePath(root, request.url);
@@ -1039,6 +1042,37 @@ async function serveBundledUi(request) {
     });
   }
   return net.fetch(pathToFileURL(filePath).toString());
+}
+
+function localBackendStatePath() {
+  return path.join(app.getPath("userData"), "local-backend");
+}
+
+/** Where the local backend keeps per-thread files (`OPEN_SWE_LOCAL_ARTIFACTS_DIR`). */
+function localArtifactsPath() {
+  return path.join(localBackendStatePath(), "artifacts");
+}
+
+/** Images the local agent moved out of a thread's conversation onto disk. */
+async function serveLocalImage(request) {
+  const image = localImageFile(localArtifactsPath(), request.url);
+  if (!image || !localThreadStore?.get(image.threadId))
+    return new Response("Not found", { status: 404 });
+  let body;
+  try {
+    body = await fs.promises.readFile(image.filePath);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+  return new Response(request.method === "HEAD" ? null : body, {
+    headers: {
+      "content-type": image.contentType,
+      "content-length": String(body.byteLength),
+      // Image names are immutable, so the renderer can keep them for good.
+      "cache-control": "private, max-age=31536000, immutable",
+      "x-content-type-options": "nosniff",
+    },
+  });
 }
 
 async function loadApp(window) {
@@ -1586,7 +1620,7 @@ if (!hasSingleInstanceLock) {
       isPackaged: app.isPackaged,
       repoRoot: path.resolve(__dirname, "../.."),
       resourcesPath: process.resourcesPath,
-      stateDir: path.join(app.getPath("userData"), "local-backend"),
+      stateDir: localBackendStatePath(),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
       tracingEnv: async () => {

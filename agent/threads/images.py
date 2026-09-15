@@ -1,47 +1,44 @@
-"""Serve images the agent moved out of the conversation into the store."""
+"""Serve images the agent moved out of the conversation into the thread's store."""
 
-import base64
-import binascii
-import re
+import logging
 
 from fastapi import HTTPException, Response
 
-from agent.store import get_value
-from agent.thread_images import IMAGE_STORE_NAMESPACE, image_owner_threads
+from agent.thread_images import image_owner_threads, open_image_store, parse_image_name
 from agent.threads.access import _readable_thread_metadata
 
-_IMAGE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-_SERVABLE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+logger = logging.getLogger(__name__)
 
 
 async def get_dashboard_thread_image(
-    thread_id: str, image_id: str, login: str, *, email: str | None = None
+    thread_id: str, image_name: str, login: str, *, email: str | None = None
 ) -> Response:
-    if not _IMAGE_ID_RE.fullmatch(image_id):
+    parsed = parse_image_name(image_name)
+    if parsed is None:
         raise HTTPException(404, "image not found")
+    _, mime_type = parsed
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
-    stored = await get_value(IMAGE_STORE_NAMESPACE, image_id)
-    if stored is None:
-        raise HTTPException(404, "image not found")
-    # Images are keyed globally, so an id from an unrelated thread must not be
-    # servable under a thread the caller happens to read.
-    owners = image_owner_threads(thread_id, metadata.get("continued_from_thread_id"))
-    if stored.get("thread_id") not in owners:
-        raise HTTPException(404, "image not found")
-    mime_type = stored.get("mime_type")
-    encoded = stored.get("base64")
-    if mime_type not in _SERVABLE_MIME_TYPES or not isinstance(encoded, str):
-        raise HTTPException(404, "image not found")
-    try:
-        content = base64.b64decode(encoded, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise HTTPException(404, "image not found") from exc
-    return Response(
-        content=content,
-        media_type=mime_type,
-        headers={
-            # Image ids are immutable, so the browser can keep them for good.
-            "Cache-Control": "private, max-age=31536000, immutable",
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
+    # Images live with the thread that stored them, so a reference copied into
+    # a private continuation is looked up in the source thread as a fallback.
+    for owner in image_owner_threads(thread_id, metadata.get("continued_from_thread_id")):
+        try:
+            store = await open_image_store(owner)
+            content = await store.get(image_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Could not read a thread image",
+                extra={"thread_id": owner, "image_name": image_name},
+                exc_info=True,
+            )
+            raise HTTPException(503, "Could not connect to the workspace.") from exc
+        if content is not None:
+            return Response(
+                content=content,
+                media_type=mime_type,
+                headers={
+                    # Image names are immutable, so the browser can keep them for good.
+                    "Cache-Control": "private, max-age=31536000, immutable",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+    raise HTTPException(404, "image not found")

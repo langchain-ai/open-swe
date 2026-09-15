@@ -153,6 +153,38 @@ function appRedirectUrl(location) {
   return `${APP_URL}${target.pathname.replace(/^\//, "")}${target.search}${target.hash}`;
 }
 
+const LOCAL_IMAGE_PREFIX = "/local-images/";
+const LOCAL_IMAGE_TYPES = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+/**
+ * The on-disk file and media type for an offloaded conversation image the
+ * renderer asks for as `/local-images/<threadId>/<image name>`, or null when
+ * the request does not name exactly one image inside the artifacts root. The
+ * layout mirrors `desktop_images_dir` in `agent/desktop.py`.
+ */
+function localImageFile(artifactsRoot, appRequestUrl) {
+  if (!isAppUrl(appRequestUrl)) return null;
+  const pathname = new URL(appRequestUrl).pathname;
+  if (!pathname.startsWith(LOCAL_IMAGE_PREFIX)) return null;
+  const segments = pathname.slice(LOCAL_IMAGE_PREFIX.length).split("/");
+  if (segments.length !== 2) return null;
+  const [threadId, name] = segments.map((segment) =>
+    decodeURIComponent(segment),
+  );
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(threadId)) return null;
+  const image = /^[0-9a-f]{32}\.(png|jpg|gif|webp)$/.exec(name);
+  if (!image) return null;
+  const rootPath = path.resolve(artifactsRoot);
+  const filePath = path.resolve(rootPath, threadId, "images", name);
+  if (!filePath.startsWith(`${rootPath}${path.sep}`)) return null;
+  return { threadId, filePath, contentType: LOCAL_IMAGE_TYPES[image[1]] };
+}
+
 function staticFilePath(root, appRequestUrl) {
   if (!isAppUrl(appRequestUrl)) return null;
   const pathname = decodeURIComponent(new URL(appRequestUrl).pathname);
@@ -182,6 +214,7 @@ module.exports = {
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
+  localImageFile,
   resolveBackendUrl,
   staticFilePath,
   validateBackendUrl,

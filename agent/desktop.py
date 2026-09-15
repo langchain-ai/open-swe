@@ -75,6 +75,21 @@ def _artifacts_root() -> Path:
     return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"
 
 
+def _thread_artifacts_dir(thread_id: str) -> Path:
+    # The thread id becomes a path segment, so it may only be a plain name.
+    safe_id = re.sub(r"[^A-Za-z0-9._-]", "-", thread_id or "thread").lstrip(".") or "thread"
+    return _artifacts_root() / safe_id
+
+
+def desktop_images_dir(thread_id: str) -> Path:
+    """Where a desktop thread's offloaded conversation images are kept.
+
+    The desktop app serves this directory to its renderer, so the layout is
+    shared with ``desktop/src/main.cts``.
+    """
+    return _thread_artifacts_dir(thread_id) / "images"
+
+
 async def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
     """Backends for the agent's own scratch files on a desktop run.
 
@@ -83,9 +98,7 @@ async def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend
     changes and be swept into the next `git add -A`. Route them out of the
     repository while leaving the virtual paths the model sees unchanged.
     """
-    # The thread id becomes a path segment, so it may only be a plain name.
-    safe_id = re.sub(r"[^A-Za-z0-9._-]", "-", thread_id or "thread").lstrip(".") or "thread"
-    root = _artifacts_root() / safe_id
+    root = _thread_artifacts_dir(thread_id)
     routes = {}
     for name in ("large_tool_results", "conversation_history"):
         directory = root / name

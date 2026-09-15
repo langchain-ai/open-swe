@@ -4,9 +4,8 @@ import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 import {
   ImageSourceProvider,
-  storeImageSrc,
+  localImageSrc,
 } from "@/features/agents/lib/imageSource"
-import { createLocalGraphClient } from "@/lib/langgraph-client"
 import type { ImageSourceResolver } from "@/features/agents/lib/imageSource"
 
 import type {
@@ -115,12 +114,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     selection === undefined ? (threadSelection ?? defaultSelection) : selection
   const initialPromptRef = useRef<string | null>(null)
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
-  // Offloaded images live in the local graph's store; there is no dashboard
-  // API on the desktop to stream them from.
-  const resolveLocalImage = useMemo<ImageSourceResolver>(() => {
-    const client = createLocalGraphClient()
-    return (fileId) => storeImageSrc(client, fileId)
-  }, [])
+  // Offloaded images live on disk; the desktop app serves them, since there
+  // is no dashboard API for local threads.
+  const resolveLocalImage = useMemo<ImageSourceResolver>(
+    () => (imageName) => localImageSrc(sessionId, imageName),
+    [sessionId]
+  )
   const streamRef = useRef(stream)
   useEffect(() => {
     streamRef.current = stream

@@ -11,6 +11,10 @@ import type { MessagesProps } from "./types"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
+import {
+  ImageSourceProvider,
+  useImageSourceResolver,
+} from "@/features/agents/lib/imageSource"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
 function QueuedMessages({
@@ -107,6 +111,7 @@ export const Messages = memo(function MessagesComponent({
   }, [onShowScrollToBottomChange, showScrollToBottom])
 
   const projectPath = project?.path
+  const imageSource = useImageSourceResolver(threadId)
   const lastAgentIndex = visibleMessages.findLastIndex(
     (message) => message.author === "agent"
   )
@@ -119,93 +124,94 @@ export const Messages = memo(function MessagesComponent({
 
   return (
     <TooltipProvider delay={250} closeDelay={0}>
-      <div className="relative min-h-0 min-w-0 flex-1">
-        <div
-          ref={scrollRef}
-          // Gutter on both edges: the centered column keeps its position when the
-          // scrollbar appears, so it stays aligned with the composer below it.
-          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-5 text-[14px] leading-[1.6] antialiased"
-        >
+      <ImageSourceProvider value={imageSource}>
+        <div className="relative min-h-0 min-w-0 flex-1">
           <div
-            ref={contentRef}
-            className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
-            style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
+            ref={scrollRef}
+            // Gutter on both edges: the centered column keeps its position when the
+            // scrollbar appears, so it stays aligned with the composer below it.
+            className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-5 text-[14px] leading-[1.6] antialiased"
           >
-            {visibleMessages.length === 0 && emptyState}
-            {visibleMessages.map((message, index) => {
-              const isLastMessage = index === visibleMessages.length - 1
-              const messageIsStreaming = isStreaming && isLastMessage
-              const messageIsMarkdownLive = message.id === liveMarkdownMessageId
+            <div
+              ref={contentRef}
+              className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
+              style={
+                bottomInset > 0 ? { paddingBottom: bottomInset } : undefined
+              }
+            >
+              {visibleMessages.length === 0 && emptyState}
+              {visibleMessages.map((message, index) => {
+                const isLastMessage = index === visibleMessages.length - 1
+                const messageIsStreaming = isStreaming && isLastMessage
+                const messageIsMarkdownLive =
+                  message.id === liveMarkdownMessageId
 
-              if (
-                message.author === "user" ||
-                message.structuredSenderKind === "system"
-              ) {
+                if (
+                  message.author === "user" ||
+                  message.structuredSenderKind === "system"
+                ) {
+                  return <UserMessage key={message.id} message={message} />
+                }
+
                 return (
-                  <UserMessage
+                  <AgentTurn
                     key={message.id}
                     message={message}
-                    threadId={threadId}
+                    isStreaming={messageIsStreaming && !isOffloading}
+                    isMarkdownLive={messageIsMarkdownLive}
+                    projectPath={projectPath}
+                    activityLabel={
+                      messageIsStreaming ? activityLabel : undefined
+                    }
+                    onApprove={onApprove}
+                    onReject={onReject}
+                    onAutoApprove={onAutoApprove}
+                    onOpenFile={onOpenFile}
                   />
                 )
-              }
-
-              return (
-                <AgentTurn
-                  key={message.id}
-                  message={message}
-                  isStreaming={messageIsStreaming && !isOffloading}
-                  isMarkdownLive={messageIsMarkdownLive}
-                  projectPath={projectPath}
-                  activityLabel={messageIsStreaming ? activityLabel : undefined}
-                  onApprove={onApprove}
-                  onReject={onReject}
-                  onAutoApprove={onAutoApprove}
-                  onOpenFile={onOpenFile}
+              })}
+              {threadId && showPlanArtifact && (
+                <InlinePlanArtifact threadId={threadId} />
+              )}
+              {threadId && (
+                <WorkflowApprovalCard
+                  threadId={threadId}
+                  pollWhileActive={pollWorkflowApprovalsWhileActive}
                 />
-              )
-            })}
-            {threadId && showPlanArtifact && (
-              <InlinePlanArtifact threadId={threadId} />
-            )}
-            {threadId && (
-              <WorkflowApprovalCard
-                threadId={threadId}
-                pollWhileActive={pollWorkflowApprovalsWhileActive}
+              )}
+              <QueuedMessages queuedMessages={queuedMessages} />
+              {footer}
+              <ThinkingSpinner
+                isActive={
+                  isOffloading ||
+                  (!!(isThinking || streamIsLoading || isStreaming) &&
+                    !(
+                      isStreaming &&
+                      lastAgentIndex >= 0 &&
+                      lastAgentIndex === visibleMessages.length - 1
+                    ))
+                }
+                settingUpSandbox={settingUpSandbox && !isOffloading}
+                label={
+                  isOffloading ? "Offloading conversation..." : activityLabel
+                }
               />
-            )}
-            <QueuedMessages queuedMessages={queuedMessages} />
-            {footer}
-            <ThinkingSpinner
-              isActive={
-                isOffloading ||
-                (!!(isThinking || streamIsLoading || isStreaming) &&
-                  !(
-                    isStreaming &&
-                    lastAgentIndex >= 0 &&
-                    lastAgentIndex === visibleMessages.length - 1
-                  ))
-              }
-              settingUpSandbox={settingUpSandbox && !isOffloading}
-              label={
-                isOffloading ? "Offloading conversation..." : activityLabel
-              }
-            />
+            </div>
           </div>
-        </div>
 
-        {scrollButtonSlot === "internal" && showScrollToBottom && (
-          <button
-            type="button"
-            onClick={scrollToBottom}
-            aria-label="Scroll to bottom"
-            className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
-            style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
-          >
-            <ChevronDown className="size-3.5" />
-          </button>
-        )}
-      </div>
+          {scrollButtonSlot === "internal" && showScrollToBottom && (
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              aria-label="Scroll to bottom"
+              className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+              style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
+            >
+              <ChevronDown className="size-3.5" />
+            </button>
+          )}
+        </div>
+      </ImageSourceProvider>
     </TooltipProvider>
   )
 })
