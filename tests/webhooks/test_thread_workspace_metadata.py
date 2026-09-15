@@ -40,12 +40,11 @@ async def test_workspace_for_repo_config_resolves_owner_and_falls_back_to_defaul
 
 
 async def test_workspace_for_repo_config_falls_back_when_the_store_fails(monkeypatch) -> None:
-    """An unreadable workspace list must not stop a run, only misroute it loudly."""
+    """An unreadable binding must not stop a run, only misroute it loudly."""
 
-    async def unreadable() -> list[object]:
+    async def unreadable(full_name: str) -> str | None:
         raise RuntimeError("store is down")
 
-    monkeypatch.setattr(routing.WORKSPACES, "list_all", unreadable)
-    routing.invalidate_routing_cache()
+    monkeypatch.setattr(routing.WORKSPACES, "owner_of_repo", unreadable)
 
     assert await common.workspace_for_repo_config({"owner": "acme", "name": "oss"}) == "default"

@@ -23,12 +23,7 @@ from typing import Literal
 
 from agent.config import ENV
 from agent.dashboard.user_preferences import get_user_preferences
-from agent.utils import ttl_cache
-from agent.workspaces.cache import (
-    WORKSPACE_LIST_CACHE_KEY,
-    WORKSPACE_LIST_CACHE_TTL_SECONDS,
-)
-from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, Workspace, slugify
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -45,30 +40,16 @@ class WorkspaceResolution:
     resolved_by: ResolvedBy
 
 
-def invalidate_routing_cache() -> None:
-    ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
-
-
-async def _all_workspaces() -> list[Workspace]:
-    """Every workspace, cached briefly: a tag or a default is checked against it."""
-    try:
-        return await ttl_cache.cached(
-            WORKSPACE_LIST_CACHE_KEY, WORKSPACE_LIST_CACHE_TTL_SECONDS, WORKSPACES.list_all
-        )
-    except Exception as exc:
-        raise WorkspaceLookupError("workspace listing failed") from exc
-
-
 async def _slug_exists(slug: str) -> bool:
-    return any(record.slug == slug for record in await _all_workspaces())
+    """Whether this name is a workspace; raises when the lookup itself fails."""
+    try:
+        return await WORKSPACES.slug_exists(slug)
+    except Exception as exc:
+        raise WorkspaceLookupError("workspace slug lookup failed") from exc
 
 
 async def _repo_owner(owner: str, name: str) -> str | None:
-    """The workspace owning this repository; raises when ownership is unreadable.
-
-    An indexed lookup rather than a scan of the cached list: the binding is a
-    row keyed on the repository, and a webhook only ever asks about one.
-    """
+    """The workspace owning this repository; raises when ownership is unreadable."""
     try:
         return await WORKSPACES.owner_of_repo(f"{owner}/{name}")
     except Exception as exc:

@@ -23,17 +23,11 @@ async def test_default_workspace_preference_round_trips(fake_store: FakeStore) -
     assert (await get_user_preferences("alice"))["default_workspace"] == "oss"
 
 
-@pytest.fixture(autouse=True)
-def _clear_routing_cache() -> None:
-    routing.invalidate_routing_cache()
-
-
 async def _seed() -> None:
     await WORKSPACES.create(WorkspaceCreate(name="Default"), "alice")
     await WORKSPACES.create(
         WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
     )
-    routing.invalidate_routing_cache()
 
 
 async def test_thread_wins_over_everything() -> None:
@@ -97,9 +91,14 @@ async def test_an_import_that_never_ran_is_not_an_unowned_repository(
 
 
 async def test_writes_are_visible_to_routing_immediately() -> None:
+    """Every routing lookup is a live query, so nothing has to be invalidated."""
     assert await routing.workspace_for_repo("acme", "oss") is None
+    assert (await routing.resolve_workspace(tag="oss")).resolved_by == "instance_default"
+
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
+
     assert await routing.workspace_for_repo("acme", "oss") == "oss"
+    assert (await routing.resolve_workspace(tag="oss")) == routing.WorkspaceResolution("oss", "tag")
     await WORKSPACES.apply_update("oss", WorkspaceUpdate(repos=["acme/other"]))
     assert await routing.workspace_for_repo("acme", "oss") is None
     assert await routing.workspace_for_repo("acme", "other") == "oss"

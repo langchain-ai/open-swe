@@ -50,8 +50,6 @@ from agent.database import postgres
 from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
 from agent.store import delete_value, now_iso, search_all_values
-from agent.utils import ttl_cache
-from agent.workspaces.cache import WORKSPACE_LIST_CACHE_KEY
 from agent.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -718,6 +716,18 @@ class WorkspaceStore:
             )
             return None
 
+    async def slug_exists(self, slug: str) -> bool:
+        """Whether a workspace is stored under ``slug``, without reading the record.
+
+        An indexed lookup, like the repository and Slack-channel ownership
+        queries: routing checks a tag or a user's default against it, and a
+        workspace an admin just created has to resolve at once.
+        """
+        async with postgres.session() as session:
+            return (
+                await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
+            ) is not None
+
     async def routing_is_populated(self) -> bool:
         """Whether an "unowned repository" answer can be trusted.
 
@@ -863,18 +873,14 @@ class WorkspaceStore:
 
     async def save(self, record: Workspace) -> Workspace:
         record.updated_at = now_iso()
-        result = await self.put(record.slug, record)
-        ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
-        return result
+        return await self.put(record.slug, record)
 
     async def create(self, create: WorkspaceCreate, created_by: str) -> Workspace:
         record = Workspace.seed(create, created_by)
         await self._assert_unique(record)
-        if await self.get(record.slug) is not None:
+        if await self.slug_exists(record.slug):
             raise WorkspaceConflictError(f"workspace {create.name!r} already exists")
-        result = await self.put(record.slug, record)
-        ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
-        return result
+        return await self.put(record.slug, record)
 
     async def apply_update(self, slug: str, update: WorkspaceUpdate) -> Workspace:
         record = await self.get(slug)
@@ -941,7 +947,6 @@ class WorkspaceStore:
 
         await remove_refresh_cron(record)
         await _delete_snapshot(record.snapshot_id)
-        ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
         return True
 
     async def mark_capturing(self, slug: str) -> Workspace | None:
@@ -1297,8 +1302,6 @@ async def import_store_records() -> int:
                     continue
                 imported += 1
             await delete_value(namespace, record.slug)
-    if imported:
-        ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
     WORKSPACES.import_completed = True
     return imported
 
