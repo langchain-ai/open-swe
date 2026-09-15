@@ -1,40 +1,64 @@
-"""Batched check-run state for many pull requests in one GraphQL round trip.
+"""Check-run state for many pull requests at once, behind the sidebar dot.
 
 The sidebar wants a failing/passing dot on every row that has a pull request,
 which the per-thread ``pull_request_status`` path cannot serve without one
-GitHub fan-out per row. This resolves up to `_MAX_PULL_REQUESTS` PRs in a
-single aliased GraphQL query.
+GitHub fan-out per row. Stored rows recent enough to answer for GitHub are read
+from PostgreSQL in one query; whatever is left resolves in a single aliased
+GraphQL query of up to `_MAX_PULL_REQUESTS` PRs and is written back in the
+background.
 
 Callers supply ``owner/repo`` and a number directly rather than a thread id, so
-the authorization boundary is GitHub itself: the query runs with the calling
-user's own OAuth token and can only see what that account can already see. The
-TTL cache is keyed by login for the same reason — a cached verdict for a
-private PR is never served to an account that lacks access.
+nothing upstream has decided what this caller may see. GitHub decides it for
+the live path: the query runs with the calling user's own OAuth token and can
+only see what that account can already see, and the TTL cache is keyed by login
+so a cached verdict is never served to another account. The tables know no such
+thing, so a stored row is served only when the repository is recorded public,
+or when the caller's own cached repository list names it; otherwise the PR is
+treated as unstored and GitHub is asked with the caller's token.
 """
 
-import re
+import logging
 import time
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, TypedDict
 
 import httpx2
+from pydantic import BaseModel, Field, ValidationError
 
+from agent.database import postgres
 from agent.github.http import GITHUB_GRAPHQL, github_client, github_request
+from agent.github.pull_request_sync import schedule_pull_request_sync
+from agent.github.pull_request_terms import (
+    CheckState,
+    identity_key,
+    parse_identity,
+    pull_request_max_age,
+)
+from agent.github.pull_requests import PullRequest
+from agent.github.repo_cache import read_cached_repos
 
-CheckState = Literal["failing", "passing", "pending", "unknown"]
+logger = logging.getLogger(__name__)
+
 PrState = Literal["open", "draft", "merged", "closed"]
 
 
 class PullRequestState(TypedDict):
-    """Live GitHub truth for one PR: check verdict plus open/merged/closed."""
+    """One PR as the sidebar renders it: check verdict plus open/merged/closed."""
 
     checks: CheckState
     state: PrState | None
 
 
-_OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
-_REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
+class _CachedRepo(BaseModel):
+    full_name: str = ""
+
+
+class _CachedRepoList(BaseModel):
+    repositories: list[_CachedRepo] = Field(default_factory=list)
+
+
 _MAX_PULL_REQUESTS = 50
+_MAX_WRITE_BACK = 10
 _CACHE_TTL_SECONDS = 60.0
 _CACHE_MAX_ENTRIES = 2000
 
@@ -56,20 +80,7 @@ def pull_request_key(repo_full_name: str, number: int) -> str:
 def _identity(record: object) -> tuple[str, str, int] | None:
     if not isinstance(record, Mapping):
         return None
-    full_name = record.get("repoFullName")
-    number = record.get("number")
-    if not isinstance(full_name, str) or full_name.count("/") != 1:
-        return None
-    owner, repo = full_name.split("/", 1)
-    if (
-        not _OWNER_PATTERN.fullmatch(owner)
-        or not _REPO_PATTERN.fullmatch(repo)
-        or repo in {".", ".."}
-    ):
-        return None
-    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
-        return None
-    return owner, repo, number
+    return parse_identity(record.get("repoFullName"), record.get("number"))
 
 
 def _evict_expired(now: float) -> None:
@@ -130,15 +141,51 @@ def _build_query(identities: Sequence[tuple[str, str, int]]) -> tuple[str, dict[
     return query, variables
 
 
+async def _accessible_repo_keys(login: str) -> frozenset[str]:
+    """Lowercased repositories the caller's cached repo list names."""
+    cached = await read_cached_repos(login)
+    if cached is None:
+        return frozenset()
+    try:
+        listing = _CachedRepoList.model_validate(cached[0])
+    except ValidationError:
+        return frozenset()
+    return frozenset(repo.full_name.lower() for repo in listing.repositories if repo.full_name)
+
+
+async def _servable_rows(
+    identities: Sequence[tuple[str, str, int]], login: str
+) -> dict[tuple[str, str, int], PullRequest]:
+    """Stored rows this caller may be served: fresh, and on a repository they can see."""
+    if not identities or not postgres.configured():
+        return {}
+    max_age = pull_request_max_age()
+    try:
+        rows = await PullRequest.get_all(identities)
+    except Exception:
+        logger.warning(
+            "Sidebar pull request check states could not read stored rows", exc_info=True
+        )
+        return {}
+    fresh = [row for row in rows if row.synced_within(max_age)]
+    restricted = any(row.repository.private is not False for row in fresh)
+    accessible = await _accessible_repo_keys(login) if restricted else frozenset()
+    return {
+        identity_key((row.owner, row.repo, row.number)): row
+        for row in fresh
+        if row.repository.private is False or row.repository.key in accessible
+    }
+
+
 async def get_pull_request_check_states(
     records: Sequence[object], login: str, token: str
 ) -> dict[str, PullRequestState]:
-    """Return live state per requested pull request, keyed ``repo#number``."""
+    """Return state per requested pull request, keyed ``repo#number``, stored rows first."""
     now = time.monotonic()
     _evict_expired(now)
 
     results: dict[str, PullRequestState] = {}
-    pending: list[tuple[str, str, int]] = []
+    unresolved: list[tuple[str, str, int]] = []
     for record in records[:_MAX_PULL_REQUESTS]:
         identity = _identity(record)
         if identity is None:
@@ -149,7 +196,21 @@ async def get_pull_request_check_states(
         if cached and cached[0] > now:
             results[pull_request_key(full_name, number)] = cached[1]
         else:
+            unresolved.append(identity)
+
+    stored = await _servable_rows(unresolved, login)
+    expires = time.monotonic() + _CACHE_TTL_SECONDS
+    pending: list[tuple[str, str, int]] = []
+    for identity in unresolved:
+        owner, repo, number = identity
+        row = stored.get(identity_key(identity))
+        if row is None:
             pending.append(identity)
+            continue
+        full_name = f"{owner}/{repo}"
+        state: PullRequestState = {"checks": row.check_state, "state": row.state}
+        results[pull_request_key(full_name, number)] = state
+        _cache[(login, full_name, number)] = (expires, state)
 
     if not pending:
         return results
@@ -178,4 +239,10 @@ async def get_pull_request_check_states(
         results[pull_request_key(full_name, number)] = resolved
         if resolved["state"] is not None:
             _cache[(login, full_name, number)] = (expires, resolved)
+
+    # A sidebar that has just been opened on a cold cache would otherwise burst
+    # a full sync per row; past the cap the rows are left to the next read.
+    if len(pending) <= _MAX_WRITE_BACK:
+        for owner, repo, number in pending:
+            schedule_pull_request_sync(owner, repo, number, token=token)
     return results

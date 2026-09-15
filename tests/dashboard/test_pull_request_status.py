@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import httpx2
@@ -6,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent.github import pull_request_status
+from agent.github.pull_requests import PullRequest, PullRequestCheck, PullRequestReviewThread
 from agent.threads import access as thread_access
 from agent.threads import handlers
 from tests.conftest import patch_thread_module
@@ -21,6 +23,74 @@ def _response(status: int, payload: object) -> httpx2.Response:
 async def _client(**kwargs):
     assert kwargs == {"token": "oauth-token"}
     yield object()
+
+
+@pytest.fixture(autouse=True)
+def write_backs(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, int, str]]:
+    """Capture background write-backs instead of letting them reach GitHub."""
+    scheduled: list[tuple[str, str, int, str]] = []
+    monkeypatch.setattr(
+        pull_request_status,
+        "schedule_pull_request_sync",
+        lambda owner, repo, number, *, token: scheduled.append((owner, repo, number, token)),
+    )
+    return scheduled
+
+
+@pytest.fixture(autouse=True)
+def stored_rows(monkeypatch: pytest.MonkeyPatch) -> list[PullRequest]:
+    """Stand in for the pull request table; empty unless a test fills it."""
+    rows: list[PullRequest] = []
+    monkeypatch.setattr(pull_request_status.postgres, "configured", lambda: True)
+    monkeypatch.setattr(PullRequest, "get_all", AsyncMock(return_value=rows))
+    return rows
+
+
+def _stored_row(*, age: timedelta = timedelta(0)) -> PullRequest:
+    row = PullRequest(
+        owner="o",
+        repo="r",
+        number=7,
+        state="draft",
+        draft=True,
+        head_sha="a" * 40,
+        mergeable_state="dirty",
+    )
+    row.last_synced_at = datetime.now(UTC) - age
+    row.checks = [
+        PullRequestCheck(
+            head_sha="a" * 40,
+            kind="check_run",
+            external_id="1",
+            name="unit",
+            status="completed",
+            conclusion="timed_out",
+            details_url="https://checks/unit",
+        ),
+        PullRequestCheck(
+            head_sha="a" * 40, kind="check_run", external_id="2", name="deploy", status="queued"
+        ),
+        PullRequestCheck(
+            head_sha="a" * 40,
+            kind="check_run",
+            external_id="3",
+            name="lint",
+            status="completed",
+            conclusion="skipped",
+        ),
+    ]
+    row.review_threads = [
+        PullRequestReviewThread(
+            node_id="t1",
+            path="a.py",
+            line=4,
+            author="alice",
+            body="fix this",
+            url="https://github.com/o/r/pull/7#discussion_r1",
+        ),
+        PullRequestReviewThread(node_id="t2", is_resolved=True, path="b.py"),
+    ]
+    return row
 
 
 def test_pull_request_identity_rejects_untrusted_path_components() -> None:
@@ -330,6 +400,113 @@ async def test_partial_check_failure_cannot_appear_green(
     assert result["pendingCheckCount"] is None
     assert result["inconclusiveCheckCount"] is None
     assert result["commentsAvailable"] is True
+
+
+async def test_fresh_stored_row_is_served_without_touching_github(
+    monkeypatch: pytest.MonkeyPatch,
+    stored_rows: list[PullRequest],
+    write_backs: list[tuple[str, str, int, str]],
+) -> None:
+    async def request(*args, **kwargs):
+        raise AssertionError("a fresh stored row must not reach GitHub")
+
+    monkeypatch.setattr(pull_request_status, "github_client", _client)
+    monkeypatch.setattr(pull_request_status, "github_request", request)
+    stored_rows.append(_stored_row())
+
+    result = await pull_request_status.get_pull_request_statuses(
+        [{"repo_full_name": "o/r", "number": 7}], "oauth-token"
+    )
+
+    assert result == [
+        {
+            "repoFullName": "o/r",
+            "number": 7,
+            "url": "https://github.com/o/r/pull/7",
+            "statusAvailable": True,
+            "state": "open",
+            "isDraft": True,
+            "mergeConflictState": "conflicting",
+            "checksAvailable": True,
+            "failingChecks": [
+                {"name": "unit", "conclusion": "timed_out", "url": "https://checks/unit"}
+            ],
+            "pendingCheckCount": 1,
+            "inconclusiveCheckCount": 1,
+            "commentsAvailable": True,
+            "unresolvedReviewThreadCount": 1,
+            "unresolvedReviewThreads": [
+                {
+                    "author": "alice",
+                    "body": "fix this",
+                    "path": "a.py",
+                    "line": 4,
+                    "url": "https://github.com/o/r/pull/7#discussion_r1",
+                }
+            ],
+        }
+    ]
+    assert write_backs == []
+
+
+async def test_stale_stored_row_falls_back_to_github_and_schedules_a_write_back(
+    monkeypatch: pytest.MonkeyPatch,
+    stored_rows: list[PullRequest],
+    write_backs: list[tuple[str, str, int, str]],
+) -> None:
+    monkeypatch.setattr(pull_request_status, "github_client", _client)
+
+    async def request(client, method, url, **kwargs):
+        if url.endswith("/pulls/7"):
+            return _response(
+                200,
+                {
+                    "state": "open",
+                    "draft": False,
+                    "mergeable": True,
+                    "mergeable_state": "clean",
+                    "head": {"sha": "a" * 40},
+                },
+            )
+        if url == pull_request_status.GITHUB_GRAPHQL:
+            return _response(200, {"errors": [{"message": "nope"}]})
+        return _response(200, {"check_runs": [], "statuses": []})
+
+    monkeypatch.setattr(pull_request_status, "github_request", request)
+    stored_rows.append(_stored_row(age=timedelta(hours=2)))
+
+    result = await pull_request_status.get_pull_request_statuses(
+        [{"repo_full_name": "o/r", "number": 7}], "oauth-token"
+    )
+
+    assert result[0]["state"] == "open"
+    assert result[0]["isDraft"] is False
+    assert result[0]["mergeConflictState"] == "mergeable"
+    assert write_backs == [("o", "r", 7, "oauth-token")]
+
+
+async def test_missing_stored_row_schedules_a_write_back(
+    monkeypatch: pytest.MonkeyPatch, write_backs: list[tuple[str, str, int, str]]
+) -> None:
+    monkeypatch.setattr(pull_request_status, "github_client", _client)
+
+    async def request(client, method, url, **kwargs):
+        return _response(404, {"message": "Not Found"})
+
+    monkeypatch.setattr(pull_request_status, "github_request", request)
+
+    result = await pull_request_status.get_pull_request_statuses(
+        [
+            {"repo_full_name": "o/r", "number": 7},
+            {"repo_full_name": "bad/repo/segment", "number": 2},
+        ],
+        "oauth-token",
+    )
+
+    assert result[0]["statusAvailable"] is False
+    assert result[1]["url"] is None
+    # An unparseable record never reaches GitHub, so it is never written back.
+    assert write_backs == [("o", "r", 7, "oauth-token")]
 
 
 async def test_thread_status_authorizes_read_access_before_token_or_metadata_use(

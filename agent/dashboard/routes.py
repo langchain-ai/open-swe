@@ -15,6 +15,7 @@ from agent.dashboard.user_mappings import router as user_mappings_router
 from agent.dashboard.user_preferences import router as user_preferences_router
 from agent.environments.routes import router as environments_router
 from agent.github.dashboard_routes import router as repos_router
+from agent.github.pull_request_sync_routes import router as pull_request_sync_router
 from agent.incidents.document_routes import router as incident_documents_router
 from agent.incidents.routes import router as incidents_router
 from agent.mcp.routes import router as mcp_router
@@ -43,6 +44,7 @@ router.include_router(team_settings_router)
 router.include_router(mcp_router)
 router.include_router(environments_router)
 router.include_router(repos_router)
+router.include_router(pull_request_sync_router)
 router.include_router(review_router)
 router.include_router(agent_instructions_router)
 router.include_router(skills_router)
