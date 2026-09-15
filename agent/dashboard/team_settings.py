@@ -10,7 +10,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
 
 from agent.config import ENV
@@ -29,7 +29,7 @@ from agent.dashboard.options import (
 from agent.run_config import RunConfig
 from agent.store import get_value, now_iso, put_value
 from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
-from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -349,14 +349,26 @@ def _default_settings() -> dict[str, Any]:
 
 
 def resolve_settings_workspace(explicit: str | None = None) -> str:
-    """Which workspace's settings apply: the caller's, else the running run's, else default."""
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip().lower()
+    """Which workspace's settings apply: the caller's, else the running run's, else default.
+
+    The name is slugified, so one spelling of a workspace cannot address a
+    record another spelling misses. A name with nothing to slugify reads as the
+    instance default: the HTTP layer rejects those before they reach here, and a
+    run must not die over a settings lookup.
+    """
+    candidate = explicit
+    if not (isinstance(candidate, str) and candidate.strip()):
+        try:
+            candidate = RunConfig.from_runtime().workspace_slug
+        except Exception:  # noqa: BLE001
+            candidate = None
+    if not (isinstance(candidate, str) and candidate.strip()):
+        return DEFAULT_WORKSPACE_SLUG
     try:
-        slug = RunConfig.from_runtime().workspace_slug
-    except Exception:  # noqa: BLE001
-        slug = None
-    return slug or DEFAULT_WORKSPACE_SLUG
+        return slugify(candidate)
+    except ValueError:
+        logger.warning("unslugifiable workspace name; using the instance default")
+        return DEFAULT_WORKSPACE_SLUG
 
 
 async def get_team_settings(workspace: str | None = None) -> dict[str, Any]:
@@ -692,11 +704,18 @@ def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
 router = APIRouter(tags=["team-settings"])
 
 
+def _normalized_workspace(raw: str) -> str:
+    try:
+        return slugify(raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/team-settings")
 async def api_get_team_settings(
     workspace: str = DEFAULT_WORKSPACE_SLUG, _session: dict[str, Any] = SESSION_DEP
 ) -> dict[str, Any]:
-    return await get_team_settings(workspace)
+    return await get_team_settings(_normalized_workspace(workspace))
 
 
 @router.put("/team-settings")
@@ -705,4 +724,4 @@ async def api_put_team_settings(
     workspace: str = DEFAULT_WORKSPACE_SLUG,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await upsert_team_settings(body, workspace)
+    return await upsert_team_settings(body, _normalized_workspace(workspace))
