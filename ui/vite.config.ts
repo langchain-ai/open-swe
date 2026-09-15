@@ -14,6 +14,7 @@ import type { Plugin } from "vite"
 const BACKEND_PREFIXES = [
   "/dashboard/api",
   "/webhooks",
+  "/sandbox-download",
   "/mock",
   "/control",
   "/fake-gh",
@@ -281,6 +282,7 @@ const config = defineConfig({
           ? [
               "/dashboard/api",
               "/webhooks",
+              "/sandbox-download",
               // A built server fronting the mock harness fronts its fake-SaaS and
               // control routes too, so the E2E browser has the one origin a
               // deployment gives it and reaches the backend the way it really

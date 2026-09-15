@@ -1,4 +1,5 @@
 import posixpath
+import secrets
 import shlex
 from typing import Any, Literal
 
@@ -6,6 +7,10 @@ from agent.run_config import RunConfig
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import get_async_sandbox_client
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+from agent.store import put_value
+from agent.utils.dashboard_links import dashboard_base_url
+
+_DOWNLOAD_NAMESPACE = ("sandbox_downloads",)
 
 
 async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
@@ -63,8 +68,21 @@ async def create_sandbox_file_download_url(
 
     if not download.download_url:
         raise RuntimeError("LangSmith did not return a download URL")
-    return {
-        "url": download.download_url,
-        "file_path": path,
-        "expires_at": download.expires_at,
-    }
+
+    url = download.download_url
+    base_url = dashboard_base_url()
+    if base_url:
+        handle = secrets.token_urlsafe(12)
+        await put_value(
+            _DOWNLOAD_NAMESPACE,
+            handle,
+            {
+                "thread_id": RunConfig.from_runtime().thread_id,
+                "sandbox_id": backend.id,
+                "url": url,
+                "expires_at": download.expires_at,
+            },
+        )
+        url = f"{base_url}/sandbox-download/{handle}"
+
+    return {"url": url, "file_path": path, "expires_at": download.expires_at}

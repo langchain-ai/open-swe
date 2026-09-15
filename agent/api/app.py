@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
+from agent.api.sandbox_downloads import router as sandbox_downloads_router
 from agent.api.tracing import add_trace_resource_names
 from agent.config import ENV
 from agent.dashboard import router as dashboard_router
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(linear_webhook_router)
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
+    app.include_router(sandbox_downloads_router)
     app.include_router(github_webhook_router)
     mount_dashboard_ui(app)
     return app
