@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from agent.expedited_review.watch import WATCHED_GITHUB_EVENTS as EXPEDITED_REVIEW_EVENTS
 from agent.github import webhook as service
 from agent.webhooks import common
 
@@ -46,6 +47,9 @@ async def github_webhook(
         "owner": webhook_repo.get("owner", {}).get("login", ""),
         "name": webhook_repo.get("name", ""),
     }
+
+    if event_type in EXPEDITED_REVIEW_EVENTS:
+        background_tasks.add_task(service.process_expedited_review_event, payload, event_type)
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

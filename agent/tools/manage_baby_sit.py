@@ -19,9 +19,10 @@ def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
     return RunConfig.from_config(config), config if isinstance(config, Mapping) else {}
 
 
-def _run_config(
+def dispatch_run_config(
     cfg: RunConfig, thread_id: str, source_installation_id: int | None
 ) -> dict[str, Any]:
+    """The configurable a durable watch stores to wake this thread later."""
     allowed = (
         "source",
         "slack_thread",
@@ -137,7 +138,7 @@ async def manage_baby_sit(
             head_ref=pr_head_ref,
             installation_id=installation_id,
             thread_id=thread_id,
-            run_config=_run_config(cfg, thread_id, source_installation_id),
+            run_config=dispatch_run_config(cfg, thread_id, source_installation_id),
             source_context=_source_context(cfg),
         )
     except Exception as exc:

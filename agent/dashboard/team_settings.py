@@ -54,6 +54,7 @@ class TeamSettingsUpdate(BaseModel):
     model_routing_enabled: bool | None = None
     gateway_enabled: bool | None = None
     fable_enabled: bool = False
+    expedited_review_enabled: bool = False
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -313,6 +314,7 @@ def _default_settings() -> dict[str, Any]:
         "model_routing_enabled": None,
         "gateway_enabled": None,
         "fable_enabled": False,
+        "expedited_review_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -391,6 +393,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "model_routing_enabled": update.model_routing_enabled,
         "gateway_enabled": update.gateway_enabled,
         "fable_enabled": update.fable_enabled,
+        "expedited_review_enabled": update.expedited_review_enabled,
         "org_guidelines": update.org_guidelines,
         "default_agent_model": update.default_agent_model,
         "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
@@ -623,6 +626,13 @@ async def get_team_fable_enabled() -> bool:
     settings = await get_team_settings()
     value = settings.get("fable_enabled")
     return bool(value) if isinstance(value, bool) else False
+
+
+async def get_team_expedited_review_enabled() -> bool:
+    """Whether the experimental expedited Slack review is switched on for this instance."""
+    settings = await get_team_settings()
+    value = settings.get("expedited_review_enabled")
+    return value if isinstance(value, bool) else False
 
 
 async def get_effective_gateway_enabled() -> bool:
