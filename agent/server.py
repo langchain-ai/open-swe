@@ -1238,6 +1238,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    if local_run or (await _cached_team_settings()).get("expedited_review_enabled") is not True:
+        static_tools = [tool for tool in static_tools if tool is not expedite_pr_approval]
     incident_automatic = incident_session is not None and incident_session.explicit_request is None
     if incident_session is not None:
         static_tools.extend(incident_session.tools)

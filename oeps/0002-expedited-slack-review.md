@@ -3,15 +3,17 @@
 - **Authors:** Ramon Nogueira (`@ramon-langchain`)
 - **Status:** Draft
 - **Created:** 2026-09-09
+- **Updated:** 2026-09-15
 - **Discussion:** https://github.com/langchain-ai/open-swe/issues/2569
+- **Implementation:** https://github.com/langchain-ai/open-swe/pull/2779 (experimental, off by default)
 - **Supersedes:** None
 
 ## Summary
 
-The agent nominates a tiny PR. When CI is green and all review agents are done and
-clean, Open SWE posts the full diff in Slack with approve/reject buttons. Two
-authorized people approve; their clicks become real GitHub reviews; Open SWE
-merges and resolves the thread. Any rejection kills the round.
+The agent nominates a tiny PR. Once CI is green and every review is clean, Open SWE
+posts the full diff in the Slack thread with Approve and Reject buttons. Two distinct
+people with write access approve; non-author clicks become real GitHub reviews; Open
+SWE merges. Any rejection, new commit, or regressed check kills the vote.
 
 ## Motivation
 
@@ -20,74 +22,94 @@ are already in the Slack thread.
 
 ## Proposal
 
+### Enablement
+
+- Experimental. Off by default; an admin turns it on per Open SWE instance in
+  Settings. Turning it off withdraws open cards and hides the tool.
+- Available only in threads that have a Slack location; the card has nowhere else to go.
+
 ### Enrollment
 
-- Off by default; enabled per repository.
-- The agent calls an enrollment tool; the backend decides eligibility.
-- Eligible: 1–10 changed lines, complete text diff. Never: auth, secrets,
-  workflows, dependencies, migrations, binaries.
-- A round pins repo, PR, head SHA, and diff fingerprint.
+- The agent calls `expedite_pr_approval` with the PR URL; the backend decides
+  eligibility.
+- Eligible: 1–10 changed lines, every file with a text diff. Never: paths under
+  auth, secrets, CI workflows, dependency manifests, migrations, env and key files,
+  binaries, or files GitHub cannot show a patch for.
+- An approval pins repo, PR, head SHA, and a fingerprint of the diff. One active
+  approval per PR.
 
 ### Readiness
 
-Reuse baby-sit's PR watching, extended to successes and review events. Controls
-appear only when, for the enrolled revision:
+Open SWE watches the PR through GitHub webhooks with a cron fallback. The card
+appears only when, for the enrolled revision:
 
-- PR open, ready, conflict-free;
-- every check passed (pending/skipped/neutral block);
-- every review agent, including Open SWE's, reports completion — silence is not
-  completion, and a passing review check is not "no findings";
-- no unresolved review threads, findings, or change requests.
+- the PR is open, not a draft, and conflict-free;
+- every check passed (pending, failed, or inconclusive checks block);
+- no review thread is unresolved and nobody has a standing request for changes;
+- where Open SWE auto-review is enabled for the repository, Open SWE has published a
+  review for this exact head SHA. Silence is not completion.
 
-The agent is woken once to publish the card. Everything after is backend state.
+Third-party review agents are covered through their check runs and review threads;
+no other completion signal exists for them.
+
+Everything after enrollment is backend state. The agent is woken only for an outcome
+it must act on.
 
 ### Slack card
 
-PR link, files, full diff, revision, voters, and three buttons: **Approve**,
-**Reject and give feedback**, **Use normal review**. Reactions are never votes.
+PR link, revision, author, every changed file with its full patch, the vote tally,
+and two buttons: **Approve** and **Reject and give feedback**. Reactions are never
+votes.
 
 ### Voting
 
-- Voter: linked GitHub account with write+ on the repo. Distinct GitHub IDs.
-- Each non-author approve submits a GitHub `APPROVE` review at `commit_id` with
-  that user's own token. The button says so. Counts only after GitHub confirms.
-  No token → reconnect; never a bot identity.
-- The author's click counts in Slack but GitHub rejects self-approval, so branch
-  protection may still want another reviewer. Show what's missing.
-- Two votes are necessary, not sufficient. Prior GitHub approvals don't count.
+- Voter: Slack account linked to a GitHub login with write or higher on the repo.
+  Distinct GitHub logins.
+- The author may approve; that click counts in Slack but is not sent to GitHub.
+- Every non-author approve submits a GitHub `APPROVE` review at `commit_id` with that
+  user's own token, and counts only after GitHub confirms. No token → sign in to the
+  dashboard; never a bot identity.
+- Two approvals are necessary, not sufficient. Prior GitHub approvals don't count.
 
 ### Rejection
 
-Any voter can reject at any time. Votes void, card disabled forever. Feedback via
-modal or a thread reply from the rejector is posted with attribution and sent to
-the agent once. Re-enrollment reruns readiness and needs two fresh votes; an
-unchanged diff also needs the rejector to withdraw.
+Any voter can reject at any time. A modal collects optional feedback. Votes void,
+card disabled forever. The feedback is sent to the agent once, attributed, as user
+input rather than instructions. Re-enrollment reruns readiness and needs two fresh
+votes.
 
-A Slack rejection is a veto of the round, not a GitHub `REQUEST_CHANGES`.
-New commit, new finding, or regressed check also kills the round.
+A Slack rejection is a veto of the vote, not a GitHub `REQUEST_CHANGES`. A new
+commit, changed diff, or regressed check also kills the vote.
 
 ### Merge
 
-Quorum → revalidate → persist intent → normal merge conditional on head SHA with a
-narrowly scoped credential. GitHub says no → stop. No admin bypass, ever.
+Quorum → revalidate readiness → merge with a GitHub App token scoped to contents
+and pull requests on that repository, conditional on the reviewed head SHA, using a
+merge method the repository allows. GitHub says no → the vote fails and the agent is
+told why. No admin bypass, ever.
 
-Rejection wins if committed before the merge call; after that the card says
-"merging". Treat an HTTP error as unknown, not failed.
+A rejection committed before the merge call wins. A transport error leaves the vote
+in `merging`; the next evaluation either confirms the merge or retries it.
 
-On confirmed merge: card → merged, merged reaction on the Slack root, watches
-dropped, thread resolved via tracked-PR `resolves_thread`.
+On confirmed merge: card → merged, merged reaction on the Slack root, watch dropped.
+The thread resolves through the existing merged-PR handling.
+
+### Storage
+
+PostgreSQL, alongside the pull request tables: one row per approval, one per vote,
+both auditable.
 
 ### Non-goals
 
 - Auto-enrolling small PRs; line count is not a safety test.
 - Admin bypass, bot-authored approvals, weaker protection rules.
-- Implementing anything in this PR.
+- Per-repository enablement or vote expiry, until experience shows a need.
 
 ## Security and privacy
 
 - The agent nominates; it cannot vote or skip the gate.
-- Feedback is user input, not instructions. Rounds, voters, review IDs, and
-  outcomes are audited.
+- Feedback is user input, not instructions. Approvals, voters, review ids, and
+  outcomes are stored.
 
 ## Alternatives
 
@@ -95,8 +117,14 @@ dropped, thread resolved via tracked-PR `resolves_thread`.
 - **Reactions as votes:** ambiguous, not revision-bound.
 - **Resume the agent on every event:** puts a security state machine in an LLM.
 
+## Resolved questions
+
+- **Author consent counts toward the quorum.** Two distinct people confirm review;
+  the author is usually one of them.
+- **Eligibility policy:** the fixed rules above; no preview size cap beyond Slack's.
+- **Vote expiry:** none.
+
 ## Unresolved questions
 
-- Does author consent count toward the quorum?
-- Eligibility policy, preview size cap, round expiry.
-- Which review agents expose a trustworthy completion signal?
+- Which third-party review agents expose a trustworthy completion signal, and
+  whether to require a configured list of reviewer check names.
