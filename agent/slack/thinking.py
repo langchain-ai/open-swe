@@ -29,6 +29,7 @@ _DEFAULT_RETRY_SECONDS = 30.0
 _MAX_RETRY_SECONDS = 300.0
 _THINKING_STATUS = "Thinking..."
 _STATUS_REFRESH_SECONDS = 90.0
+_status_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 @dataclass
@@ -314,6 +315,38 @@ async def show_slack_thinking_status(
     """Keep Slack's animated "Thinking..." thread status alive until the run ends."""
     if not await restore_slack_thinking_status(channel_id, thread_ts):
         return
+    await maintain_slack_thinking_status(
+        client=client,
+        thread_id=thread_id,
+        run_id=run_id,
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+    )
+
+
+def maintain_slack_thinking_status_task(
+    *, client: LangGraphClient, thread_id: str, run_id: str, channel_id: str, thread_ts: str
+) -> None:
+    """Start maintaining Slack's thinking status once per run."""
+    if run_id in _status_tasks:
+        return
+    task = asyncio.create_task(
+        maintain_slack_thinking_status(
+            client=client,
+            thread_id=thread_id,
+            run_id=run_id,
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+        )
+    )
+    _status_tasks[run_id] = task
+    task.add_done_callback(lambda _task: _status_tasks.pop(run_id, None))
+
+
+async def maintain_slack_thinking_status(
+    *, client: LangGraphClient, thread_id: str, run_id: str, channel_id: str, thread_ts: str
+) -> None:
+    """Refresh and clear an already-displayed Slack thinking status."""
 
     async def refresh() -> None:
         while True:

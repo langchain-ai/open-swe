@@ -2,7 +2,7 @@ import importlib
 import json
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 from uuid import UUID
 
 import pytest
@@ -283,21 +283,36 @@ async def test_slack_thread_reply_passes_executing_run_id(
     assert captured["triggering_user_id"] == "active-user"
 
 
-async def test_slack_thread_reply_restores_thinking_status_after_interim_reply(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("untagged_reply", [False, True])
+async def test_slack_thread_reply_restores_and_maintains_thinking_status(
+    monkeypatch: pytest.MonkeyPatch, untagged_reply: bool
 ) -> None:
     run_id = UUID("12345678-1234-5678-1234-567812345678")
     config = _config()
     config["run_id"] = run_id
+    config["configurable"]["thread_id"] = "thread-1"
+    config["configurable"]["untagged_reply"] = untagged_reply
     restore_status = AsyncMock()
+    maintain_status = MagicMock()
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(
         slack_reply_tool, "_post_and_store_mapping", AsyncMock(return_value=("2.0", None))
     )
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", restore_status)
+    monkeypatch.setattr(slack_reply_tool, "maintain_slack_thinking_status_task", maintain_status)
 
     assert await slack_reply_tool.slack_thread_reply("Still working") == {"success": True}
     restore_status.assert_awaited_once_with("C1", "1.0")
+    if untagged_reply:
+        maintain_status.assert_called_once_with(
+            client=ANY,
+            thread_id="thread-1",
+            run_id=str(run_id),
+            channel_id="C1",
+            thread_ts="1.0",
+        )
+    else:
+        maintain_status.assert_not_called()
 
 
 async def test_slack_thread_reply_posts_plain_text_without_options(
