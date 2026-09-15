@@ -27,6 +27,7 @@ from agent.prompts import load_prompt
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
+from agent.utils.thread_ops import queue_lock
 
 logger = logging.getLogger(__name__)
 
@@ -214,22 +215,21 @@ async def check_message_queue_before_model(  # noqa: PLR0911
 
         namespace = ("queue", thread_id)
 
-        try:
-            queued_item = await store.aget(namespace, "pending_messages")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to get queued item: %s", e)
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
+        async with queue_lock(thread_id):
+            try:
+                queued_item = await store.aget(namespace, "pending_messages")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to get queued item: %s", e)
+                _flush_blocks(queued_updates, content_blocks, injected)
+                return _message_update(queued_updates, thread_id)
 
-        if queued_item is None:
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
+            if queued_item is None:
+                _flush_blocks(queued_updates, content_blocks, injected)
+                return _message_update(queued_updates, thread_id)
 
-        queued_value = queued_item.value
-        queued_messages = queued_value.get("messages", [])
-
-        # Delete early to prevent duplicate processing if middleware runs again
-        await store.adelete(namespace, "pending_messages")
+            queued_value = queued_item.value
+            queued_messages = queued_value.get("messages", [])
+            await store.adelete(namespace, "pending_messages")
 
         if not queued_messages:
             _flush_blocks(queued_updates, content_blocks, injected)

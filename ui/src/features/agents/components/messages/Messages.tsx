@@ -13,6 +13,8 @@ import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtif
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
+const MAX_MOUNTED_MESSAGES = 500
+
 function QueuedMessages({
   queuedMessages,
 }: {
@@ -85,7 +87,10 @@ export const Messages = memo(function MessagesComponent({
     useTranscriptScroll({ scrollKey, messages, isStreaming })
 
   const visibleMessages = useMemo(
-    () => messages.filter((message) => !message.hidden),
+    () =>
+      messages
+        .filter((message) => !message.hidden)
+        .slice(-MAX_MOUNTED_MESSAGES),
     [messages]
   )
   const liveMarkdownMessageId = useLiveMarkdownMessageId(
