@@ -201,7 +201,7 @@ async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
         "email": None,
         "avatar_url": None,
     }
-    own = await report(limit=1, current_email=" PRIVATE@EXAMPLE.COM ")
+    own = await report(limit=2, current_email=" PRIVATE@EXAMPLE.COM ")
     assert own["current_user_rank"] == 2
     assert own["rows"][1]["user"]["name"] == "private"
     assert own["rows"][1]["user"]["email"] == "private@example.com"
