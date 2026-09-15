@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 
 import httpx
@@ -88,3 +89,18 @@ async def test_a_repeated_workspace_name_is_a_409(admin_client: httpx.AsyncClien
     )
     assert second.status_code == 409
     assert "already exists" in second.json()["detail"]
+
+
+async def test_two_creates_of_one_name_at_once_are_a_200_and_a_409(
+    admin_client: httpx.AsyncClient,
+) -> None:
+    """The loser of the race lands on the unique constraint, not on a 500."""
+    payload = {"name": "Core", "repos": ["acme/api"]}
+    first, second = await asyncio.gather(
+        admin_client.post("/dashboard/api/workspaces", json=payload),
+        admin_client.post("/dashboard/api/workspaces", json=payload),
+    )
+
+    assert sorted([first.status_code, second.status_code]) == [200, 409]
+    conflict = first if first.status_code == 409 else second
+    assert "already" in conflict.json()["detail"]

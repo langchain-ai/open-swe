@@ -79,6 +79,12 @@ def test_create_validates_repo_full_names() -> None:
     assert create.repos == ["owner/repo"]
 
 
+def test_repos_are_deduped_however_they_are_capitalized() -> None:
+    """One ``repository`` row per name, so two spellings cannot both be bound."""
+    create = WorkspaceCreate(name="env", repos=["Acme/API", "acme/api"])
+    assert create.repos == ["Acme/API"]
+
+
 def test_sandbox_resources_require_positive_integers() -> None:
     with pytest.raises(ValueError, match="greater than 0"):
         WorkspaceCreate(name="env", mem_bytes=0)
@@ -815,6 +821,18 @@ async def test_owner_of_repo_matches_however_the_repository_is_written() -> None
     # Routing asks about whatever an inbound event carried, so an unparseable
     # name reads as unowned rather than raising.
     assert await WORKSPACES.owner_of_repo("acme") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_write_returns_the_repository_casing_it_stored() -> None:
+    """``put`` answers with the stored view, so it agrees with ``get``."""
+    async with postgres.session() as session:
+        await Repository(full_name="acme/api").save(session)
+
+    written = await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["ACME/API"]), "alice")
+
+    assert written.repos == ["acme/api"]
+    assert await WORKSPACES.get("core") == written
 
 
 @pytest.mark.usefixtures("registry_db")

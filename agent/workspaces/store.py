@@ -86,6 +86,27 @@ def _validate_slack_channel_ids(value: list[str] | None) -> list[str]:
     return list(dict.fromkeys(normalize_slack_channel_id(entry) for entry in value))
 
 
+class WorkspaceConflictError(ValueError):
+    """Another workspace already holds the slug or binding this write claims.
+
+    A ``ValueError`` so every caller that already treats a rejected definition
+    as a bad request keeps working; the HTTP layer answers 409 for this one and
+    400 for the rest.
+    """
+
+
+# The unique constraints a workspace write can land on that mean "taken", as
+# opposed to a constraint failure that is a bug and must propagate.
+_CONFLICT_CONSTRAINTS = frozenset(
+    {"workspace_slug_key", "workspace_repository_pkey", "workspace_slack_channel_pkey"}
+)
+
+
+def _violated_constraint(error: IntegrityError) -> str | None:
+    """The constraint ``error`` landed on, as the driver reported it."""
+    return getattr(getattr(error.orig, "__cause__", None), "constraint_name", None)
+
+
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
 RefreshStatus = Literal["never", "refreshing", "success", "failed"]
 RefreshKind = Literal["full", "update"]
@@ -320,7 +341,13 @@ def _validate_repos(value: list[str] | None) -> list[str]:
         return []
     if len(value) > MAX_REPOS:
         raise ValueError(f"at most {MAX_REPOS} repositories per workspace")
-    return list(dict.fromkeys(normalize_repo_full_name(entry) for entry in value))
+    # One ``repository`` row per name however it is capitalized, so `Acme/API`
+    # and `acme/api` are the same entry rather than two that collide on save.
+    deduped: dict[str, str] = {}
+    for entry in value:
+        full_name = normalize_repo_full_name(entry)
+        deduped.setdefault(full_name.lower(), full_name)
+    return list(deduped.values())
 
 
 def _normalize_create_param_name(value: str) -> str:
@@ -727,7 +754,12 @@ class WorkspaceStore:
         return records
 
     async def put(self, slug: str, record: Workspace) -> Workspace:
-        """Write the row and replace its bindings, in one transaction."""
+        """Write the row and replace its bindings, in one transaction.
+
+        Returns the stored view rather than the record it was handed: a
+        repository already known under another capitalization keeps the casing
+        its ``repository`` row carries, which is what :meth:`get` reads back.
+        """
         try:
             async with postgres.session() as session:
                 row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
@@ -739,11 +771,39 @@ class WorkspaceStore:
                 await _bind_repos(session, row.id, record.repos)
                 await _bind_channels(session, row.id, record.slack_channel_ids)
                 await session.flush()
-        except IntegrityError:
-            # The transaction is gone, so the owner is looked up in a new one.
+                stored_repos = await _bound_repos(session, row.id)
+                stored_channels = await _bound_channels(session, row.id)
+            return record.model_copy(
+                update={"repos": stored_repos, "slack_channel_ids": stored_channels}
+            )
+        except IntegrityError as exc:
+            conflict = await self._conflict(exc, slug, record)
+            if conflict is None:
+                raise
+            raise conflict from exc
+
+    async def _conflict(
+        self, exc: IntegrityError, slug: str, record: Workspace
+    ) -> WorkspaceConflictError | None:
+        """The conflict a failed write should raise, or ``None`` to propagate it.
+
+        A write that races past :meth:`_assert_unique` lands on one of the
+        unique constraints instead, and the transaction it happened in is gone
+        by now — so the owner that beat it is looked up in a new one. Any other
+        constraint is a bug rather than a busy slug or binding.
+        """
+        constraint = _violated_constraint(exc)
+        if constraint not in _CONFLICT_CONSTRAINTS:
+            return None
+        if constraint == "workspace_slug_key":
+            return WorkspaceConflictError(f"workspace {slug!r} already exists")
+        try:
             await self._assert_bindings_free(record)
-            raise
-        return record
+        except WorkspaceConflictError as conflict:
+            return conflict
+        return WorkspaceConflictError(
+            "another workspace claimed one of these bindings; reload and try again"
+        )
 
     async def delete(self, slug: str) -> None:
         async with postgres.session() as session:
@@ -792,10 +852,14 @@ class WorkspaceStore:
             channel_owners = await _channel_owners(session, record.slack_channel_ids, record.slug)
         for repo in record.repos:
             if owner := repo_owners.get(repo.lower()):
-                raise ValueError(f"repository {repo.lower()} already belongs to workspace {owner}")
+                raise WorkspaceConflictError(
+                    f"repository {repo.lower()} already belongs to workspace {owner}"
+                )
         for channel in record.slack_channel_ids:
             if owner := channel_owners.get(channel):
-                raise ValueError(f"slack channel {channel} already belongs to workspace {owner}")
+                raise WorkspaceConflictError(
+                    f"slack channel {channel} already belongs to workspace {owner}"
+                )
 
     async def save(self, record: Workspace) -> Workspace:
         record.updated_at = now_iso()
@@ -807,7 +871,7 @@ class WorkspaceStore:
         record = Workspace.seed(create, created_by)
         await self._assert_unique(record)
         if await self.get(record.slug) is not None:
-            raise ValueError(f"workspace {create.name!r} already exists")
+            raise WorkspaceConflictError(f"workspace {create.name!r} already exists")
         result = await self.put(record.slug, record)
         ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
         return result
@@ -835,7 +899,7 @@ class WorkspaceStore:
     ) -> Workspace:
         if isinstance(definition, WorkspaceCreate):
             if await self.get(slug) is not None:
-                raise ValueError(f"workspace {definition.name!r} already exists")
+                raise WorkspaceConflictError(f"workspace {definition.name!r} already exists")
             return Workspace.seed(definition, created_by)
         existing = await self.get(slug)
         if existing is None:

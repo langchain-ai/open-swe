@@ -20,6 +20,7 @@ from agent.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
     WORKSPACES,
     Workspace,
+    WorkspaceConflictError,
     WorkspaceCreate,
     WorkspaceUpdate,
     list_workspace_options,
@@ -51,9 +52,15 @@ def _normalized_slug(raw: str) -> str:
         raise HTTPException(400, str(e)) from e
 
 
-def _save_error_status(message: str) -> int:
-    """409 when another workspace already owns what this one claims, else 400."""
-    return 409 if "already belongs to workspace" in message or "already exists" in message else 400
+def _save_conflict(error: ValueError) -> HTTPException:
+    """409 when another workspace already holds what this one claims, else 400.
+
+    A slug or binding two admins raced for is a conflict the caller can retry
+    after reloading; everything else is a definition the store refuses.
+    """
+    if isinstance(error, WorkspaceConflictError):
+        return HTTPException(409, str(error))
+    return HTTPException(400, str(error))
 
 
 @router.get("/workspaces")
@@ -74,7 +81,7 @@ async def api_create_workspace(
     try:
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
-        raise HTTPException(_save_error_status(str(e)), str(e)) from e
+        raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
     return record
@@ -111,7 +118,7 @@ async def api_update_workspace(
     try:
         record = await WORKSPACES.apply_update(_normalized_slug(slug), body)
     except ValueError as e:
-        raise HTTPException(_save_error_status(str(e)), str(e)) from e
+        raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
     return record
