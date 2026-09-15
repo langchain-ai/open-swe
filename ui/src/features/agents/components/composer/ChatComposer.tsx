@@ -122,7 +122,7 @@ export interface ChatComposerProps {
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
   /** Workspaces a new thread can boot from. The picker appears only when there are several. */
-  workspaces?: Array<WorkspaceOption>
+  workspaceOptions?: Array<WorkspaceOption>
   selectedWorkspace?: string | null
   onWorkspaceChange?: (slug: string | null) => void
   /** Paths offered by `@` autocomplete — in a thread, the files the agent has touched. */
@@ -247,7 +247,7 @@ export const ChatComposer = memo(function ChatComposer({
   onSelectLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
-  workspaces = [],
+  workspaceOptions = [],
   selectedWorkspace = null,
   onWorkspaceChange,
   mentionPaths = [],
@@ -662,7 +662,7 @@ export const ChatComposer = memo(function ChatComposer({
           )}
           {runTarget !== "local" && onWorkspaceChange && (
             <WorkspaceSelector
-              workspaces={workspaces}
+              workspaces={workspaceOptions}
               selectedSlug={selectedWorkspace}
               onChange={onWorkspaceChange}
             />

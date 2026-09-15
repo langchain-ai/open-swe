@@ -1,9 +1,21 @@
 /** @vitest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { SlackIntegrationSection } from "./admin"
+import { api, type TeamSettings } from "@/lib/api"
+
+import { FableSection, SlackIntegrationSection } from "./admin"
+
+afterEach(cleanup)
 
 const STORAGE_KEY = "open-swe.admin.slack-code-channels-enabled"
 const storage = new Map<string, string>()
@@ -57,5 +69,59 @@ describe("SlackIntegrationSection", () => {
     expect(
       JSON.parse(writeText.mock.calls[1]![0]).features.code_channels.enabled
     ).toBe(true)
+  })
+})
+
+describe("FableSection", () => {
+  const settings = (fable_enabled: boolean): TeamSettings => ({
+    review_draft_prs: false,
+    pr_summaries: false,
+    review_trace_links: false,
+    fable_enabled,
+  })
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it("caches a save under the workspace it started in, not the one selected when it finishes", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    vi.spyOn(api, "getTeamSettings").mockImplementation(async () =>
+      settings(false)
+    )
+    let finishSave: (saved: TeamSettings) => void = () => {}
+    const saveTeamSettings = vi
+      .spyOn(api, "saveTeamSettings")
+      .mockImplementation(
+        () => new Promise<TeamSettings>((resolve) => (finishSave = resolve))
+      )
+    const section = (workspace: string) => (
+      <QueryClientProvider client={qc}>
+        <FableSection workspace={workspace} />
+      </QueryClientProvider>
+    )
+
+    const view = render(section("alpha"))
+    // The section renders a single switch, disabled until the settings load.
+    const toggle = await within(view.container).findByRole("switch")
+    await waitFor(() => {
+      expect(toggle.hasAttribute("disabled")).toBe(false)
+      expect(toggle.hasAttribute("data-disabled")).toBe(false)
+      expect(toggle.getAttribute("aria-disabled")).not.toBe("true")
+    })
+    fireEvent.click(toggle)
+    await waitFor(() =>
+      expect(saveTeamSettings).toHaveBeenCalledWith(settings(true), "alpha")
+    )
+
+    view.rerender(section("beta"))
+    finishSave(settings(true))
+
+    await waitFor(() =>
+      expect(qc.getQueryData(["teamSettings", "alpha"])).toEqual(settings(true))
+    )
+    await waitFor(() =>
+      expect(qc.getQueryData(["teamSettings", "beta"])).toEqual(settings(false))
+    )
   })
 })

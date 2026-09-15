@@ -100,7 +100,6 @@ export interface SessionUser {
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
-  default_workspace: string | null
 }
 
 export interface ModelOption {
@@ -420,6 +419,7 @@ export interface UserPreferences {
   default_visibility: ThreadVisibility
   local_tracing_project: string | null
   default_local_tracing_project: string
+  default_workspace: string | null
 }
 
 export interface Skill {
@@ -471,6 +471,9 @@ export interface WorkspaceRefreshStep {
   log_path?: string | null
 }
 
+/** Slug of the workspace every deployment ships with; matches the backend's `DEFAULT_WORKSPACE_SLUG`. */
+export const DEFAULT_WORKSPACE_SLUG = "default"
+
 export interface WorkspaceOption {
   slug: string
   name: string
@@ -489,6 +492,31 @@ export interface WorkspaceOption {
 export interface WorkspaceOptionList {
   workspaces: Array<WorkspaceOption>
   default_slug: string
+}
+
+/** Body for `POST /workspaces`; `name` is the only required field. */
+export interface WorkspaceCreate {
+  name: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+}
+
+/** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
+export interface WorkspaceUpdate {
+  name?: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+}
+
+/** The fields `createWorkspace`/`updateWorkspace` are guaranteed to return. */
+export interface WorkspaceRecord {
+  slug: string
+  name: string
+  prompt: string
+  repos: Array<string>
+  slack_channel_ids: Array<string>
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -727,7 +755,11 @@ export interface ReviewerEvalStatus {
 
 export const api = {
   me: () => request<SessionUser>("/me"),
-  options: () => request<OptionsPayload>("/options"),
+  /** Model list and defaults for one workspace; model defaults are per workspace. */
+  options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
+    request<OptionsPayload>(
+      `/options?workspace=${encodeURIComponent(workspace)}`
+    ),
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
@@ -843,7 +875,26 @@ export const api = {
     }),
   listWorkspaceOptions: () =>
     request<WorkspaceOptionList>("/workspaces/options"),
-  getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  getWorkspace: (slug: string) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`),
+  createWorkspace: (body: WorkspaceCreate) =>
+    request<WorkspaceRecord>("/workspaces", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateWorkspace: (slug: string, body: WorkspaceUpdate) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteWorkspace: (slug: string) =>
+    request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    }),
+  getTeamSettings: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
+    request<TeamSettings>(
+      `/team-settings?workspace=${encodeURIComponent(workspace)}`
+    ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
@@ -856,11 +907,17 @@ export const api = {
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
       { method: "DELETE" }
     ),
-  saveTeamSettings: (body: TeamSettings) =>
-    request<TeamSettings>("/team-settings", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
+  saveTeamSettings: (
+    body: TeamSettings,
+    workspace: string = DEFAULT_WORKSPACE_SLUG
+  ) =>
+    request<TeamSettings>(
+      `/team-settings?workspace=${encodeURIComponent(workspace)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
   getWorkspaceMCPs: (workspace: string) =>
     request<MCPConnection[]>(
       `/workspaces/${encodeURIComponent(workspace)}/mcps`

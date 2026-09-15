@@ -1,14 +1,24 @@
-import { useQuery } from "@tanstack/react-query"
+import { useRef, useState } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { SettingsSection } from "@/components/AppShell"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 import {
   api,
+  type WorkspaceCreate,
   type WorkspaceOption,
+  type WorkspaceRecord,
   type WorkspaceRefreshStatus,
   type WorkspaceRefreshStep,
+  type WorkspaceUpdate,
 } from "@/lib/api"
 import { formatRelativeTime } from "@/lib/utils"
+
+const WORKSPACE_OPTIONS_KEY = ["workspace-options"]
 
 const REFRESH_LABEL: Record<WorkspaceRefreshStatus, string> = {
   never: "Never refreshed",
@@ -73,42 +83,170 @@ function RefreshSteps({ steps }: { steps: Array<WorkspaceRefreshStep> }) {
   )
 }
 
+function Chips({ values }: { values: Array<string> }) {
+  if (values.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {values.map((value) => (
+        <span
+          key={value}
+          className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+        >
+          {value}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** A textarea's raw lines, trimmed and with blanks dropped. */
+function parseLines(value: string): Array<string> {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+}
+
+interface WorkspaceDraft {
+  name: string
+  repos: string
+  slackChannelIds: string
+  prompt: string
+}
+
+function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
+  return {
+    name: workspace.name,
+    repos: workspace.repos.join("\n"),
+    slackChannelIds: workspace.slack_channel_ids.join("\n"),
+    prompt: workspace.prompt,
+  }
+}
+
+const EMPTY_DRAFT: WorkspaceDraft = {
+  name: "",
+  repos: "",
+  slackChannelIds: "",
+  prompt: "",
+}
+
+function WorkspaceEditor({
+  draft,
+  onChange,
+  promptHint,
+}: {
+  draft: WorkspaceDraft
+  onChange: (next: WorkspaceDraft) => void
+  promptHint: string
+}) {
+  return (
+    <div className="space-y-3 border-t border-border px-4 py-3.5">
+      <label className="block text-sm">
+        Name
+        <Input
+          aria-label="Workspace name"
+          value={draft.name}
+          onChange={(e) => onChange({ ...draft, name: e.target.value })}
+        />
+      </label>
+      <label className="block text-sm">
+        Repositories
+        <Textarea
+          aria-label="Repositories"
+          placeholder={"owner/repo\none per line"}
+          value={draft.repos}
+          onChange={(e) => onChange({ ...draft, repos: e.target.value })}
+        />
+      </label>
+      <label className="block text-sm">
+        Slack channel IDs
+        <Textarea
+          aria-label="Slack channel IDs"
+          placeholder={"C0123456789\none per line"}
+          value={draft.slackChannelIds}
+          onChange={(e) =>
+            onChange({ ...draft, slackChannelIds: e.target.value })
+          }
+        />
+      </label>
+      <label className="block text-sm">
+        Instructions
+        <Textarea
+          aria-label="Instructions"
+          placeholder={promptHint}
+          value={draft.prompt}
+          onChange={(e) => onChange({ ...draft, prompt: e.target.value })}
+        />
+      </label>
+    </div>
+  )
+}
+
 function WorkspaceRow({
   workspace,
   isDefault,
   isAdmin,
+  editing,
+  draft,
+  loadError,
+  saving,
+  saveError,
+  onStartEdit,
+  onCancelEdit,
+  onDraftChange,
+  onSave,
 }: {
   workspace: WorkspaceOption
   isDefault: boolean
   isAdmin: boolean
+  editing: boolean
+  draft: WorkspaceDraft | null
+  loadError: string | null
+  saving: boolean
+  saveError: string | null
+  onStartEdit: () => void
+  onCancelEdit: () => void
+  onDraftChange: (next: WorkspaceDraft) => void
+  onSave: () => void
 }) {
   const status = workspace.refresh_status ?? "never"
   const when = refreshedAt(workspace.refresh_finished_at)
   const log = workspace.refresh_log_excerpt
   const steps = workspace.refresh_steps ?? []
-  const detail = [
-    isDefault ? "Default workspace" : null,
-    workspace.has_snapshot ? "Snapshot ready" : "No snapshot",
-  ]
-    .filter(Boolean)
-    .join(" · ")
+  const detail = workspace.has_snapshot ? "Snapshot ready" : "No snapshot"
 
   return (
-    <div className="flex flex-col gap-2 px-4 py-3.5">
+    <div data-workspace-row className="flex flex-col gap-2 px-4 py-3.5">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
         <div className="flex flex-col gap-1">
-          <span className="text-sm/none font-medium text-foreground">
+          <span className="flex items-center gap-2 text-sm/none font-medium text-foreground">
             {workspace.name}
+            {isDefault && <Badge variant="secondary">Default</Badge>}
           </span>
           <span className="text-xs/relaxed text-muted-foreground">
             {detail}
           </span>
         </div>
-        <span className={`text-xs sm:shrink-0 ${REFRESH_CLASS[status]}`}>
-          {refreshLabel(status, workspace.refresh_kind)}
-          {status !== "refreshing" && when ? ` ${when}` : ""}
-        </span>
+        <div className="flex items-center gap-3 sm:shrink-0">
+          <span className={`text-xs ${REFRESH_CLASS[status]}`}>
+            {refreshLabel(status, workspace.refresh_kind)}
+            {status !== "refreshing" && when ? ` ${when}` : ""}
+          </span>
+          {isAdmin && (
+            <Button
+              size="sm"
+              variant="outline"
+              aria-label={`${editing ? "Close" : "Edit"} ${workspace.name}`}
+              aria-expanded={editing}
+              onClick={editing ? onCancelEdit : onStartEdit}
+            >
+              {editing ? "Close" : "Edit"}
+            </Button>
+          )}
+        </div>
       </div>
+      <Chips values={workspace.repos} />
+      <Chips values={workspace.slack_channel_ids} />
       {steps.length > 0 && <RefreshSteps steps={steps} />}
       {workspace.refresh_error && (
         <p className="text-xs/relaxed text-destructive">
@@ -125,25 +263,159 @@ function WorkspaceRow({
           </pre>
         </details>
       )}
+      {editing && draft && (
+        <div className="-mx-4">
+          <WorkspaceEditor
+            draft={draft}
+            onChange={onDraftChange}
+            promptHint="Instructions appended to every run in this workspace"
+          />
+          <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
+            {saveError && (
+              <p role="alert" className="text-xs text-destructive">
+                {saveError}
+              </p>
+            )}
+            <div className="ml-auto flex gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={saving}
+                onClick={onCancelEdit}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" disabled={saving} onClick={onSave}>
+                {saving ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editing && !draft && (
+        <div className="-mx-4 border-t border-border px-4 py-3.5 text-xs">
+          {loadError ? (
+            <p role="alert" className="text-destructive">
+              {loadError}
+            </p>
+          ) : (
+            <p className="text-muted-foreground">Loading workspace…</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
 export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
+  const qc = useQueryClient()
   const workspaces = useQuery({
-    queryKey: ["workspace-options"],
+    queryKey: WORKSPACE_OPTIONS_KEY,
     queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     refetchInterval: 5000,
   })
   const options = workspaces.data
 
+  const [editingSlug, setEditingSlug] = useState<string | null>(null)
+  const [draft, setDraft] = useState<WorkspaceDraft | null>(null)
+  const [editLoadError, setEditLoadError] = useState<string | null>(null)
+  // Mirrors `editingSlug` for reads inside async callbacks below: a fetch or
+  // save started for one workspace must not clobber another row's state if
+  // the admin has since switched (or closed) the edit target before it
+  // resolves.
+  const editingSlugRef = useRef<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const [adding, setAdding] = useState(false)
+  const [createDraft, setCreateDraft] = useState<WorkspaceDraft>(EMPTY_DRAFT)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+
+  const startEdit = (workspace: WorkspaceOption) => {
+    editingSlugRef.current = workspace.slug
+    setEditingSlug(workspace.slug)
+    setDraft(null)
+    setSaveError(null)
+    setEditLoadError(null)
+    void api.getWorkspace(workspace.slug).then(
+      (record) => {
+        if (editingSlugRef.current !== workspace.slug) return
+        setDraft(draftFromWorkspace(record))
+      },
+      (e) => {
+        if (editingSlugRef.current !== workspace.slug) return
+        setEditLoadError(
+          e instanceof Error ? e.message : "Could not load the workspace"
+        )
+      }
+    )
+  }
+
+  const cancelEdit = () => {
+    editingSlugRef.current = null
+    setEditingSlug(null)
+    setDraft(null)
+    setSaveError(null)
+    setEditLoadError(null)
+  }
+
+  const save = async (slug: string) => {
+    if (!draft) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const body: WorkspaceUpdate = {
+        name: draft.name.trim(),
+        repos: parseLines(draft.repos),
+        slack_channel_ids: parseLines(draft.slackChannelIds),
+        // The draft is only ever populated from the full record, so a blank
+        // field here is the admin deliberately clearing the instructions.
+        prompt: draft.prompt.trim(),
+      }
+      await api.updateWorkspace(slug, body)
+      await qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
+      // Only clear the shared edit state if it still belongs to this save —
+      // the admin may have opened a different row while this one was saving.
+      if (editingSlugRef.current === slug) cancelEdit()
+    } catch (e) {
+      setSaveError(
+        e instanceof Error ? e.message : "Could not save the workspace"
+      )
+    }
+    setSaving(false)
+  }
+
+  const create = async () => {
+    setCreating(true)
+    setCreateError(null)
+    try {
+      const body: WorkspaceCreate = {
+        name: createDraft.name.trim(),
+        repos: parseLines(createDraft.repos),
+        slack_channel_ids: parseLines(createDraft.slackChannelIds),
+      }
+      const prompt = createDraft.prompt.trim()
+      if (prompt) body.prompt = prompt
+      await api.createWorkspace(body)
+      await qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
+      setAdding(false)
+      setCreateDraft(EMPTY_DRAFT)
+    } catch (e) {
+      setCreateError(
+        e instanceof Error ? e.message : "Could not create the workspace"
+      )
+    }
+    setCreating(false)
+  }
+
   return (
     <SettingsSection
       title="Workspaces"
       description={
         isAdmin
-          ? "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, start a new agent thread, open the + menu, enable admin mode, and ask Open SWE to make the change."
+          ? "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. Edit its name, repositories, Slack channels, and instructions below. To change its scripts, start a new agent thread, open the + menu, enable admin mode, and ask Open SWE to make the change."
           : "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, ask a workspace admin to start an admin thread and ask Open SWE to make the change."
       }
     >
@@ -166,9 +438,62 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
             workspace={workspace}
             isDefault={workspace.slug === options.default_slug}
             isAdmin={isAdmin}
+            editing={editingSlug === workspace.slug}
+            draft={editingSlug === workspace.slug ? draft : null}
+            loadError={editingSlug === workspace.slug ? editLoadError : null}
+            saving={saving}
+            saveError={editingSlug === workspace.slug ? saveError : null}
+            onStartEdit={() => startEdit(workspace)}
+            onCancelEdit={cancelEdit}
+            onDraftChange={setDraft}
+            onSave={() => void save(workspace.slug)}
           />
         ))
       )}
+      {isAdmin &&
+        (adding ? (
+          <div>
+            <WorkspaceEditor
+              draft={createDraft}
+              onChange={setCreateDraft}
+              promptHint="Instructions appended to every run in this workspace"
+            />
+            <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
+              {createError && (
+                <p role="alert" className="text-xs text-destructive">
+                  {createError}
+                </p>
+              )}
+              <div className="ml-auto flex gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={creating}
+                  onClick={() => {
+                    setAdding(false)
+                    setCreateDraft(EMPTY_DRAFT)
+                    setCreateError(null)
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={creating || !createDraft.name.trim()}
+                  onClick={() => void create()}
+                >
+                  {creating ? "Creating…" : "Create workspace"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="px-4 py-3.5">
+            <Button size="sm" onClick={() => setAdding(true)}>
+              Add workspace
+            </Button>
+          </div>
+        ))}
     </SettingsSection>
   )
 }
