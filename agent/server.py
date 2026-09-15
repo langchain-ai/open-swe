@@ -13,7 +13,7 @@ import logging
 import warnings
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from agent.config import ENV
 
@@ -63,15 +63,17 @@ from agent.dashboard.options import (
     model_supports_effort,
 )
 from agent.dashboard.team_settings import (
-    get_effective_gateway_enabled,
-    get_team_agent_routing_models,
-    get_team_default_model_pair,
     get_team_default_repo,
-    get_team_default_thread_title_model,
-    get_team_fable_enabled,
     get_team_fast_alt_probability,
-    get_team_model_routing_enabled,
-    get_team_settings,
+)
+from agent.dashboard.team_settings_cache import (
+    cached_agent_routing_models,
+    cached_fable_enabled,
+    cached_gateway_enabled,
+    cached_model_routing_enabled,
+    cached_team_default_model_pair,
+    cached_team_settings,
+    cached_thread_title_model,
 )
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
@@ -226,6 +228,7 @@ from agent.utils.thread_settings import (
     store_thread_settings,
 )
 from agent.workspaces.store import (
+    DEFAULT_WORKSPACE_SLUG,
     load_workspace,
 )
 
@@ -283,7 +286,7 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
         return None
 
     try:
-        return await get_team_default_repo()
+        return await get_team_default_repo(workspace_slug(cfg))
     except Exception:
         logger.debug("Failed to load team default repo for prompt", exc_info=True)
         return None
@@ -491,7 +494,7 @@ ADMIN_TOOLS = (
 
 def workspace_slug(cfg: RunConfig) -> str | None:
     """The workspace this thread selected, if any."""
-    return (cfg.environment or "").strip() or None
+    return cfg.workspace_slug
 
 
 async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -541,9 +544,9 @@ async def _notion_tools_for(profile_login: str | None) -> list[Any]:
     )
 
 
-async def _mcp_tools_for(credential_login: str | None) -> list[Any]:
-    """Load workspace MCPs with private-owner personal overrides."""
-    sources = [workspace_mcp_source]
+async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[Any]:
+    """Load the run's workspace MCPs with private-owner personal overrides."""
+    sources = [workspace_mcp_source(workspace)]
     if credential_login:
         sources.append(user_mcp_source(credential_login))
     return await load_mcp_tools(*sources)
@@ -552,58 +555,6 @@ async def _mcp_tools_for(credential_login: str | None) -> list[Any]:
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
     async with aphase(thread_id, name):
         return await loader()
-
-
-async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
-    return await ttl_cache.cached(
-        f"team-default-model-pair:{kind}",
-        60,
-        lambda: get_team_default_model_pair(kind),
-    )
-
-
-async def _cached_team_settings() -> dict[str, Any]:
-    return await ttl_cache.cached("team:settings", 60, get_team_settings)
-
-
-async def _cached_agent_routing_models() -> dict[str, tuple[str, str]]:
-    return await ttl_cache.cached(
-        "team:agent-routing-models",
-        60,
-        get_team_agent_routing_models,
-    )
-
-
-async def _cached_thread_title_model() -> tuple[str, str]:
-    return await ttl_cache.cached(
-        "team:thread-title-model",
-        60,
-        get_team_default_thread_title_model,
-    )
-
-
-async def _cached_gateway_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:gateway-enabled",
-        60,
-        get_effective_gateway_enabled,
-    )
-
-
-async def _cached_fable_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:fable-enabled",
-        60,
-        get_team_fable_enabled,
-    )
-
-
-async def _cached_team_model_routing_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:model-routing-enabled",
-        60,
-        get_team_model_routing_enabled,
-    )
 
 
 async def _cached_profile(profile_login: str | None):
@@ -954,6 +905,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
     local_run = is_desktop_run(cfg)
+    # Every settings read below is keyed by this slug. A factory runs outside the
+    # graph's own context, so the settings module cannot recover it on its own.
+    settings_workspace = workspace_slug(cfg)
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
             {} if local_run else await load_thread_settings(client, thread_id)
@@ -984,14 +938,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 profile,
                 fable_enabled,
             ) = await asyncio.gather(
-                _cached_team_default_model_pair("agent"),
-                _cached_agent_routing_models(),
-                _cached_thread_title_model(),
-                _cached_gateway_enabled(),
+                cached_team_default_model_pair("agent", settings_workspace),
+                cached_agent_routing_models(settings_workspace),
+                cached_thread_title_model(settings_workspace),
+                cached_gateway_enabled(settings_workspace),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
-                _cached_fable_enabled(),
+                cached_fable_enabled(settings_workspace),
             )
-            fast_alt_probability = get_team_fast_alt_probability(await _cached_team_settings())
+            fast_alt_probability = get_team_fast_alt_probability(
+                await cached_team_settings(settings_workspace)
+            )
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
@@ -1030,7 +986,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # User preference overrides the org-wide toggle; None inherits it.
     adaptive_model_routing = profile_model_routing_enabled(profile)
     if adaptive_model_routing is None:
-        adaptive_model_routing = False if local_run else await _cached_team_model_routing_enabled()
+        adaptive_model_routing = (
+            False if local_run else await cached_model_routing_enabled(settings_workspace)
+        )
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
@@ -1165,7 +1123,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             _phase_result(
                 thread_id,
                 "factory.mcp_tools",
-                lambda: _mcp_tools_for(credential_login),
+                lambda: _mcp_tools_for(
+                    credential_login, workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+                ),
             ),
             _phase_result(
                 thread_id,

@@ -21,7 +21,9 @@ def update(**fields):
 async def test_saved_credentials_are_reused_only_from_the_same_user(fake_store):
     await mcps.save_user_mcp("bob", "linear", update(headers={"Authorization": "bob-secret"}))
     await workspace_mcps.save_workspace_mcp(
-        "linear", update(headers={"Authorization": "workspace-secret"}, allowed_tools=["search"])
+        "default",
+        "linear",
+        update(headers={"Authorization": "workspace-secret"}, allowed_tools=["search"]),
     )
     saved = await mcps.save_user_mcp(" Alice ", "linear", update(enabled=False))
     assert saved["header_names"] == []
@@ -29,7 +31,9 @@ async def test_saved_credentials_are_reused_only_from_the_same_user(fake_store):
     assert await mcps.list_user_mcps("bob") != [saved]
     assert await mcps.list_user_mcps("ALICE") == [saved]
     assert (
-        await load_mcp_tools(workspace_mcps.workspace_mcp_source, mcps.user_mcp_source("alice"))
+        await load_mcp_tools(
+            workspace_mcps.workspace_mcp_source("default"), mcps.user_mcp_source("alice")
+        )
         == []
     )
     record = await mcps.user_mcp_source("ALICE").get_connection("linear")

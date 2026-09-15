@@ -77,7 +77,7 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
 async def list_workspaces() -> dict[str, Any]:
     """List every workspace with its snapshot state.
 
-    The one named ``default`` is what runs boot from; the rest are drafts.
+    The one named ``default`` is what unrouted work falls back to.
 
     Returns:
         ``{"ok": True, "workspaces": [...]}``.
@@ -173,6 +173,10 @@ async def publish_workspace(
             elif clear_base_snapshot_id:
                 update_values["base_snapshot_id"] = None
             definition = store.WorkspaceUpdate(**update_values)
+        # Repository ownership and the min-one-repo rule are checked here as
+        # well as on the write: a capture takes minutes, and a definition that
+        # can never be saved should be refused before it starts.
+        await store.WORKSPACES.assert_publishable(slug, definition)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -191,7 +195,7 @@ async def publish_workspace(
             backend.id, published_name, timeout=refresh.capture_timeout()
         )
     except Exception as exc:
-        logger.exception("Failed to capture sandbox for workspace %s", slug)
+        logger.exception("Failed to capture sandbox for workspace", extra={"workspace": slug})
         return {"ok": False, "error": f"snapshot capture failed: {exc}"}
 
     # Definition and image pointer land in one write, so a failure here means
@@ -207,7 +211,7 @@ async def publish_workspace(
             created_by=login if isinstance(login, str) else "open-swe",
         )
     except Exception as exc:
-        logger.exception("Failed to record workspace %s after capture", slug)
+        logger.exception("Failed to record workspace after capture", extra={"workspace": slug})
         await store.discard_unreferenced_snapshot(slug, snapshot_id)
         return {"ok": False, "error": f"failed to record the workspace: {exc}"}
 
@@ -241,7 +245,7 @@ async def delete_workspace(name: str) -> dict[str, Any]:
     try:
         deleted = await store.WORKSPACES.remove(slug)
     except Exception as exc:
-        logger.exception("Failed to delete workspace %s", slug)
+        logger.exception("Failed to delete workspace", extra={"workspace": slug})
         return {"ok": False, "error": f"failed to delete workspace: {exc}"}
     if not deleted:
         return {"ok": False, "error": f"no workspace named {name!r}"}

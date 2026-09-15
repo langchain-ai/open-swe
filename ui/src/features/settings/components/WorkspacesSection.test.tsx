@@ -36,6 +36,9 @@ describe("WorkspacesSection", () => {
         {
           slug: "default",
           name: "Default",
+          repos: [],
+          slack_channel_ids: [],
+          is_default: true,
           has_snapshot: true,
           refresh_status: "success",
           refresh_kind: "update",
@@ -45,6 +48,9 @@ describe("WorkspacesSection", () => {
         {
           slug: "preview",
           name: "Preview",
+          repos: [],
+          slack_channel_ids: [],
+          is_default: false,
           has_snapshot: false,
           refresh_status: "failed",
           refresh_finished_at: new Date(Date.now() - 60_000).toISOString(),
@@ -73,6 +79,9 @@ describe("WorkspacesSection", () => {
         {
           slug: "default",
           name: "Default",
+          repos: [],
+          slack_channel_ids: [],
+          is_default: true,
           has_snapshot: true,
           refresh_status: "success",
           refresh_kind: "full",
@@ -92,7 +101,16 @@ describe("WorkspacesSection", () => {
   it("says so when a workspace has never been refreshed", async () => {
     vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
-      workspaces: [{ slug: "default", name: "Default", has_snapshot: false }],
+      workspaces: [
+        {
+          slug: "default",
+          name: "Default",
+          repos: [],
+          slack_channel_ids: [],
+          is_default: true,
+          has_snapshot: false,
+        },
+      ],
     })
 
     renderSection(true)

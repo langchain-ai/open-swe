@@ -22,7 +22,8 @@ from agent.slack.request import SlackRequest
 from agent.source_context import SourceContext
 from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import common as webhook_common
-from agent.workspaces.store import WORKSPACES_NAMESPACE
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.conftest import FakeStore
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -827,20 +828,23 @@ def test_get_slack_repo_config_uses_existing_thread_repo(
         webhook_common, "post_slack_thread_reply", fake_post_slack_thread_reply, raising=False
     )
 
-    repo = asyncio.run(
+    resolution = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == Repo(owner="saved-owner", name="saved-repo")
+    assert resolution.repo == Repo(owner="saved-owner", name="saved-repo")
+    # The thread named it, so it may decide the workspace.
+    assert resolution.explicit is True
     assert threads_client.requested_thread_id == "mapped-thread"
     assert not posted
 
 
-async def _no_team_default_repo() -> dict[str, str] | None:
+async def _no_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
     return None
 
 
 def test_get_slack_repo_config_new_thread_uses_default(
+    fake_store: FakeStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(raise_not_found=True)
@@ -850,14 +854,17 @@ def test_get_slack_repo_config_new_thread_uses_default(
 
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
 
-    repo = asyncio.run(
+    resolution = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == Repo(owner="default-owner", name="default-repo")
+    assert resolution.repo == Repo(owner="default-owner", name="default-repo")
+    # Nobody named it, so it must not outrank a channel binding.
+    assert resolution.explicit is False
 
 
 def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
+    fake_store: FakeStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
@@ -867,11 +874,12 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
 
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
 
-    repo = asyncio.run(
+    resolution = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == Repo(owner="default-owner", name="default-repo")
+    assert resolution.repo == Repo(owner="default-owner", name="default-repo")
+    assert resolution.explicit is False
     assert threads_client.requested_thread_id == "mapped-thread"
 
 
@@ -884,11 +892,11 @@ def test_get_slack_repo_config_ignores_repo_syntax_in_message(
 
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
 
-    repo = asyncio.run(
+    resolution = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == Repo(owner="saved-owner", name="saved-repo")
+    assert resolution.repo == Repo(owner="saved-owner", name="saved-repo")
 
 
 def test_get_slack_repo_config_applies_profile_default_repo(
@@ -913,21 +921,23 @@ def test_get_slack_repo_config_applies_profile_default_repo(
     )
     monkeypatch.setattr(webhook_common, "get_profile_default_repo", fake_get_profile_default_repo)
 
-    repo = asyncio.run(
+    resolution = asyncio.run(
         webhook_common.get_slack_repo_config(
             "C123", "1.234", slack_user_id="U123", thread_id="mapped-thread"
         )
     )
 
-    assert repo == Repo(owner="profile-owner", name="profile-repo")
+    assert resolution.repo == Repo(owner="profile-owner", name="profile-repo")
+    assert resolution.explicit is False
 
 
 def test_get_slack_repo_config_applies_team_default_repo(
+    fake_store: FakeStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
 
-    async def fake_get_team_default_repo() -> dict[str, str] | None:
+    async def fake_get_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
         return {"owner": "team-owner", "name": "team-repo"}
 
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
@@ -935,14 +945,16 @@ def test_get_slack_repo_config_applies_team_default_repo(
     monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "")
     monkeypatch.setattr(webhook_common, "DEFAULT_REPO_NAME", "")
 
-    repo = asyncio.run(
+    resolution = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo == Repo(owner="team-owner", name="team-repo")
+    assert resolution.repo == Repo(owner="team-owner", name="team-repo")
+    assert resolution.explicit is False
 
 
 def test_get_slack_repo_config_is_none_when_nothing_names_a_repo(
+    fake_store: FakeStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
@@ -954,11 +966,11 @@ def test_get_slack_repo_config_is_none_when_nothing_names_a_repo(
     monkeypatch.setattr(webhook_common, "DEFAULT_REPO_OWNER", "")
     monkeypatch.setattr(webhook_common, "DEFAULT_REPO_NAME", "")
 
-    repo = asyncio.run(
+    resolution = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
     )
 
-    assert repo is None
+    assert resolution == webhook_common.SlackRepoResolution()
 
 
 def _setup_slack_mention_fakes(
@@ -1066,7 +1078,7 @@ def _setup_slack_mention_fakes(
 
 
 @pytest.fixture
-def slack_file_mention(monkeypatch, fake_store):
+async def slack_file_mention(monkeypatch, fake_store, registry_db):
     from agent.sandboxes import lifecycle, state
 
     captured: dict[str, Any] = {}
@@ -1119,7 +1131,7 @@ def slack_file_mention(monkeypatch, fake_store):
     monkeypatch.setattr(lifecycle, "get_recorded_proxy_base_config", lambda _: None)
     monkeypatch.setattr(webhook_common, "get_slack_permalink", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_utils, "download_slack_file", AsyncMock(return_value=b"zip"))
-    fake_store.seed(WORKSPACES_NAMESPACE, "staging", {"slug": "staging", "name": "Staging"})
+    await WORKSPACES.create(WorkspaceCreate(name="Staging", repos=["acme/staging"]), "alice")
     request = SlackRequest(
         channel_id="C123",
         thread_ts="1700000000.000100",
@@ -1155,7 +1167,10 @@ def slack_file_mention(monkeypatch, fake_store):
 @pytest.mark.parametrize("private", [False, True])
 @pytest.mark.parametrize(
     ("existing", "tag", "environment"),
-    [(False, "", None), (False, "env:staging", "staging"), (True, "", "staging")],
+    # A first mention with no tag, repo, or channel binding still resolves
+    # through the shared workspace resolver, which falls all the way back to
+    # the instance default rather than leaving the sandbox unbound.
+    [(False, "", "default"), (False, "env:staging", "staging"), (True, "", "staging")],
 )
 async def test_slack_files_reach_bound_sandbox_with_thread_environment(
     slack_file_mention, private, existing, tag, environment
@@ -1331,7 +1346,9 @@ def test_process_slack_mention_preserves_forwarded_attachment_from_event(
                     "bot_user_id": "UBOT",
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -1372,7 +1389,9 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
                     "bot_user_id": "UBOT",
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -1467,7 +1486,9 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
                     "treat_all_messages_as_mentions": True,
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -1523,7 +1544,9 @@ def test_process_slack_mention_skips_trace_reply_on_followup_mention(
                     "bot_user_id": "UBOT",
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -1576,7 +1599,9 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
                     "bot_user_id": "UBOT",
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -1631,7 +1656,9 @@ def test_process_slack_mention_mapped_user_no_token_record_prompts_setup(
                     "bot_user_id": "UBOT",
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -1682,7 +1709,9 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
                     "bot_user_id": "UBOT",
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -1724,7 +1753,9 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
                     "bot_user_id": "UBOT",
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -1777,7 +1808,9 @@ def test_process_slack_mention_existing_thread_adds_everyone_as_participants(
                     "bot_user_id": "UBOT",
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -1942,13 +1975,13 @@ def test_get_slack_permalink_without_token_returns_none(monkeypatch: pytest.Monk
     assert result is None
 
 
-def test_thread_environment_round_trips_through_metadata(
+def test_thread_workspace_round_trips_through_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A tagged opening message persists the environment; follow-ups read it back.
+    """A tagged opening message persists the workspace; follow-ups read it back.
 
     Without this, a follow-up (which carries no `env:` tag) would resolve the
-    default environment while reusing the sandbox built from the tagged one.
+    default workspace while reusing the sandbox built from the tagged one.
     """
     threads = _FakeThreadsClient({"metadata": {}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
@@ -1957,11 +1990,11 @@ def test_thread_environment_round_trips_through_metadata(
         webhook_common.upsert_agent_thread_metadata(
             "thread-id",
             source="slack",
-            environment="staging",
+            workspace="staging",
         )
     )
     assert threads.thread is not None
-    assert threads.thread["metadata"]["environment"] == "staging"
+    assert threads.thread["metadata"]["workspace"] == "staging"
     assert asyncio.run(webhook_common.get_thread_workspace("thread-id")) == "staging"
 
 
@@ -2002,13 +2035,13 @@ def test_thread_model_choice_is_none_for_auto_selection(
     assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) is None
 
 
-def test_thread_environment_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_thread_workspace_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     threads = _FakeThreadsClient({"metadata": {}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
     assert asyncio.run(webhook_common.get_thread_workspace("thread-id")) is None
 
 
-def test_thread_environment_is_none_for_a_missing_thread(
+def test_thread_workspace_is_none_for_a_missing_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads = _FakeThreadsClient(raise_not_found=True)
@@ -2247,7 +2280,9 @@ def test_process_slack_mention_queues_a_message_edit_instead_of_running(
                     "message_update": True,
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 
@@ -2292,7 +2327,9 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
                     "message_update": True,
                 }
             ),
-            Repo(owner="langchain-ai", name="open-swe"),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
         )
     )
 

@@ -61,7 +61,7 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
             return {"result": {"status": "missing_thread_id"}}
         return {"result": await monitor_background_tasks(thread_id)}
     if task in (WORKSPACE_REFRESH_TASK, LEGACY_REFRESH_TASK):
-        slug = state.workspace_slug or state.environment_slug or cfg.environment
+        slug = state.workspace_slug or state.environment_slug or cfg.workspace_slug
         kind = "update" if state.refresh_kind == "update" else "full"
         return {"result": await run_workspace_refresh_tick(slug or None, kind)}
     if task == "session_cost":

@@ -29,6 +29,8 @@ from agent.threads.summary import (
 from agent.utils.json_types import JsonObject, ThreadLike
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import participant_search_filters
+from agent.workspaces.routing import workspace_for_repo
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 logger = logging.getLogger(__name__)
 
@@ -421,6 +423,9 @@ async def list_dashboard_thread_projects(
                 "name": name,
                 "updatedAt": updated_at,
             }
+    for project in projects.values():
+        owner, _, repo_name = str(project["repoFullName"]).partition("/")
+        project["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
     return sorted(projects.values(), key=lambda project: project["updatedAt"], reverse=True)
 
 

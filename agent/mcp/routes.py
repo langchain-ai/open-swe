@@ -27,6 +27,7 @@ from agent.mcp.workspace import (
     save_workspace_mcp,
 )
 from agent.tool_loaders.workspace_mcp import discover_workspace_mcp
+from agent.workspaces.store import slugify
 
 
 def _reveal_mcp_headers(record: MCPConnection | None) -> JSONResponse:
@@ -39,49 +40,63 @@ def _reveal_mcp_headers(record: MCPConnection | None) -> JSONResponse:
     return JSONResponse(content=headers, headers={"Cache-Control": "no-store"})
 
 
+def _normalized_workspace(raw: str) -> str:
+    try:
+        return slugify(raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 workspace_mcp_router = APIRouter(route_class=MCPRoute)
 
 
-@workspace_mcp_router.get("/workspace-mcps", response_model=list[MCPConnectionPublic])
-async def api_list_workspace_mcps(_admin: dict[str, Any] = ADMIN_DEP) -> list[dict[str, Any]]:
-    return await list_workspace_mcps()
+@workspace_mcp_router.get("/workspaces/{workspace}/mcps", response_model=list[MCPConnectionPublic])
+async def api_list_workspace_mcps(
+    workspace: str, _admin: dict[str, Any] = ADMIN_DEP
+) -> list[dict[str, Any]]:
+    return await list_workspace_mcps(_normalized_workspace(workspace))
 
 
-@workspace_mcp_router.put("/workspace-mcps/{name}", response_model=MCPConnectionPublic)
+@workspace_mcp_router.put("/workspaces/{workspace}/mcps/{name}", response_model=MCPConnectionPublic)
 async def api_save_workspace_mcp(
+    workspace: str,
     name: str,
     update: MCPConnectionUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
     try:
-        return await save_workspace_mcp(name, update)
+        return await save_workspace_mcp(_normalized_workspace(workspace), name, update)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
 
 
-@workspace_mcp_router.delete("/workspace-mcps/{name}", status_code=204)
-async def api_delete_workspace_mcp(name: str, _admin: dict[str, Any] = ADMIN_DEP) -> None:
-    await delete_workspace_mcp(name)
+@workspace_mcp_router.delete("/workspaces/{workspace}/mcps/{name}", status_code=204)
+async def api_delete_workspace_mcp(
+    workspace: str, name: str, _admin: dict[str, Any] = ADMIN_DEP
+) -> None:
+    await delete_workspace_mcp(_normalized_workspace(workspace), name)
 
 
-@workspace_mcp_router.post("/workspace-mcps/{name}/headers/reveal")
+@workspace_mcp_router.post("/workspaces/{workspace}/mcps/{name}/headers/reveal")
 async def api_reveal_workspace_mcp_headers(
+    workspace: str,
     name: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> JSONResponse:
-    return _reveal_mcp_headers(await get_workspace_mcp(name))
+    return _reveal_mcp_headers(await get_workspace_mcp(_normalized_workspace(workspace), name))
 
 
 @workspace_mcp_router.post(
-    "/workspace-mcps/{name}/discover", response_model=list[MCPToolDescription]
+    "/workspaces/{workspace}/mcps/{name}/discover", response_model=list[MCPToolDescription]
 )
 async def api_discover_workspace_mcp(
+    workspace: str,
     name: str,
     update: MCPConnectionUpdate | None = None,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> list[dict[str, str]]:
     try:
-        return await discover_workspace_mcp(name, update)
+        return await discover_workspace_mcp(_normalized_workspace(workspace), name, update)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
 

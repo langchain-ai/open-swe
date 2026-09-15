@@ -31,7 +31,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from agent.dashboard.team_settings import get_effective_gateway_enabled
+from agent.dashboard.team_settings_cache import cached_gateway_enabled
 from agent.github.app import get_github_app_installation_token
 from agent.middleware import (
     BasePrepareRunMiddleware,
@@ -58,7 +58,6 @@ from agent.sandboxes.providers.langsmith import configure_github_proxy
 from agent.sandboxes.state import unwrap_sandbox_backend
 from agent.tools.read_finding_outcomes import read_finding_outcomes
 from agent.tools.save_review_style import save_review_style_prompt
-from agent.utils import ttl_cache
 from agent.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
@@ -80,14 +79,6 @@ async def _configure_sandbox_github_proxy(
         return
     backend = unwrap_sandbox_backend(sandbox_backend)
     await configure_github_proxy(backend.id, github_token)
-
-
-async def _cached_gateway_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:gateway-enabled",
-        60,
-        get_effective_gateway_enabled,
-    )
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
@@ -142,7 +133,8 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
 
 
 async def get_analyzer(config: RunnableConfig) -> Pregel:
-    thread_id = RunConfig.from_config(config).thread_id
+    cfg = RunConfig.from_config(config)
+    thread_id = cfg.thread_id
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
@@ -155,7 +147,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     backend = CompositeBackend(default=default_backend, routes={SKILLS_ROUTE: StateBackend()})
 
     model_id = DEFAULT_LLM_MODEL_ID
-    use_gateway = await _cached_gateway_enabled()
+    use_gateway = await cached_gateway_enabled(cfg.workspace_slug)
     model_kwargs = provider_model_kwargs(
         model_id,
         None,

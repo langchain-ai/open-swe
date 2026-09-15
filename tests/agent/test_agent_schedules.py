@@ -12,8 +12,11 @@ from pydantic import ValidationError
 
 from agent import store as agent_store
 from agent.dashboard import repo_access
+from agent.dashboard.options import fable_disabled_fallback
+from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
 from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 class _FakeStore:
@@ -1133,6 +1136,78 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert stored["last_thread_id"] == thread_id
     assert stored["last_run_id"] == "run_123"
     assert stored["scope"] == "workspace"
+
+
+async def test_launch_scheduled_agent_run_stamps_workspace_owning_repo(
+    fake_client, auth, monkeypatch, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    workspace = await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice"
+    )
+    record = {
+        "id": "sched_1",
+        "name": "Weekly dependencies",
+        "prompt": "Check dependencies and open a PR if needed",
+        "schedule": "0 9 * * 1",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "model": "Default",
+        "effort": None,
+        "base_branch": "main",
+        "branch_prefix": "open-swe",
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result["status"] == "started"
+    run = fake_client.runs.created[0]
+    assert run["config"]["configurable"]["workspace"] == workspace.slug
+    assert run["config"]["configurable"]["environment"] == workspace.slug
+
+
+async def test_launch_scheduled_agent_run_gates_fable_by_the_repos_workspace(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    """Fable is a per-workspace kill switch, so the run's own workspace decides.
+
+    `default` leaves it on here and the workspace owning the schedule's
+    repository does not, so a flag read from `default` would let the Fable
+    model through.
+    """
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    await upsert_team_settings(TeamSettingsUpdate(fable_enabled=True), workspace="default")
+    record = {
+        "id": "sched_1",
+        "name": "Weekly dependencies",
+        "prompt": "Check dependencies and open a PR if needed",
+        "schedule": "0 9 * * 1",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "model": "anthropic:claude-fable-5-1",
+        "effort": "high",
+        "base_branch": "main",
+        "branch_prefix": "open-swe",
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
+
+    configurable = fake_client.runs.created[0]["config"]["configurable"]
+    assert configurable["workspace"] == "oss"
+    assert (configurable["agent_model_id"], configurable["agent_effort"]) == (
+        fable_disabled_fallback("high")
+    )
 
 
 @pytest.mark.parametrize("creator", [None, "alice"])
