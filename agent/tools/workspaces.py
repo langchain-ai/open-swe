@@ -1,4 +1,4 @@
-"""Admin-thread tools for managing environments.
+"""Admin-thread tools for managing workspaces.
 
 Wired into admin threads; each tool rechecks user or system authorization.
 """
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _require_admin() -> str | None:
-    return await require_admin("manage environments")
+    return await require_admin("manage workspaces")
 
 
 # Deliberately narrower than the record: the agent has no use for authorship
@@ -57,10 +57,10 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
     if record is None:
         return {
             "status": "error",
-            "error": f"no environment named {name!r}; publish_workspace creates one",
+            "error": f"no workspace named {name!r}; publish_workspace creates one",
         }
     if not record.setup_script:
-        return {"status": "error", "error": f"environment {name!r} has no setup_script to run"}
+        return {"status": "error", "error": f"workspace {name!r} has no setup_script to run"}
     if refresh.is_refresh_in_flight(record):
         return {
             "status": "error",
@@ -75,19 +75,19 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
 
 
 async def list_workspaces() -> dict[str, Any]:
-    """List every environment with its snapshot state.
+    """List every workspace with its snapshot state.
 
     The one named ``default`` is what runs boot from; the rest are drafts.
 
     Returns:
-        ``{"ok": True, "environments": [...]}``.
+        ``{"ok": True, "workspaces": [...]}``.
     """
     if error := await _require_admin():
         return {"ok": False, "error": error}
     records = await store.WORKSPACES.list_all()
     return {
         "ok": True,
-        "environments": [
+        "workspaces": [
             {**_summary(record), "is_default": record.slug == store.DEFAULT_WORKSPACE_SLUG}
             for record in records
         ],
@@ -191,7 +191,7 @@ async def publish_workspace(
             backend.id, published_name, timeout=refresh.capture_timeout()
         )
     except Exception as exc:
-        logger.exception("Failed to capture sandbox for environment %s", slug)
+        logger.exception("Failed to capture sandbox for workspace %s", slug)
         return {"ok": False, "error": f"snapshot capture failed: {exc}"}
 
     # Definition and image pointer land in one write, so a failure here means
@@ -207,16 +207,16 @@ async def publish_workspace(
             created_by=login if isinstance(login, str) else "open-swe",
         )
     except Exception as exc:
-        logger.exception("Failed to record environment %s after capture", slug)
+        logger.exception("Failed to record workspace %s after capture", slug)
         await store.discard_unreferenced_snapshot(slug, snapshot_id)
-        return {"ok": False, "error": f"failed to record the environment: {exc}"}
+        return {"ok": False, "error": f"failed to record the workspace: {exc}"}
 
     await store.retire_superseded_snapshot(
         slug, existing.snapshot_id if existing is not None else None, snapshot_id
     )
     if record.setup_script:
         await refresh.ensure_refresh_cron(slug)
-    return {"ok": True, "environment": _summary(record), "created": existing is None}
+    return {"ok": True, "workspace": _summary(record), "created": existing is None}
 
 
 async def refresh_workspace_start(name: str) -> dict[str, Any]:
@@ -241,8 +241,8 @@ async def delete_workspace(name: str) -> dict[str, Any]:
     try:
         deleted = await store.WORKSPACES.remove(slug)
     except Exception as exc:
-        logger.exception("Failed to delete environment %s", slug)
-        return {"ok": False, "error": f"failed to delete environment: {exc}"}
+        logger.exception("Failed to delete workspace %s", slug)
+        return {"ok": False, "error": f"failed to delete workspace: {exc}"}
     if not deleted:
-        return {"ok": False, "error": f"no environment named {name!r}"}
+        return {"ok": False, "error": f"no workspace named {name!r}"}
     return {"ok": True, "deleted": True}

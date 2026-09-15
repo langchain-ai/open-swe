@@ -1,11 +1,11 @@
-"""Named environments: a prompt plus the scripts that build and boot their sandboxes.
+"""Named workspaces: a prompt plus the scripts that build and boot their sandboxes.
 
-An environment is a definition, not a frozen image. It holds a prompt appended to
+A workspace is a definition, not a frozen image. It holds a prompt appended to
 the agent's system prompt, a ``setup_script`` that provisions a sandbox from the
 base snapshot (clone the repos, install toolchains, warm caches), and an optional
 ``update_script`` that freshens what goes stale in an image — a ``git pull``, a
 dependency sync — run against the current snapshot at most hourly, and only while
-the environment is actually in use.
+the workspace is actually in use.
 
 :mod:`agent.workspaces.refresh` runs both scripts in a throwaway
 sandbox and captures the result, nightly on a cron and on demand. Because the
@@ -13,16 +13,16 @@ scripts are the definition, the snapshot can always be rebuilt, and the refresh
 outcome — status, timestamps, and a capped log — rides on the record for the
 dashboard to show.
 
-Snapshots are Docker-style: an environment owns a name (its own, or
-``<prefix>-environment-<slug>`` from ``ENVIRONMENT_SNAPSHOT_PREFIX``) and each
+Snapshots are Docker-style: a workspace owns a name (its own, or
+``<prefix>-environment-<slug>`` from ``WORKSPACE_SNAPSHOT_PREFIX``) and each
 refresh publishes under ``name:latest``, moving the tag to the new content. Runs
 boot from the immutable snapshot id on the record, not from the tag, so a refresh
 mid-run cannot change what a reconnecting sandbox comes back to. The superseded
-snapshot is deleted once the new one is ready, so one environment costs one image.
+snapshot is deleted once the new one is ready, so one workspace costs one image.
 
-A run uses the environment it selected — from the dashboard picker, or an
+A run uses the workspace it selected — from the dashboard picker, or an
 ``env:<name>`` tag on the Slack message that opened the thread — and otherwise
-the one named ``default``. Nothing here is required: with no environment, or one
+the one named ``default``. Nothing here is required: with no workspace, or one
 whose snapshot is not ready, runs fall back to the configured base snapshot.
 """
 
@@ -117,7 +117,7 @@ _ENV_TAG_RE = re.compile(r"(?:(?<=\s)|^)env:([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)
 
 
 def slugify(name: str) -> str:
-    """Return the storage key for an environment name.
+    """Return the storage key for a workspace name.
 
     Also the snapshot name stem, so it is restricted to what a Docker-style tag
     accepts: lowercase alphanumerics and single hyphens.
@@ -134,10 +134,10 @@ def snapshot_name_prefix() -> str:
     A configured prefix carrying a colon would produce a name the platform
     rejects, so it is dropped rather than passed through.
     """
-    prefix = ENV.ENVIRONMENT_SNAPSHOT_PREFIX.get("").strip()
+    prefix = ENV.WORKSPACE_SNAPSHOT_PREFIX.get("").strip()
     if ":" in prefix:
         logger.warning(
-            "ENVIRONMENT_SNAPSHOT_PREFIX %r contains a colon, which snapshot names "
+            "WORKSPACE_SNAPSHOT_PREFIX %r contains a colon, which snapshot names "
             "may not; falling back to the default prefix",
             prefix,
         )
@@ -151,7 +151,7 @@ def default_snapshot_name_for(slug: str) -> str:
 
 
 def script_root() -> str:
-    """Where an environment's scripts and their logs live inside a sandbox.
+    """Where a workspace's scripts and their logs live inside a sandbox.
 
     ``/open-swe/environment`` in a real sandbox, where the agent runs as root.
     Configurable
@@ -178,7 +178,7 @@ def script_log_paths() -> dict[str, str]:
 
 
 def script_command(script: str, label: str) -> str:
-    """Shell command that writes one of an environment's scripts, runs it, and logs it.
+    """Shell command that writes one of a workspace's scripts, runs it, and logs it.
 
     Base64 so nothing in the script body — quotes, heredocs, newlines — can break
     out of the command carrying it.
@@ -211,7 +211,7 @@ def sandbox_update_timeout() -> int:
     Tighter than the builder's: this one is on the critical path before the first
     model call, and a ``git pull`` that takes minutes is broken rather than slow.
     """
-    seconds = ENV.ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS.get_int(
+    seconds = ENV.WORKSPACE_SANDBOX_UPDATE_TIMEOUT_SECONDS.get_int(
         DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
     )
     return seconds if seconds > 0 else DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
@@ -272,7 +272,7 @@ def _validate_repos(value: list[str] | None) -> list[str]:
     if not value:
         return []
     if len(value) > MAX_REPOS:
-        raise ValueError(f"at most {MAX_REPOS} repositories per environment")
+        raise ValueError(f"at most {MAX_REPOS} repositories per workspace")
     return list(dict.fromkeys(normalize_repo_full_name(entry) for entry in value))
 
 
@@ -532,9 +532,9 @@ class Workspace(BaseModel):
 
     @property
     def published_snapshot_name(self) -> str:
-        """The name this environment publishes under, stored or derived.
+        """The name this workspace publishes under, stored or derived.
 
-        Stable for the life of the environment: every refresh re-captures under
+        Stable for the life of the workspace: every refresh re-captures under
         it and moves the tag, so the name is an address callers can hold.
         """
         return self.snapshot_name or default_snapshot_name_for(self.slug)
@@ -558,11 +558,11 @@ class Workspace(BaseModel):
         try:
             return _validate_create_params(self.create_params)
         except ValueError:
-            logger.warning("Ignoring invalid sandbox create params for environment %s", self.slug)
+            logger.warning("Ignoring invalid sandbox create params for workspace %s", self.slug)
             return {}
 
     def option(self, *, include_log: bool = False) -> dict[str, Any]:
-        """Name/slug/refresh-state for the environment picker and the settings page.
+        """Name/slug/refresh-state for the workspace picker and the settings page.
 
         The log excerpt is admin-only: scripts run under ``bash -x``, whose trace
         expands every argument, so a script that put a credential on a command
@@ -599,13 +599,13 @@ class WorkspaceStore(TypedStore[Workspace]):
     async def create(self, create: WorkspaceCreate, created_by: str) -> Workspace:
         record = Workspace.seed(create, created_by)
         if await self.get(record.slug) is not None:
-            raise ValueError(f"environment {create.name!r} already exists")
+            raise ValueError(f"workspace {create.name!r} already exists")
         return await self.put(record.slug, record)
 
     async def apply_update(self, slug: str, update: WorkspaceUpdate) -> Workspace:
         record = await self.get(slug)
         if record is None:
-            raise ValueError(f"no environment named {slug!r}")
+            raise ValueError(f"no workspace named {slug!r}")
         return await self.save(_apply(record, update))
 
     async def publish(
@@ -622,16 +622,16 @@ class WorkspaceStore(TypedStore[Workspace]):
 
         The image already exists by the time this runs; what must not happen is a
         record that carries the new definition but still points at the old image,
-        or a new environment with no image at all. One ``put`` cannot land half.
+        or a new workspace with no image at all. One ``put`` cannot land half.
         """
         if isinstance(definition, WorkspaceCreate):
             if await self.get(slug) is not None:
-                raise ValueError(f"environment {definition.name!r} already exists")
+                raise ValueError(f"workspace {definition.name!r} already exists")
             record = Workspace.seed(definition, created_by)
         else:
             existing = await self.get(slug)
             if existing is None:
-                raise ValueError(f"no environment named {slug!r}")
+                raise ValueError(f"no workspace named {slug!r}")
             record = _apply(existing, definition)
         _stamp_captured(
             record,
@@ -779,7 +779,7 @@ class WorkspaceStore(TypedStore[Workspace]):
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
     if update.name is not None and slugify(update.name) != record.slug:
-        raise ValueError("renaming an environment across slugs is not supported; create a new one")
+        raise ValueError("renaming a workspace across slugs is not supported; create a new one")
     if update.name is not None:
         record.name = update.name.strip()
     if update.prompt is not None:
@@ -824,21 +824,21 @@ WORKSPACES = WorkspaceStore()
 
 
 async def load_default_workspace() -> Workspace | None:
-    """Return the environment named ``default``, or ``None``.
+    """Return the workspace named ``default``, or ``None``.
 
     Fail-soft on purpose: this runs while a sandbox is being created, and a
-    store failure must fall back to the base snapshot with no environment
+    store failure must fall back to the base snapshot with no workspace
     prompt rather than fail the run.
     """
     try:
         return await WORKSPACES.get(DEFAULT_WORKSPACE_SLUG)
     except Exception:
-        logger.warning("default environment resolution failed", exc_info=True)
+        logger.warning("default workspace resolution failed", exc_info=True)
         return None
 
 
 async def load_workspace(slug: str | None) -> Workspace | None:
-    """Return the environment a run uses: the one it selected, else ``default``.
+    """Return the workspace a run uses: the one it selected, else ``default``.
 
     Never raises, and a selection that no longer exists falls back to ``default``
     rather than failing the run.
@@ -848,18 +848,18 @@ async def load_workspace(slug: str | None) -> Workspace | None:
     try:
         record = await WORKSPACES.get(slug)
     except Exception:
-        logger.warning("environment resolution failed for %s", slug, exc_info=True)
+        logger.warning("workspace resolution failed for %s", slug, exc_info=True)
         record = None
     if record is None:
-        logger.info("Environment %s is not configured; falling back to the default", slug)
+        logger.info("Workspace %s is not configured; falling back to the default", slug)
         return await load_default_workspace()
     return record
 
 
 async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str, Any]]:
-    """Every environment's picker/settings view; ``include_logs`` only for admins.
+    """Every workspace's picker/settings view; ``include_logs`` only for admins.
 
-    Prompts and snapshot ids never appear here; picking an environment needs
+    Prompts and snapshot ids never appear here; picking a workspace needs
     neither.
     """
     return [record.option(include_log=include_logs) for record in await WORKSPACES.list_all()]
@@ -869,7 +869,7 @@ def parse_workspace_tag(text: str) -> tuple[str | None, str]:
     """Split a leading-or-inline ``env:<name>`` tag off a message.
 
     Returns ``(slug, text_without_the_tag)``; ``(None, text)`` when there is no
-    tag. The caller decides whether the slug names a real environment — an
+    tag. The caller decides whether the slug names a real workspace — an
     unresolvable tag should be left in the text rather than silently dropped.
     """
     match = _ENV_TAG_RE.search(text or "")
@@ -888,7 +888,7 @@ def require_capture_support() -> None:
     sandbox_type = ENV.SANDBOX_TYPE.get()
     if sandbox_type != "langsmith":
         raise RuntimeError(
-            f"capturing an environment snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"
+            f"capturing a workspace snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"
         )
 
 
@@ -911,9 +911,9 @@ async def capture_workspace_snapshot(
     *,
     timeout: int = 600,
 ) -> Workspace:
-    """Capture ``sandbox_id``'s filesystem as this environment's ``name:tag``.
+    """Capture ``sandbox_id``'s filesystem as this workspace's ``name:tag``.
 
-    The name belongs to the environment and never moves; each capture publishes
+    The name belongs to the workspace and never moves; each capture publishes
     new content under it and the tag is repointed, which is why nothing here
     handles a name collision — re-using a tag is the documented way to move it.
 
@@ -928,7 +928,7 @@ async def capture_workspace_snapshot(
 
     record = await WORKSPACES.get(slug)
     if record is None:
-        raise ValueError(f"no environment named {slug!r}")
+        raise ValueError(f"no workspace named {slug!r}")
 
     snapshot_name = record.published_snapshot_name
     previous_snapshot_id = record.snapshot_id
@@ -937,7 +937,7 @@ async def capture_workspace_snapshot(
     try:
         snapshot_id = await capture_sandbox_snapshot(sandbox_id, snapshot_name, timeout=timeout)
     except Exception as exc:
-        logger.warning("snapshot capture failed for environment %s", slug, exc_info=True)
+        logger.warning("snapshot capture failed for workspace %s", slug, exc_info=True)
         await WORKSPACES.mark_capture_settled(
             slug,
             "ready" if previous_was_ready else "failed",
@@ -960,7 +960,7 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
     """Capture ``sandbox_id`` as ``snapshot_name:latest`` and return the new snapshot id.
 
     Touches no record: callers that must not write anything until the image
-    exists — publishing an environment from a live sandbox — capture first and
+    exists — publishing a workspace from a live sandbox — capture first and
     record second.
     """
     from agent.sandboxes.providers.langsmith import (

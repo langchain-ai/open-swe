@@ -490,7 +490,7 @@ ADMIN_TOOLS = (
 
 
 def workspace_slug(cfg: RunConfig) -> str | None:
-    """The environment this thread selected, if any."""
+    """The workspace this thread selected, if any."""
     return (cfg.environment or "").strip() or None
 
 
@@ -505,7 +505,7 @@ async def _workspace_admin(config: RunnableConfig, profile_login: str | None) ->
 
 
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether this run may manage environments and organization skills.
+    """Whether this run may manage workspaces and organization skills.
 
     The dashboard only stamps ``admin_thread`` for an admin session, but the flag
     is re-checked here against ``CONFIGURED_ADMINS`` so a thread cannot carry the
@@ -660,7 +660,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_issue_number: str,
         draft_prs: bool,
         plan_mode: bool,
-        admin_environments: bool,
+        admin_workspaces: bool,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
@@ -679,7 +679,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
-        self._admin_environments = admin_environments
+        self._admin_workspaces = admin_workspaces
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
 
@@ -803,8 +803,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         del github_token
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-        async with aphase(self._thread_id, "prepare.environment"):
-            environment = await load_workspace(workspace_slug(cfg))
+        async with aphase(self._thread_id, "prepare.workspace"):
+            workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.sender_context"):
             sender_instructions, participant_identities = await asyncio.gather(
                 _resolve_user_custom_instructions(self._credential_login),
@@ -888,9 +888,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=self._repo_instructions,
-                environment_name=environment.name if environment else None,
-                environment_instructions=environment.instructions if environment else None,
-                admin_environments=self._admin_environments,
+                workspace_name=workspace.name if workspace else None,
+                workspace_instructions=workspace.instructions if workspace else None,
+                admin_workspaces=self._admin_workspaces,
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
@@ -1376,7 +1376,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_issue_number=linear_issue_number,
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
-                    admin_environments=admin_thread,
+                    admin_workspaces=admin_thread,
                     model_selection=model_selection,
                     routing_defaults=routing_defaults,
                 ),

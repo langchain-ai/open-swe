@@ -285,14 +285,14 @@ const BUNDLED_SKILLS: Array<Skill> = [
   },
 ]
 
-export const environmentOptionKeys = {
-  all: ["environment-options"] as const,
+export const workspaceOptionKeys = {
+  all: ["workspace-options"] as const,
 }
 
-/** Environments a new thread can boot from. Empty when none are configured. */
-export function useEnvironmentOptions(enabled = true) {
+/** Workspaces a new thread can boot from. Empty when none are configured. */
+export function useWorkspaceOptions(enabled = true) {
   return useQuery({
-    queryKey: environmentOptionKeys.all,
+    queryKey: workspaceOptionKeys.all,
     queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     enabled,

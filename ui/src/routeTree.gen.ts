@@ -13,7 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
-import { Route as EnvironmentsRouteImport } from './routes/environments'
+import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as IncidentsRouteImport } from './routes/incidents'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
@@ -25,7 +25,7 @@ import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
-import { Route as AgentsEnvironmentsRouteImport } from './routes/agents_.environments'
+import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
 import { Route as AgentsSandboxRouteImport } from './routes/agents_.sandbox'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
@@ -61,9 +61,9 @@ const CloudAgentsRoute = CloudAgentsRouteImport.update({
   path: '/cloud-agents',
   getParentRoute: () => rootRouteImport,
 } as any)
-const EnvironmentsRoute = EnvironmentsRouteImport.update({
-  id: '/environments',
-  path: '/environments',
+const WorkspacesRoute = WorkspacesRouteImport.update({
+  id: '/workspaces',
+  path: '/workspaces',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IncidentsRoute = IncidentsRouteImport.update({
@@ -121,9 +121,9 @@ const AgentsThreadsRoute = AgentsThreadsRouteImport.update({
   path: '/threads',
   getParentRoute: () => AgentsRoute,
 } as any)
-const AgentsEnvironmentsRoute = AgentsEnvironmentsRouteImport.update({
-  id: '/agents_/environments',
-  path: '/agents/environments',
+const AgentsWorkspacesRoute = AgentsWorkspacesRouteImport.update({
+  id: '/agents_/workspaces',
+  path: '/agents/workspaces',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsInstructionsRoute = AgentsInstructionsRouteImport.update({
@@ -204,7 +204,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/agents': typeof AgentsRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
-  '/environments': typeof EnvironmentsRoute
+  '/workspaces': typeof WorkspacesRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -215,7 +215,7 @@ export interface FileRoutesByFullPath {
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
-  '/agents/environments': typeof AgentsEnvironmentsRoute
+  '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
@@ -236,7 +236,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/cloud-agents': typeof CloudAgentsRoute
-  '/environments': typeof EnvironmentsRoute
+  '/workspaces': typeof WorkspacesRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
@@ -246,7 +246,7 @@ export interface FileRoutesByTo {
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
-  '/agents/environments': typeof AgentsEnvironmentsRoute
+  '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
@@ -269,7 +269,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/agents': typeof AgentsRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
-  '/environments': typeof EnvironmentsRoute
+  '/workspaces': typeof WorkspacesRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -280,7 +280,7 @@ export interface FileRoutesById {
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
-  '/agents_/environments': typeof AgentsEnvironmentsRoute
+  '/agents_/workspaces': typeof AgentsWorkspacesRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/sandbox': typeof AgentsSandboxRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
@@ -304,7 +304,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/agents'
     | '/cloud-agents'
-    | '/environments'
+    | '/workspaces'
     | '/incidents'
     | '/integrations'
     | '/login'
@@ -315,7 +315,7 @@ export interface FileRouteTypes {
     | '/agents/$threadId'
     | '/agents/skills'
     | '/agents/threads'
-    | '/agents/environments'
+    | '/agents/workspaces'
     | '/agents/instructions'
     | '/agents/sandbox'
     | '/incidents/$incidentId'
@@ -336,7 +336,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/cloud-agents'
-    | '/environments'
+    | '/workspaces'
     | '/integrations'
     | '/login'
     | '/my-settings'
@@ -346,7 +346,7 @@ export interface FileRouteTypes {
     | '/agents/$threadId'
     | '/agents/skills'
     | '/agents/threads'
-    | '/agents/environments'
+    | '/agents/workspaces'
     | '/agents/instructions'
     | '/agents/sandbox'
     | '/incidents/$incidentId'
@@ -368,7 +368,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/agents'
     | '/cloud-agents'
-    | '/environments'
+    | '/workspaces'
     | '/incidents'
     | '/integrations'
     | '/login'
@@ -379,7 +379,7 @@ export interface FileRouteTypes {
     | '/agents/$threadId'
     | '/agents/skills'
     | '/agents/threads'
-    | '/agents_/environments'
+    | '/agents_/workspaces'
     | '/agents_/instructions'
     | '/agents_/sandbox'
     | '/incidents/$incidentId'
@@ -402,7 +402,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AgentsRoute: typeof AgentsRouteWithChildren
   CloudAgentsRoute: typeof CloudAgentsRoute
-  EnvironmentsRoute: typeof EnvironmentsRoute
+  WorkspacesRoute: typeof WorkspacesRoute
   IncidentsRoute: typeof IncidentsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
@@ -410,7 +410,7 @@ export interface RootRouteChildren {
   ReviewRoute: typeof ReviewRoute
   UsageRoute: typeof UsageRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
-  AgentsEnvironmentsRoute: typeof AgentsEnvironmentsRoute
+  AgentsWorkspacesRoute: typeof AgentsWorkspacesRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
   AgentsSandboxRoute: typeof AgentsSandboxRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
@@ -448,11 +448,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CloudAgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/environments': {
-      id: '/environments'
-      path: '/environments'
-      fullPath: '/environments'
-      preLoaderRoute: typeof EnvironmentsRouteImport
+    '/workspaces': {
+      id: '/workspaces'
+      path: '/workspaces'
+      fullPath: '/workspaces'
+      preLoaderRoute: typeof WorkspacesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/incidents': {
@@ -532,11 +532,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsThreadsRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/agents_/environments': {
-      id: '/agents_/environments'
-      path: '/agents/environments'
-      fullPath: '/agents/environments'
-      preLoaderRoute: typeof AgentsEnvironmentsRouteImport
+    '/agents_/workspaces': {
+      id: '/agents_/workspaces'
+      path: '/agents/workspaces'
+      fullPath: '/agents/workspaces'
+      preLoaderRoute: typeof AgentsWorkspacesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents_/instructions': {
@@ -690,7 +690,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AgentsRoute: AgentsRouteWithChildren,
   CloudAgentsRoute: CloudAgentsRoute,
-  EnvironmentsRoute: EnvironmentsRoute,
+  WorkspacesRoute: WorkspacesRoute,
   IncidentsRoute: IncidentsRouteWithChildren,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,
@@ -698,7 +698,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReviewRoute: ReviewRoute,
   UsageRoute: UsageRoute,
   AdminEvalsRoute: AdminEvalsRoute,
-  AgentsEnvironmentsRoute: AgentsEnvironmentsRoute,
+  AgentsWorkspacesRoute: AgentsWorkspacesRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
   AgentsSandboxRoute: AgentsSandboxRoute,
   ReviewStylesRoute: ReviewStylesRoute,

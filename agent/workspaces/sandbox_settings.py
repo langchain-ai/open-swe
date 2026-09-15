@@ -7,7 +7,7 @@ stored value wins, and an unset record falls back to the env var.
 
 The value is an opaque provider-scoped identifier — for ``SANDBOX_TYPE=langsmith``
 it is a LangSmith snapshot id — so it is stored as free text with no format
-validation. An environment with a ready snapshot still takes precedence over this
+validation. A workspace with a ready snapshot still takes precedence over this
 base.
 """
 

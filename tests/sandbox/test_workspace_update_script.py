@@ -33,7 +33,7 @@ def _script_run(backend: MagicMock) -> str:
 
 
 def _stale(**overrides: object) -> Workspace:
-    """An environment whose snapshot has never been captured, so it is stale."""
+    """A workspace whose snapshot has never been captured, so it is stale."""
     return Workspace(
         slug="base",
         update_script="git pull",
@@ -69,7 +69,7 @@ async def test_a_fresh_image_costs_the_run_nothing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_environment_and_no_script_both_skip() -> None:
+async def test_no_workspace_and_no_script_both_skip() -> None:
     backend = _backend(_Result("", 0))
 
     await SandboxCreateConfig(snapshot_id=None).run_update_script(backend, None)

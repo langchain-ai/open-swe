@@ -94,7 +94,7 @@ async def test_refresh_runs_the_script_then_captures_and_cleans_up(
         patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
         await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
-        result = await refresh.refresh_environment("base")
+        result = await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
     assert result["status"] == "success"
@@ -126,7 +126,7 @@ async def test_the_update_script_runs_after_setup_and_gates_the_capture(
             WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
             "ramon",
         )
-        result = await refresh.refresh_environment("base")
+        result = await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
     assert result["status"] == "failed"
@@ -158,7 +158,7 @@ async def test_a_failing_script_is_never_captured(fake_store: FakeStore) -> None
             snapshot_name="openswe-environment-base",
             source_sandbox_id="sb-prior",
         )
-        result = await refresh.refresh_environment("base")
+        result = await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
     assert result["status"] == "failed"
@@ -183,7 +183,7 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure(
         patch.object(refresh, "_release_builder_sandbox", release),
     ):
         await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
-        result = await refresh.refresh_environment("base")
+        result = await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
     assert result["status"] == "failed"
@@ -200,7 +200,7 @@ async def test_a_refresh_in_flight_blocks_a_second_one(fake_store: FakeStore) ->
     with patch.object(refresh, "_create_builder_sandbox", create):
         await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
         await WORKSPACES.mark_refreshing("base")
-        result = await refresh.refresh_environment("base")
+        result = await refresh.refresh_workspace("base")
 
     assert result["status"] == "already_refreshing"
     create.assert_not_awaited()
@@ -214,23 +214,23 @@ async def test_refresh_requires_the_langsmith_provider(
     create = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create):
         await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
-        result = await refresh.refresh_environment("base")
+        result = await refresh.refresh_workspace("base")
 
     assert result["status"] == "unsupported"
     create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_the_nightly_sweep_only_visits_scripted_environments(
+async def test_the_nightly_sweep_only_visits_scripted_workspaces(
     fake_store: FakeStore,
 ) -> None:
     refreshed = AsyncMock(return_value={"status": "success"})
-    with patch.object(refresh, "refresh_environment", refreshed):
+    with patch.object(refresh, "refresh_workspace", refreshed):
         await WORKSPACES.create(
             WorkspaceCreate(name="scripted", setup_script="make setup"), "ramon"
         )
         await WORKSPACES.create(WorkspaceCreate(name="bare"), "ramon")
-        await refresh.run_environment_refresh_tick(None)
+        await refresh.run_workspace_refresh_tick(None)
 
     assert [call.args[0] for call in refreshed.await_args_list] == ["scripted"]
 
@@ -260,7 +260,7 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
             snapshot_name="openswe-environment-base",
             source_sandbox_id="sb-prior",
         )
-        result = await refresh.refresh_environment("base", "update")
+        result = await refresh.refresh_workspace("base", "update")
         record = await WORKSPACES.get("base")
 
     assert result["status"] == "success"
@@ -282,7 +282,7 @@ async def test_an_update_needs_a_snapshot_to_update(fake_store: FakeStore) -> No
             WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
             "ramon",
         )
-        result = await refresh.refresh_environment("base", "update")
+        result = await refresh.refresh_workspace("base", "update")
 
     assert result["status"] == "no_snapshot_to_update"
     create_builder.assert_not_awaited()
@@ -387,7 +387,7 @@ async def test_cron_registration_is_idempotent(fake_store: FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_deleting_an_environment_removes_its_cron(fake_store: FakeStore) -> None:
+async def test_deleting_an_workspace_removes_its_cron(fake_store: FakeStore) -> None:
     client = MagicMock()
     client.crons.create = AsyncMock(return_value={"cron_id": "cron-1"})
     client.crons.delete = AsyncMock()
@@ -415,7 +415,7 @@ async def test_a_refresh_records_every_stage_it_reaches(fake_store: FakeStore) -
             WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
             "ramon",
         )
-        await refresh.refresh_environment("base")
+        await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
     assert record is not None
@@ -440,7 +440,7 @@ async def test_the_step_that_broke_is_the_one_left_failed(fake_store: FakeStore)
         patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
     ):
         await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
-        await refresh.refresh_environment("base")
+        await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
     assert record is not None
@@ -468,7 +468,7 @@ async def test_the_builder_is_published_while_it_lives_and_cleared_after(
         patch.object(refresh, "capture_workspace_snapshot", _capture),
     ):
         await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
-        await refresh.refresh_environment("base")
+        await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
     assert published == ["sb-builder"]

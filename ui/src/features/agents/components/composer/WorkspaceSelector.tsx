@@ -4,26 +4,26 @@ import { CaretDownIcon, StackIcon } from "@phosphor-icons/react"
 import type { WorkspaceOption } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-interface EnvironmentSelectorProps {
-  environments: Array<WorkspaceOption>
+interface WorkspaceSelectorProps {
+  workspaces: Array<WorkspaceOption>
   selectedSlug: string | null
   onChange: (slug: string | null) => void
   disabled?: boolean
 }
 
 /**
- * Picks the environment a new thread's sandbox boots from.
+ * Picks the workspace a new thread's sandbox boots from.
  *
  * Only rendered when there is more than one to choose between — with a single
- * environment (or none) the choice is already made, so the control would be
+ * workspace (or none) the choice is already made, so the control would be
  * noise.
  */
-export function EnvironmentSelector({
-  environments,
+export function WorkspaceSelector({
+  workspaces,
   selectedSlug,
   onChange,
   disabled = false,
-}: EnvironmentSelectorProps) {
+}: WorkspaceSelectorProps) {
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -38,31 +38,29 @@ export function EnvironmentSelector({
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  if (environments.length < 2) return null
+  if (workspaces.length < 2) return null
 
-  const selected = environments.find((env) => env.slug === selectedSlug)
+  const selected = workspaces.find((env) => env.slug === selectedSlug)
 
   return (
     <div ref={dropdownRef} className="relative min-w-0 shrink">
       <button
         type="button"
         disabled={disabled}
-        aria-label="Environment"
+        aria-label="Workspace"
         onClick={() => setOpen((value) => !value)}
         className="flex max-w-[220px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
       >
         <StackIcon className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
-          {selected?.name ?? "No environment"}
+          {selected?.name ?? "No workspace"}
         </span>
         <CaretDownIcon className="size-3 shrink-0 opacity-70" />
       </button>
       {open && (
         <div className="absolute top-full left-0 z-50 mt-1 flex max-h-72 w-64 flex-col overflow-y-auto rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg">
-          <div className="px-2 pt-2 pb-1 text-muted-foreground">
-            Environment
-          </div>
-          {environments.map((env) => {
+          <div className="px-2 pt-2 pb-1 text-muted-foreground">Workspace</div>
+          {workspaces.map((env) => {
             const isSelected = env.slug === selectedSlug
             return (
               <button

@@ -476,9 +476,9 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const EnvironmentIcon =
+  const LocationIcon =
     item.location === "local" ? IoLaptopOutline : IoCloudOutline
-  const environmentLabel = item.location === "local" ? "This Mac" : "Cloud"
+  const locationLabel = item.location === "local" ? "This Mac" : "Cloud"
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -486,9 +486,9 @@ function ThreadHoverCard({
         <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
           {item.title}
         </span>
-        <EnvironmentIcon
+        <LocationIcon
           className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-          aria-label={environmentLabel}
+          aria-label={locationLabel}
         />
         <span className="mt-px shrink-0 text-[11px] text-muted-foreground">
           {compactAge(item.updatedAt)}

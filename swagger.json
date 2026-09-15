@@ -296,536 +296,6 @@
         "title": "EnabledReviewRepoUpdate",
         "type": "object"
       },
-      "Environment": {
-        "properties": {
-          "base_snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Snapshot Id"
-          },
-          "create_params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Create Params",
-            "type": "object"
-          },
-          "created_at": {
-            "default": "",
-            "title": "Created At",
-            "type": "string"
-          },
-          "created_by": {
-            "default": "",
-            "title": "Created By",
-            "type": "string"
-          },
-          "fs_capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fs Capacity Bytes"
-          },
-          "last_captured_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Captured At"
-          },
-          "mem_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mem Bytes"
-          },
-          "name": {
-            "default": "",
-            "title": "Name",
-            "type": "string"
-          },
-          "prompt": {
-            "default": "",
-            "title": "Prompt",
-            "type": "string"
-          },
-          "refresh_cron_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Cron Id"
-          },
-          "refresh_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Error"
-          },
-          "refresh_finished_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Finished At"
-          },
-          "refresh_kind": {
-            "anyOf": [
-              {
-                "enum": [
-                  "full",
-                  "update"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Kind"
-          },
-          "refresh_log": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Log"
-          },
-          "refresh_run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Run Id"
-          },
-          "refresh_sandbox_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Sandbox Id"
-          },
-          "refresh_started_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Started At"
-          },
-          "refresh_status": {
-            "default": "never",
-            "enum": [
-              "never",
-              "refreshing",
-              "success",
-              "failed"
-            ],
-            "title": "Refresh Status",
-            "type": "string"
-          },
-          "refresh_steps": {
-            "items": {
-              "$ref": "#/components/schemas/RefreshStep"
-            },
-            "title": "Refresh Steps",
-            "type": "array"
-          },
-          "repos": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Repos",
-            "type": "array"
-          },
-          "setup_script": {
-            "default": "",
-            "title": "Setup Script",
-            "type": "string"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Id"
-          },
-          "snapshot_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Name"
-          },
-          "snapshot_status": {
-            "default": "none",
-            "enum": [
-              "none",
-              "capturing",
-              "ready",
-              "failed"
-            ],
-            "title": "Snapshot Status",
-            "type": "string"
-          },
-          "snapshot_tag": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Tag"
-          },
-          "source_sandbox_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Sandbox Id"
-          },
-          "status_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status Message"
-          },
-          "update_script": {
-            "default": "",
-            "title": "Update Script",
-            "type": "string"
-          },
-          "updated_at": {
-            "default": "",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vcpus"
-          }
-        },
-        "required": [
-          "slug"
-        ],
-        "title": "Environment",
-        "type": "object"
-      },
-      "EnvironmentCreate": {
-        "properties": {
-          "base_snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Snapshot Id"
-          },
-          "create_params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Create Params",
-            "type": "object"
-          },
-          "fs_capacity_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fs Capacity Bytes"
-          },
-          "mem_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mem Bytes"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "prompt": {
-            "default": "",
-            "title": "Prompt",
-            "type": "string"
-          },
-          "repos": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Repos",
-            "type": "array"
-          },
-          "setup_script": {
-            "default": "",
-            "title": "Setup Script",
-            "type": "string"
-          },
-          "snapshot_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Name"
-          },
-          "update_script": {
-            "default": "",
-            "title": "Update Script",
-            "type": "string"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vcpus"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "EnvironmentCreate",
-        "type": "object"
-      },
-      "EnvironmentUpdate": {
-        "description": "Partial update: only the fields present are written.",
-        "properties": {
-          "base_snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Snapshot Id"
-          },
-          "create_params": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Create Params"
-          },
-          "fs_capacity_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fs Capacity Bytes"
-          },
-          "mem_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mem Bytes"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "prompt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt"
-          },
-          "repos": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Repos"
-          },
-          "setup_script": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Setup Script"
-          },
-          "snapshot_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Name"
-          },
-          "update_script": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Update Script"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vcpus"
-          }
-        },
-        "title": "EnvironmentUpdate",
-        "type": "object"
-      },
       "FeedbackResponse": {
         "properties": {
           "errors": {
@@ -2691,6 +2161,536 @@
         ],
         "title": "WebhookResponse",
         "type": "object"
+      },
+      "Workspace": {
+        "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
+          "create_params": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Create Params",
+            "type": "object"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "default": "",
+            "title": "Created By",
+            "type": "string"
+          },
+          "fs_capacity_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fs Capacity Bytes"
+          },
+          "last_captured_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Captured At"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Bytes"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "refresh_cron_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Cron Id"
+          },
+          "refresh_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Error"
+          },
+          "refresh_finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Finished At"
+          },
+          "refresh_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "update"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Kind"
+          },
+          "refresh_log": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Log"
+          },
+          "refresh_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Run Id"
+          },
+          "refresh_sandbox_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Sandbox Id"
+          },
+          "refresh_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Started At"
+          },
+          "refresh_status": {
+            "default": "never",
+            "enum": [
+              "never",
+              "refreshing",
+              "success",
+              "failed"
+            ],
+            "title": "Refresh Status",
+            "type": "string"
+          },
+          "refresh_steps": {
+            "items": {
+              "$ref": "#/components/schemas/RefreshStep"
+            },
+            "title": "Refresh Steps",
+            "type": "array"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "setup_script": {
+            "default": "",
+            "title": "Setup Script",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "snapshot_status": {
+            "default": "none",
+            "enum": [
+              "none",
+              "capturing",
+              "ready",
+              "failed"
+            ],
+            "title": "Snapshot Status",
+            "type": "string"
+          },
+          "snapshot_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Tag"
+          },
+          "source_sandbox_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sandbox Id"
+          },
+          "status_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Message"
+          },
+          "update_script": {
+            "default": "",
+            "title": "Update Script",
+            "type": "string"
+          },
+          "updated_at": {
+            "default": "",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "title": "Workspace",
+        "type": "object"
+      },
+      "WorkspaceCreate": {
+        "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
+          "create_params": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Create Params",
+            "type": "object"
+          },
+          "fs_capacity_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fs Capacity Bytes"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Bytes"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "setup_script": {
+            "default": "",
+            "title": "Setup Script",
+            "type": "string"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "update_script": {
+            "default": "",
+            "title": "Update Script",
+            "type": "string"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "WorkspaceCreate",
+        "type": "object"
+      },
+      "WorkspaceUpdate": {
+        "description": "Partial update: only the fields present are written.",
+        "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
+          "create_params": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create Params"
+          },
+          "fs_capacity_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fs Capacity Bytes"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Bytes"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "repos": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repos"
+          },
+          "setup_script": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup Script"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "update_script": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Script"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
+          }
+        },
+        "title": "WorkspaceUpdate",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -3638,309 +3638,6 @@
         "tags": [
           "dashboard",
           "review"
-        ]
-      }
-    },
-    "/dashboard/api/environments": {
-      "get": {
-        "operationId": "api_list_environments_dashboard_api_environments_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api List Environments Dashboard Api Environments Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Environments",
-        "tags": [
-          "dashboard",
-          "environments"
-        ]
-      },
-      "post": {
-        "operationId": "api_create_environment_dashboard_api_environments_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnvironmentCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Environment"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Create Environment",
-        "tags": [
-          "dashboard",
-          "environments"
-        ]
-      }
-    },
-    "/dashboard/api/environments/options": {
-      "get": {
-        "description": "Pickable environments for any signed-in user; refresh logs only for admins.",
-        "operationId": "api_environment_options_dashboard_api_environments_options_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Environment Options Dashboard Api Environments Options Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Environment Options",
-        "tags": [
-          "dashboard",
-          "environments"
-        ]
-      }
-    },
-    "/dashboard/api/environments/{slug}": {
-      "delete": {
-        "operationId": "api_delete_environment_dashboard_api_environments__slug__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Delete Environment",
-        "tags": [
-          "dashboard",
-          "environments"
-        ]
-      },
-      "get": {
-        "operationId": "api_get_environment_dashboard_api_environments__slug__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Environment"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Environment",
-        "tags": [
-          "dashboard",
-          "environments"
-        ]
-      },
-      "put": {
-        "operationId": "api_update_environment_dashboard_api_environments__slug__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnvironmentUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Environment"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Update Environment",
-        "tags": [
-          "dashboard",
-          "environments"
-        ]
-      }
-    },
-    "/dashboard/api/environments/{slug}/refresh": {
-      "post": {
-        "description": "Start a snapshot rebuild from the environment's scripts.\n\nStarted in the background rather than awaited: a rebuild takes minutes, and\nthe outcome lands on the record for the dashboard to poll.",
-        "operationId": "api_refresh_environment_dashboard_api_environments__slug__refresh_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Refresh Environment Dashboard Api Environments  Slug  Refresh Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Refresh Environment",
-        "tags": [
-          "dashboard",
-          "environments"
         ]
       }
     },
@@ -7342,7 +7039,7 @@
         "summary": "Api Get Sandbox Settings",
         "tags": [
           "dashboard",
-          "environments"
+          "workspaces"
         ]
       },
       "put": {
@@ -7392,7 +7089,7 @@
         "summary": "Api Set Sandbox Settings",
         "tags": [
           "dashboard",
-          "environments"
+          "workspaces"
         ]
       }
     },
@@ -10372,6 +10069,309 @@
         "summary": "Api Reveal Workspace Mcp Headers",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces": {
+      "get": {
+        "operationId": "api_list_workspaces_dashboard_api_workspaces_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api List Workspaces Dashboard Api Workspaces Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Workspaces",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_workspace_dashboard_api_workspaces_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/options": {
+      "get": {
+        "description": "Pickable workspaces for any signed-in user; refresh logs only for admins.",
+        "operationId": "api_workspace_options_dashboard_api_workspaces_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Workspace Options Dashboard Api Workspaces Options Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Workspace Options",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{slug}": {
+      "delete": {
+        "operationId": "api_delete_workspace_dashboard_api_workspaces__slug__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      },
+      "get": {
+        "operationId": "api_get_workspace_dashboard_api_workspaces__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      },
+      "put": {
+        "operationId": "api_update_workspace_dashboard_api_workspaces__slug__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{slug}/refresh": {
+      "post": {
+        "description": "Start a snapshot rebuild from the workspace's scripts.\n\nStarted in the background rather than awaited: a rebuild takes minutes, and\nthe outcome lands on the record for the dashboard to poll.",
+        "operationId": "api_refresh_workspace_dashboard_api_workspaces__slug__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Refresh Workspace Dashboard Api Workspaces  Slug  Refresh Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Refresh Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
         ]
       }
     },

@@ -1,16 +1,16 @@
-"""Rebuilding an environment's snapshot from its scripts.
+"""Rebuilding a workspace's snapshot from its scripts.
 
 Two kinds of refresh, both on a throwaway builder sandbox that is stopped once
 its capture lands:
 
 - ``full``: boot from the base snapshot, run ``setup_script`` then
-  ``update_script``, capture. Nightly per environment on a LangGraph cron, and on
+  ``update_script``, capture. Nightly per workspace on a LangGraph cron, and on
   demand from an admin thread. This is the lineage reset — every update chains
   snapshot to snapshot, and the nightly rebuild from base keeps drift from
   accumulating.
-- ``update``: boot from the environment's *current* snapshot, run only
+- ``update``: boot from the workspace's *current* snapshot, run only
   ``update_script`` (a ``git pull``, a dependency sync), capture. Triggered
-  lazily: creating a sandbox for an environment whose snapshot is older than
+  lazily: creating a sandbox for a workspace whose snapshot is older than
   ``UPDATE_INTERVAL_SECONDS`` enqueues one in the background, so the image
   converges and later creations skip the work.
 
@@ -21,7 +21,7 @@ triggered it, and when runs are sparse every run is a triggering run, so the
 first one after a quiet spell would work against a checkout as old as the last
 nightly rebuild.
 
-The outcome — status, kind, timestamps, a capped log — lands on the environment
+The outcome — status, kind, timestamps, a capped log — lands on the workspace
 record for the dashboard. A failed refresh of either kind leaves the previous
 snapshot in place: runs keep booting from the last image that worked.
 """
@@ -49,7 +49,9 @@ from agent.workspaces.store import (
 logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "scheduler"
-REFRESH_TASK = "environment_refresh"
+REFRESH_TASK = "workspace_refresh"
+# Crons registered before the rename still carry this task name.
+LEGACY_REFRESH_TASK = "environment_refresh"
 
 DEFAULT_SCRIPT_TIMEOUT_SECONDS = 30 * 60
 DEFAULT_UPDATE_TIMEOUT_SECONDS = 10 * 60
@@ -71,7 +73,7 @@ def _seconds(var: EnvVar, default: int) -> int:
 
 
 def capture_timeout() -> int:
-    return _seconds(ENV.ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS, DEFAULT_CAPTURE_TIMEOUT_SECONDS)
+    return _seconds(ENV.WORKSPACE_CAPTURE_TIMEOUT_SECONDS, DEFAULT_CAPTURE_TIMEOUT_SECONDS)
 
 
 def _client():
@@ -89,7 +91,7 @@ def _parse_iso(value: str | None) -> datetime | None:
 
 
 def is_refresh_in_flight(record: Workspace) -> bool:
-    """Whether another refresh of this environment is still plausibly running."""
+    """Whether another refresh of this workspace is still plausibly running."""
     if record.refresh_status != "refreshing":
         return False
     started_at = _parse_iso(record.refresh_started_at)
@@ -99,13 +101,13 @@ def is_refresh_in_flight(record: Workspace) -> bool:
 
 
 def daily_schedule(slug: str) -> str:
-    """Daily cron expression, staggered per environment to spread the rebuilds."""
+    """Daily cron expression, staggered per workspace to spread the rebuilds."""
     digest = int(hashlib.sha256(slug.encode()).hexdigest(), 16)
     return f"{digest % 60} {3 + (digest // 60) % 3} * * *"  # 03:00–05:59 UTC
 
 
 async def ensure_refresh_cron(slug: str) -> str | None:
-    """Idempotently register the daily refresh cron for an environment."""
+    """Idempotently register the daily refresh cron for a workspace."""
     record = await WORKSPACES.get(slug)
     if record is None:
         return None
@@ -115,11 +117,11 @@ async def ensure_refresh_cron(slug: str) -> str | None:
         cron = await _client().crons.create(
             _ASSISTANT_ID,
             schedule=daily_schedule(slug),
-            input={"task": REFRESH_TASK, "environment_slug": slug},
-            metadata={"kind": REFRESH_TASK, "environment": slug},
+            input={"task": REFRESH_TASK, "workspace_slug": slug},
+            metadata={"kind": REFRESH_TASK, "workspace": slug},
         )
     except Exception:
-        logger.exception("Failed to create refresh cron for environment %s", slug)
+        logger.exception("Failed to create refresh cron for workspace %s", slug)
         return None
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
     if not (isinstance(cron_id, str) and cron_id):
@@ -130,7 +132,7 @@ async def ensure_refresh_cron(slug: str) -> str | None:
 
 
 async def remove_refresh_cron(record: Workspace | None) -> None:
-    """Delete the refresh cron carried by an environment record, if any."""
+    """Delete the refresh cron carried by a workspace record, if any."""
     if record is None or not record.refresh_cron_id:
         return
     try:
@@ -184,7 +186,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
             (
                 "setup",
                 script_command(record.setup_script, "setup"),
-                _seconds(ENV.ENVIRONMENT_REFRESH_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS),
+                _seconds(ENV.WORKSPACE_REFRESH_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS),
             )
         )
     if record.update_script:
@@ -192,7 +194,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
             (
                 "update",
                 script_command(record.update_script, "update"),
-                _seconds(ENV.ENVIRONMENT_UPDATE_TIMEOUT_SECONDS, DEFAULT_UPDATE_TIMEOUT_SECONDS),
+                _seconds(ENV.WORKSPACE_UPDATE_TIMEOUT_SECONDS, DEFAULT_UPDATE_TIMEOUT_SECONDS),
             )
         )
     return steps
@@ -238,11 +240,11 @@ async def maybe_start_update(record: Workspace | None) -> str | None:
     try:
         return await start_refresh_run(record.slug, kind="update")
     except Exception:
-        logger.warning("Could not start environment update for %s", record.slug, exc_info=True)
+        logger.warning("Could not start workspace update for %s", record.slug, exc_info=True)
         return None
 
 
-async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str, Any]:
+async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, Any]:
     """Refresh ``slug``'s snapshot on a throwaway builder.
 
     ``full`` boots from the base snapshot and runs setup then update; ``update``
@@ -252,11 +254,11 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
     Returns a status dict rather than raising, carrying the combined log: this is
     awaited by an admin thread iterating on a script, by a cron tick, and by a
     background run, and none of them should surface a traceback. The same detail
-    lands on the environment record.
+    lands on the workspace record.
     """
     record = await WORKSPACES.get(slug)
     if record is None:
-        return {"status": "unknown_environment", "slug": slug}
+        return {"status": "unknown_workspace", "slug": slug}
     if kind == "full" and not record.setup_script:
         return {"status": "no_setup_script", "slug": slug}
     if kind == "update" and not record.update_script:
@@ -312,7 +314,7 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
         await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
         await WORKSPACES.finish_refresh_step(slug, "capture", "success")
     except Exception as exc:
-        logger.warning("Refresh failed for environment %s", slug, exc_info=True)
+        logger.warning("Refresh failed for workspace %s", slug, exc_info=True)
         await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=str(exc))
         return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
     finally:
@@ -321,7 +323,7 @@ async def refresh_environment(slug: str, kind: RefreshKind = "full") -> dict[str
 
     elapsed = int((datetime.now(UTC) - started).total_seconds())
     await WORKSPACES.mark_refresh_settled(slug, "success", log=log)
-    logger.info("Refreshed environment %s (%s) in %ss", slug, kind, elapsed)
+    logger.info("Refreshed workspace %s (%s) in %ss", slug, kind, elapsed)
     return {"status": "success", "slug": slug, "kind": kind, "seconds": elapsed, "log": log}
 
 
@@ -336,12 +338,12 @@ async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None
         run = await _client().runs.create(
             None,
             _ASSISTANT_ID,
-            input={"task": REFRESH_TASK, "environment_slug": slug, "refresh_kind": kind},
-            metadata={"kind": REFRESH_TASK, "environment": slug, "refresh_kind": kind},
+            input={"task": REFRESH_TASK, "workspace_slug": slug, "refresh_kind": kind},
+            metadata={"kind": REFRESH_TASK, "workspace": slug, "refresh_kind": kind},
             on_completion="delete",
         )
     except Exception:
-        logger.exception("Failed to start refresh run for environment %s", slug)
+        logger.exception("Failed to start refresh run for workspace %s", slug)
         return None
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     if not isinstance(run_id, str):
@@ -354,8 +356,10 @@ async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None
     return run_id
 
 
-TASK_PREFIX = "env"
-TASK_KIND = "environment_refresh"
+TASK_PREFIX = "ws"
+# Task handles minted before the rename.
+_LEGACY_TASK_PREFIX = "env"
+TASK_KIND = "workspace_refresh"
 # A trace tail, not the whole log: enough to see the step in flight.
 LIVE_LOG_MAX_BYTES = 4_000
 LIVE_LOG_READ_TIMEOUT_SECONDS = 20
@@ -373,16 +377,20 @@ def refresh_task_id(run_id: str) -> str:
 
 
 def owns_task(task_id: str) -> bool:
-    return task_id.startswith(f"{TASK_PREFIX}-")
+    return task_id.startswith((f"{TASK_PREFIX}-", f"{_LEGACY_TASK_PREFIX}-"))
+
+
+def _run_id_of(task_id: str) -> str:
+    return task_id.removeprefix(f"{TASK_PREFIX}-").removeprefix(f"{_LEGACY_TASK_PREFIX}-")
 
 
 async def _record_for_task(task_id: str) -> Workspace | None:
-    """The environment whose *current* refresh this task id names.
+    """The workspace whose *current* refresh this task id names.
 
     Keyed on the run id rather than the slug so a handle from a superseded
     refresh resolves to nothing instead of reporting a later run's progress.
     """
-    run_id = task_id.removeprefix(f"{TASK_PREFIX}-")
+    run_id = _run_id_of(task_id)
     for record in await WORKSPACES.list_all():
         if record.refresh_run_id == run_id:
             return record
@@ -423,7 +431,7 @@ async def task_status(task_id: str, *, with_output: bool = True) -> dict[str, An
             "error": "task not found",
             "task_id": task_id,
             "detail": (
-                "no environment is tracking this refresh — it finished long enough ago "
+                "no workspace is tracking this refresh — it finished long enough ago "
                 "to be superseded by a later one, or never started"
             ),
         }
@@ -431,7 +439,7 @@ async def task_status(task_id: str, *, with_output: bool = True) -> dict[str, An
     state: dict[str, Any] = {
         "task_id": task_id,
         "kind": TASK_KIND,
-        "environment": record.slug,
+        "workspace": record.slug,
         "refresh_kind": record.refresh_kind,
         "status": _TASK_STATUS.get(record.refresh_status, record.refresh_status),
         "started_at": record.refresh_started_at,
@@ -457,7 +465,7 @@ async def task_status(task_id: str, *, with_output: bool = True) -> dict[str, An
 
 
 async def task_list() -> list[dict[str, Any]]:
-    """Every environment refresh worth reporting, newest attempt first.
+    """Every workspace refresh worth reporting, newest attempt first.
 
     Skips the live trace read: a list must not open a connection per builder.
     """
@@ -476,7 +484,7 @@ async def task_stop(task_id: str) -> dict[str, Any]:
         return {"error": "task not found", "task_id": task_id}
     if record.refresh_status != "refreshing":
         return await task_status(task_id)
-    run_id = task_id.removeprefix(f"{TASK_PREFIX}-")
+    run_id = _run_id_of(task_id)
     try:
         await _client().runs.cancel(None, run_id)
     except Exception:
@@ -488,14 +496,14 @@ async def task_stop(task_id: str) -> dict[str, Any]:
     return await task_status(task_id)
 
 
-async def run_environment_refresh_tick(
+async def run_workspace_refresh_tick(
     slug: str | None, kind: RefreshKind = "full"
 ) -> dict[str, Any]:
-    """Scheduler entrypoint: refresh one environment, or every scripted one."""
+    """Scheduler entrypoint: refresh one workspace, or every scripted one."""
     if slug:
-        return await refresh_environment(slug, kind)
+        return await refresh_workspace(slug, kind)
     results = [
-        await refresh_environment(record.slug, kind)
+        await refresh_workspace(record.slug, kind)
         for record in await WORKSPACES.list_all()
         if record.setup_script
     ]

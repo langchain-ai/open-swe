@@ -851,7 +851,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         or "(no text in mention)"
     )
     is_first_mention = not await common.thread_exists(thread_id)
-    # `env:<name>` on the message that opens a thread picks the environment its
+    # `env:<name>` on the message that opens a thread picks the workspace its
     # sandbox boots from. Only the opening message can: the sandbox is created
     # once, so honoring a later tag would change the prompt but not the image. The
     # tag is stripped only when it resolves, so a typo stays visible in the
@@ -864,7 +864,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
             clean_text = text_without_tag or "(no text in mention)"
         elif tagged_slug:
             common.logger.info(
-                "Slack thread %s tagged unknown environment %s; using the default",
+                "Slack thread %s tagged unknown workspace %s; using the default",
                 thread_id,
                 tagged_slug,
             )
@@ -1017,12 +1017,12 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if mapped_login:
         configurable["github_login"] = mapped_login
         logins_by_user_id[user_id] = mapped_login
-    # Later mentions carry no tag, so the thread's environment comes back from
+    # Later mentions carry no tag, so the thread's workspace comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
-    # was built from the environment the opening message picked.
-    thread_environment = workspace_slug or await common.get_thread_environment(thread_id)
-    if thread_environment:
-        configurable["environment"] = thread_environment
+    # was built from the workspace the opening message picked.
+    thread_workspace = workspace_slug or await common.get_thread_workspace(thread_id)
+    if thread_workspace:
+        configurable["environment"] = thread_workspace
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
@@ -1076,7 +1076,7 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
         staged_files = await _download_slack_files_to_sandbox(
             _slack_file_entries(source_messages),
             thread_id,
-            workspace_slug=thread_environment,
+            workspace_slug=thread_workspace,
         )
         if staged_files:
             operational_context += f"\n\n{_slack_files_section(staged_files)}"
