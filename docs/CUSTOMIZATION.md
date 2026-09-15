@@ -41,7 +41,7 @@ DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"                            # Optional, d
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, default 2592000 (30 d); 0 disables
 ```
 
-This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
+This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. Agents invoke the GitHub CLI as `gh <command>` and rely on the LangSmith proxy for the real credentials. The sandbox must provide a compatible CLI; Open SWE currently requires `gh` 2.50.0 or later. To install the pinned version used by Open SWE in a custom image or environment setup script, run `scripts/install_gh.sh`.
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is only the deployment default. Admins can override it at runtime — from the **Sandbox** page or via `PUT /dashboard/api/sandbox-settings` — so a rebuilt image can be rolled out without a redeploy. See [INSTALLATION.md](./INSTALLATION.md) and `examples/github-actions/set-base-snapshot.yml` for the CI flow.
 
