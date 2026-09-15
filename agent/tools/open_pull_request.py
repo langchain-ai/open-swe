@@ -29,6 +29,7 @@ from agent.slack.code_channels import (
 )
 from agent.threads.plan_store import get_plan_content
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from agent.utils.langsmith import create_langsmith_feedback
 
 logger = logging.getLogger(__name__)
 
@@ -484,15 +485,14 @@ def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[s
     number = record.get("number")
     url = record.get("url")
     for item in existing:
-        if (
-            isinstance(item, dict)
-            and (
-                (item.get("repo_full_name") == repo and item.get("number") == number)
-                or item.get("url") == url
-            )
-            and isinstance(item.get("slack_feedback"), dict)
+        if isinstance(item, dict) and (
+            (item.get("repo_full_name") == repo and item.get("number") == number)
+            or item.get("url") == url
         ):
-            record = {**record, "slack_feedback": item["slack_feedback"]}
+            if isinstance(item.get("opening_run_id"), str):
+                record = {**record, "opening_run_id": item["opening_run_id"]}
+            if isinstance(item.get("slack_feedback"), dict):
+                record = {**record, "slack_feedback": item["slack_feedback"]}
             break
     return [
         item
@@ -560,6 +560,7 @@ async def _record_pr_telemetry(
     base: str,
     pr: dict[str, Any],
     resolves_thread: bool = False,
+    created: bool = True,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
@@ -649,11 +650,13 @@ async def _record_pr_telemetry(
                 "resolves_thread": resolves_thread,
             }
             run_id = config.get("run_id") or cfg.run_id
-            if run_id and cfg.slack_thread and cfg.slack_thread.channel_id:
-                record["slack_feedback"] = {
-                    "run_id": str(run_id),
-                    "channel_id": cfg.slack_thread.channel_id,
-                }
+            if run_id:
+                record["opening_run_id"] = str(run_id)
+                if cfg.slack_thread and cfg.slack_thread.channel_id:
+                    record["slack_feedback"] = {
+                        "run_id": str(run_id),
+                        "channel_id": cfg.slack_thread.channel_id,
+                    }
             pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",
@@ -674,6 +677,21 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            if created and run_id and isinstance(pr_url, str):
+                await create_langsmith_feedback(
+                    str(run_id),
+                    "github_pr_opened",
+                    score=1.0,
+                    comment=f"Agent-authored pull request opened: {pr_url}",
+                    source_info={
+                        "source": "github_pr_opened",
+                        "thread_id": thread_id,
+                        "pr_url": pr_url,
+                        "repo_full_name": f"{owner}/{repo}",
+                        "pr_number": pr_number,
+                    },
+                    idempotency_key=f"github_pr_opened:{pr_url}",
+                )
             try:
                 await PullRequest(
                     owner=owner,
@@ -938,6 +956,7 @@ async def _open_pull_request(
                     base=base,
                     pr=existing,
                     resolves_thread=resolves_thread,
+                    created=False,
                 )
                 return {
                     "success": True,
