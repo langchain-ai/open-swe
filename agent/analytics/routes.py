@@ -16,7 +16,8 @@ router = APIRouter(tags=["analytics"])
 @router.get("/agent-usage-leaderboard")
 async def api_agent_usage_leaderboard(
     period: str | None = "30d",
-    limit: int = 10,
+    limit: int = Query(default=10, ge=1, le=100),
+    cursor: str | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     from asyncpg import PostgresError
@@ -30,6 +31,7 @@ async def api_agent_usage_leaderboard(
         return await usage_leaderboard(
             period=period,
             limit=limit,
+            cursor=cursor,
             current_login=session["sub"],
             current_email=session.get("email"),
             admin=session_is_admin(session),
