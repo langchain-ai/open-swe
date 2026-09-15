@@ -13,6 +13,7 @@ import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { ThreadFeedbackDialog } from "@/features/agents/components/ThreadFeedbackDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
 import type { AgentThread } from "@/features/agents/lib/types"
@@ -92,6 +93,7 @@ export function AgentThreadHeader({
   onVisibilityChange?: (next: ThreadVisibility) => void
 }) {
   const navigate = useNavigate()
+  const session = useSession()
   const refreshLocalThreads = useRefreshLocalThreads()
   const { prefs, toggleLocalPin } = useSidebarPrefs()
   const [deletingLocal, setDeletingLocal] = useState(false)
@@ -105,6 +107,7 @@ export function AgentThreadHeader({
   const deleteThread = useDeleteAgentThread()
   const continuePrivately = useContinueThreadPrivately()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const pinned = localThread
     ? prefs.pinnedLocalIds.includes(localThread.id)
     : Boolean(
@@ -230,6 +233,7 @@ export function AgentThreadHeader({
           resolveThread.mutate({ threadId: thread.id, resolved: !archived })
         }
       }}
+      onFeedback={thread ? () => setFeedbackOpen(true) : undefined}
       onDelete={() => setDeleteOpen(true)}
     />
   )
@@ -358,6 +362,14 @@ export function AgentThreadHeader({
           </ContextMenu.Positioner>
         </ContextMenu.Portal>
       </ContextMenu.Root>
+      {thread && (
+        <ThreadFeedbackDialog
+          open={feedbackOpen}
+          onOpenChange={setFeedbackOpen}
+          threadId={thread.id}
+          login={session.data?.login ?? null}
+        />
+      )}
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={(open) => {
