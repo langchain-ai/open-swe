@@ -17,6 +17,7 @@ from agent.database import postgres
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
+from agent.workspaces.store import WORKSPACES
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 
@@ -183,6 +184,18 @@ def _reset_ttl_cache() -> Iterator[None]:
     ttl_cache.clear()
     yield
     ttl_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _workspace_store_import_completed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Treat the startup import of LangGraph Store workspaces as done.
+
+    Tests do not run the application lifespan, and until that import succeeds
+    :func:`agent.workspaces.routing.repo_is_routable` fails closed rather than
+    reading an empty table as "nobody owns this repository". A test about that
+    path sets the flag back to ``False`` itself.
+    """
+    monkeypatch.setattr(WORKSPACES, "import_completed", True)
 
 
 @pytest.fixture(autouse=True)

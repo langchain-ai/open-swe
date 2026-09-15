@@ -663,6 +663,13 @@ class WorkspaceStore:
     it lands on the constraint and is translated into the same one.
     """
 
+    def __init__(self) -> None:
+        # Set once :func:`import_store_records` has emptied the LangGraph Store
+        # into these tables. Until then an empty ``workspace`` table may only
+        # mean this process failed to populate it, which
+        # :meth:`routing_is_populated` refuses to read as "nobody owns this".
+        self.import_completed = False
+
     async def get(self, slug: str) -> Workspace | None:
         """The workspace stored under ``slug``, or ``None``.
 
@@ -683,6 +690,18 @@ class WorkspaceStore:
                 "Unreadable workspace record", extra={"workspace_slug": slug}, exc_info=True
             )
             return None
+
+    async def routing_is_populated(self) -> bool:
+        """Whether an "unowned repository" answer can be trusted.
+
+        The LangGraph Store import is what fills these tables on a deployment
+        that predates them, so until it has succeeded an empty table cannot be
+        told apart from one this process never managed to write.
+        """
+        if self.import_completed:
+            return True
+        async with postgres.session() as session:
+            return (await session.scalar(select(WorkspaceRow.id).limit(1))) is not None
 
     async def list_all(self) -> list[Workspace]:
         """Every workspace, skipping a row that fails to validate.
@@ -1168,6 +1187,10 @@ async def import_store_records() -> int:
     A record the Store cannot be made sense of, or one whose repositories are
     claimed by another workspace, stays where it is rather than being dropped
     on the floor.
+
+    Raising leaves ``WorkspaceStore.import_completed`` unset, which is what
+    keeps :func:`agent.workspaces.routing.repo_is_routable` from reading the
+    empty table it may have left behind as "nobody owns this repository".
     """
     imported = 0
     for namespace in (WORKSPACES_NAMESPACE, LEGACY_ENVIRONMENTS_NAMESPACE):
@@ -1187,7 +1210,9 @@ async def import_store_records() -> int:
             if await WORKSPACES.get(record.slug) is None:
                 try:
                     await WORKSPACES.put(record.slug, record)
-                except ValueError:
+                except ValueError, IntegrityError:
+                    # One record another workspace has since claimed, or one a
+                    # constraint refuses, must not cost the rest their import.
                     logger.warning(
                         "Could not import a stored workspace record",
                         extra={"workspace": record.slug, "store_namespace": namespace},
@@ -1198,6 +1223,7 @@ async def import_store_records() -> int:
             await delete_value(namespace, record.slug)
     if imported:
         ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
+    WORKSPACES.import_completed = True
     return imported
 
 

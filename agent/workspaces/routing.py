@@ -127,12 +127,20 @@ def _unassigned_policy() -> str:
 async def repo_is_routable(owner: str, name: str) -> bool:
     """Whether a GitHub event for this repository should be handled at all.
 
-    Raises :class:`WorkspaceLookupError` when ownership cannot be read: under
-    the ``ignore`` policy a false answer drops the delivery for good, and
-    GitHub only retries a 5xx.
+    Raises :class:`WorkspaceLookupError` when ownership cannot be read, and when
+    the workspaces are not populated at all: under the ``ignore`` policy a false
+    answer drops the delivery for good, and GitHub only retries a 5xx. A startup
+    import that failed leaves an empty table behind, in which every repository
+    reads as unowned, so "no workspaces yet" is not an answer either.
     """
     if await _repo_owner(owner, name) is not None:
         return True
+    try:
+        populated = await WORKSPACES.routing_is_populated()
+    except Exception as exc:
+        raise WorkspaceLookupError("workspace population lookup failed") from exc
+    if not populated:
+        raise WorkspaceLookupError("workspaces have not been imported into PostgreSQL yet")
     return _unassigned_policy() == "default"
 
 

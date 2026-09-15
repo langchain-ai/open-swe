@@ -657,6 +657,23 @@ async def test_stored_records_are_imported_from_both_namespaces(fake_store: Fake
 
 
 @pytest.mark.usefixtures("registry_db")
+async def test_one_unimportable_record_does_not_stop_the_others(fake_store: FakeStore) -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
+    fake_store.seed(
+        WORKSPACES_NAMESPACE, "taken", {"slug": "taken", "name": "Taken", "repos": ["acme/api"]}
+    )
+    fake_store.seed(
+        WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}
+    )
+
+    assert await import_store_records() == 1
+
+    assert sorted(record.slug for record in await WORKSPACES.list_all()) == ["core", "oss"]
+    # The one whose repository another workspace owns stays where it is.
+    assert sorted(fake_store.values(WORKSPACES_NAMESPACE)) == ["taken"]
+
+
+@pytest.mark.usefixtures("registry_db")
 async def test_importing_twice_imports_nothing_the_second_time(fake_store: FakeStore) -> None:
     fake_store.seed(
         WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}

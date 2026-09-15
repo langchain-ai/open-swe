@@ -49,7 +49,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # the tables and is a no-op once it has.
         imported = await import_store_records()
     except Exception:  # noqa: BLE001
-        logger.warning("Importing workspaces from the LangGraph Store failed", exc_info=True)
+        # Startup continues, but repository routing fails closed until an import
+        # succeeds: the tables this failed to fill make every repository read as
+        # unowned, and GitHub retries a 503 while it drops a 200.
+        logger.exception("Importing workspaces from the LangGraph Store failed")
     else:
         logger.info(
             "Imported workspaces from the LangGraph Store",
