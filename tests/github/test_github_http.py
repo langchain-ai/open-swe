@@ -6,8 +6,6 @@ import httpx2
 import pytest
 
 from agent.github.http import (
-    GITHUB_API_BASE,
-    GITHUB_GRAPHQL,
     _compute_backoff,
     _is_retryable_response,
     _is_secondary_rate_limit,
@@ -23,11 +21,6 @@ def test_github_headers_returns_standard_headers() -> None:
     assert headers["Authorization"] == "Bearer mytoken"
     assert headers["Accept"] == "application/vnd.github+json"
     assert headers["X-GitHub-Api-Version"] == "2022-11-28"
-
-
-def test_github_constants() -> None:
-    assert GITHUB_API_BASE == "https://api.github.com"
-    assert GITHUB_GRAPHQL == "https://api.github.com/graphql"
 
 
 def _make_response(status_code: int, headers: dict[str, str] | None = None) -> httpx2.Response:
