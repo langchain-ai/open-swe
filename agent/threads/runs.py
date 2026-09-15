@@ -5,6 +5,7 @@ import binascii
 import logging
 import uuid
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -467,7 +468,9 @@ async def _enrich_run_start_command(
         raise HTTPException(400, "offloading requires an existing conversation")
     command_images = _dashboard_images_from_content(content)
     invocation_id = new_invocation_id()
+    invocation_started_at = datetime.now(UTC).isoformat()
     overrides = with_invocation_id(None, invocation_id)
+    overrides["invocation_started_at"] = invocation_started_at
     run_model: str | None = None
     run_effort: str | None = None
 
@@ -653,6 +656,7 @@ async def _enrich_run_start_command(
                 if key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
             },
             **agent_version_metadata(),
+            "invocation_started_at": invocation_started_at,
         },
         invocation_id,
     )

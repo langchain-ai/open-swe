@@ -11,7 +11,8 @@ from sqlalchemy import text
 from agent.analytics.events import EventEnvelope
 from agent.analytics.ingestion import ingest
 from agent.config import ENV
-from agent.database.analytics import record_capture, transaction
+from agent.database import transaction
+from agent.database.analytics import record_capture
 
 logger = logging.getLogger(__name__)
 

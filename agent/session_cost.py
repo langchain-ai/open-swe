@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
@@ -28,6 +28,7 @@ class SessionCostRefresh(TypedDict):
     run_id: str
     invocation_id: str
     prepare_run_id: str
+    invocation_started_at: NotRequired[str]
     channel_id: str
     thread_ts: str
     attempt: int
@@ -48,7 +49,7 @@ def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | Non
         return None
     if invocation_id is None or any(value is None for value in values.values()):
         return None
-    return {
+    payload: SessionCostRefresh = {
         "task": "session_cost",
         "agent_thread_id": values["agent_thread_id"] or "",
         "run_id": values["run_id"] or "",
@@ -58,6 +59,9 @@ def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | Non
         "thread_ts": values["thread_ts"] or "",
         "attempt": attempt,
     }
+    if started_at := _value(state, "invocation_started_at"):
+        payload["invocation_started_at"] = started_at
+    return payload
 
 
 async def schedule_session_cost_refresh(
@@ -120,8 +124,11 @@ async def _refresh_once(
         return "unavailable", "run has no Slack response"
 
     try:
+        cost_kwargs: dict[str, Any] = {}
+        if started_at := payload.get("invocation_started_at"):
+            cost_kwargs["lookup_start"] = started_at
         snapshot = await get_langsmith_thread_cost(
-            payload["agent_thread_id"], payload["invocation_id"]
+            payload["agent_thread_id"], payload["invocation_id"], **cost_kwargs
         )
     except LangSmithCostUnavailable as exc:
         return "unavailable", str(exc)
