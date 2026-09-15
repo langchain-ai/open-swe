@@ -33,16 +33,37 @@ import re
 import shlex
 from typing import Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, field_validator
 
 from agent.config import ENV
 from agent.review.styles import normalize_repo_full_name
-from agent.store import TypedStore, now_iso
+from agent.store import TypedStore, now_iso, search_all_values
 
 logger = logging.getLogger(__name__)
 
 WORKSPACES_NAMESPACE: list[str] = ["workspaces"]
 DEFAULT_WORKSPACE_SLUG = "default"
+LEGACY_ENVIRONMENTS_NAMESPACE: list[str] = ["environments"]
+MAX_SLACK_CHANNELS = 50
+# Real Slack channel ids are longer, but the fixed prefix is what a workspace
+# record actually depends on; a looser minimum keeps short test/fixture ids valid.
+_SLACK_CHANNEL_RE = re.compile(r"^[CG][A-Z0-9]+$")
+
+
+def normalize_slack_channel_id(value: str) -> str:
+    channel_id = (value or "").strip().upper()
+    if not _SLACK_CHANNEL_RE.fullmatch(channel_id):
+        raise ValueError("slack channel ids must be Slack channel ids starting with C or G")
+    return channel_id
+
+
+def _validate_slack_channel_ids(value: list[str] | None) -> list[str]:
+    if not value:
+        return []
+    if len(value) > MAX_SLACK_CHANNELS:
+        raise ValueError(f"at most {MAX_SLACK_CHANNELS} Slack channels per workspace")
+    return list(dict.fromkeys(normalize_slack_channel_id(entry) for entry in value))
+
 
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
 RefreshStatus = Literal["never", "refreshing", "success", "failed"]
@@ -336,6 +357,7 @@ class WorkspaceCreate(BaseModel):
     base_snapshot_id: str | None = None
     snapshot_name: str | None = None
     repos: list[str] = Field(default_factory=list)
+    slack_channel_ids: list[str] = Field(default_factory=list)
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -371,6 +393,11 @@ class WorkspaceCreate(BaseModel):
     def _check_repos(cls, v: list[str]) -> list[str]:
         return _validate_repos(v)
 
+    @field_validator("slack_channel_ids")
+    @classmethod
+    def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
+        return _validate_slack_channel_ids(v)
+
     @field_validator("create_params")
     @classmethod
     def _check_create_params(cls, v: dict[str, JsonValue]) -> dict[str, JsonValue]:
@@ -387,6 +414,7 @@ class WorkspaceUpdate(BaseModel):
     base_snapshot_id: str | None = None
     snapshot_name: str | None = None
     repos: list[str] | None = None
+    slack_channel_ids: list[str] | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -416,6 +444,11 @@ class WorkspaceUpdate(BaseModel):
     @classmethod
     def _check_repos(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _validate_repos(v)
+
+    @field_validator("slack_channel_ids")
+    @classmethod
+    def _check_slack_channel_ids(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _validate_slack_channel_ids(v)
 
     @field_validator("create_params")
     @classmethod
@@ -454,6 +487,7 @@ class Workspace(BaseModel):
     update_script: str = ""
     base_snapshot_id: str | None = None
     repos: list[str] = Field(default_factory=list)
+    slack_channel_ids: list[str] = Field(default_factory=list)
     mem_bytes: int | None = None
     vcpus: int | None = None
     fs_capacity_bytes: int | None = None
@@ -492,6 +526,11 @@ class Workspace(BaseModel):
         """Stripped on the way in, so ``if record.setup_script`` is the whole test."""
         return v.strip() if isinstance(v, str) else ("" if v is None else v)
 
+    @field_validator("slack_channel_ids")
+    @classmethod
+    def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
+        return _validate_slack_channel_ids(v)
+
     @classmethod
     def seed(cls, create: WorkspaceCreate, created_by: str) -> Workspace:
         now = now_iso()
@@ -504,6 +543,7 @@ class Workspace(BaseModel):
             base_snapshot_id=create.base_snapshot_id,
             snapshot_name=create.snapshot_name or default_snapshot_name_for(slugify(create.name)),
             repos=create.repos,
+            slack_channel_ids=create.slack_channel_ids,
             mem_bytes=create.mem_bytes,
             vcpus=create.vcpus,
             fs_capacity_bytes=create.fs_capacity_bytes,
@@ -588,9 +628,65 @@ class WorkspaceStore(TypedStore[Workspace]):
         super().__init__(WORKSPACES_NAMESPACE, Workspace)
 
     async def list_all(self) -> list[Workspace]:
+        await self._migrate_legacy()
         records = await self.search_all()
         records.sort(key=lambda record: record.name)
         return records
+
+    async def get(self, key: str) -> Workspace | None:
+        record = await super().get(key)
+        if record is None:
+            await self._migrate_legacy()
+            record = await super().get(key)
+        return record
+
+    async def _migrate_legacy(self) -> None:
+        """Copy environment records forward once; the legacy namespace is left in place."""
+        legacy = await search_all_values(LEGACY_ENVIRONMENTS_NAMESPACE)
+        if not legacy:
+            return
+        existing = {record.slug for record in await self.search_all()}
+        for value in legacy:
+            slug = value.get("slug")
+            if isinstance(slug, str) and slug and slug not in existing:
+                try:
+                    record = Workspace.model_validate(value)
+                except ValidationError:
+                    logger.warning("skipping unreadable legacy environment", extra={"slug": slug})
+                    continue
+                await self.put(record.slug, record)
+
+    async def owner_of_repo(self, full_name: str) -> str | None:
+        wanted = full_name.strip().lower()
+        for record in await self.list_all():
+            if any(repo.lower() == wanted for repo in record.repos):
+                return record.slug
+        return None
+
+    async def owner_of_slack_channel(self, channel_id: str) -> str | None:
+        wanted = channel_id.strip().upper()
+        for record in await self.list_all():
+            if wanted in record.slack_channel_ids:
+                return record.slug
+        return None
+
+    async def _assert_unique(self, record: Workspace) -> None:
+        if record.slug != DEFAULT_WORKSPACE_SLUG and not record.repos:
+            raise ValueError("a workspace must list at least one repository")
+        for other in await self.list_all():
+            if other.slug == record.slug:
+                continue
+            theirs = {repo.lower() for repo in other.repos}
+            for repo in record.repos:
+                if repo.lower() in theirs:
+                    raise ValueError(
+                        f"repository {repo.lower()} already belongs to workspace {other.slug}"
+                    )
+            for channel in record.slack_channel_ids:
+                if channel in other.slack_channel_ids:
+                    raise ValueError(
+                        f"slack channel {channel} already belongs to workspace {other.slug}"
+                    )
 
     async def save(self, record: Workspace) -> Workspace:
         record.updated_at = now_iso()
@@ -598,6 +694,7 @@ class WorkspaceStore(TypedStore[Workspace]):
 
     async def create(self, create: WorkspaceCreate, created_by: str) -> Workspace:
         record = Workspace.seed(create, created_by)
+        await self._assert_unique(record)
         if await self.get(record.slug) is not None:
             raise ValueError(f"environment {create.name!r} already exists")
         return await self.put(record.slug, record)
@@ -606,7 +703,9 @@ class WorkspaceStore(TypedStore[Workspace]):
         record = await self.get(slug)
         if record is None:
             raise ValueError(f"no environment named {slug!r}")
-        return await self.save(_apply(record, update))
+        record = _apply(record, update)
+        await self._assert_unique(record)
+        return await self.save(record)
 
     async def publish(
         self,
@@ -633,6 +732,7 @@ class WorkspaceStore(TypedStore[Workspace]):
             if existing is None:
                 raise ValueError(f"no environment named {slug!r}")
             record = _apply(existing, definition)
+        await self._assert_unique(record)
         _stamp_captured(
             record,
             snapshot_id=snapshot_id,
@@ -786,6 +886,8 @@ def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
         record.prompt = update.prompt
     if update.repos is not None:
         record.repos = update.repos
+    if update.slack_channel_ids is not None:
+        record.slack_channel_ids = update.slack_channel_ids
     if update.setup_script is not None:
         record.setup_script = update.setup_script
     if update.update_script is not None:

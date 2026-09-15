@@ -7,7 +7,9 @@ from pydantic import ValidationError
 from agent import store as agent_store
 from agent.workspaces import store as env_store
 from agent.workspaces.store import (
+    LEGACY_ENVIRONMENTS_NAMESPACE,
     WORKSPACES,
+    WORKSPACES_NAMESPACE,
     Workspace,
     WorkspaceCreate,
     WorkspaceUpdate,
@@ -204,7 +206,7 @@ def test_environment_prompt_blank_is_none() -> None:
 
 @pytest.mark.asyncio
 async def test_only_the_environment_named_default_is_resolved(fake_store: FakeStore) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="Draft"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="Draft", repos=["acme/draft"]), "ramon")
     assert await env_store.load_default_workspace() is None
 
     await WORKSPACES.create(WorkspaceCreate(name="Default"), "ramon")
@@ -216,9 +218,9 @@ async def test_only_the_environment_named_default_is_resolved(fake_store: FakeSt
 
 @pytest.mark.asyncio
 async def test_create_rejects_duplicate_name(fake_store: FakeStore) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
     with pytest.raises(ValueError, match="already exists"):
-        await WORKSPACES.create(WorkspaceCreate(name="Base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="Base", repos=["acme/base"]), "ramon")
 
 
 @pytest.mark.asyncio
@@ -255,7 +257,7 @@ async def test_update_writes_only_provided_fields(fake_store: FakeStore) -> None
 
 @pytest.mark.asyncio
 async def test_update_rejects_a_rename_across_slugs(fake_store: FakeStore) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="draft"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="draft", repos=["acme/draft"]), "ramon")
     with pytest.raises(ValueError, match="renaming an environment"):
         await WORKSPACES.apply_update("draft", WorkspaceUpdate(name="default"))
 
@@ -315,7 +317,7 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
             return_value=_sandbox_client(capture),
         ),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
         # A prior capture published under the environment's own name, as any real
         # one would: the name is the address, and only the tag moves.
         await WORKSPACES.mark_captured(
@@ -349,7 +351,8 @@ async def test_capture_publishes_under_the_environments_own_name(fake_store: Fak
         ),
     ):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", snapshot_name="acme-monorepo"), "ramon"
+            WorkspaceCreate(name="base", repos=["acme/base"], snapshot_name="acme-monorepo"),
+            "ramon",
         )
         record = await env_store.capture_workspace_snapshot("base", "sb-123")
 
@@ -372,7 +375,7 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot(
             return_value=_sandbox_client(capture),
         ),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
         await WORKSPACES.mark_captured(
             "base",
             snapshot_id="snap-1",
@@ -403,7 +406,7 @@ async def test_first_capture_failure_marks_the_environment_failed(fake_store: Fa
             return_value=_sandbox_client(capture),
         ),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
 
         with pytest.raises(RuntimeError, match="capture exploded"):
             await env_store.capture_workspace_snapshot("base", "sb-123")
@@ -428,7 +431,7 @@ async def test_capture_requires_the_langsmith_provider(
             return_value=_sandbox_client(capture),
         ),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
         with pytest.raises(RuntimeError, match="SANDBOX_TYPE=langsmith"):
             await env_store.capture_workspace_snapshot("base", "sb-123")
 
@@ -446,7 +449,10 @@ async def test_update_clearing_create_params_with_null_stays_readable(
     unresolvable, unupdatable, and invisible to listings.
     """
     await WORKSPACES.create(
-        WorkspaceCreate(name="base", create_params={"_internal_runtime": "v2"}), "ramon"
+        WorkspaceCreate(
+            name="base", repos=["acme/base"], create_params={"_internal_runtime": "v2"}
+        ),
+        "ramon",
     )
 
     updated = await WORKSPACES.apply_update("base", WorkspaceUpdate(create_params=None))
@@ -503,7 +509,7 @@ def test_parse_workspace_tag(text: str, expected_slug: str | None, expected_text
 @pytest.mark.asyncio
 async def test_load_workspace_prefers_the_selection(fake_store: FakeStore) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
-    await WORKSPACES.create(WorkspaceCreate(name="staging"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="staging", repos=["acme/staging"]), "ramon")
 
     selected = await env_store.load_workspace("staging")
     assert selected is not None
@@ -563,7 +569,7 @@ async def test_publish_writes_definition_and_image_together(fake_store: FakeStor
     """One put carries both, so a record can never show a new definition on an old image."""
     record = await WORKSPACES.publish(
         "base",
-        WorkspaceCreate(name="base", prompt="p1", setup_script="make setup"),
+        WorkspaceCreate(name="base", repos=["acme/base"], prompt="p1", setup_script="make setup"),
         snapshot_id="snap-1",
         snapshot_name="openswe-environment-base",
         source_sandbox_id="sb-1",
@@ -591,7 +597,7 @@ async def test_publish_writes_definition_and_image_together(fake_store: FakeStor
 async def test_publish_refuses_a_create_over_an_existing_environment(
     fake_store: FakeStore,
 ) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
     with pytest.raises(ValueError, match="already exists"):
         await WORKSPACES.publish(
             "base",
@@ -601,3 +607,60 @@ async def test_publish_refuses_a_create_over_an_existing_environment(
             source_sandbox_id="sb-1",
             created_by="ramon",
         )
+
+
+# --- Slack channels, uniqueness, legacy migration ---
+
+
+async def test_create_rejects_repo_owned_by_another_workspace(fake_store: FakeStore) -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
+    with pytest.raises(ValueError, match="acme/api already belongs to workspace core"):
+        await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["ACME/API"]), "alice")
+
+
+async def test_update_rejects_slack_channel_owned_by_another_workspace(
+    fake_store: FakeStore,
+) -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["C123"]), "alice"
+    )
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
+    with pytest.raises(ValueError, match="C123 already belongs to workspace core"):
+        await WORKSPACES.apply_update("oss", WorkspaceUpdate(slack_channel_ids=["c123"]))
+
+
+async def test_non_default_workspace_requires_a_repo(fake_store: FakeStore) -> None:
+    with pytest.raises(ValueError, match="at least one repository"):
+        await WORKSPACES.create(WorkspaceCreate(name="Empty"), "alice")
+    record = await WORKSPACES.create(WorkspaceCreate(name="Default"), "alice")
+    assert record.slug == "default" and record.repos == []
+
+
+async def test_slack_channel_ids_are_normalized(fake_store: FakeStore) -> None:
+    record = await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=[" c123 ", "C123"]),
+        "alice",
+    )
+    assert record.slack_channel_ids == ["C123"]
+
+
+async def test_owner_lookups(fake_store: FakeStore) -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["C123"]), "alice"
+    )
+    assert await WORKSPACES.owner_of_repo("Acme/API") == "core"
+    assert await WORKSPACES.owner_of_repo("acme/other") is None
+    assert await WORKSPACES.owner_of_slack_channel("C123") == "core"
+    assert await WORKSPACES.owner_of_slack_channel("C999") is None
+
+
+async def test_legacy_environment_records_are_migrated_on_list(fake_store: FakeStore) -> None:
+    fake_store.seed(
+        LEGACY_ENVIRONMENTS_NAMESPACE,
+        "default",
+        {"slug": "default", "name": "Default", "prompt": "hi", "repos": []},
+    )
+    records = await WORKSPACES.list_all()
+    assert [r.slug for r in records] == ["default"]
+    assert fake_store.values(WORKSPACES_NAMESPACE)["default"]["prompt"] == "hi"
+    assert (await WORKSPACES.get("default")) is not None
