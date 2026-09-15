@@ -1,8 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
+import {
+  CaretDownIcon,
+  CheckCircleIcon,
+  ClockCountdownIcon,
+  WarningCircleIcon,
+} from "@phosphor-icons/react"
+import { useState } from "react"
 
 import type {
   AnalyticsMetadata,
+  ModelOption,
   PRMergeRateCohort,
   ReviewerStatsPayload,
   UsageLeaderboardPeriod,
@@ -10,6 +18,7 @@ import type {
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -20,6 +29,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
+import { useOptions } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
@@ -30,6 +40,8 @@ export const Route = createFileRoute("/usage")({
   component: UsagePage,
 })
 
+const PAGE_SIZES = [10, 25, 50, 100] as const
+
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "7d": "Last 7 days",
   "30d": "Last 30 days",
@@ -38,14 +50,15 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
 
 function UsagePage() {
   const session = useSession()
+  const options = useOptions()
   const period =
-    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "30d"
+    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
   const navigate = Route.useNavigate()
   const activePeriod: UsageLeaderboardPeriod = ["7d", "30d", "all"].includes(
     period
   )
     ? period
-    : "30d"
+    : "7d"
 
   if (session.isLoading) {
     return (
@@ -62,6 +75,7 @@ function UsagePage() {
         period={activePeriod}
         login={session.data.login}
         isAdmin={session.data.is_admin}
+        models={options.data?.models ?? []}
         onPeriodChange={(value) =>
           navigate({ to: "/usage", search: { period: value } })
         }
@@ -74,16 +88,68 @@ export function UsageAnalytics({
   period: activePeriod,
   login,
   isAdmin,
+  models = [],
   onPeriodChange,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
+  models?: Array<ModelOption>
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
+  const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
+
+  return (
+    <UsageAnalyticsPeriod
+      key={activePeriod}
+      period={activePeriod}
+      login={login}
+      isAdmin={isAdmin}
+      models={models}
+      pageSize={leaderboardPageSize}
+      onPageSizeChange={setLeaderboardPageSize}
+      onPeriodChange={onPeriodChange}
+    />
+  )
+}
+
+function UsageAnalyticsPeriod({
+  period: activePeriod,
+  login,
+  isAdmin,
+  models,
+  pageSize: leaderboardPageSize,
+  onPageSizeChange: setLeaderboardPageSize,
+  onPeriodChange,
+}: {
+  period: UsageLeaderboardPeriod
+  login: string
+  isAdmin: boolean
+  models: Array<ModelOption>
+  pageSize: number
+  onPageSizeChange: (pageSize: number) => void
+  onPeriodChange: (period: UsageLeaderboardPeriod) => void
+}) {
+  const [leaderboardPage, setLeaderboardPage] = useState(1)
+  const [leaderboardCursors, setLeaderboardCursors] = useState<
+    (string | undefined)[]
+  >([undefined])
   const leaderboard = useQuery({
-    queryKey: ["usageLeaderboard", activePeriod, login, isAdmin],
-    queryFn: () => api.usageLeaderboard(activePeriod, 10),
+    queryKey: [
+      "usageLeaderboard",
+      activePeriod,
+      login,
+      isAdmin,
+      leaderboardPage,
+      leaderboardPageSize,
+      leaderboardCursors[leaderboardPage - 1],
+    ],
+    queryFn: () =>
+      api.usageLeaderboard(
+        activePeriod,
+        leaderboardPageSize,
+        leaderboardCursors[leaderboardPage - 1]
+      ),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
@@ -97,7 +163,7 @@ export function UsageAnalytics({
 
   return (
     <>
-      <PRMergeRateSection report={report} />
+      <PRMergeRateSection report={report} models={models} />
 
       <SettingsSection
         title="Agent leaderboard"
@@ -144,15 +210,34 @@ export function UsageAnalytics({
               Retry usage analytics
             </button>
           </div>
-        ) : !leaderboard.data?.rows.length ? (
+        ) : !leaderboard.data?.total_members ? (
           <div className="p-6 text-center text-xs text-muted-foreground">
             No Open SWE Agent usage has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
         ) : (
           <UsageTable
+            models={models}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
+            page={leaderboardPage}
+            pageSize={leaderboardPageSize}
+            onPageChange={(page) => {
+              const nextCursor = leaderboard.data.next_cursor
+              if (page > leaderboardPage && nextCursor) {
+                setLeaderboardCursors((cursors) => {
+                  const updated = cursors.slice(0, leaderboardPage)
+                  updated[leaderboardPage] = nextCursor
+                  return updated
+                })
+              }
+              setLeaderboardPage(page)
+            }}
+            onPageSizeChange={(pageSize) => {
+              setLeaderboardPageSize(pageSize)
+              setLeaderboardPage(1)
+              setLeaderboardCursors([undefined])
+            }}
           />
         )}
       </SettingsSection>
@@ -196,65 +281,73 @@ function AnalyticsCoverage({ reports }: { reports: AnalyticsMetadata[] }) {
         label: "Analytics need attention",
         description:
           "Some events could not be processed. Reports may be incomplete.",
-        color: "bg-destructive",
+        icon: WarningCircleIcon,
+        tone: "text-destructive",
       }
     : hasPendingEvents
       ? {
           label: "Analytics are updating",
-          description:
-            "New activity is still being processed. No action needed.",
-          color: "bg-amber-500",
+          description: "New activity is still being processed.",
+          icon: ClockCountdownIcon,
+          tone: "text-amber-600 dark:text-amber-400",
         }
       : {
           label: "Analytics are up to date",
           description: latest.last_processed_at
             ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}.`
             : "No events have been processed yet.",
-          color: "bg-emerald-500",
+          icon: CheckCircleIcon,
+          tone: "text-emerald-600 dark:text-emerald-400",
         }
+  const StatusIcon = status.icon
 
   return (
-    <div
-      className="mt-6 border-t border-border pt-4 text-xs text-muted-foreground"
-      role="status"
-      aria-label="Analytics coverage"
-    >
-      <div className="flex items-start gap-2">
-        <span
-          aria-hidden="true"
-          className={`mt-1.5 size-2 shrink-0 rounded-full ${status.color}`}
-        />
-        <div className="min-w-0">
-          <p className="font-medium text-foreground">{status.label}</p>
-          <p className="mt-0.5">{status.description}</p>
-          <details className="mt-2">
-            <summary className="cursor-pointer rounded-sm text-foreground underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-              View coverage details
-            </summary>
-            <div className="mt-2 space-y-1">
-              <p>
-                Reporting since{" "}
-                <time dateTime={latest.reporting_cutover_at}>
-                  {new Date(latest.reporting_cutover_at).toLocaleString()}
-                </time>
-                .
-              </p>
-              <p>
-                {latest.last_processed_at
-                  ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}. `
-                  : "No events have been processed yet. "}
-                {hasPendingEvents
-                  ? "Some captured events are still waiting to be processed. "
-                  : ""}
-                {hasFailedEvents
-                  ? "Some events could not be processed. Reports may be incomplete. "
-                  : ""}
-                Reports checked {new Date(latest.as_of).toLocaleString()}.
-              </p>
-            </div>
-          </details>
+    <div role="status" aria-label="Analytics coverage">
+      <details className="group rounded-xl border border-border bg-card text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+          <StatusIcon
+            aria-hidden="true"
+            className={`size-4 shrink-0 ${status.tone}`}
+            weight="fill"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium text-foreground">
+              {status.label}
+            </span>
+            <span className="mt-0.5 block text-muted-foreground">
+              {status.description}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground group-open:text-foreground">
+            Details
+            <CaretDownIcon
+              aria-hidden="true"
+              className="size-3.5 transition-transform group-open:rotate-180"
+            />
+          </span>
+        </summary>
+        <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
+          <p>
+            Reporting since{" "}
+            <time dateTime={latest.reporting_cutover_at}>
+              {new Date(latest.reporting_cutover_at).toLocaleString()}
+            </time>
+            .
+          </p>
+          <p>
+            {latest.last_processed_at
+              ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}. `
+              : "No events have been processed yet. "}
+            {hasPendingEvents
+              ? "Some captured events are still waiting to be processed. "
+              : ""}
+            {hasFailedEvents
+              ? "Some events could not be processed. Reports may be incomplete. "
+              : ""}
+            Reports checked {new Date(latest.as_of).toLocaleString()}.
+          </p>
         </div>
-      </div>
+      </details>
     </div>
   )
 }
@@ -276,8 +369,10 @@ function usePRMergeRateReport(
 
 function PRMergeRateSection({
   report,
+  models,
 }: {
   report: ReturnType<typeof usePRMergeRateReport>
+  models: Array<ModelOption>
 }) {
   const data = report.isError ? undefined : report.data
   const emptyMessage =
@@ -317,7 +412,11 @@ function PRMergeRateSection({
           </button>
         </div>
       ) : data?.status === "ready" ? (
-        <PRMergeRateTable cohorts={data.cohorts} />
+        <PRMergeRateTable
+          key={data.period}
+          cohorts={data.cohorts}
+          models={models}
+        />
       ) : (
         <p
           className="p-6 text-center text-xs text-muted-foreground"
@@ -375,7 +474,22 @@ function PRMergeRateSection({
   )
 }
 
-function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
+function PRMergeRateTable({
+  cohorts,
+  models,
+}: {
+  cohorts: PRMergeRateCohort[]
+  models: Array<ModelOption>
+}) {
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const pageCount = Math.max(1, Math.ceil(cohorts.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const rows = cohorts.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  )
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] text-xs">
@@ -393,11 +507,11 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {cohorts.map((cohort) => (
+          {rows.map((cohort) => (
             <tr key={`${cohort.model_id}-${cohort.model_attribution_quality}`}>
               <td className="px-4 py-3">
                 <div className="font-medium">
-                  {cohort.model_id ?? "Unavailable"}
+                  {formatModelName(models, cohort.model_id)}
                 </div>
                 <div className="text-muted-foreground">
                   {cohort.model_attribution_quality} attribution
@@ -429,16 +543,36 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
           ))}
         </tbody>
       </table>
+      <TablePagination
+        page={currentPage}
+        pageSize={pageSize}
+        total={cohorts.length}
+        onPageChange={setPage}
+        onPageSizeChange={(value) => {
+          setPageSize(value)
+          setPage(1)
+        }}
+      />
     </div>
   )
 }
 
 function UsageTable({
+  models,
   rows,
   totalMembers,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
 }: {
+  models: Array<ModelOption>
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
+  page: number
+  pageSize: number
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
 }) {
   return (
     <div className="overflow-x-auto">
@@ -469,7 +603,7 @@ function UsageTable({
                 <UserCell row={row} />
               </td>
               <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
-                {row.favorite_model}
+                {formatModelName(models, row.favorite_model)}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.invocations)}
@@ -499,9 +633,77 @@ function UsageTable({
           ))}
         </tbody>
       </table>
-      <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-        Top {Math.min(10, totalMembers)} of {formatNumber(totalMembers)} member
-        {totalMembers === 1 ? "" : "s"}
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={totalMembers}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
+    </div>
+  )
+}
+
+function TablePagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number
+  pageSize: number
+  total: number
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
+}) {
+  if (total <= 10) return null
+
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const start = total ? (page - 1) * pageSize + 1 : 0
+  const end = Math.min(page * pageSize, total)
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+      <span>
+        {formatNumber(start)}–{formatNumber(end)} of {formatNumber(total)}
+      </span>
+      <div className="flex items-center gap-2">
+        <span>Rows per page</span>
+        <Select
+          value={String(pageSize)}
+          onValueChange={(value) => onPageSizeChange(Number(value))}
+        >
+          <SelectTrigger aria-label="Rows per page" className="w-20">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PAGE_SIZES.map((size) => (
+              <SelectItem key={size} value={String(size)}>
+                {size}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={page === 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          Previous
+        </Button>
+        <span>
+          Page {page} of {pageCount}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next
+        </Button>
       </div>
     </div>
   )
@@ -609,6 +811,21 @@ function CounterList({
 function UserCell({ row }: { row: UsageLeaderboardRow }) {
   const initials = initialsFor(row.user.name)
   const detail = row.user.email ?? row.user.github_login ?? "unknown"
+  const profileUrl = githubProfileUrl(row.user.github_login)
+  const name = profileUrl ? (
+    <a
+      href={profileUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="truncate font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    >
+      {row.user.name}
+    </a>
+  ) : (
+    <span className="truncate font-medium text-foreground">
+      {row.user.name}
+    </span>
+  )
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <Avatar>
@@ -618,9 +835,7 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
         <AvatarFallback>{initials}</AvatarFallback>
       </Avatar>
       <div className="flex min-w-0 flex-col">
-        <span className="truncate font-medium text-foreground">
-          {row.user.name}
-        </span>
+        {name}
         {detail !== row.user.name ? (
           <span className="truncate text-xs text-muted-foreground">
             {detail}
@@ -629,6 +844,27 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
       </div>
     </div>
   )
+}
+
+function githubProfileUrl(login: string | null): string | null {
+  if (!login) return null
+  return `https://github.com/${encodeURIComponent(login)}`
+}
+
+function formatModelName(
+  models: Array<ModelOption>,
+  modelId: string | null
+): string {
+  if (!modelId) return "Unavailable"
+  return (
+    models.find((model) => model.id === modelId)?.label ??
+    stripProvider(modelId)
+  )
+}
+
+function stripProvider(modelId: string): string {
+  const separator = modelId.indexOf(":")
+  return separator >= 0 ? modelId.slice(separator + 1) : modelId
 }
 
 function initialsFor(name: string): string {

@@ -215,6 +215,80 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
         },
       ]);
 
+    await page.getByRole("button", { name: "Thread actions" }).click();
+    await expect(
+      page.getByRole("menuitem", { name: "Open trace", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: "Copy trace URL" }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("menuitem", { name: "Copy thread ID" }),
+    ).toBeVisible();
+    const menuScreenshot = testInfo.outputPath("desktop-open-trace.png");
+    await page.screenshot({ path: menuScreenshot, fullPage: true });
+    await testInfo.attach("desktop-open-trace", {
+      path: menuScreenshot,
+      contentType: "image/png",
+    });
+    for (const scenario of [
+      "https",
+      "http",
+      "missing",
+      "unsafe",
+      "malformed",
+      "http-error",
+      "network-error",
+      "shell-error",
+    ]) {
+      await electronApp.evaluate(({ shell, dialog, clipboard }, outcome) => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (input, init) => {
+          if (!String(input).includes("/dashboard/api/me/local-trace-url/"))
+            return originalFetch(input, init);
+          globalThis.fetch = originalFetch;
+          if (outcome === "network-error")
+            throw new Error("Network unavailable");
+          return Response.json(
+            {
+              trace_url:
+                outcome === "missing"
+                  ? null
+                  : outcome === "unsafe"
+                    ? "file:///tmp/trace"
+                    : outcome === "malformed"
+                      ? "not a URL"
+                      : `${outcome === "http" ? "http" : "https"}://smith.langchain.com/trace`,
+            },
+            { status: outcome === "http-error" ? 503 : 200 },
+          );
+        };
+        clipboard.writeText("");
+        shell.openExternal = async (url) => {
+          if (outcome === "shell-error") throw new Error("Browser unavailable");
+          clipboard.writeText(`opened:${url}`);
+        };
+        dialog.showMessageBox = async () => {
+          clipboard.writeText("error-dialog");
+          return { response: 0, checkboxChecked: false };
+        };
+      }, scenario);
+      if (scenario !== "https")
+        await page.getByRole("button", { name: "Thread actions" }).click();
+      await page
+        .getByRole("menuitem", { name: "Open trace", exact: true })
+        .click();
+      await expect
+        .poll(() =>
+          electronApp.evaluate(({ clipboard }) => clipboard.readText()),
+        )
+        .toBe(
+          scenario === "https" || scenario === "http"
+            ? `opened:${scenario}://smith.langchain.com/trace`
+            : "error-dialog",
+        );
+    }
+
     const screenshot = testInfo.outputPath("desktop-local-agent.png");
     await page.screenshot({ path: screenshot, fullPage: true });
     await testInfo.attach("desktop-local-agent", {

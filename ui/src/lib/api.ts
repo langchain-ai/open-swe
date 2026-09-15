@@ -95,6 +95,7 @@ export interface SessionUser {
   login: string
   email: string | null
   avatar_url: string | null
+  user_id?: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
@@ -328,6 +329,7 @@ export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   rows: Array<UsageLeaderboardRow>
   total_members: number
+  next_cursor?: string | null
   current_user_rank: number | null
   generated_at_ms: number | null
   reviewer_stats: ReviewerStatsPayload
@@ -908,9 +910,13 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
-  usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
+  usageLeaderboard: (
+    period: UsageLeaderboardPeriod = "7d",
+    limit = 10,
+    cursor?: string
+  ) =>
     request<UsageLeaderboardPayload>(
-      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
     ).then((payload) => ({
       ...payload,
       rows: payload.rows.map((row) => ({
@@ -921,7 +927,7 @@ export const api = {
       })),
     })),
   prMergeRateByModel: (
-    period: UsageLeaderboardPeriod = "30d",
+    period: UsageLeaderboardPeriod = "7d",
     maturityDays?: number
   ) =>
     request<PRMergeRatePayload>(

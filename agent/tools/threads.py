@@ -512,8 +512,16 @@ async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
     invocation_id = _run_invocation_id(run)
     if not invocation_id:
         return {"status": "unavailable", "total_usd": None}
+    metadata = _value(run, "metadata")
+    lookup_start = (
+        metadata.get("invocation_started_at") if isinstance(metadata, Mapping) else None
+    ) or _value(run, "created_at")
     try:
-        snapshot = await get_langsmith_thread_cost(thread_id, invocation_id)
+        snapshot = await get_langsmith_thread_cost(
+            thread_id,
+            invocation_id,
+            **({"lookup_start": str(lookup_start)} if lookup_start else {}),
+        )
     except LangSmithCostUnavailable:
         return {"status": "unavailable", "total_usd": None}
     except Exception:

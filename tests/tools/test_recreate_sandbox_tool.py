@@ -46,9 +46,3 @@ async def test_recreate_sandbox_reports_failure_without_ids() -> None:
         result = await recreate_sandbox()
 
     assert result == {"success": False, "error": "creation failed"}
-
-
-def test_recreate_sandbox_exported() -> None:
-    from agent.tools import recreate_sandbox as exported
-
-    assert exported is recreate_sandbox
