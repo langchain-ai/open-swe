@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from agent.dashboard import deps, options_routes, profiles
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
+from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
 from agent.dashboard.ttft import AssistantTextObservation
 from agent.threads import diffs as thread_diffs
 from agent.threads import handlers
@@ -108,7 +109,7 @@ def test_langgraph_proxy_headers_include_api_key(monkeypatch) -> None:
 
 
 async def test_resolve_agent_model_choice_applies_profile_before_team_default(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
@@ -118,13 +119,14 @@ async def test_resolve_agent_model_choice_applies_profile_before_team_default(mo
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
         None,
         None,
+        None,
     )
 
     assert (model_id, effort) == (_TEXT_ONLY_MODEL, "high")
 
 
 async def test_resolve_agent_model_choice_applies_request_before_profile(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
@@ -134,13 +136,14 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
         "anthropic:claude-opus-5",
         "high",
+        None,
     )
 
     assert (model_id, effort) == ("anthropic:claude-opus-5", "high")
 
 
 async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _VISION_MODEL, "medium"
 
     patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
@@ -149,6 +152,7 @@ async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(m
         {"default_model": "anthropic:claude-opus-5", "reasoning_effort": "high"},
         "fireworks:accounts/fireworks/models/glm-5p2",
         "high",
+        None,
     )
 
     assert (model_id, effort) == (_VISION_MODEL, "medium")
@@ -230,7 +234,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     async def fake_profile(login: str) -> dict[str, object]:
         return dict(profile)
 
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
@@ -330,6 +334,65 @@ async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
     created_metadata = created["metadata"]
     assert isinstance(created_metadata, dict)
     assert created_metadata["workspace"] == "oss"
+
+
+async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
+    monkeypatch, fake_store: FakeStore, registry_db
+) -> None:
+    """A new thread's model default comes from the repo's own workspace, not `default`."""
+    created: dict[str, object] = {}
+
+    async def fake_profile(login: str) -> dict[str, object]:
+        return {}
+
+    async def fake_ensure_token(login: str) -> None:
+        return None
+
+    async def fake_resolve_email(login: str, prof: dict[str, object]) -> str:
+        return f"{login}@example.com"
+
+    patch_thread_module(monkeypatch, "get_profile", fake_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
+    await upsert_team_settings(
+        TeamSettingsUpdate(
+            default_agent_model="anthropic:claude-sonnet-5",
+            default_agent_reasoning_effort="high",
+        ),
+        workspace="default",
+    )
+    await upsert_team_settings(
+        TeamSettingsUpdate(
+            default_agent_model="openai:gpt-6-astra",
+            default_agent_reasoning_effort="low",
+        ),
+        workspace="oss",
+    )
+
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "config": {"configurable": {"repo": "acme/oss"}},
+        },
+    }
+
+    await thread_runs._enrich_run_start_command(
+        "new-tid",
+        "octocat",
+        command,
+        metadata={},
+        creating=True,
+    )
+
+    created_metadata = created["metadata"]
+    assert isinstance(created_metadata, dict)
+    assert created_metadata["workspace"] == "oss"
+    assert created_metadata["resolved_model"] == "openai:gpt-6-astra"
+    assert created_metadata["resolved_effort"] == "low"
 
 
 @pytest.mark.parametrize(

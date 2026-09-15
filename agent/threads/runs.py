@@ -111,8 +111,9 @@ async def _resolve_agent_model_choice(
     profile: dict[str, Any],
     model_id: str | None,
     effort: str | None,
+    workspace: str | None,
 ) -> tuple[str, str]:
-    resolved_model, resolved_effort = await get_team_default_model("agent")
+    resolved_model, resolved_effort = await get_team_default_model("agent", workspace)
     if model_id not in DEPRECATED_MODEL_IDS:
         profile_model, profile_effort = normalize_profile_overrides(profile)
         if profile_model and profile_effort:
@@ -121,7 +122,9 @@ async def _resolve_agent_model_choice(
         if chosen_model and chosen_effort:
             resolved_model, resolved_effort = chosen_model, chosen_effort
     resolved_model, resolved_effort = gate_fable_model(
-        resolved_model, resolved_effort, fable_enabled=await get_team_fable_enabled()
+        resolved_model,
+        resolved_effort,
+        fable_enabled=await get_team_fable_enabled(workspace),
     )
     if not isinstance(resolved_effort, str):
         raise ValueError("team default model must include a reasoning effort")
@@ -228,7 +231,9 @@ async def _create_dashboard_thread_record(
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
-    resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
+    resolved_model, resolved_effort = await _resolve_agent_model_choice(
+        profile, model_id, effort, workspace
+    )
     resolved_model, resolved_effort = _with_vision_fallback(
         resolved_model,
         resolved_effort,

@@ -584,7 +584,7 @@ async def _agent_run_config(
     model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
-            model, effort, fable_enabled=await get_team_fable_enabled()
+            model, effort, fable_enabled=await get_team_fable_enabled(workspace)
         )
         configurable["agent_model_id"] = model
         configurable["agent_effort"] = effort
