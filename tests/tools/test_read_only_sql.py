@@ -53,9 +53,9 @@ async def test_read_only_sql_returns_json_safe_limited_rows(
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
     result = MagicMock()
-    result.keys.return_value = ["created_at", "cost"]
+    result.keys.return_value = ["created_at", "cost", "ratio"]
     result.fetchmany = AsyncMock(
-        return_value=[(datetime(2026, 9, 15, tzinfo=UTC), Decimal("1.25"))]
+        return_value=[(datetime(2026, 9, 15, tzinfo=UTC), Decimal("1.25"), float("inf"))]
     )
     conn = AsyncMock()
     conn.stream.return_value = result
@@ -69,19 +69,19 @@ async def test_read_only_sql_returns_json_safe_limited_rows(
         "agent.run_config.get_config",
         return_value=_config(admin_thread=True, source="dashboard", github_login="admin"),
     ):
-        response = await query_tool("SELECT created_at, cost FROM usage")
+        response = await query_tool("SELECT created_at, cost, ratio FROM usage")
 
     assert response == {
         "ok": True,
-        "columns": ["created_at", "cost"],
-        "rows": [["2026-09-15T00:00:00+00:00", "1.25"]],
+        "columns": ["created_at", "cost", "ratio"],
+        "rows": [["2026-09-15T00:00:00+00:00", "1.25", "inf"]],
         "row_count": 1,
         "truncated": False,
     }
     conn.execute.assert_awaited_once()
     assert str(conn.execute.await_args.args[0]) == "SET LOCAL statement_timeout = 60000"
     conn.stream.assert_awaited_once()
-    assert str(conn.stream.await_args.args[0]) == "SELECT created_at, cost FROM usage"
+    assert str(conn.stream.await_args.args[0]) == "SELECT created_at, cost, ratio FROM usage"
 
 
 @pytest.mark.asyncio

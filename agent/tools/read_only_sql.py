@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
@@ -20,6 +21,8 @@ _STATEMENT_TIMEOUT_MS = 60_000
 
 
 def _json_value(value: object) -> object:
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, (date, datetime, time)):

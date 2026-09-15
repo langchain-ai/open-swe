@@ -1,3 +1,4 @@
+import { parseSqlResult } from "../chat/SqlResultTable"
 import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
 
 export type RenderItem =
@@ -168,8 +169,12 @@ function isShellTool(chunk: ToolExecutionChunk): boolean {
   return chunk.toolKind === "execute"
 }
 
-function isSqlTool(chunk: ToolExecutionChunk): boolean {
-  return chunk.toolKind === "sql"
+function isSqlResult(chunk: ToolExecutionChunk): boolean {
+  return (
+    chunk.toolKind === "sql" &&
+    chunk.status === "completed" &&
+    parseSqlResult(chunk.output) !== null
+  )
 }
 
 function isReplyTool(chunk: ToolExecutionChunk): boolean {
@@ -272,7 +277,7 @@ export function buildRenderItems(
           key: `tool-${chunk.toolCallId}`,
           chunk,
         })
-      } else if (isSqlTool(chunk)) {
+      } else if (isSqlResult(chunk)) {
         items.push({
           type: "sql-item",
           key: `tool-${chunk.toolCallId}`,
