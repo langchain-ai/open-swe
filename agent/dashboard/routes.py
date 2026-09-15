@@ -2006,7 +2006,7 @@ async def api_agent_usage_leaderboard(
     from asyncpg import PostgresError
     from sqlalchemy.exc import SQLAlchemyError
 
-    from agent.database.analytics import configured
+    from agent.database import configured
 
     try:
         if not configured():
@@ -2036,7 +2036,7 @@ async def api_pr_merge_rate_by_model(
     from sqlalchemy.exc import SQLAlchemyError
 
     from agent.analytics.queries import pr_merge_rate_by_model
-    from agent.database.analytics import configured
+    from agent.database import configured
 
     try:
         if not configured():

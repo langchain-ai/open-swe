@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from operator import attrgetter
@@ -16,6 +17,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from agent.config import ENV
+
+logger = logging.getLogger(__name__)
 
 _ENGINE: AsyncEngine | None = None
 _ENGINE_URI: str | None = None
@@ -99,11 +102,19 @@ async def session() -> AsyncIterator[AsyncSession]:
 
 
 async def migrate() -> None:
+    logger.info(
+        "Initializing database",
+        extra={"database_setting": "POSTGRES_URI", "database_schema": SCHEMA},
+    )
     migrations = await asyncio.to_thread(load_migrations)
     async with engine().begin() as conn:
         await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK})
         await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}"))
         await conn.run_sync(upgrade, migrations)
+    logger.info(
+        "Database initialized",
+        extra={"database_setting": "POSTGRES_URI", "database_schema": SCHEMA},
+    )
 
 
 def load_migrations() -> ScriptDirectory:

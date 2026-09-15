@@ -1,4 +1,4 @@
-"""Repositories as rows: the owner every pull request row belongs to.
+"""Repositories: the owner every pull request belongs to.
 
 Rows carry a synthetic UUIDv7 ``id``; the natural key is the lowercased
 ``owner/name``, unique, because GitHub resolves repository paths
@@ -10,48 +10,44 @@ from datetime import datetime
 from typing import Self
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel, field_validator
 from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
 
 from agent.database import postgres
-from agent.database.rows import RepositoryRow
+from agent.database.orm import NOW, Base
 from agent.review.styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
 
 
-class Repository(BaseModel):
-    full_name: str
-    id: UUID | None = None
-    private: bool | None = None
-    default_branch: str = ""
-    first_seen_at: datetime | None = None
-    last_activity_at: datetime | None = None
+class Repository(Base):
+    __tablename__ = "repository"
 
-    @field_validator("full_name", mode="before")
-    @classmethod
-    def _normalize_full_name(cls, value: str) -> str:
-        return normalize_repo_full_name(value)
+    full_name: Mapped[str]
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    key: Mapped[str] = mapped_column(unique=True, init=False)
+    private: Mapped[bool | None] = mapped_column(default=None)
+    default_branch: Mapped[str] = mapped_column(server_default="", default="")
+    first_seen_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    last_activity_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+
+    def __post_init__(self) -> None:
+        self.full_name = normalize_repo_full_name(self.full_name)
+        self.key = self.full_name.lower()
 
     @classmethod
     async def get(cls, full_name: str) -> Self | None:
         async with postgres.session() as session:
-            row = await session.scalar(
-                select(RepositoryRow).where(RepositoryRow.key == cls(full_name=full_name).key)
+            return await session.scalar(
+                select(cls).where(cls.key == normalize_repo_full_name(full_name).lower())
             )
-        return None if row is None else cls.model_validate(row, from_attributes=True)
 
     @classmethod
     async def all(cls) -> list[Self]:
         async with postgres.session() as session:
-            rows = await session.scalars(select(RepositoryRow).order_by(RepositoryRow.key))
-            return [cls.model_validate(row, from_attributes=True) for row in rows]
-
-    @property
-    def key(self) -> str:
-        return self.full_name.lower()
+            return list(await session.scalars(select(cls).order_by(cls.key)))
 
     @property
     def owner(self) -> str:
@@ -69,26 +65,26 @@ class Repository(BaseModel):
         if session is None:
             async with postgres.session() as own:
                 return await self.save(own)
-        upsert = insert(RepositoryRow).values(
-            id=self.id or uuid7(),
+        cls = type(self)
+        upsert = insert(cls).values(
+            id=self.id,
             key=self.key,
             full_name=self.full_name,
             private=self.private,
             default_branch=self.default_branch,
         )
-        row = (
-            await session.execute(
-                upsert.on_conflict_do_update(
-                    index_elements=[RepositoryRow.key],
-                    set_={
-                        "private": func.coalesce(upsert.excluded.private, RepositoryRow.private),
-                        "default_branch": case(
-                            (upsert.excluded.default_branch != "", upsert.excluded.default_branch),
-                            else_=RepositoryRow.default_branch,
-                        ),
-                        "last_activity_at": func.clock_timestamp(),
-                    },
-                ).returning(RepositoryRow)
-            )
-        ).scalar_one()
-        return type(self).model_validate(row, from_attributes=True)
+        stored = await session.scalars(
+            upsert.on_conflict_do_update(
+                index_elements=[cls.key],
+                set_={
+                    "private": func.coalesce(upsert.excluded.private, cls.private),
+                    "default_branch": case(
+                        (upsert.excluded.default_branch != "", upsert.excluded.default_branch),
+                        else_=cls.default_branch,
+                    ),
+                    "last_activity_at": func.clock_timestamp(),
+                },
+            ).returning(cls),
+            execution_options={"populate_existing": True},
+        )
+        return stored.one()

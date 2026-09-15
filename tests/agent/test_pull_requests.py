@@ -1,4 +1,4 @@
-"""PostgreSQL regressions for the pull request row and its thread/review links."""
+"""PostgreSQL regressions for pull requests and their thread/review links."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -50,11 +50,30 @@ async def test_the_row_decides_a_links_role_not_the_caller() -> None:
     ]
 
 
-async def test_save_leaves_fields_the_caller_did_not_set() -> None:
-    await PullRequest(owner="lc", repo="repo", number=7, title="Add widget", author="ada").save()
-    saved = await PullRequest(owner="lc", repo="repo", number=7, state="merged").save()
+async def test_linking_never_overwrites_what_save_wrote() -> None:
+    await PullRequest(
+        owner="lc", repo="repo", number=7, state="merged", title="Add widget", author="ada"
+    ).save()
+    linked = await _pr().link_thread("fixer")
+    reviewed = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11)
 
-    assert (saved.state, saved.title, saved.author) == ("merged", "Add widget", "ada")
+    assert (linked.state, linked.title, linked.author) == ("merged", "Add widget", "ada")
+    assert (reviewed.state, reviewed.title, reviewed.author) == ("merged", "Add widget", "ada")
+
+
+async def test_save_from_a_later_event_updates_github_fields_but_keeps_resolves_thread() -> None:
+    await PullRequest(
+        owner="lc", repo="repo", number=7, title="Add widget", resolves_thread=True
+    ).save()
+    saved = await PullRequest(
+        owner="lc", repo="repo", number=7, state="merged", title="Add widget (final)"
+    ).save()
+
+    assert (saved.state, saved.title, saved.resolves_thread) == (
+        "merged",
+        "Add widget (final)",
+        True,
+    )
     assert saved.created_at is not None and saved.updated_at is not None
 
 
@@ -111,16 +130,16 @@ async def test_entity_rows_get_synthetic_uuid7_ids_that_survive_resaves() -> Non
     resaved = await PullRequest(owner="lc", repo="repo", number=7, title="Retitled").save()
     repository = await Repository.get("lc/repo")
 
-    assert repository is not None and repository.id is not None
-    assert saved.id is not None and saved.reviews[0].id is not None
+    assert repository is not None
     assert {repository.id.version, saved.id.version, saved.reviews[0].id.version} == {7}
     assert resaved.id == saved.id
 
 
-async def test_relinking_a_review_replaces_the_row_with_the_same_github_id() -> None:
-    await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=3)
+async def test_relinking_a_review_updates_the_row_with_the_same_github_id() -> None:
+    first = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=3)
     saved = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=1)
 
     assert [review.github_review_id for review in saved.reviews] == [11]
     assert saved.reviews[0].finding_count == 1
+    assert saved.reviews[0].id == first.reviews[0].id
     assert saved.reviews[0].url == "https://github.com/lc/repo/pull/7#pullrequestreview-11"

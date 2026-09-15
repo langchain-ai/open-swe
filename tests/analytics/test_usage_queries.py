@@ -8,14 +8,16 @@ from sqlalchemy import text
 
 from agent.analytics import directory, queries
 from agent.database import analytics as database
+from agent.database import postgres
+from tests.analytics.conftest import initialize_database
 
 NOW = datetime(2026, 9, 11, tzinfo=UTC)
 
 
 @pytest.fixture
 async def usage_db(deployment_db, monkeypatch):
-    await database.migrate()
-    async with database.transaction() as conn:
+    await initialize_database()
+    async with postgres.transaction() as conn:
         await conn.execute(
             text("UPDATE deployment_metadata SET reporting_cutover_at = :cutover"),
             {"cutover": NOW - timedelta(days=90)},
@@ -32,7 +34,7 @@ async def usage_db(deployment_db, monkeypatch):
 
 async def insert(table, *, workspace_id=None, **values):
     values = {"workspace_id": workspace_id or database.workspace_id(), **values}
-    async with database.transaction() as conn:
+    async with postgres.transaction() as conn:
         await conn.execute(
             text(
                 f"INSERT INTO {table} ({', '.join(values)}) "
@@ -309,7 +311,7 @@ async def test_reports_require_activation_and_exclude_pre_cutover_facts(usage_db
             observed_at=NOW,
             event_id=uuid4(),
         )
-    async with database.transaction() as conn:
+    async with postgres.transaction() as conn:
         await conn.execute(
             text("UPDATE deployment_metadata SET reporting_cutover_at = :cutover"),
             {"cutover": NOW - timedelta(days=1)},
@@ -325,7 +327,7 @@ async def test_reports_require_activation_and_exclude_pre_cutover_facts(usage_db
     assert result["reporting_cutover_at"] == (NOW - timedelta(days=1)).isoformat()
     outcomes = await queries.pr_merge_rate_by_model(period="all", admin=True)
     assert outcomes["cohorts"][0]["cohort_size"] == 1
-    async with database.transaction() as conn:
+    async with postgres.transaction() as conn:
         await conn.execute(text("UPDATE deployment_metadata SET reporting_cutover_at = NULL"))
     with pytest.raises(RuntimeError, match="not been activated"):
         await report()
@@ -358,7 +360,7 @@ async def test_reused_handles_do_not_transfer_an_immutable_owners_usage(usage_db
     assert sorted(row["invocations"] for row in result["rows"]) == [1, 2]
     own = next(row for row in result["rows"] if row["rank"] == result["current_user_rank"])
     assert own["invocations"] == 1
-    async with database.connection() as conn:
+    async with postgres.connection() as conn:
         assert (
             await conn.scalar(
                 text("SELECT person_id FROM identity_aliases WHERE alias_person_id = :alias"),

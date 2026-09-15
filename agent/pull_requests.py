@@ -1,4 +1,4 @@
-"""Pull requests as rows, owned by a repository and pointing at their threads.
+"""Pull requests, owned by a repository and pointing at their threads.
 
 A pull request is the thing Open SWE actually works on across many threads: the
 agent thread that opened it, later threads that repair it, and the reviewer
@@ -9,15 +9,20 @@ at all.
 
 Each pull request names one ``primary`` thread — the thread that opened the PR,
 or the first thread associated with it — and any number of secondaries. First
-writer wins: ``save`` upserts the pull request row first, which locks it for the
-rest of the transaction, so the role it assigns to each new link is decided
+writer wins: every write upserts the pull request row first, which locks it for
+the rest of the transaction, so the role assigned to each new link is decided
 against links that have already committed, and a partial unique index makes a
 second primary impossible.
 
+Two kinds of write, by who knows what. ``save`` is for callers holding the PR
+as GitHub describes it (the opener, lifecycle webhooks): it writes the
+GitHub-owned columns and can set, never clear, ``resolves_thread``.
+``link_thread`` and ``link_review`` are for callers that only know the PR's
+identity: they create the row if it is missing and touch no other column.
+
 Rows live in PostgreSQL (``POSTGRES_URI``), which this module requires. Entity
 rows carry a synthetic UUIDv7 ``id``; ``(repository, number)`` stays the natural
-key callers address a PR by. ``save`` merges: fields set on the instance win,
-threads and reviews accrue.
+key callers address a PR by.
 """
 
 import logging
@@ -27,18 +32,13 @@ from typing import Literal, Self
 from uuid import UUID, uuid7
 
 from pydantic import AliasPath, BaseModel, Field, ValidationError
-from sqlalchemy import Select, func, select
+from sqlalchemy import BigInteger, ForeignKey, Text, UniqueConstraint, desc, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from agent.database import postgres
-from agent.database.rows import (
-    PullRequestReviewRow,
-    PullRequestRow,
-    PullRequestThreadRow,
-    RepositoryRow,
-)
+from agent.database.orm import NOW, Base
 from agent.github.comments import PrState, derive_pr_state
 from agent.github.pull_request_status import pull_request_identity
 from agent.repositories import Repository
@@ -51,56 +51,77 @@ logger = logging.getLogger(__name__)
 ThreadRole = Literal["primary", "secondary"]
 
 _SEARCH_PAGE_SIZE = 50
-_MUTABLE_COLUMNS = ("state", "title", "head_ref", "base_ref", "author", "resolves_thread")
+_GITHUB_COLUMNS = ("state", "title", "head_ref", "base_ref", "author")
 
 
-def _with_links(statement: Select[tuple[PullRequestRow]]) -> Select[tuple[PullRequestRow]]:
-    return statement.options(
-        selectinload(PullRequestRow.threads), selectinload(PullRequestRow.reviews)
+class ThreadLink(Base):
+    __tablename__ = "pull_request_thread"
+
+    thread_id: Mapped[str] = mapped_column(primary_key=True)
+    pull_request_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pull_request.id", ondelete="CASCADE"), primary_key=True, init=False
     )
+    role: Mapped[ThreadRole] = mapped_column(Text, default="secondary")
+    source: Mapped[str] = mapped_column(server_default="", default="")
+    linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
-class ThreadLink(BaseModel):
-    thread_id: str
-    role: ThreadRole = "secondary"
-    source: str = ""
-    linked_at: datetime | None = None
+class ReviewLink(Base):
+    __tablename__ = "pull_request_review"
 
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    pull_request_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pull_request.id", ondelete="CASCADE"), init=False
+    )
+    reviewer_thread_id: Mapped[str] = mapped_column(server_default="", default="")
+    github_review_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    url: Mapped[str] = mapped_column(server_default="", default="")
+    head_sha: Mapped[str] = mapped_column(server_default="", default="")
+    finding_count: Mapped[int | None] = mapped_column(default=None)
+    published_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
-class ReviewLink(BaseModel):
-    id: UUID | None = None
-    reviewer_thread_id: str = ""
-    github_review_id: int | None = None
-    url: str = ""
-    head_sha: str = ""
-    finding_count: int | None = None
-    published_at: datetime | None = None
-
-    def same_as(self, row: PullRequestReviewRow) -> bool:
+    def same_as(self, other: ReviewLink) -> bool:
         if self.github_review_id is not None:
-            return row.github_review_id == self.github_review_id
+            return other.github_review_id == self.github_review_id
         return (
-            row.github_review_id is None
-            and row.reviewer_thread_id == self.reviewer_thread_id
-            and row.head_sha == self.head_sha
+            other.github_review_id is None
+            and other.reviewer_thread_id == self.reviewer_thread_id
+            and other.head_sha == self.head_sha
         )
 
 
-class PullRequest(BaseModel):
-    owner: str
-    repo: str
-    number: int
-    id: UUID | None = None
-    state: PrState = "open"
-    title: str = ""
-    head_ref: str = ""
-    base_ref: str = ""
-    author: str = ""
-    resolves_thread: bool = False
-    threads: list[ThreadLink] = Field(default_factory=list)
-    reviews: list[ReviewLink] = Field(default_factory=list)
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+class PullRequest(Base):
+    __tablename__ = "pull_request"
+    __table_args__ = (UniqueConstraint("repository_id", "number"),)
+
+    owner: Mapped[str]
+    repo: Mapped[str]
+    number: Mapped[int]
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    repository_id: Mapped[UUID] = mapped_column(ForeignKey("repository.id"), init=False)
+    state: Mapped[PrState] = mapped_column(Text, default="open")
+    title: Mapped[str] = mapped_column(server_default="", default="")
+    head_ref: Mapped[str] = mapped_column(server_default="", default="")
+    base_ref: Mapped[str] = mapped_column(server_default="", default="")
+    author: Mapped[str] = mapped_column(server_default="", default="")
+    resolves_thread: Mapped[bool] = mapped_column(default=False)
+    threads: Mapped[list[ThreadLink]] = relationship(
+        default_factory=list,
+        cascade="all, delete-orphan",
+        order_by=lambda: (
+            desc(ThreadLink.role == "primary"),
+            ThreadLink.linked_at,
+            ThreadLink.thread_id,
+        ),
+    )
+    reviews: Mapped[list[ReviewLink]] = relationship(
+        default_factory=list,
+        cascade="all, delete-orphan",
+        order_by=lambda: (ReviewLink.published_at, ReviewLink.id),
+    )
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    repository: Mapped[Repository] = relationship(init=False)
 
     @classmethod
     async def get(cls, owner: str, repo: str, number: int) -> Self | None:
@@ -117,14 +138,12 @@ class PullRequest(BaseModel):
     async def for_repository(cls, owner: str, repo: str) -> list[Self]:
         async with postgres.session() as session:
             rows = await session.scalars(
-                _with_links(
-                    select(PullRequestRow)
-                    .join(PullRequestRow.repository)
-                    .where(RepositoryRow.key == f"{owner}/{repo}".lower())
-                    .order_by(PullRequestRow.number)
-                )
+                cls._with_links(select(cls))
+                .join(cls.repository)
+                .where(Repository.key == f"{owner}/{repo}".lower())
+                .order_by(cls.number)
             )
-            return [cls.model_validate(row, from_attributes=True) for row in rows]
+            return list(rows)
 
     @property
     def repo_full_name(self) -> str:
@@ -145,67 +164,19 @@ class PullRequest(BaseModel):
             link.thread_id for link in self.threads if link.role != "primary"
         ]
 
-    def attach_thread(self, thread_id: str, *, source: str = "") -> None:
-        """Queue a thread link for the next ``save``; the row decides its role."""
-        if thread_id and all(link.thread_id != thread_id for link in self.threads):
-            self.threads.append(ThreadLink(thread_id=thread_id, source=source))
-
-    def attach_review(self, review: ReviewLink) -> None:
-        """Queue a review for the next ``save``; a same-identity row is updated in place."""
-        self.reviews.append(review)
-
     async def save(self, *, repository_private: bool | None = None) -> Self:
-        """Merge into the stored row and register the repository it belongs to.
+        """Write the PR as GitHub describes it and register its repository.
 
-        Fields set on this instance overwrite; threads are linked under the
-        pull request's row lock, so the primary is whichever link lands first.
+        Overwrites the GitHub-owned columns; ``resolves_thread`` can only be set,
+        never cleared. Queued ``threads``/``reviews`` are linked as well.
         """
-        async with postgres.session() as session:
-            repository = await Repository(
-                full_name=self.repo_full_name, private=repository_private
-            ).save(session)
-            if repository.id is None:
-                raise RuntimeError(f"repository {self.repo_full_name} saved without an id")
-            row = await self._upsert_row(session, repository.id)
-            for link in self.threads:
-                if all(existing.thread_id != link.thread_id for existing in row.threads):
-                    role = (
-                        "secondary" if any(t.role == "primary" for t in row.threads) else "primary"
-                    )
-                    row.threads.append(
-                        PullRequestThreadRow(
-                            thread_id=link.thread_id, role=role, source=link.source
-                        )
-                    )
-            for review in self.reviews:
-                existing = next((r for r in row.reviews if review.same_as(r)), None)
-                if existing is None:
-                    row.reviews.append(
-                        PullRequestReviewRow(
-                            id=review.id or uuid7(),
-                            reviewer_thread_id=review.reviewer_thread_id,
-                            github_review_id=review.github_review_id,
-                            url=review.url,
-                            head_sha=review.head_sha,
-                            finding_count=review.finding_count,
-                        )
-                    )
-                else:
-                    existing.reviewer_thread_id = review.reviewer_thread_id
-                    existing.url = review.url
-                    existing.head_sha = review.head_sha
-                    existing.finding_count = review.finding_count
-                    existing.published_at = func.clock_timestamp()
-            await session.flush()
-            stored = await self.fetch(session)
-        if stored is None:
-            raise RuntimeError(f"pull request {self.url} vanished during save")
-        return stored
+        return await self._write(overwrite=True, repository_private=repository_private)
 
     async def link_thread(self, thread_id: str, *, source: str = "") -> Self:
         """Associate a thread with this PR, as primary when it has none yet."""
-        self.attach_thread(thread_id, source=source)
-        return await self.save()
+        if all(link.thread_id != thread_id for link in self.threads):
+            self.threads.append(ThreadLink(thread_id=thread_id, source=source))
+        return await self._write(overwrite=False)
 
     async def link_review(
         self,
@@ -215,8 +186,8 @@ class PullRequest(BaseModel):
         head_sha: str = "",
         finding_count: int | None = None,
     ) -> Self:
-        """Record a published review against this PR."""
-        self.attach_review(
+        """Record a published review against this PR; a same-identity row is updated."""
+        self.reviews.append(
             ReviewLink(
                 reviewer_thread_id=reviewer_thread_id,
                 github_review_id=github_review_id,
@@ -229,7 +200,7 @@ class PullRequest(BaseModel):
                 finding_count=finding_count,
             )
         )
-        return await self.save()
+        return await self._write(overwrite=False)
 
     async def linked_threads(self, *, backfill: bool = True) -> list[str]:
         """Linked agent threads, primary first.
@@ -249,9 +220,12 @@ class PullRequest(BaseModel):
                 "pr_discovered_threads": len(discovered),
             },
         )
-        for thread_id in discovered:
-            self.attach_thread(thread_id, source="backfill")
-        return (await self.save()).thread_ids if discovered else []
+        if not discovered:
+            return []
+        self.threads.extend(
+            ThreadLink(thread_id=thread_id, source="backfill") for thread_id in discovered
+        )
+        return (await self._write(overwrite=False)).thread_ids
 
     async def primary_thread(self, *, backfill: bool = True) -> str | None:
         threads = await self.linked_threads(backfill=backfill)
@@ -288,45 +262,87 @@ class PullRequest(BaseModel):
 
     async def fetch(self, session: AsyncSession) -> Self | None:
         """This PR's stored row with its threads and reviews, read through ``session``."""
-        row = await session.scalar(
-            _with_links(
-                select(PullRequestRow)
-                .join(PullRequestRow.repository)
-                .where(
-                    RepositoryRow.key == self.repo_full_name.lower(),
-                    PullRequestRow.number == self.number,
-                )
-                .execution_options(populate_existing=True)
-            )
+        cls = type(self)
+        return await session.scalar(
+            cls._with_links(select(cls))
+            .join(cls.repository)
+            .where(Repository.key == self.repo_full_name.lower(), cls.number == self.number)
+            .execution_options(populate_existing=True)
         )
-        return None if row is None else type(self).model_validate(row, from_attributes=True)
 
-    async def _upsert_row(self, session: AsyncSession, repository_id: UUID) -> PullRequestRow:
+    @classmethod
+    def _with_links(cls, statement):  # noqa: ANN001, ANN206
+        return statement.options(selectinload(cls.threads), selectinload(cls.reviews))
+
+    async def _write(self, *, overwrite: bool, repository_private: bool | None = None) -> Self:
+        async with postgres.session() as session:
+            repository = await Repository(
+                full_name=self.repo_full_name, private=repository_private
+            ).save(session)
+            row = await self._upsert(session, repository.id, overwrite=overwrite)
+            for link in self.threads:
+                if all(existing.thread_id != link.thread_id for existing in row.threads):
+                    role: ThreadRole = (
+                        "secondary" if any(t.role == "primary" for t in row.threads) else "primary"
+                    )
+                    row.threads.append(
+                        ThreadLink(thread_id=link.thread_id, role=role, source=link.source)
+                    )
+            for review in self.reviews:
+                existing = next((r for r in row.reviews if review.same_as(r)), None)
+                if existing is None:
+                    row.reviews.append(
+                        ReviewLink(
+                            id=review.id,
+                            reviewer_thread_id=review.reviewer_thread_id,
+                            github_review_id=review.github_review_id,
+                            url=review.url,
+                            head_sha=review.head_sha,
+                            finding_count=review.finding_count,
+                        )
+                    )
+                else:
+                    existing.reviewer_thread_id = review.reviewer_thread_id
+                    existing.url = review.url
+                    existing.head_sha = review.head_sha
+                    existing.finding_count = review.finding_count
+                    existing.published_at = func.clock_timestamp()
+            await session.flush()
+            stored = await self.fetch(session)
+        if stored is None:
+            raise RuntimeError(f"pull request {self.url} vanished during save")
+        return stored
+
+    async def _upsert(self, session: AsyncSession, repository_id: UUID, *, overwrite: bool) -> Self:
         """Insert or update the row and return it locked for the transaction."""
-        columns = {c: getattr(self, c) for c in _MUTABLE_COLUMNS if c in self.model_fields_set}
-        upsert = insert(PullRequestRow).values(
-            id=self.id or uuid7(),
+        cls = type(self)
+        upsert = insert(cls).values(
+            id=self.id,
             repository_id=repository_id,
             number=self.number,
             owner=self.owner,
             repo=self.repo,
-            **columns,
+            **{column: getattr(self, column) for column in _GITHUB_COLUMNS},
+            resolves_thread=self.resolves_thread,
+        )
+        github_changes = (
+            {
+                **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
+                "resolves_thread": or_(cls.resolves_thread, upsert.excluded.resolves_thread),
+            }
+            if overwrite
+            else {}
         )
         pull_request_id = await session.scalar(
             upsert.on_conflict_do_update(
-                index_elements=[PullRequestRow.repository_id, PullRequestRow.number],
-                set_={
-                    **{c: getattr(upsert.excluded, c) for c in columns},
-                    "updated_at": func.clock_timestamp(),
-                },
-            ).returning(PullRequestRow.id)
+                index_elements=[cls.repository_id, cls.number],
+                set_={"updated_at": func.clock_timestamp(), **github_changes},
+            ).returning(cls.id)
         )
         row = await session.scalar(
-            _with_links(
-                select(PullRequestRow)
-                .where(PullRequestRow.id == pull_request_id)
-                .execution_options(populate_existing=True)
-            )
+            cls._with_links(select(cls))
+            .where(cls.id == pull_request_id)
+            .execution_options(populate_existing=True)
         )
         if row is None:
             raise RuntimeError(f"pull request {self.url} vanished during save")
