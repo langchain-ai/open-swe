@@ -7,8 +7,15 @@ import pytest
 from agent.github import pull_requests
 from agent.github.pull_requests import PullRequest, ThreadLink
 from agent.github.repositories import Repository
+from agent.users import User
 
 pytestmark = pytest.mark.usefixtures("registry_db")
+
+
+@pytest.fixture(autouse=True)
+def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "Ada")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
 
 
 def _pr() -> PullRequest:
@@ -75,6 +82,33 @@ async def test_save_from_a_later_event_updates_github_fields_but_keeps_resolves_
         True,
     )
     assert saved.created_at is not None and saved.updated_at is not None
+
+
+async def test_author_links_to_a_registered_user_by_github_id_or_login() -> None:
+    ada = await User.sign_in("github", "42", login="Ada")
+
+    by_id = await PullRequest(
+        owner="lc", repo="repo", number=1, author="renamed", author_github_id=42
+    ).save()
+    by_login = await PullRequest(owner="lc", repo="repo", number=2, author="ADA").save()
+    unregistered = await PullRequest(
+        owner="lc", repo="repo", number=3, author="ghost", author_github_id=99
+    ).save()
+
+    assert (by_id.author_user_id, by_login.author_user_id) == (ada.id, ada.id)
+    assert (by_id.author_github_id, unregistered.author_github_id) == (42, 99)
+    assert unregistered.author_user_id is None
+
+
+async def test_a_resolved_author_survives_later_saves_and_links() -> None:
+    ada = await User.sign_in("github", "42", login="Ada")
+    await PullRequest(owner="lc", repo="repo", number=7, author="Ada", author_github_id=42).save()
+
+    relinked = await _pr().link_thread("fixer")
+    resaved = await PullRequest(owner="lc", repo="repo", number=7, state="merged").save()
+
+    assert (relinked.author_user_id, resaved.author_user_id) == (ada.id, ada.id)
+    assert (relinked.author_github_id, resaved.author_github_id) == (42, 42)
 
 
 async def test_saving_a_pull_request_registers_its_repository() -> None:

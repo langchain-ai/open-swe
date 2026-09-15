@@ -30,9 +30,11 @@ pin_single_event_loop()
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent import database
     from agent.analytics.worker import start_worker, stop_worker
+    from agent.dashboard.admin import configured_admins
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from agent.users import User
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
 
     pin_single_event_loop()
@@ -41,6 +43,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_local_dev_llm_config()
     database.require_configured()
     await database.migrate()
+    if admins := configured_admins():
+        await User.sync_admins(admins)
     try:
         await load_workspace()
         await activate_reporting()

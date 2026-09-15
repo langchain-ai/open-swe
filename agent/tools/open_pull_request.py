@@ -619,6 +619,7 @@ async def _record_pr_telemetry(
             pr_title = details.get("title") or pr.get("title")
             pr_user = details.get("user") or pr.get("user")
             author = pr_user.get("login") if isinstance(pr_user, dict) else None
+            author_id = pr_user.get("id") if isinstance(pr_user, dict) else None
             author_avatar_url = pr_user.get("avatar_url") if isinstance(pr_user, dict) else None
             diff_stats = {
                 "files": changed_files,
@@ -683,6 +684,7 @@ async def _record_pr_telemetry(
                     head_ref=head,
                     base_ref=base,
                     author=author if isinstance(author, str) else "",
+                    author_github_id=author_id if isinstance(author_id, int) else None,
                     resolves_thread=resolves_thread,
                     threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
                 ).save(repository_private=repo_private)
