@@ -30,6 +30,7 @@ from agent.github.app import (
 from agent.github.ci import head_sha_from_check_payload
 from agent.github.pull_requests import PullRequest
 from agent.prompts import render_prompt
+from agent.slack.blocks import block_payload
 from agent.slack.client import (
     add_slack_reaction,
     post_slack_thread_reply,
@@ -155,7 +156,7 @@ async def _update_card(
     else:
         text, blocks = card.closed_card(approval, title=title, files=files, outcome=outcome)
     ok, error = await update_slack_message(
-        approval.slack_channel_id, approval.slack_message_ts, text, blocks=blocks
+        approval.slack_channel_id, approval.slack_message_ts, text, blocks=block_payload(blocks)
     )
     if not ok:
         logger.warning(
@@ -234,7 +235,11 @@ async def _post_card(
         return "failed"
     text, blocks = card.open_card(approval, title=readiness.snapshot.title, files=files)
     message_ts, error = await post_slack_thread_reply_with_ts(
-        location[0], location[1], text, blocks=blocks, agent_thread_id=approval.thread_id or None
+        location[0],
+        location[1],
+        text,
+        blocks=block_payload(blocks),
+        agent_thread_id=approval.thread_id or None,
     )
     if not message_ts:
         logger.warning(

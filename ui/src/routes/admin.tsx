@@ -632,7 +632,10 @@ function ExpeditedReviewSection() {
               checked={!!settings.data?.expedited_review_enabled}
               onCheckedChange={(next) =>
                 settings.data &&
-                save.mutate({ ...settings.data, expedited_review_enabled: next })
+                save.mutate({
+                  ...settings.data,
+                  expedited_review_enabled: next,
+                })
               }
               disabled={!settings.data || save.isPending}
             />
