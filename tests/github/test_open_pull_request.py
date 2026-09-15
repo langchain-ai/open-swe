@@ -1036,17 +1036,17 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
     ]
     create_feedback.assert_awaited_once_with(
         "run-1",
-        "github_pr_opened",
+        "pr_opened",
         score=1.0,
         comment=f"Agent-authored pull request opened: {details['html_url']}",
         source_info={
-            "source": "github_pr_opened",
+            "source": "pr_opened",
             "thread_id": "t1",
             "pr_url": details["html_url"],
             "repo_full_name": "langchain-ai/open-swe",
             "pr_number": 3,
         },
-        idempotency_key=f"github_pr_opened:{details['html_url']}",
+        idempotency_key=f"pr_opened:{details['html_url']}",
     )
 
 

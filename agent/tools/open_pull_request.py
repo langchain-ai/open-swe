@@ -680,17 +680,17 @@ async def _record_pr_telemetry(
             if created and run_id and isinstance(pr_url, str):
                 await create_langsmith_feedback(
                     str(run_id),
-                    "github_pr_opened",
+                    "pr_opened",
                     score=1.0,
                     comment=f"Agent-authored pull request opened: {pr_url}",
                     source_info={
-                        "source": "github_pr_opened",
+                        "source": "pr_opened",
                         "thread_id": thread_id,
                         "pr_url": pr_url,
                         "repo_full_name": f"{owner}/{repo}",
                         "pr_number": pr_number,
                     },
-                    idempotency_key=f"github_pr_opened:{pr_url}",
+                    idempotency_key=f"pr_opened:{pr_url}",
                 )
             try:
                 await PullRequest(

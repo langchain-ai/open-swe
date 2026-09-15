@@ -145,7 +145,7 @@ from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.json_types import ThreadLike, as_thread_dict
-from agent.utils.langsmith import create_langsmith_feedback, create_langsmith_thread_feedback
+from agent.utils.langsmith import create_langsmith_feedback
 from agent.utils.multimodal import (
     dedupe_urls,  # noqa: F401
     extract_image_urls,  # noqa: F401
@@ -1275,16 +1275,20 @@ async def _record_pr_status_feedback(
     thread_id: str,
     *,
     pr_url: str,
+    repo_full_name: str,
+    pr_number: int,
     opening_run_id: str | None,
     status: Literal["merged", "closed_without_merge"],
 ) -> None:
     try:
-        key = f"github_pr_{status}"
+        key = f"pr_{status}"
         comment = f"Agent-authored pull request {status.replace('_', ' ')}: {pr_url}"
         source_info = {
             "source": key,
             "thread_id": thread_id,
             "pr_url": pr_url,
+            "repo_full_name": repo_full_name,
+            "pr_number": pr_number,
         }
         if opening_run_id:
             await create_langsmith_feedback(
@@ -1295,13 +1299,6 @@ async def _record_pr_status_feedback(
                 source_info=source_info,
                 idempotency_key=f"{key}:{pr_url}",
             )
-        await create_langsmith_thread_feedback(
-            thread_id,
-            f"{key}:{pr_url}",
-            score=1.0,
-            comment=comment,
-            source_info=source_info,
-        )
     except Exception:  # noqa: BLE001
         logger.debug("Failed to record PR status feedback for thread %s", thread_id, exc_info=True)
 
@@ -1323,6 +1320,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     if event is None or pull_request is None:
         return
     pr_url = pull_request.url
+    repo_full_name = f"{pull_request.owner}/{pull_request.repo}"
+    pr_number = pull_request.number
     new_state = pull_request.state
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -1420,7 +1419,12 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
             await task_marked_complete(thread_id, source="github", auto=True)
             await _record_pr_status_feedback(
-                thread_id, pr_url=pr_url, opening_run_id=opening_run_id, status="merged"
+                thread_id,
+                pr_url=pr_url,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                opening_run_id=opening_run_id,
+                status="merged",
             )
             from agent.thread_feedback import schedule_pr_feedback
 
@@ -1429,6 +1433,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             await _record_pr_status_feedback(
                 thread_id,
                 pr_url=pr_url,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
                 opening_run_id=opening_run_id,
                 status="closed_without_merge",
             )

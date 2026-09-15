@@ -403,7 +403,7 @@ async def test_update_agent_thread_pr_state_waits_for_open_prs_when_flagged() ->
     with (
         patch("agent.webhooks.common.get_client", return_value=fake_client),
         patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("agent.webhooks.common.create_langsmith_thread_feedback", AsyncMock()),
+        patch("agent.webhooks.common.create_langsmith_feedback", AsyncMock()),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
 
@@ -527,7 +527,7 @@ async def test_update_agent_thread_pr_state_noop_when_state_unchanged() -> None:
 
 
 @pytest.mark.asyncio
-async def test_merged_pr_records_thread_feedback() -> None:
+async def test_merged_pr_records_opening_trace_feedback() -> None:
     thread = {
         "thread_id": "t1",
         "metadata": {
@@ -547,36 +547,29 @@ async def test_merged_pr_records_thread_feedback() -> None:
     fake_client.threads.search = AsyncMock(return_value=[thread])
     fake_client.threads.get = AsyncMock(return_value=thread)
     fake_client.threads.update = AsyncMock()
-    create_thread_feedback = AsyncMock(return_value=True)
     create_run_feedback = AsyncMock(return_value=True)
 
     with (
         patch("agent.webhooks.common.get_client", return_value=fake_client),
         patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("agent.webhooks.common.create_langsmith_thread_feedback", create_thread_feedback),
         patch("agent.webhooks.common.create_langsmith_feedback", create_run_feedback),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
 
     expected_source = {
-        "source": "github_pr_merged",
+        "source": "pr_merged",
         "thread_id": "t1",
         "pr_url": "https://github.com/lc/repo/pull/7",
+        "repo_full_name": "lc/repo",
+        "pr_number": 7,
     }
     create_run_feedback.assert_awaited_once_with(
         "run-1",
-        "github_pr_merged",
+        "pr_merged",
         score=1.0,
         comment="Agent-authored pull request merged: https://github.com/lc/repo/pull/7",
         source_info=expected_source,
-        idempotency_key="github_pr_merged:https://github.com/lc/repo/pull/7",
-    )
-    create_thread_feedback.assert_awaited_once_with(
-        "t1",
-        "github_pr_merged:https://github.com/lc/repo/pull/7",
-        score=1.0,
-        comment="Agent-authored pull request merged: https://github.com/lc/repo/pull/7",
-        source_info=expected_source,
+        idempotency_key="pr_merged:https://github.com/lc/repo/pull/7",
     )
 
 
@@ -588,6 +581,13 @@ async def test_closed_unmerged_pr_records_status_feedback() -> None:
             "kind": "agent",
             "pr_url": "https://github.com/lc/repo/pull/7",
             "pr_state": "open",
+            "pull_requests": [
+                {
+                    "url": "https://github.com/lc/repo/pull/7",
+                    "state": "open",
+                    "opening_run_id": "run-1",
+                }
+            ],
         },
     }
     fake_client = MagicMock()
@@ -599,22 +599,25 @@ async def test_closed_unmerged_pr_records_status_feedback() -> None:
     with (
         patch("agent.webhooks.common.get_client", return_value=fake_client),
         patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("agent.webhooks.common.create_langsmith_thread_feedback", create_feedback),
+        patch("agent.webhooks.common.create_langsmith_feedback", create_feedback),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
     create_feedback.assert_awaited_once_with(
-        "t1",
-        "github_pr_closed_without_merge:https://github.com/lc/repo/pull/7",
+        "run-1",
+        "pr_closed_without_merge",
         score=1.0,
         comment=(
             "Agent-authored pull request closed without merge: https://github.com/lc/repo/pull/7"
         ),
         source_info={
-            "source": "github_pr_closed_without_merge",
+            "source": "pr_closed_without_merge",
             "thread_id": "t1",
             "pr_url": "https://github.com/lc/repo/pull/7",
+            "repo_full_name": "lc/repo",
+            "pr_number": 7,
         },
+        idempotency_key="pr_closed_without_merge:https://github.com/lc/repo/pull/7",
     )
 
 
