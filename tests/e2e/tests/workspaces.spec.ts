@@ -289,7 +289,7 @@ test.describe("Workspaces", () => {
 
     await typeIntoComposer(
       page,
-      "Please set up the default workspace for this repo and capture it.",
+      "Please set up the default environment for this repo and capture it.",
     );
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
@@ -313,7 +313,7 @@ test.describe("Workspaces", () => {
 
     // The agent's own summary, after the real save + capture tools ran.
     await expect(
-      page.getByText(/workspace is captured and live/),
+      page.getByText(/environment is captured and live/),
     ).toBeVisible();
 
     // Publishing captured this thread's sandbox synchronously, so the image is
@@ -389,7 +389,7 @@ test.describe("Workspaces", () => {
       page.getByText(/anything else you'd like changed/),
     ).toBeVisible();
     const systemPrompt = await lastSystemPrompt(page);
-    expect(systemPrompt).toContain("### Workspace Instructions (default)");
+    expect(systemPrompt).toContain("### Environment Instructions (default)");
     expect(systemPrompt).toContain(ENVIRONMENT_PROMPT);
     // Admin threads also carry the workspace-management instructions.
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
