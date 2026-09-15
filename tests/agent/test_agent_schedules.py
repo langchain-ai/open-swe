@@ -1193,7 +1193,7 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
 ) -> None:  # noqa: ANN001, ARG001
     from agent import server
     from agent.run_config import RunConfig
-    from agent.tools import automations, environments, organization_skills
+    from agent.tools import automations, organization_skills, workspaces
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
@@ -1212,8 +1212,8 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     assert await server._admin_thread(run_config, None) is True
     assert RunConfig.from_config(run_config).github_login is None
     assert RunConfig.from_config(run_config).user_email is None
-    monkeypatch.setattr(environments.store.ENVIRONMENTS, "list_all", AsyncMock(return_value=[]))
-    assert (await environments.list_environments())["ok"] is True
+    monkeypatch.setattr(workspaces.store.WORKSPACES, "list_all", AsyncMock(return_value=[]))
+    assert (await workspaces.list_workspaces())["ok"] is True
     assert (await automations.list_automations())["ok"] is True
     await organization_skills.save_organization_skill("system-check", "Check", "instructions")
     assert (await organization_skills.delete_organization_skill("system-check"))["ok"] is True
@@ -1247,17 +1247,17 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     ):
         run_config["configurable"] = {**original, **patch}
         assert await server._admin_thread(run_config, None) is False
-        assert (await environments.list_environments())["ok"] is False
+        assert (await workspaces.list_workspaces())["ok"] is False
 
     run_config["configurable"] = original
     metadata = fake_client.threads.created[0]["metadata"]
     metadata["owner_type"] = "user"
     assert await server._admin_thread(run_config, None) is False
-    assert (await environments.list_environments())["ok"] is False
+    assert (await workspaces.list_workspaces())["ok"] is False
     metadata["owner_type"] = "system"
     monkeypatch.setenv("CONFIGURED_ADMINS", "bob")
     assert await server._admin_thread(run_config, None) is False
-    assert (await environments.list_environments())["ok"] is False
+    assert (await workspaces.list_workspaces())["ok"] is False
 
 
 async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_thread(

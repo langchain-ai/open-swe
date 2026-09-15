@@ -6,14 +6,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from agent.environments import refresh
-from agent.environments.store import Environment, RefreshStep
 from agent.tools.background_task import background_task
+from agent.workspaces import refresh
+from agent.workspaces.store import RefreshStep, Workspace
 
 
 @pytest.fixture
 def admin(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Environment refreshes are admin-only, so most of these run as one."""
+    """Workspace refreshes are admin-only, so most of these run as one."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     config = cast(RunnableConfig, {"configurable": {"github_login": "ramonn"}})
     with patch("agent.run_config.get_config", return_value=config):
@@ -28,8 +28,8 @@ def member(monkeypatch: pytest.MonkeyPatch) -> Any:
         yield
 
 
-def _running(**overrides: Any) -> Environment:
-    return Environment(
+def _running(**overrides: Any) -> Workspace:
+    return Workspace(
         slug="base",
         refresh_status="refreshing",
         refresh_kind="full",
@@ -47,9 +47,9 @@ def _running(**overrides: Any) -> Environment:
     ).model_copy(update=overrides)
 
 
-def _store(*records: Environment) -> Any:
+def _store(*records: Workspace) -> Any:
     return patch.object(
-        refresh.ENVIRONMENTS, "list_all", new_callable=AsyncMock, return_value=list(records)
+        refresh.WORKSPACES, "list_all", new_callable=AsyncMock, return_value=list(records)
     )
 
 

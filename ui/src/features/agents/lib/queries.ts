@@ -293,7 +293,7 @@ export const environmentOptionKeys = {
 export function useEnvironmentOptions(enabled = true) {
   return useQuery({
     queryKey: environmentOptionKeys.all,
-    queryFn: api.listEnvironmentOptions,
+    queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     enabled,
   })

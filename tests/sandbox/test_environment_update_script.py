@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.environments.store import Environment, script_log_path
 from agent.sandboxes.lifecycle import SandboxCreateConfig
+from agent.workspaces.store import Workspace, script_log_path
 
 
 class _Result:
@@ -32,9 +32,9 @@ def _script_run(backend: MagicMock) -> str:
     return base64.b64decode(encoded).decode()
 
 
-def _stale(**overrides: object) -> Environment:
+def _stale(**overrides: object) -> Workspace:
     """An environment whose snapshot has never been captured, so it is stale."""
-    return Environment(
+    return Workspace(
         slug="base",
         update_script="git pull",
         snapshot_status="ready",
@@ -45,7 +45,7 @@ def _stale(**overrides: object) -> Environment:
 @pytest.mark.asyncio
 async def test_a_stale_image_is_freshened_before_the_run_starts() -> None:
     backend = _backend(_Result("Already up to date.", 0))
-    config = SandboxCreateConfig(snapshot_id="snap-1", environment=_stale())
+    config = SandboxCreateConfig(snapshot_id="snap-1", workspace=_stale())
 
     await config.run_update_script(backend, "t-1")
 
@@ -61,7 +61,7 @@ async def test_a_fresh_image_costs_the_run_nothing() -> None:
     backend = _backend(_Result("", 0))
     fresh = _stale(last_captured_at=datetime.now(UTC).isoformat())
 
-    await SandboxCreateConfig(snapshot_id="snap-1", environment=fresh).run_update_script(
+    await SandboxCreateConfig(snapshot_id="snap-1", workspace=fresh).run_update_script(
         backend, "t-1"
     )
 
@@ -74,7 +74,7 @@ async def test_no_environment_and_no_script_both_skip() -> None:
 
     await SandboxCreateConfig(snapshot_id=None).run_update_script(backend, None)
     await SandboxCreateConfig(
-        snapshot_id="snap-1", environment=_stale(update_script="")
+        snapshot_id="snap-1", workspace=_stale(update_script="")
     ).run_update_script(backend, None)
 
     backend.aexecute.assert_not_awaited()
@@ -85,7 +85,7 @@ async def test_a_failing_update_does_not_fail_the_run() -> None:
     """The image is already usable, so a broken pull costs freshness, not the run."""
     backend = _backend(_Result("fatal: not a git repository", 1))
 
-    await SandboxCreateConfig(snapshot_id="snap-1", environment=_stale()).run_update_script(
+    await SandboxCreateConfig(snapshot_id="snap-1", workspace=_stale()).run_update_script(
         backend, "t-1"
     )
 
@@ -99,7 +99,7 @@ async def test_an_execute_that_raises_does_not_lose_the_sandbox() -> None:
     backend.id = "sb-1"
     backend.aexecute = AsyncMock(side_effect=RuntimeError("sandbox unreachable"))
 
-    await SandboxCreateConfig(snapshot_id="snap-1", environment=_stale()).run_update_script(
+    await SandboxCreateConfig(snapshot_id="snap-1", workspace=_stale()).run_update_script(
         backend, "t-1"
     )
 

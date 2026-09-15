@@ -6,27 +6,27 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from agent.dashboard.deps import ADMIN_DEP, ADMIN_OR_TOKEN_DEP, SESSION_DEP, session_is_admin
-from agent.environments.refresh import (
+from agent.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
     start_refresh_run,
 )
-from agent.environments.sandbox_settings import (
+from agent.workspaces.sandbox_settings import (
     SandboxSettingsUpdate,
     get_sandbox_settings,
     upsert_sandbox_settings,
 )
-from agent.environments.store import (
-    DEFAULT_ENVIRONMENT_SLUG,
-    ENVIRONMENTS,
-    Environment,
-    EnvironmentCreate,
-    EnvironmentUpdate,
-    list_environment_options,
+from agent.workspaces.store import (
+    DEFAULT_WORKSPACE_SLUG,
+    WORKSPACES,
+    Workspace,
+    WorkspaceCreate,
+    WorkspaceUpdate,
+    list_workspace_options,
     slugify,
 )
 
-router = APIRouter(tags=["environments"])
+router = APIRouter(tags=["workspaces"])
 
 
 @router.get("/sandbox-settings")
@@ -51,23 +51,23 @@ def _normalized_slug(raw: str) -> str:
         raise HTTPException(400, str(e)) from e
 
 
-@router.get("/environments")
+@router.get("/workspaces")
 async def api_list_environments(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
     return {
-        "environments": await ENVIRONMENTS.list_all(),
-        "default_slug": DEFAULT_ENVIRONMENT_SLUG,
+        "workspaces": await WORKSPACES.list_all(),
+        "default_slug": DEFAULT_WORKSPACE_SLUG,
     }
 
 
-@router.post("/environments")
+@router.post("/workspaces")
 async def api_create_environment(
-    body: EnvironmentCreate,
+    body: WorkspaceCreate,
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> Environment:
+) -> Workspace:
     try:
-        record = await ENVIRONMENTS.create(body, _admin["sub"])
+        record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
     if record.setup_script:
@@ -75,36 +75,36 @@ async def api_create_environment(
     return record
 
 
-@router.get("/environments/options")
+@router.get("/workspaces/options")
 async def api_environment_options(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     """Pickable environments for any signed-in user; refresh logs only for admins."""
     return {
-        "environments": await list_environment_options(include_logs=session_is_admin(session)),
-        "default_slug": DEFAULT_ENVIRONMENT_SLUG,
+        "workspaces": await list_workspace_options(include_logs=session_is_admin(session)),
+        "default_slug": DEFAULT_WORKSPACE_SLUG,
     }
 
 
-@router.get("/environments/{slug}")
+@router.get("/workspaces/{slug}")
 async def api_get_environment(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> Environment:
-    record = await ENVIRONMENTS.get(_normalized_slug(slug))
+) -> Workspace:
+    record = await WORKSPACES.get(_normalized_slug(slug))
     if not record:
         raise HTTPException(404, "environment not found")
     return record
 
 
-@router.put("/environments/{slug}")
+@router.put("/workspaces/{slug}")
 async def api_update_environment(
     slug: str,
-    body: EnvironmentUpdate,
+    body: WorkspaceUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> Environment:
+) -> Workspace:
     try:
-        record = await ENVIRONMENTS.apply_update(_normalized_slug(slug), body)
+        record = await WORKSPACES.apply_update(_normalized_slug(slug), body)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     if record.setup_script:
@@ -112,7 +112,7 @@ async def api_update_environment(
     return record
 
 
-@router.post("/environments/{slug}/refresh")
+@router.post("/workspaces/{slug}/refresh")
 async def api_refresh_environment(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -123,7 +123,7 @@ async def api_refresh_environment(
     the outcome lands on the record for the dashboard to poll.
     """
     normalized = _normalized_slug(slug)
-    record = await ENVIRONMENTS.get(normalized)
+    record = await WORKSPACES.get(normalized)
     if not record:
         raise HTTPException(404, "environment not found")
     if not record.setup_script:
@@ -136,11 +136,11 @@ async def api_refresh_environment(
     return {"started": True, "run_id": run_id}
 
 
-@router.delete("/environments/{slug}")
+@router.delete("/workspaces/{slug}")
 async def api_delete_environment(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:
-    if not await ENVIRONMENTS.remove(_normalized_slug(slug)):
+    if not await WORKSPACES.remove(_normalized_slug(slug)):
         raise HTTPException(404, "environment not found")
     return Response(status_code=204)

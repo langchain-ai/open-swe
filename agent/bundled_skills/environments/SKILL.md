@@ -11,7 +11,7 @@ Only workspace admins can change environments, and only from an admin thread. An
 
 ## The one rule: build here, publish from here
 
-You do not write an environment as a script and hope. You build it in the admin thread's own sandbox with ordinary tools — `execute`, the file tools — and when it works you call `publish_environment`. That captures **this sandbox** as the image and writes the record only after the capture succeeded. Nothing is half-written on failure, and the environment is usable the moment the call returns.
+You do not write an environment as a script and hope. You build it in the admin thread's own sandbox with ordinary tools — `execute`, the file tools — and when it works you call `publish_workspace`. That captures **this sandbox** as the image and writes the record only after the capture succeeded. Nothing is half-written on failure, and the environment is usable the moment the call returns.
 
 Everything on the sandbox filesystem is captured, so provision it fully and leave no tokens, credentials, or proxy secrets on disk.
 
@@ -21,15 +21,15 @@ The image you publish is whatever you are sitting on plus your changes, so start
 
 | You want to… | Start the admin thread… | Then |
 |---|---|---|
-| **Edit** an environment | in that environment (composer → Environment picker) | change it, `publish_environment` under the **same** name |
-| **Fork** one into a new environment | in the parent | change what differs, `publish_environment` under a **new** name |
+| **Edit** an environment | in that environment (composer → Environment picker) | change it, `publish_workspace` under the **same** name |
+| **Fork** one into a new environment | in the parent | change what differs, `publish_workspace` under a **new** name |
 | Build **from scratch** | in no environment, or `sandbox_reset` with the base `snapshot_id` | provision everything, publish |
 
-Already in a thread and need a different image? `sandbox_reset(snapshot_id=…)` with an id from `list_environments`, or `sandbox_reset(snapshot="<prefix>-environment-<slug>:latest")`. The old sandbox is detached, not deleted.
+Already in a thread and need a different image? `sandbox_reset(snapshot_id=…)` with an id from `list_workspaces`, or `sandbox_reset(snapshot="<prefix>-environment-<slug>:latest")`. The old sandbox is detached, not deleted.
 
 ## `setup_script` — the reproducibility contract
 
-Optional. It is **not** the build; you already did the build by hand. It is the record of how to reproduce the image from the base snapshot, and when present a nightly cron replays it on a throwaway sandbox and replaces the image **only if it exits 0**. Anything you did by hand that the script does not do therefore shows up as a *failed refresh* on the Environments page rather than as silent drift. `refresh_environment_start` runs the same check on demand.
+Optional. It is **not** the build; you already did the build by hand. It is the record of how to reproduce the image from the base snapshot, and when present a nightly cron replays it on a throwaway sandbox and replaces the image **only if it exits 0**. Anything you did by hand that the script does not do therefore shows up as a *failed refresh* on the Environments page rather than as silent drift. `refresh_workspace_start` runs the same check on demand.
 
 Two consequences:
 
@@ -48,9 +48,9 @@ Optional; typically `git pull` plus a dependency sync. Keep it to seconds. It ru
 
 ## Reading a refresh
 
-A rebuild takes minutes to an hour and runs on a throwaway builder, not the thread's sandbox. `refresh_environment_start` returns `status: "started"` and a `task_id`; it is not done. Read it with `background_task("status", task_id)`, which reports the stage reached — `boot`, `setup`, `update`, `capture` — and, while a script is running, a tail of its live `bash -x` trace. Check in at intervals; do not poll in a loop.
+A rebuild takes minutes to an hour and runs on a throwaway builder, not the thread's sandbox. `refresh_workspace_start` returns `status: "started"` and a `task_id`; it is not done. Read it with `background_task("status", task_id)`, which reports the stage reached — `boot`, `setup`, `update`, `capture` — and, while a script is running, a tail of its live `bash -x` trace. Check in at intervals; do not poll in a loop.
 
-When it fails: the stage that broke is marked `failed` with its exit code, `error` names the script, and `output` is the log. The **previous image stays in place** — runs never drop to the base snapshot because a script broke. Fix the script, `publish_environment` with the new `setup_script`, and run the check again.
+When it fails: the stage that broke is marked `failed` with its exit code, `error` names the script, and `output` is the log. The **previous image stays in place** — runs never drop to the base snapshot because a script broke. Fix the script, `publish_workspace` with the new `setup_script`, and run the check again.
 
 Logs are written under `/open-swe/environment/logs/` (`setup.log`, `update.log`) with the scripts beside them, and are captured into the image — so any sandbox booted from an environment can read how its own image was built.
 

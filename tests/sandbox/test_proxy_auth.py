@@ -12,12 +12,12 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.environments.store import Environment
 from agent.sandboxes.providers.langsmith import (
     PROXY_GH_TOKEN_PLACEHOLDER,
     configure_github_proxy,
 )
 from agent.sandboxes.state import SandboxBackendProxy
+from agent.workspaces.store import Workspace
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -448,7 +448,7 @@ class TestCreateSandboxWithProxy:
 
     @pytest.mark.asyncio
     async def test_passes_environment_resources_to_sandbox_creation(self) -> None:
-        environment = Environment(
+        environment = Workspace(
             slug="env",
             snapshot_status="ready",
             snapshot_id="env-snap",
@@ -462,7 +462,7 @@ class TestCreateSandboxWithProxy:
         )
         with (
             patch(
-                "agent.sandboxes.lifecycle.resolve_environment",
+                "agent.sandboxes.lifecycle.load_workspace",
                 new_callable=AsyncMock,
                 return_value=environment,
             ),
@@ -483,7 +483,7 @@ class TestCreateSandboxWithProxy:
 
             from agent.sandboxes.lifecycle import _create_sandbox_with_proxy
 
-            await _create_sandbox_with_proxy(environment_slug="large")
+            await _create_sandbox_with_proxy(workspace_slug="large")
 
         mock_create.assert_awaited_once_with(
             snapshot_id="env-snap",
@@ -616,9 +616,9 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value=("ghp", None),
             ),
             patch(
-                "agent.server.resolve_environment",
+                "agent.server.load_workspace",
                 new_callable=AsyncMock,
-                return_value=Environment(slug="env", create_params={"proxy_config": {}}),
+                return_value=Workspace(slug="env", create_params={"proxy_config": {}}),
             ),
             patch(
                 "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",

@@ -24,7 +24,6 @@ from agent.dashboard.options import (
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
 from agent.dashboard.user_preferences import get_user_preferences
-from agent.environments.store import ENVIRONMENTS, slugify
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -60,6 +59,7 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from agent.workspaces.store import WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +196,7 @@ async def _resolve_requested_environment(requested: Any) -> str | None:
         slug = slugify(requested)
     except ValueError:
         return None
-    return slug if await ENVIRONMENTS.get(slug) is not None else None
+    return slug if await WORKSPACES.get(slug) is not None else None
 
 
 def _resolve_repo_config(repo: str | None) -> dict[str, str]:
