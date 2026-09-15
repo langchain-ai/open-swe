@@ -28,6 +28,7 @@ from agent.threads.runs import (
     _notify_slack_web_handoff,
     _user_message_content,
 )
+from agent.threads.state_view import ThreadStateView, trim_thread_state
 from agent.threads.summary import (
     _DASHBOARD_SOURCE,
     _SANDBOX_CREATING_SENTINEL,
@@ -671,7 +672,9 @@ async def get_dashboard_thread_state(
     login: str,
     *,
     email: str | None = None,
+    view: ThreadStateView = "full",
     timings: dict[str, float] | None = None,
+    counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     record = timings if timings is not None else {}
     client = langgraph_client()
@@ -689,6 +692,12 @@ async def get_dashboard_thread_state(
     with phase(record, "get_state"):
         state = await client.threads.get_state(thread_id)
     result = as_json_object(state)
+    if view == "trimmed":
+        with phase(record, "trim"):
+            stats = trim_thread_state(result)
+        if counts is not None:
+            counts["stubbed"] = stats["stubbed"]
+            counts["saved_bytes"] = stats["saved_bytes"]
     # The SDK's `useStream` opens its live event subscription only when the
     # hydrated `getState()` looks active (`next` non-empty / absent). When a
     # run was just started out-of-band (our REST run-create), the latest
