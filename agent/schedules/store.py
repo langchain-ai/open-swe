@@ -826,6 +826,17 @@ def _matches_issue_automation(record: dict[str, Any], repo_full_name: str) -> bo
     return (record_full_name or "").lower() == repo_full_name
 
 
+async def _release_issue_delivery_claim(claim_thread_id: str, schedule_id: str) -> None:
+    try:
+        await langgraph_client().threads.delete(claim_thread_id)
+    except Exception:
+        logger.warning(
+            "Failed to release GitHub issue automation delivery claim",
+            extra={"schedule_id": schedule_id},
+            exc_info=True,
+        )
+
+
 async def launch_github_issue_automations(
     payload: dict[str, Any], delivery_id: str
 ) -> list[dict[str, Any]]:
@@ -844,7 +855,14 @@ async def launch_github_issue_automations(
         schedule_id = record.get("id")
         if not isinstance(schedule_id, str) or not schedule_id:
             continue
-        claim_thread_id = await _claim_issue_delivery(delivery_id, schedule_id)
+        try:
+            claim_thread_id = await _claim_issue_delivery(delivery_id, schedule_id)
+        except Exception:
+            logger.exception(
+                "Failed to claim GitHub issue automation delivery",
+                extra={"schedule_id": schedule_id, "github_delivery": delivery_id},
+            )
+            continue
         if claim_thread_id is None:
             continue
         try:
@@ -856,24 +874,10 @@ async def launch_github_issue_automations(
                 "Failed to launch GitHub issue automation",
                 extra={"schedule_id": schedule_id},
             )
-            try:
-                await langgraph_client().threads.delete(claim_thread_id)
-            except Exception:
-                logger.warning(
-                    "Failed to release GitHub issue automation delivery claim",
-                    extra={"schedule_id": schedule_id},
-                    exc_info=True,
-                )
+            await _release_issue_delivery_claim(claim_thread_id, schedule_id)
             continue
         if result.get("status") != "started":
-            try:
-                await langgraph_client().threads.delete(claim_thread_id)
-            except Exception:
-                logger.warning(
-                    "Failed to release GitHub issue automation delivery claim",
-                    extra={"schedule_id": schedule_id},
-                    exc_info=True,
-                )
+            await _release_issue_delivery_claim(claim_thread_id, schedule_id)
         results.append(result)
     return results
 
