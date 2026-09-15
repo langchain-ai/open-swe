@@ -984,6 +984,8 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
         config = {**opr.get_config(), "run_id": "run-1"}
         monkeypatch.setattr(opr, "get_config", lambda: config)
     monkeypatch.setattr(opr, "record_agent_pr_usage", AsyncMock())
+    create_feedback = AsyncMock(return_value=True)
+    monkeypatch.setattr(opr, "create_langsmith_feedback", create_feedback)
     monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
     langgraph = MagicMock()
     langgraph.threads.get = AsyncMock(return_value={"metadata": {}})
@@ -1028,9 +1030,24 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
             "created_at": "",
             "diff_stats": {"files": 0, "additions": 0, "deletions": 0},
             "resolves_thread": True,
+            "opening_run_id": "run-1",
             "slack_feedback": {"run_id": "run-1", "channel_id": "C1"},
         }
     ]
+    create_feedback.assert_awaited_once_with(
+        "run-1",
+        "pr_opened",
+        score=1.0,
+        comment=f"Agent-authored pull request opened: {details['html_url']}",
+        source_info={
+            "source": "pr_opened",
+            "thread_id": "t1",
+            "pr_url": details["html_url"],
+            "repo_full_name": "langchain-ai/open-swe",
+            "pr_number": 3,
+        },
+        idempotency_key=f"pr_opened:{details['html_url']}",
+    )
 
 
 def test_updating_pr_preserves_original_feedback_run() -> None:
@@ -1038,6 +1055,7 @@ def test_updating_pr_preserves_original_feedback_run() -> None:
         "url": "https://github.com/lc/repo/pull/7",
         "repo_full_name": "lc/repo",
         "number": 7,
+        "opening_run_id": "original-run",
         "slack_feedback": {"run_id": "original-run", "channel_id": "C1"},
     }
     updated = {
@@ -1046,5 +1064,6 @@ def test_updating_pr_preserves_original_feedback_run() -> None:
         "slack_feedback": {"run_id": "later-run", "channel_id": "C2"},
     }
     result = opr._upsert_pull_request([original], updated)
+    assert result[0]["opening_run_id"] == "original-run"
     assert result[0]["slack_feedback"] == original["slack_feedback"]
     assert result[0]["state"] == "open"

@@ -7,7 +7,7 @@ import json
 import logging
 from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qs, quote
 
 import httpx2
@@ -145,7 +145,7 @@ from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.json_types import ThreadLike, as_thread_dict
-from agent.utils.langsmith import create_langsmith_thread_feedback
+from agent.utils.langsmith import create_langsmith_feedback
 from agent.utils.multimodal import (
     dedupe_urls,  # noqa: F401
     extract_image_urls,  # noqa: F401
@@ -1271,21 +1271,36 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
     return event.state if event is not None else None
 
 
-async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
+async def _record_pr_status_feedback(
+    thread_id: str,
+    *,
+    pr_url: str,
+    repo_full_name: str,
+    pr_number: int,
+    opening_run_id: str | None,
+    status: Literal["merged", "closed_without_merge"],
+) -> None:
     try:
-        await create_langsmith_thread_feedback(
-            thread_id,
-            f"github_pr_merged:{pr_url}",
-            score=1.0,
-            comment=f"Agent-authored pull request merged: {pr_url}",
-            source_info={
-                "source": "github_pr_merged",
-                "thread_id": thread_id,
-                "pr_url": pr_url,
-            },
-        )
+        key = f"pr_{status}"
+        comment = f"Agent-authored pull request {status.replace('_', ' ')}: {pr_url}"
+        source_info = {
+            "source": key,
+            "thread_id": thread_id,
+            "pr_url": pr_url,
+            "repo_full_name": repo_full_name,
+            "pr_number": pr_number,
+        }
+        if opening_run_id:
+            await create_langsmith_feedback(
+                opening_run_id,
+                key,
+                score=1.0,
+                comment=comment,
+                source_info=source_info,
+                idempotency_key=f"{key}:{pr_url}",
+            )
     except Exception:  # noqa: BLE001
-        logger.debug("Failed to record merged PR feedback for thread %s", thread_id, exc_info=True)
+        logger.debug("Failed to record PR status feedback for thread %s", thread_id, exc_info=True)
 
 
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
@@ -1305,6 +1320,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     if event is None or pull_request is None:
         return
     pr_url = pull_request.url
+    repo_full_name = f"{pull_request.owner}/{pull_request.repo}"
+    pr_number = pull_request.number
     new_state = pull_request.state
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -1330,7 +1347,18 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 pull_requests = metadata.get("pull_requests")
                 updated_pull_requests: list[dict[str, Any]] = []
                 previous_state: Any = None
+                opening_run_id: str | None = None
                 if isinstance(pull_requests, list):
+                    opening_run_id = next(
+                        (
+                            record.get("opening_run_id")
+                            for record in pull_requests
+                            if isinstance(record, dict)
+                            and record.get("url") == pr_url
+                            and isinstance(record.get("opening_run_id"), str)
+                        ),
+                        None,
+                    )
                     previous_state = next(
                         (
                             record.get("state")
@@ -1390,10 +1418,26 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from agent.analytics.emitter import task_marked_complete
 
             await task_marked_complete(thread_id, source="github", auto=True)
-            await _record_pr_merge_feedback(thread_id, pr_url=pr_url)
+            await _record_pr_status_feedback(
+                thread_id,
+                pr_url=pr_url,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                opening_run_id=opening_run_id,
+                status="merged",
+            )
             from agent.thread_feedback import schedule_pr_feedback
 
             await schedule_pr_feedback(thread_id, metadata, pr_url)
+        elif new_state == "closed":
+            await _record_pr_status_feedback(
+                thread_id,
+                pr_url=pr_url,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                opening_run_id=opening_run_id,
+                status="closed_without_merge",
+            )
         elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
             from agent.analytics.emitter import task_rework
 
