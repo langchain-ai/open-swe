@@ -49,6 +49,21 @@ export interface SidebarProjectGroup extends SidebarProjectOption {
   threads: Array<SidebarThreadItem>
 }
 
+/** A project option annotated with the workspace slug that owns its repository. */
+export type SidebarWorkspacedProjectOption = SidebarProjectOption & {
+  workspace?: string
+}
+
+export const DEFAULT_SIDEBAR_WORKSPACE_SLUG = "default"
+
+export interface SidebarWorkspaceGroup<
+  TProject extends SidebarProjectOption = SidebarProjectGroup,
+> {
+  slug: string
+  name: string
+  projects: Array<TProject>
+}
+
 /**
  * Identity, not display name: `owner/repo` for cloud and the checkout path for
  * local. Keying on the short label instead would merge `acme/api` with
@@ -218,6 +233,75 @@ export function groupSidebarThreadsByProject(
           (right.threads[0]?.updatedAt ?? 0) - (left.threads[0]?.updatedAt ?? 0)
       ),
     recents,
+  }
+}
+
+/**
+ * Buckets already-built project groups by the workspace that owns them, using
+ * each entry's `workspace` field from `projects` — falling back to
+ * {@link DEFAULT_SIDEBAR_WORKSPACE_SLUG} for a project with no workspace
+ * (every repository belongs to exactly one workspace, so this only fires for
+ * a project the caller didn't annotate). A workspace absent from `workspaces`
+ * displays its slug as its own name.
+ *
+ * Generic over the project-group shape so callers with richer, hydrated
+ * groups (live thread counts, active-thread hints) can bucket those directly
+ * instead of rebuilding them from raw threads.
+ */
+export function groupProjectGroupsByWorkspace<
+  TProject extends SidebarProjectOption,
+>(
+  groups: ReadonlyArray<TProject>,
+  projects: ReadonlyArray<SidebarWorkspacedProjectOption>,
+  workspaces: ReadonlyArray<{ slug: string; name: string }>
+): Array<SidebarWorkspaceGroup<TProject>> {
+  const workspaceByProjectKey = new Map(
+    projects.map((project) => [
+      project.key,
+      project.workspace ?? DEFAULT_SIDEBAR_WORKSPACE_SLUG,
+    ])
+  )
+  const names = new Map(
+    workspaces.map((workspace) => [workspace.slug, workspace.name])
+  )
+  const buckets = new Map<string, SidebarWorkspaceGroup<TProject>>()
+  for (const group of groups) {
+    const slug =
+      workspaceByProjectKey.get(group.key) ?? DEFAULT_SIDEBAR_WORKSPACE_SLUG
+    const bucket = buckets.get(slug) ?? {
+      slug,
+      name: names.get(slug) ?? slug,
+      projects: [],
+    }
+    bucket.projects.push(group)
+    buckets.set(slug, bucket)
+  }
+  return [...buckets.values()]
+}
+
+/**
+ * Groups threads by project the way {@link groupSidebarThreadsByProject}
+ * does, then nests those project groups under the workspace that owns each
+ * one. Threads with no project at all are unaffected by workspace grouping
+ * and stay in `recents`, same as the project-only grouping.
+ */
+export function groupSidebarThreadsByWorkspace(
+  threads: ReadonlyArray<SidebarThreadItem>,
+  projects: ReadonlyArray<SidebarWorkspacedProjectOption>,
+  workspaces: ReadonlyArray<{ slug: string; name: string }>,
+  mode: SidebarSort = "updated"
+): {
+  workspaces: Array<SidebarWorkspaceGroup>
+  recents: Array<SidebarThreadItem>
+} {
+  const grouped = groupSidebarThreadsByProject(threads, projects, mode)
+  return {
+    workspaces: groupProjectGroupsByWorkspace(
+      grouped.projects,
+      projects,
+      workspaces
+    ),
+    recents: grouped.recents,
   }
 }
 

@@ -18,6 +18,30 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+it("scopes workspace MCP requests to the selected workspace", async () => {
+  const requestedUrls: string[] = []
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    requestedUrls.push(String(input))
+    return new Response(JSON.stringify([]))
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="workspace" workspace="oss" />
+    </QueryClientProvider>
+  )
+  await waitFor(() => expect(requestedUrls.length).toBeGreaterThan(0))
+  expect(
+    requestedUrls.every((url) => url.includes("/workspaces/oss/mcps"))
+  ).toBe(true)
+  expect(
+    requestedUrls.some((url) => url.includes("/workspaces/default/"))
+  ).toBe(false)
+  client.clear()
+})
+
 it.each(["form", "import"])(
   "configures OAuth through %s and preserves saved credentials when editing",
   async (source) => {

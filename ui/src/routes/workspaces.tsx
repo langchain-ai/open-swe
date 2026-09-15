@@ -26,7 +26,7 @@ function WorkspacesPage() {
     <AppShell
       user={session.data}
       title="Workspaces"
-      description="The sandbox images agent runs boot from, and how their nightly rebuilds went."
+      description="Which repositories and Slack channels each workspace owns, the sandbox image its runs boot from, and how its nightly rebuild went."
     >
       <WorkspacesSection isAdmin={session.data.is_admin} />
     </AppShell>

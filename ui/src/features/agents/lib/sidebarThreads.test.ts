@@ -7,6 +7,7 @@ import {
   cloudProjectKeysByLabel,
   cloudSidebarThread,
   groupSidebarThreadsByProject,
+  groupSidebarThreadsByWorkspace,
   localSidebarThread,
   sidebarProjectOptions,
   sortSidebarThreads,
@@ -210,5 +211,85 @@ describe("groupSidebarThreadsByProject", () => {
 
     expect(grouped.projects).toHaveLength(1)
     expect(grouped.recents.map((thread) => thread.id)).toEqual(["orphan"])
+  })
+})
+
+describe("groupSidebarThreadsByWorkspace", () => {
+  it("nests project groups under their owning workspace, defaulting the rest", () => {
+    const alpha = cloudSidebarThread(
+      cloudThread({
+        id: "alpha",
+        repo: "alpha",
+        repoFullName: "acme/alpha",
+        updatedAt: 10,
+      })
+    )
+    const beta = cloudSidebarThread(
+      cloudThread({
+        id: "beta",
+        repo: "beta",
+        repoFullName: "acme/beta",
+        updatedAt: 20,
+      })
+    )
+    const gamma = cloudSidebarThread(
+      cloudThread({
+        id: "gamma",
+        repo: "gamma",
+        repoFullName: "acme/gamma",
+        updatedAt: 30,
+      })
+    )
+    const threads = [alpha, beta, gamma]
+    const projects = [
+      { key: "project:acme/alpha", label: "alpha", workspace: "oss" },
+      { key: "project:acme/beta", label: "beta", workspace: "oss" },
+      // No workspace field at all: falls under "default".
+      { key: "project:acme/gamma", label: "gamma" },
+    ]
+    const workspaces = [
+      { slug: "oss", name: "Open Source" },
+      { slug: "default", name: "Default" },
+    ]
+
+    const grouped = groupSidebarThreadsByWorkspace(
+      threads,
+      projects,
+      workspaces
+    )
+
+    expect(grouped.recents).toEqual([])
+    expect(
+      grouped.workspaces.map((workspace) => [
+        workspace.slug,
+        workspace.name,
+        workspace.projects.map((project) => project.key).sort(),
+      ])
+    ).toEqual(
+      expect.arrayContaining([
+        ["oss", "Open Source", ["project:acme/alpha", "project:acme/beta"]],
+        ["default", "Default", ["project:acme/gamma"]],
+      ])
+    )
+    expect(grouped.workspaces).toHaveLength(2)
+  })
+
+  it("falls back to the slug as a display name for an unknown workspace", () => {
+    const thread = cloudSidebarThread(
+      cloudThread({ id: "solo", repo: "solo", repoFullName: "acme/solo" })
+    )
+    const projects = [
+      { key: "project:acme/solo", label: "solo", workspace: "ghost" },
+    ]
+
+    const grouped = groupSidebarThreadsByWorkspace([thread], projects, [])
+
+    expect(grouped.workspaces).toEqual([
+      {
+        slug: "ghost",
+        name: "ghost",
+        projects: [expect.objectContaining({ key: "project:acme/solo" })],
+      },
+    ])
   })
 })
