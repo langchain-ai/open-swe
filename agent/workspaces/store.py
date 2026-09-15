@@ -1117,15 +1117,27 @@ async def _channels_by_workspace(session: AsyncSession) -> dict[UUID, list[str]]
 async def _bind_repos(session: AsyncSession, workspace_id: UUID, repos: list[str]) -> None:
     """Make this workspace's ``workspace_repository`` rows exactly ``repos``.
 
-    Each repository is upserted first, because the binding references the
-    ``repository`` row and a workspace may name one Open SWE has never seen.
-    Bindings that are already in place are left alone, so ``linked_at`` keeps
-    saying when the repository joined.
+    The binding references a ``repository`` row, and a workspace may name one
+    Open SWE has never seen, so the ones it does not know are inserted first.
+    The ones it already knows are only read: ``Repository.save`` bumps
+    ``last_activity_at``, and editing a workspace is not activity on its
+    repositories. Bindings already in place are left alone too, so ``linked_at``
+    keeps saying when the repository joined.
     """
     wanted: set[UUID] = set()
+    known: dict[str, UUID] = {}
+    if repos:
+        rows = await session.execute(
+            select(Repository.key, Repository.id).where(
+                Repository.key.in_([full_name.lower() for full_name in repos])
+            )
+        )
+        known = dict(rows.tuples().all())
     for full_name in repos:
-        stored = await Repository(full_name=full_name).save(session)
-        wanted.add(stored.id)
+        repository_id = known.get(full_name.lower())
+        if repository_id is None:
+            repository_id = (await Repository(full_name=full_name).save(session)).id
+        wanted.add(repository_id)
     current = set(
         await session.scalars(
             select(WorkspaceRepositoryRow.repository_id).where(

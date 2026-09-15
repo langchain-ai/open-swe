@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from agent.database import postgres
 from agent.github.repositories import Repository
@@ -821,6 +821,23 @@ async def test_owner_of_repo_matches_however_the_repository_is_written() -> None
     # Routing asks about whatever an inbound event carried, so an unparseable
     # name reads as unowned rather than raising.
     assert await WORKSPACES.owner_of_repo("acme") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_saving_a_workspace_is_not_activity_on_its_repositories() -> None:
+    """``repository.last_activity_at`` says when work happened, not when settings changed."""
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
+
+    async def last_activity() -> object:
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(Repository.last_activity_at).where(Repository.key == "acme/api")
+            )
+
+    before = await last_activity()
+    await WORKSPACES.apply_update("core", WorkspaceUpdate(prompt="build with make"))
+
+    assert await last_activity() == before
 
 
 @pytest.mark.usefixtures("registry_db")
