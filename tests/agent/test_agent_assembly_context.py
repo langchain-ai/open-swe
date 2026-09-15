@@ -18,9 +18,10 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
+from agent.run_config import RunConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
-from agent.server import DesktopAgentState, _registered_tool_name, get_agent
+from agent.server import DesktopAgentState, _registered_tool_name, get_agent, workspace_slug
 
 
 @pytest.fixture(autouse=True)
@@ -674,3 +675,9 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)
     assert subagent_names == parent_names - parent_only_names
+
+
+def test_workspace_slug_reads_workspace_then_environment() -> None:
+    assert workspace_slug(RunConfig(workspace="oss")) == "oss"
+    assert workspace_slug(RunConfig(environment="legacy")) == "legacy"
+    assert workspace_slug(RunConfig()) is None

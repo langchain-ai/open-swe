@@ -490,8 +490,8 @@ ADMIN_TOOLS = (
 
 
 def workspace_slug(cfg: RunConfig) -> str | None:
-    """The environment this thread selected, if any."""
-    return (cfg.environment or "").strip() or None
+    """The workspace this thread selected, if any."""
+    return cfg.workspace_slug
 
 
 async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
