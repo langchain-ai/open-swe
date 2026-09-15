@@ -1,3 +1,6 @@
+import pytest
+from fastapi import HTTPException
+
 from agent.dashboard import team_settings, team_settings_cache
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
@@ -54,3 +57,14 @@ async def test_cached_reads_do_not_leak_across_workspaces(fake_store: FakeStore)
     assert (await team_settings_cache.cached_team_settings("default"))[
         "org_guidelines"
     ] == "internal only"
+
+
+async def test_a_workspace_name_that_does_not_slugify_is_refused(fake_store: FakeStore) -> None:
+    """A name the store could never hold is a bad request, not a read of `default`."""
+    with pytest.raises(HTTPException) as refused:
+        await team_settings.api_get_team_settings(workspace="!!!", _session={"sub": "alice"})
+    assert refused.value.status_code == 400
+
+    assert (
+        await team_settings.api_get_team_settings(workspace=" OSS ", _session={"sub": "alice"})
+    )["org_guidelines"] is None
