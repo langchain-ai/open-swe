@@ -93,7 +93,9 @@ async def test_schedule_creates_one_debounced_system_turn(record, policy, platfo
     assert configurable["source"] == "incidents_agent"
     assert configurable["incident_id"] == "i1"
     assert configurable["slack_thread"] == {"channel_id": "C1", "thread_ts": "0"}
-    assert not {"github_login", "user_email", "incident_request"} & configurable.keys()
+    assert not {"github_login", "user_email"} & configurable.keys()
+    # Present and null, so a stale question on the thread cannot survive into this turn.
+    assert configurable["incident_request"] is None
     assert kwargs["metadata"]["incident_turn"] == "automatic"
     assert "New activity" in json.dumps(kwargs["input"])
 
@@ -190,3 +192,14 @@ async def test_platform_rejection_means_a_turn_is_already_scheduled(record, poli
     )
     with pytest.raises(httpx.HTTPStatusError):
         await turns.schedule_automatic_turn(record, policy)
+
+
+async def test_automatic_turns_clear_a_stale_explicit_request(record, policy, platform):
+    """A thread keeps the configurable of earlier runs, so omitting the key inherits it."""
+    await turns.dispatch_turn(record, policy, request="Why are we seeing 500s?")
+    await turns.schedule_automatic_turn(record, policy)
+
+    _, kwargs = turns.create_durable_run.await_args
+    configurable = kwargs["config"]["configurable"]
+    assert "incident_request" in configurable
+    assert configurable["incident_request"] is None

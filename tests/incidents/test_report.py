@@ -86,3 +86,23 @@ def test_malformed_and_foreign_headers_are_not_evidence():
     )
     assert context_evidence(text, collector) == 1
     assert [(item.id, item.url) for item in collector.evidence] == [("slack:9", "")]
+
+
+def test_digest_fields_ignore_citation_churn_but_track_the_conclusion():
+    """Every turn cites the newest channel message; that alone is not a new finding."""
+    from agent.incidents.models import IncidentReport
+    from agent.incidents.report import digest_fields
+
+    def report(summary: str, **fields) -> IncidentReport:
+        return IncidentReport(summary=summary, impact="Impact remains unverified.", **fields)
+
+    first = report("INC-1722 remains in triage [slack:1789443151.637379]")
+    requoted = report("INC-1722 remains in triage [slack:1789444956.604229]")
+    reworded = report("No recurrence is visible; INC-1722 remains in triage [slack:1.0]")
+    advanced = report("Monitors recovered to OK after the rollback [slack:1.0]")
+
+    assert digest_fields(first) == digest_fields(requoted)
+    assert digest_fields(first) != digest_fields(reworded)
+    assert digest_fields(first) != digest_fields(advanced)
+    with_step = report(first.summary, next_steps=["Roll back the deploy"])
+    assert digest_fields(first) != digest_fields(with_step)
