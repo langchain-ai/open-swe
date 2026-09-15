@@ -735,6 +735,21 @@ function CounterList({
 function UserCell({ row }: { row: UsageLeaderboardRow }) {
   const initials = initialsFor(row.user.name)
   const detail = row.user.email ?? row.user.github_login ?? "unknown"
+  const profileUrl = githubProfileUrl(row.user.github_login)
+  const name = profileUrl ? (
+    <a
+      href={profileUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="truncate font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    >
+      {row.user.name}
+    </a>
+  ) : (
+    <span className="truncate font-medium text-foreground">
+      {row.user.name}
+    </span>
+  )
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <Avatar>
@@ -744,9 +759,7 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
         <AvatarFallback>{initials}</AvatarFallback>
       </Avatar>
       <div className="flex min-w-0 flex-col">
-        <span className="truncate font-medium text-foreground">
-          {row.user.name}
-        </span>
+        {name}
         {detail !== row.user.name ? (
           <span className="truncate text-xs text-muted-foreground">
             {detail}
@@ -755,6 +768,11 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
       </div>
     </div>
   )
+}
+
+function githubProfileUrl(login: string | null): string | null {
+  if (!login) return null
+  return `https://github.com/${encodeURIComponent(login)}`
 }
 
 function initialsFor(name: string): string {
