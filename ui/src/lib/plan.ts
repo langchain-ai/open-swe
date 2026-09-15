@@ -42,6 +42,7 @@ export interface PlanData {
   markdown: string
   approvedBy: PlanApprover | null
   approvedAt: string | null
+  dismissed: boolean
   user: PlanUser
 }
 
@@ -104,6 +105,12 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export function getPlan(threadId: string): Promise<PlanData> {
   return req<PlanData>(`/plan/${encodeURIComponent(threadId)}`)
+}
+
+export function dismissPlan(threadId: string): Promise<{ dismissed: boolean }> {
+  return req(`/plan/${encodeURIComponent(threadId)}/dismiss`, {
+    method: "POST",
+  })
 }
 
 export async function getPlanComments(

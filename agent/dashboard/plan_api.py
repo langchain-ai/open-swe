@@ -115,6 +115,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
         "markdown": content.get("markdown", ""),
         "approvedBy": approved_by,
         "approvedAt": approved_at if isinstance(approved_at, str) else None,
+        "dismissed": metadata.get("plan_dismissed") is True,
         "user": {
             "id": login,
             "login": login,
@@ -122,6 +123,15 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
             "name": session.get("name") or login,
         },
     }
+
+
+@plan_router.post("/{thread_id}/dismiss")
+async def dismiss_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, bool]:
+    metadata = await fetch_thread_metadata(thread_id)
+    if not thread_is_promptable(metadata, session["sub"]):
+        raise HTTPException(404, "thread not found")
+    await get_client().threads.update(thread_id=thread_id, metadata={"plan_dismissed": True})
+    return {"dismissed": True}
 
 
 @plan_router.put("/{thread_id}")

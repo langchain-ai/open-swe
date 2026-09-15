@@ -605,6 +605,7 @@ async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.Monkey
     assert isinstance(saved["approved_at"], str)
     assert merged == {
         "plan_status": "approved",
+        "plan_dismissed": False,
         "plan_mode": False,
         "plan_approved_by": saved["approved_by"],
         "plan_approved_at": saved["approved_at"],
@@ -640,7 +641,11 @@ async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
     await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_PLANNING, plan_mode=True)
 
     assert saved == {"html": "", "status": "planning"}
-    assert merged == {"plan_status": "planning", "plan_mode": True}
+    assert merged == {
+        "plan_status": "planning",
+        "plan_dismissed": False,
+        "plan_mode": True,
+    }
 
 
 async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -692,7 +697,7 @@ async def test_save_plan_content_can_skip_plan_mode_metadata(
 
     await plan_store.save_plan_content("t", html="x", plan_mode=None)
 
-    assert merged == {"plan_status": "ready"}
+    assert merged == {"plan_status": "ready", "plan_dismissed": False}
 
 
 async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -723,6 +728,31 @@ async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyP
         "source": "dashboard",
     }
     assert result["approvedAt"] == "2026-08-16T12:00:00+00:00"
+    assert result["dismissed"] is False
+
+
+async def test_dismiss_plan_updates_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard import plan_api
+
+    updates: list[dict[str, Any]] = []
+
+    class _Threads:
+        async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+            updates.append({"thread_id": thread_id, "metadata": metadata})
+
+    class _Client:
+        threads = _Threads()
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return {"source": "dashboard", "github_login": "owner"}
+
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "get_client", lambda: _Client())
+
+    result = await plan_api.dismiss_plan("t1", session={"sub": "owner", "email": None})
+
+    assert result == {"dismissed": True}
+    assert updates == [{"thread_id": "t1", "metadata": {"plan_dismissed": True}}]
 
 
 def _patch_update_plan_deps(

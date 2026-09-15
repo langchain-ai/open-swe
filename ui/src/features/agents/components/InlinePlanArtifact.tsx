@@ -1,24 +1,31 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ArrowUpRight, X } from "lucide-react"
-import { useState } from "react"
 
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { getPlan } from "@/lib/plan"
+import { dismissPlan, getPlan, type PlanData } from "@/lib/plan"
 
 export function InlinePlanArtifact({ threadId }: { threadId: string }) {
   const navigate = useNavigate()
-  const [dismissed, setDismissed] = useState(false)
+  const queryClient = useQueryClient()
+  const queryKey = ["plan", threadId] as const
   const query = useQuery({
-    queryKey: ["plan", threadId],
+    queryKey,
     queryFn: () => getPlan(threadId),
+  })
+  const dismiss = useMutation({
+    mutationFn: () => dismissPlan(threadId),
+    onSuccess: () =>
+      queryClient.setQueryData<PlanData>(queryKey, (plan) =>
+        plan ? { ...plan, dismissed: true } : plan
+      ),
   })
   const html = query.data?.html.trim() ?? ""
   const markdown = query.data?.markdown.trim() ?? ""
   const planVersion = html || markdown
 
-  if (!planVersion || dismissed) return null
+  if (!planVersion || query.data?.dismissed) return null
 
   return (
     <div className="group relative mt-4">
@@ -58,7 +65,8 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
       <button
         type="button"
         aria-label="Dismiss plan"
-        onClick={() => setDismissed(true)}
+        disabled={dismiss.isPending}
+        onClick={() => dismiss.mutate()}
         className="absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-full border border-border bg-background/90 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
       >
         <X className="size-3.5" />

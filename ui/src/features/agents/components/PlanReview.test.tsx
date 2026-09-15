@@ -70,6 +70,7 @@ const plan: PlanData = {
   markdown: "",
   approvedBy: null,
   approvedAt: null,
+  dismissed: false,
   user: {
     id: "user-1",
     login: "alice",
