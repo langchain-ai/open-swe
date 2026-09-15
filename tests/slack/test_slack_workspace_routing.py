@@ -20,6 +20,10 @@ from agent.workspaces.store import WORKSPACES, WorkspaceCreate, parse_workspace_
 from tests.conftest import FakeStore
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
+# Workspaces are rows; team settings are still Store records, so the test that
+# reads one keeps the store double as well.
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 
 def test_workspace_tag_accepts_both_spellings() -> None:
     assert parse_workspace_tag("workspace:oss fix the bug") == ("oss", "fix the bug")

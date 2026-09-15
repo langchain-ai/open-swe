@@ -5,7 +5,9 @@ import pytest
 from fastapi import FastAPI
 
 from agent.dashboard import deps, oauth, routes
-from tests.conftest import FakeStore
+
+# Workspaces created through the HTTP API now live in PostgreSQL.
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 
@@ -31,9 +33,7 @@ async def admin_client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[httpx.A
         yield client
 
 
-async def test_duplicate_repo_is_a_409(
-    admin_client: httpx.AsyncClient, fake_store: FakeStore
-) -> None:
+async def test_duplicate_repo_is_a_409(admin_client: httpx.AsyncClient) -> None:
     first = await admin_client.post(
         "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/api"]}
     )
@@ -45,9 +45,7 @@ async def test_duplicate_repo_is_a_409(
     assert "already belongs to workspace core" in second.json()["detail"]
 
 
-async def test_duplicate_repo_on_update_is_a_409(
-    admin_client: httpx.AsyncClient, fake_store: FakeStore
-) -> None:
+async def test_duplicate_repo_on_update_is_a_409(admin_client: httpx.AsyncClient) -> None:
     await admin_client.post(
         "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/api"]}
     )
@@ -60,7 +58,7 @@ async def test_duplicate_repo_on_update_is_a_409(
 
 
 async def test_options_carry_repos_channels_and_default_flag(
-    admin_client: httpx.AsyncClient, fake_store: FakeStore
+    admin_client: httpx.AsyncClient,
 ) -> None:
     await admin_client.post("/dashboard/api/workspaces", json={"name": "Default"})
     await admin_client.post(
@@ -75,18 +73,14 @@ async def test_options_carry_repos_channels_and_default_flag(
     ]
 
 
-async def test_a_workspace_with_no_repository_is_a_400(
-    admin_client: httpx.AsyncClient, fake_store: FakeStore
-) -> None:
+async def test_a_workspace_with_no_repository_is_a_400(admin_client: httpx.AsyncClient) -> None:
     """Only `default` may claim nothing; a malformed definition is not a conflict."""
     response = await admin_client.post("/dashboard/api/workspaces", json={"name": "OSS"})
     assert response.status_code == 400
     assert "at least one repository" in response.json()["detail"]
 
 
-async def test_a_repeated_workspace_name_is_a_409(
-    admin_client: httpx.AsyncClient, fake_store: FakeStore
-) -> None:
+async def test_a_repeated_workspace_name_is_a_409(admin_client: httpx.AsyncClient) -> None:
     payload = {"name": "Core", "repos": ["acme/api"]}
     assert (await admin_client.post("/dashboard/api/workspaces", json=payload)).status_code == 200
     second = await admin_client.post(

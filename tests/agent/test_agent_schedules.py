@@ -724,7 +724,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
 
 
 async def test_launch_scheduled_agent_run_stamps_workspace_owning_repo(
-    fake_client, auth, monkeypatch
+    fake_client, auth, monkeypatch, registry_db
 ) -> None:  # noqa: ANN001, ARG001
     workspace = await WORKSPACES.create(
         WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice"

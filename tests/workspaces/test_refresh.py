@@ -7,7 +7,9 @@ import pytest
 from agent.workspaces import refresh
 from agent.workspaces import store as env_store
 from agent.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate
-from tests.conftest import FakeStore
+
+# Most tests here create workspaces, which now live in PostgreSQL.
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 class _Result:
@@ -82,9 +84,7 @@ def test_a_wedged_refresh_does_not_block_forever() -> None:
 
 
 @pytest.mark.asyncio
-async def test_refresh_runs_the_script_then_captures_and_cleans_up(
-    fake_store: FakeStore,
-) -> None:
+async def test_refresh_runs_the_script_then_captures_and_cleans_up() -> None:
     backend = _backend(_Result("cloning acme/repo\ndone", 0))
     capture = AsyncMock()
     release = AsyncMock()
@@ -113,9 +113,7 @@ async def test_refresh_runs_the_script_then_captures_and_cleans_up(
 
 
 @pytest.mark.asyncio
-async def test_the_update_script_runs_after_setup_and_gates_the_capture(
-    fake_store: FakeStore,
-) -> None:
+async def test_the_update_script_runs_after_setup_and_gates_the_capture() -> None:
     """A broken update script must be caught here, not by the next hourly update."""
     backend = _backend(_Result("provisioned", 0), _Result("fatal: not a git repository", 1))
     capture = AsyncMock()
@@ -149,7 +147,7 @@ async def test_the_update_script_runs_after_setup_and_gates_the_capture(
 
 
 @pytest.mark.asyncio
-async def test_a_failing_script_is_never_captured(fake_store: FakeStore) -> None:
+async def test_a_failing_script_is_never_captured() -> None:
     backend = _backend(_Result("gcc: fatal error", 2))
     capture = AsyncMock()
     with (
@@ -179,9 +177,7 @@ async def test_a_failing_script_is_never_captured(fake_store: FakeStore) -> None
 
 
 @pytest.mark.asyncio
-async def test_a_sandbox_that_never_boots_still_records_the_failure(
-    fake_store: FakeStore,
-) -> None:
+async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
     release = AsyncMock()
     with (
         patch.object(
@@ -206,7 +202,7 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure(
 
 @pytest.mark.asyncio
 @pytest.mark.asyncio
-async def test_a_refresh_in_flight_blocks_a_second_one(fake_store: FakeStore) -> None:
+async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
     create = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create):
         await WORKSPACES.create(
@@ -220,9 +216,7 @@ async def test_a_refresh_in_flight_blocks_a_second_one(fake_store: FakeStore) ->
 
 
 @pytest.mark.asyncio
-async def test_refresh_requires_the_langsmith_provider(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_refresh_requires_the_langsmith_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANDBOX_TYPE", "local")
     create = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create):
@@ -236,9 +230,7 @@ async def test_refresh_requires_the_langsmith_provider(
 
 
 @pytest.mark.asyncio
-async def test_the_nightly_sweep_only_visits_scripted_environments(
-    fake_store: FakeStore,
-) -> None:
+async def test_the_nightly_sweep_only_visits_scripted_environments() -> None:
     refreshed = AsyncMock(return_value={"status": "success"})
     with patch.object(refresh, "refresh_environment", refreshed):
         await WORKSPACES.create(
@@ -255,9 +247,7 @@ async def test_the_nightly_sweep_only_visits_scripted_environments(
 
 
 @pytest.mark.asyncio
-async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_update_script(
-    fake_store: FakeStore,
-) -> None:
+async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_update_script() -> None:
     backend = _backend(_Result("Already up to date.", 0))
     create_builder = AsyncMock(return_value=backend)
     capture = AsyncMock()
@@ -296,7 +286,7 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
 
 
 @pytest.mark.asyncio
-async def test_an_update_needs_a_snapshot_to_update(fake_store: FakeStore) -> None:
+async def test_an_update_needs_a_snapshot_to_update() -> None:
     create_builder = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create_builder):
         await WORKSPACES.create(
@@ -401,7 +391,7 @@ async def test_a_failed_trigger_never_reaches_the_sandbox_creation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cron_registration_is_idempotent(fake_store: FakeStore) -> None:
+async def test_cron_registration_is_idempotent() -> None:
     client = MagicMock()
     client.crons.create = AsyncMock(return_value={"cron_id": "cron-1"})
     with patch.object(refresh, "_client", return_value=client):
@@ -415,7 +405,7 @@ async def test_cron_registration_is_idempotent(fake_store: FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_deleting_an_environment_removes_its_cron(fake_store: FakeStore) -> None:
+async def test_deleting_an_environment_removes_its_cron() -> None:
     client = MagicMock()
     client.crons.create = AsyncMock(return_value={"cron_id": "cron-1"})
     client.crons.delete = AsyncMock()
@@ -433,7 +423,7 @@ async def test_deleting_an_environment_removes_its_cron(fake_store: FakeStore) -
 
 
 @pytest.mark.asyncio
-async def test_a_refresh_records_every_stage_it_reaches(fake_store: FakeStore) -> None:
+async def test_a_refresh_records_every_stage_it_reaches() -> None:
     """A rebuild runs for minutes to an hour; the stage list is how it is followed."""
     backend = _backend(_Result("provisioned", 0), _Result("Already up to date.", 0))
     with (
@@ -467,7 +457,7 @@ async def test_a_refresh_records_every_stage_it_reaches(fake_store: FakeStore) -
 
 
 @pytest.mark.asyncio
-async def test_the_step_that_broke_is_the_one_left_failed(fake_store: FakeStore) -> None:
+async def test_the_step_that_broke_is_the_one_left_failed() -> None:
     backend = _backend(_Result("gcc: fatal error", 2))
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
@@ -488,9 +478,7 @@ async def test_the_step_that_broke_is_the_one_left_failed(fake_store: FakeStore)
 
 
 @pytest.mark.asyncio
-async def test_the_builder_is_published_while_it_lives_and_cleared_after(
-    fake_store: FakeStore,
-) -> None:
+async def test_the_builder_is_published_while_it_lives_and_cleared_after() -> None:
     """A poll reads the running trace off the builder, so its id must be current."""
     backend = _backend(_Result("provisioned", 0))
     published: list[str | None] = []

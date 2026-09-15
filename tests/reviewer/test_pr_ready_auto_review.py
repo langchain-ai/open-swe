@@ -424,7 +424,7 @@ async def test_converted_to_draft_keeps_watch_when_team_default_drafts_on(
 
 @pytest.mark.asyncio
 async def test_pr_ready_draft_reads_the_owning_workspaces_team_default(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, registry_db: None
 ) -> None:
     """The draft-review default belongs to the workspace that owns the repo."""
     fake_client = MagicMock()

@@ -5,8 +5,8 @@ import hmac
 import json
 from typing import Any, cast
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 from httpx2 import Response
 
 from agent.api.app import app
@@ -21,20 +21,30 @@ def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
     return f"sha256={sig}"
 
 
-def _post_github_webhook(client: TestClient, event_type: str, payload: dict[str, Any]) -> Response:
+async def _post_github_webhook(event_type: str, payload: dict[str, Any]) -> Response:
+    """Send a signed GitHub webhook POST request.
+
+    Uses an in-process ``httpx.AsyncClient`` rather than ``TestClient`` so the
+    request runs on the test's own event loop: the public-repo gate reads
+    workspace ownership through ``registry_db``'s engine, which is bound to
+    that loop.
+    """
     body = json.dumps(payload, separators=(",", ":")).encode()
-    return cast(
-        Response,
-        client.post(
-            "/webhooks/github",
-            content=body,
-            headers={
-                "X-GitHub-Event": event_type,
-                "X-Hub-Signature-256": _sign_body(body),
-                "Content-Type": "application/json",
-            },
-        ),
-    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return cast(
+            Response,
+            await client.post(
+                "/webhooks/github",
+                content=body,
+                headers={
+                    "X-GitHub-Event": event_type,
+                    "X-Hub-Signature-256": _sign_body(body),
+                    "Content-Type": "application/json",
+                },
+            ),
+        )
 
 
 def _install_membership_stub(monkeypatch, members: set[str]) -> dict[str, list[str]]:
@@ -55,7 +65,9 @@ def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset())
 
 
-def test_gate_blocks_non_member_on_public_pr_comment(fake_store: Any, monkeypatch) -> None:
+async def test_gate_blocks_non_member_on_public_pr_comment(
+    fake_store: Any, monkeypatch, registry_db
+) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -66,9 +78,7 @@ def test_gate_blocks_non_member_on_public_pr_comment(fake_store: Any, monkeypatc
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issue_comment",
         {
             "action": "created",
@@ -97,7 +107,9 @@ def test_gate_blocks_non_member_on_public_pr_comment(fake_store: Any, monkeypatc
     assert seen["calls"] == ["stranger"]
 
 
-def test_gate_allows_org_member_on_public_pr_comment(fake_store: Any, monkeypatch) -> None:
+async def test_gate_allows_org_member_on_public_pr_comment(
+    fake_store: Any, monkeypatch, registry_db
+) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -110,9 +122,7 @@ def test_gate_allows_org_member_on_public_pr_comment(fake_store: Any, monkeypatc
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issue_comment",
         {
             "action": "created",
@@ -139,7 +149,7 @@ def test_gate_allows_org_member_on_public_pr_comment(fake_store: Any, monkeypatc
     assert called["event"] == "issue_comment"
 
 
-def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch) -> None:
+async def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -152,9 +162,7 @@ def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch) -> None:
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issue_comment",
         {
             "action": "created",
@@ -182,7 +190,7 @@ def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch) -> None:
     assert seen["calls"] == []
 
 
-def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch) -> None:
+async def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch, gate="")
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -195,9 +203,7 @@ def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch) -> None:
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issue_comment",
         {
             "action": "created",
@@ -225,7 +231,9 @@ def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch) -> None:
     assert seen["calls"] == []
 
 
-def test_gate_blocks_non_member_on_public_issue(fake_store: Any, monkeypatch) -> None:
+async def test_gate_blocks_non_member_on_public_issue(
+    fake_store: Any, monkeypatch, registry_db
+) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -234,9 +242,7 @@ def test_gate_blocks_non_member_on_public_issue(fake_store: Any, monkeypatch) ->
 
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issues",
         {
             "action": "opened",
@@ -261,15 +267,13 @@ def test_gate_blocks_non_member_on_public_issue(fake_store: Any, monkeypatch) ->
     assert "not a member" in body["reason"]
 
 
-def test_review_requested_is_unsupported_before_public_repo_gate(
-    fake_store: Any, monkeypatch
+async def test_review_requested_is_unsupported_before_public_repo_gate(
+    fake_store: Any, monkeypatch, registry_db
 ) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "pull_request",
         {
             "action": "review_requested",
@@ -297,7 +301,7 @@ def test_review_requested_is_unsupported_before_public_repo_gate(
     assert seen["calls"] == []
 
 
-def test_gate_allows_internal_bot_sender(fake_store: Any, monkeypatch) -> None:
+async def test_gate_allows_internal_bot_sender(fake_store: Any, monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -310,9 +314,7 @@ def test_gate_allows_internal_bot_sender(fake_store: Any, monkeypatch) -> None:
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issue_comment",
         {
             "action": "created",

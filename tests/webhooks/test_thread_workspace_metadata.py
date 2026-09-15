@@ -29,7 +29,7 @@ async def test_get_thread_workspace_prefers_workspace_then_environment(monkeypat
 
 
 async def test_workspace_for_repo_config_resolves_owner_and_falls_back_to_default(
-    fake_store: Any,
+    registry_db: None,
 ) -> None:
     repo_config = {"owner": "acme", "name": "oss"}
     assert await common.workspace_for_repo_config(repo_config) == "default"

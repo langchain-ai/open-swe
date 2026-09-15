@@ -7,6 +7,7 @@ import logging
 from typing import cast
 from xml.etree import ElementTree
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -57,18 +58,26 @@ def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
     return f"sha256={sig}"
 
 
-def _post_github_webhook(client: TestClient, event_type: str, payload: dict[object, object]):
-    """Send a signed GitHub webhook POST request."""
+async def _post_github_webhook(event_type: str, payload: dict[object, object]) -> httpx.Response:
+    """Send a signed GitHub webhook POST request.
+
+    Uses an in-process ``httpx.AsyncClient`` rather than ``TestClient`` so the
+    request runs on the test's own event loop: a workspace-backed route needs
+    ``registry_db``'s engine, which is bound to that loop.
+    """
     body = json.dumps(payload, separators=(",", ":")).encode()
-    return client.post(
-        "/webhooks/github",
-        content=body,
-        headers={
-            "X-GitHub-Event": event_type,
-            "X-Hub-Signature-256": _sign_body(body),
-            "Content-Type": "application/json",
-        },
-    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await client.post(
+            "/webhooks/github",
+            content=body,
+            headers={
+                "X-GitHub-Event": event_type,
+                "X-Hub-Signature-256": _sign_body(body),
+                "Content-Type": "application/json",
+            },
+        )
 
 
 def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
@@ -146,7 +155,9 @@ def test_auto_review_enablement_uses_dashboard_opt_in(monkeypatch) -> None:
     )
 
 
-def test_github_webhook_skips_automatic_review_when_disabled(monkeypatch) -> None:
+async def test_github_webhook_skips_automatic_review_when_disabled(
+    monkeypatch, registry_db
+) -> None:
     called = False
 
     async def fake_auto_review_enabled(_repo_config: dict[str, str]) -> bool:
@@ -160,9 +171,7 @@ def test_github_webhook_skips_automatic_review_when_disabled(monkeypatch) -> Non
     monkeypatch.setattr(github_webhooks, "process_github_pr_ready", fake_process_github_pr_ready)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "pull_request",
         {
             "action": "opened",
@@ -179,7 +188,7 @@ def test_github_webhook_skips_automatic_review_when_disabled(monkeypatch) -> Non
     assert called is False
 
 
-def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
+async def test_github_webhook_accepts_issue_events(monkeypatch, registry_db) -> None:
     called: dict[str, object] = {}
 
     async def fake_process_github_issue(payload: dict[str, object], event_type: str) -> None:
@@ -189,9 +198,7 @@ def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issues",
         {
             "action": "opened",
@@ -211,7 +218,9 @@ def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
     assert called["event_type"] == "issues"
 
 
-def test_github_webhook_ignores_issue_events_without_body_or_title_change(monkeypatch) -> None:
+async def test_github_webhook_ignores_issue_events_without_body_or_title_change(
+    monkeypatch, registry_db
+) -> None:
     called = False
 
     async def fake_process_github_issue(payload: dict[str, object], event_type: str) -> None:
@@ -221,9 +230,7 @@ def test_github_webhook_ignores_issue_events_without_body_or_title_change(monkey
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issues",
         {
             "action": "edited",
@@ -244,7 +251,7 @@ def test_github_webhook_ignores_issue_events_without_body_or_title_change(monkey
     assert called is False
 
 
-def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
+async def test_github_webhook_accepts_issue_comment_events(monkeypatch, registry_db) -> None:
     called: dict[str, object] = {}
 
     async def fake_process_github_issue(payload: dict[str, object], event_type: str) -> None:
@@ -254,9 +261,7 @@ def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issue_comment",
         {
             "action": "created",
@@ -272,7 +277,9 @@ def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
     assert called["event_type"] == "issue_comment"
 
 
-def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch, caplog) -> None:
+async def test_github_webhook_ignores_unmentioned_comment_without_info_log(
+    monkeypatch, caplog, registry_db
+) -> None:
     async def fake_process_github_pr_comment(payload: dict[str, object], event_type: str) -> None:
         raise AssertionError("process_github_pr_comment should not be called")
 
@@ -282,9 +289,7 @@ def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     caplog.set_level(logging.INFO, logger=webhook_common.logger.name)
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "pull_request_review_comment",
         {
             "action": "created",
@@ -309,7 +314,9 @@ def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch
     assert f"does not mention {tags}" not in caplog.text
 
 
-def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> None:
+async def test_github_webhook_routes_review_comment_reply_without_tag(
+    monkeypatch, registry_db
+) -> None:
     called: dict[str, object] = {}
     auto_review_checked = False
 
@@ -329,9 +336,7 @@ def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> 
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "pull_request_review_comment",
         {
             "action": "created",
@@ -521,7 +526,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     assert "&lt;/body_&gt;" in message_content
 
 
-def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
+async def test_github_webhook_ignores_unsupported_comment_action(monkeypatch, registry_db) -> None:
     async def fake_process_github_pr_comment(payload: dict[str, object], event_type: str) -> None:
         raise AssertionError("process_github_pr_comment should not be called")
 
@@ -530,9 +535,7 @@ def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
     )
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "pull_request_review",
         {
             "action": "dismissed",
@@ -555,11 +558,9 @@ def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
     }
 
 
-def test_github_webhook_ignores_review_requested(monkeypatch) -> None:
+async def test_github_webhook_ignores_review_requested(monkeypatch, registry_db) -> None:
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "pull_request",
         {
             "action": "review_requested",
@@ -1426,7 +1427,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     assert request.find("repository") is None
 
 
-def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:
+async def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch, registry_db) -> None:
     captured: dict[str, object] = {}
 
     async def fake_process_pr_comment(payload: dict[str, object], event_type: str) -> None:
@@ -1437,9 +1438,7 @@ def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issue_comment",
         {
             "action": "created",
@@ -1459,7 +1458,9 @@ def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:
     assert captured["event_type"] == "issue_comment"
 
 
-def test_github_webhook_routes_pr_review_request_comment_to_agent(monkeypatch) -> None:
+async def test_github_webhook_routes_pr_review_request_comment_to_agent(
+    monkeypatch, registry_db
+) -> None:
     captured: dict[str, object] = {}
 
     async def fake_process_pr_comment(payload: dict[str, object], event_type: str) -> None:
@@ -1470,9 +1471,7 @@ def test_github_webhook_routes_pr_review_request_comment_to_agent(monkeypatch) -
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
 
-    client = TestClient(app)
-    response = _post_github_webhook(
-        client,
+    response = await _post_github_webhook(
         "issue_comment",
         {
             "action": "created",

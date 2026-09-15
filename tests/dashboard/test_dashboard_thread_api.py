@@ -304,7 +304,7 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
-    monkeypatch, fake_store: FakeStore
+    monkeypatch, fake_store: FakeStore, registry_db
 ) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={})
@@ -2406,7 +2406,7 @@ async def test_list_dashboard_thread_projects_discovers_metadata_without_summari
 
 
 async def test_list_dashboard_thread_projects_resolves_workspace_from_repo(
-    monkeypatch, fake_store: FakeStore
+    monkeypatch, fake_store: FakeStore, registry_db
 ) -> None:
     threads = _make_threads(1, resolved_before=0)
     cast(dict[str, object], threads[0]["metadata"]).update(

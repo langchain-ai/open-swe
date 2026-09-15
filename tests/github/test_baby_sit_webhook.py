@@ -3,6 +3,7 @@ import hmac
 import json
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -13,24 +14,33 @@ from agent.webhooks import common
 _SECRET = "baby-sit-webhook-secret"
 
 
-def _post(event_type: str, payload: dict[str, Any], *, delivery_id: str = "delivery-1"):
+async def _post(event_type: str, payload: dict[str, Any], *, delivery_id: str = "delivery-1"):
+    """Send a signed webhook POST on the test's own event loop.
+
+    An in-process ``httpx.AsyncClient`` rather than ``TestClient``: the route
+    reads workspace ownership through ``registry_db``'s engine, which is bound
+    to this loop, and ``TestClient`` would run the request on a different one.
+    """
     body = json.dumps(payload, separators=(",", ":")).encode()
     signature = hmac.new(_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    return TestClient(app).post(
-        "/webhooks/github",
-        content=body,
-        headers={
-            "Content-Type": "application/json",
-            "X-GitHub-Event": event_type,
-            "X-GitHub-Delivery": delivery_id,
-            "X-Hub-Signature-256": f"sha256={signature}",
-        },
-    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await client.post(
+            "/webhooks/github",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-GitHub-Event": event_type,
+                "X-GitHub-Delivery": delivery_id,
+                "X-Hub-Signature-256": f"sha256={signature}",
+            },
+        )
 
 
 @pytest.mark.parametrize("event_type", ["check_run", "check_suite", "workflow_run", "status"])
-def test_signed_ci_events_route_without_mention(
-    event_type: str, fake_store: Any, monkeypatch: pytest.MonkeyPatch
+async def test_signed_ci_events_route_without_mention(
+    event_type: str, registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict[str, Any] = {}
 
@@ -42,7 +52,7 @@ def test_signed_ci_events_route_without_mention(
     monkeypatch.setattr(github, "process_github_ci_event", process)
     payload = {"repository": {"owner": {"login": "acme"}, "name": "repo"}}
 
-    response = _post(event_type, payload)
+    response = await _post(event_type, payload)
 
     assert response.status_code == 200
     assert response.json() == {"status": "accepted", "message": "Processing GitHub CI event"}

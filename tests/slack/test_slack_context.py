@@ -22,6 +22,7 @@ from agent.slack.request import SlackRequest
 from agent.source_context import SourceContext
 from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import common as webhook_common
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
 
 
@@ -1077,7 +1078,7 @@ def _setup_slack_mention_fakes(
 
 
 @pytest.fixture
-def slack_file_mention(monkeypatch, fake_store):
+async def slack_file_mention(monkeypatch, fake_store, registry_db):
     from agent.sandboxes import lifecycle, state
 
     captured: dict[str, Any] = {}
@@ -1130,7 +1131,7 @@ def slack_file_mention(monkeypatch, fake_store):
     monkeypatch.setattr(lifecycle, "get_recorded_proxy_base_config", lambda _: None)
     monkeypatch.setattr(webhook_common, "get_slack_permalink", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_utils, "download_slack_file", AsyncMock(return_value=b"zip"))
-    fake_store.seed(["workspaces"], "staging", {"slug": "staging", "name": "Staging"})
+    await WORKSPACES.create(WorkspaceCreate(name="Staging", repos=["acme/staging"]), "alice")
     request = SlackRequest(
         channel_id="C123",
         thread_ts="1700000000.000100",

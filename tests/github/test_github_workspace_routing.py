@@ -5,8 +5,8 @@ import hmac
 import json
 from typing import Any
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 from agent.api.app import app
 from agent.github import routes as github_routes
@@ -22,17 +22,26 @@ def _sign_body(body: bytes) -> str:
     return f"sha256={sig}"
 
 
-def _post_github_webhook(client: TestClient, event_type: str, payload: dict[str, Any]):
+async def _post_github_webhook(event_type: str, payload: dict[str, Any]) -> httpx.Response:
+    """Send a signed GitHub webhook POST request.
+
+    Uses an in-process ``httpx.AsyncClient`` rather than ``TestClient`` so the
+    request runs on the test's own event loop: a workspace-backed route needs
+    ``registry_db``'s engine, which is bound to that loop.
+    """
     body = json.dumps(payload, separators=(",", ":")).encode()
-    return client.post(
-        "/webhooks/github",
-        content=body,
-        headers={
-            "X-GitHub-Event": event_type,
-            "X-Hub-Signature-256": _sign_body(body),
-            "Content-Type": "application/json",
-        },
-    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await client.post(
+            "/webhooks/github",
+            content=body,
+            headers={
+                "X-GitHub-Event": event_type,
+                "X-Hub-Signature-256": _sign_body(body),
+                "Content-Type": "application/json",
+            },
+        )
 
 
 def _unowned_repo_issue_comment_payload() -> dict[str, Any]:
@@ -45,8 +54,8 @@ def _unowned_repo_issue_comment_payload() -> dict[str, Any]:
     }
 
 
-def test_unowned_repo_is_ignored_when_policy_is_ignore(
-    fake_store: Any, monkeypatch: pytest.MonkeyPatch
+async def test_unowned_repo_is_ignored_when_policy_is_ignore(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_UNASSIGNED_REPO_WORKSPACE", "ignore")
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
@@ -56,8 +65,7 @@ def test_unowned_repo_is_ignored_when_policy_is_ignore(
 
     monkeypatch.setattr(github_webhooks, "process_github_issue", fail_if_called)
 
-    client = TestClient(app)
-    response = _post_github_webhook(client, "issue_comment", _unowned_repo_issue_comment_payload())
+    response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 
     assert response.status_code == 200
     body = response.json()
@@ -65,8 +73,8 @@ def test_unowned_repo_is_ignored_when_policy_is_ignore(
     assert "workspace" in body["reason"]
 
 
-def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
-    fake_store: Any, monkeypatch: pytest.MonkeyPatch
+async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("OPEN_SWE_UNASSIGNED_REPO_WORKSPACE", raising=False)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
@@ -78,8 +86,7 @@ def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
 
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
 
-    client = TestClient(app)
-    response = _post_github_webhook(client, "issue_comment", _unowned_repo_issue_comment_payload())
+    response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 
     assert response.status_code == 200
     body = response.json()
@@ -87,8 +94,8 @@ def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
     assert called["event_type"] == "issue_comment"
 
 
-def test_unreadable_workspace_list_asks_github_to_retry(
-    fake_store: Any, monkeypatch: pytest.MonkeyPatch
+async def test_unreadable_workspace_list_asks_github_to_retry(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A delivery we cannot route is retryable, so it must not be answered 200."""
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
@@ -102,8 +109,7 @@ def test_unreadable_workspace_list_asks_github_to_retry(
     monkeypatch.setattr(github_routes, "repo_is_routable", unreadable)
     monkeypatch.setattr(github_webhooks, "process_github_issue", fail_if_called)
 
-    client = TestClient(app)
-    response = _post_github_webhook(client, "issue_comment", _unowned_repo_issue_comment_payload())
+    response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 
     assert response.status_code == 503
     assert response.json() == {
