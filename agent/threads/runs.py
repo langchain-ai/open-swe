@@ -42,7 +42,7 @@ from agent.threads.access import (
     resolve_run_email,
 )
 from agent.threads.summary import (
-    _DASHBOARD_SOURCE,
+    DASHBOARD_SOURCE,
     _is_thread_resolved,
     _metadata_model_id,
     _now_ms,
@@ -240,8 +240,8 @@ async def _create_dashboard_thread_record(
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
     initial_title = title or prompt[:80] or "New agent"
     metadata: dict[str, Any] = {
-        "source": _DASHBOARD_SOURCE,
-        "origin": _DASHBOARD_SOURCE,
+        "source": DASHBOARD_SOURCE,
+        "origin": DASHBOARD_SOURCE,
         "owner_type": "user",
         "owner_login": login.strip(),
         "visibility": visibility,
@@ -590,7 +590,7 @@ async def _enrich_run_start_command(
     if isinstance(run_input, dict):
         run_input["messages"] = structured
     metadata_update: dict[str, Any] = {
-        "source": _DASHBOARD_SOURCE,
+        "source": DASHBOARD_SOURCE,
         "plan_mode": plan_mode_requested,
         "model_selection": model_selection,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
