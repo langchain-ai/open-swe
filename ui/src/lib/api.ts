@@ -911,7 +911,7 @@ export const api = {
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
   usageLeaderboard: (
-    period: UsageLeaderboardPeriod = "30d",
+    period: UsageLeaderboardPeriod = "7d",
     limit = 10,
     cursor?: string
   ) =>
@@ -927,7 +927,7 @@ export const api = {
       })),
     })),
   prMergeRateByModel: (
-    period: UsageLeaderboardPeriod = "30d",
+    period: UsageLeaderboardPeriod = "7d",
     maturityDays?: number
   ) =>
     request<PRMergeRatePayload>(
