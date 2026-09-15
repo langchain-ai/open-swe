@@ -189,6 +189,23 @@ pnpm run dev:desktop          # terminal 2
 
 Development connects to `http://localhost:2024`. For a hosted backend run `pnpm --dir desktop run start -- --backend-url=https://your-backend.example.com` or set `OPEN_SWE_BACKEND_URL`. `pnpm --dir desktop run pack` creates an unpacked application and `pnpm --dir desktop run dist` an installer. Packaged builds ask for the organization's backend URL on first launch and never default to the maintainers' deployment. The GitHub App must allow `<backend-url>/dashboard/api/auth/callback` for desktop login.
 
+## Profiling thread load and streaming
+
+The dashboard records two performance spans, in every build, with the same code path locally and in production (`ui/src/lib/perf/`):
+
+| Span | Starts | Steps | Ends |
+|---|---|---|---|
+| `thread_load` | The navigation to `/agents/:threadId` (or the document's time origin on a full page load, `cold=true`) | `detail` (thread summary, `GET /threads/:id`), `hydrate` (SDK state fetch, `GET /threads/:id/state`), `paint` | First frame after the transcript rendered |
+| `agent_run` | Pressing send (`joined=true` when the run was started elsewhere, e.g. a queued message) | `accepted`, `stream_open`, `first_event`, `first_token` (client-side time to first assistant text) | The run's streaming phase ends (`reason`: success, error, interrupt, stopped) |
+
+Each span carries attributes: request time-to-first-byte and the backend's `Server-Timing` phases for the detail and state requests (`detail_srv_thread_get_ms`, `state_srv_get_state_ms`, …), whether the detail came from the sidebar cache, message and chunk counts, time spent in `streamMessagesToUi` (`build_ms`), protocol event and text-delta counts, the lag between the server's event timestamp and receipt (`lag_avg_ms`, includes clock skew, read as a trend), and, in development builds only, React commit time for the transcript while streaming (`commit_ms`).
+
+**Locally.** Spans print to the console in dev builds (`[perf] thread_load 812ms — detail 120 · hydrate 640 · paint 812`). Open a thread with `?perf=1` for an overlay listing recent spans with a copy-as-JSON button (`?perf=0` hides it again; the flag persists in `localStorage`). `window.__openSwePerf.spans()` and `.export()` return the same data for scripts and Playwright. Every span is also a User Timing mark and measure named `osw:*`, so it appears on the Timings track of the Chrome Performance panel next to long tasks and network requests, which is where to look once a span says *what* is slow. Compare cold and warm loads separately (`cold`, `detail_cached`), and reload a few times per change: single samples are noisy.
+
+**In production.** With Datadog RUM configured, ended spans are sent as custom duration vitals named `thread_load` and `agent_run`, attributes in the vital context and `client` (`web` or `desktop`) in the global context. Abandoned spans (navigated away, hydration failed) stay local only. The backend side of the same picture is the `Server-Timing` header on `GET /dashboard/api/threads/{id}` and `/state` (logged as `thread state timings`) and the `open_swe_dashboard_thread_ttft` histogram.
+
+**Desktop diagnostics.** Installed builds keep *View → Toggle Developer Tools* and add *Help → Save Diagnostics Report…*, which writes the renderer's recent console output, the main process's warnings, app and OS versions, and the exported perf spans to a text file, with session cookies, bearer tokens and provider keys redacted. Ask users to attach that file to a report.
+
 ## Make targets
 
 | Target | What it does |

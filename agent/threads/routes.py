@@ -218,13 +218,18 @@ async def api_get_thread(
     thread_id: str,
     mark_viewed: bool = True,
     session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    return await get_dashboard_thread(
+) -> Response:
+    timings: dict[str, float] = {}
+    started = perf_counter()
+    payload = await get_dashboard_thread(
         thread_id,
         session["sub"],
         email=session.get("email"),
         mark_viewed=mark_viewed,
+        timings=timings,
     )
+    timings["total"] = (perf_counter() - started) * 1000
+    return JSONResponse(payload, headers={"Server-Timing": server_timing_header(timings)})
 
 
 router.include_router(terminal.router)
