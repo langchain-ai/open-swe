@@ -5,12 +5,12 @@ import pytest
 from pydantic import ValidationError
 
 from agent import store as agent_store
-from agent.environments import store as env_store
-from agent.environments.store import (
-    ENVIRONMENTS,
-    Environment,
-    EnvironmentCreate,
-    EnvironmentUpdate,
+from agent.workspaces import store as env_store
+from agent.workspaces.store import (
+    WORKSPACES,
+    Workspace,
+    WorkspaceCreate,
+    WorkspaceUpdate,
     default_snapshot_name_for,
     log_excerpt,
     slugify,
@@ -76,19 +76,19 @@ def test_no_generated_snapshot_name_contains_a_colon(monkeypatch: pytest.MonkeyP
 
 def test_a_stored_snapshot_name_wins_over_the_derived_one() -> None:
     assert (
-        Environment(slug="base", snapshot_name="acme-monorepo").published_snapshot_name
+        Workspace(slug="base", snapshot_name="acme-monorepo").published_snapshot_name
         == "acme-monorepo"
     )
-    assert Environment(slug="base").published_snapshot_name == "openswe-environment-base"
+    assert Workspace(slug="base").published_snapshot_name == "openswe-environment-base"
 
 
 def test_snapshot_name_rejects_a_tag_separator() -> None:
     with pytest.raises(ValidationError, match="must not contain a colon"):
-        EnvironmentCreate(name="env", snapshot_name="acme-monorepo:v2")
+        WorkspaceCreate(name="env", snapshot_name="acme-monorepo:v2")
 
 
 def test_scripts_are_stripped_on_the_way_in() -> None:
-    record = Environment(slug="base", setup_script="  make setup  ", update_script="   ")
+    record = Workspace(slug="base", setup_script="  make setup  ", update_script="   ")
     assert record.setup_script == "make setup"
     assert not record.update_script
 
@@ -101,21 +101,19 @@ def test_log_excerpt_keeps_the_head_and_the_tail() -> None:
 
 
 def test_create_validates_repo_full_names() -> None:
-    create = EnvironmentCreate(
-        name="env", repos=["https://github.com/owner/repo.git", "owner/repo"]
-    )
+    create = WorkspaceCreate(name="env", repos=["https://github.com/owner/repo.git", "owner/repo"])
     assert create.repos == ["owner/repo"]
 
 
 def test_sandbox_resources_require_positive_integers() -> None:
     with pytest.raises(ValueError, match="greater than 0"):
-        EnvironmentCreate(name="env", mem_bytes=0)
+        WorkspaceCreate(name="env", mem_bytes=0)
     with pytest.raises(ValueError, match="greater than 0"):
-        EnvironmentUpdate(vcpus=-1)
+        WorkspaceUpdate(vcpus=-1)
 
 
 def test_environment_sandbox_resources_omits_invalid_stored_values() -> None:
-    ready = Environment(
+    ready = Workspace(
         slug="env",
         mem_bytes=16 * 1024**3,
         vcpus=8,
@@ -126,8 +124,8 @@ def test_environment_sandbox_resources_omits_invalid_stored_values() -> None:
         "vcpus": 8,
         "fs_capacity_bytes": 256 * 1024**3,
     }
-    assert Environment(slug="env").sandbox_resources() == {}
-    assert Environment(slug="env", mem_bytes=-1).sandbox_resources() == {}
+    assert Workspace(slug="env").sandbox_resources() == {}
+    assert Workspace(slug="env", mem_bytes=-1).sandbox_resources() == {}
 
 
 def test_create_params_accept_non_sensitive_runtime_and_proxy_settings() -> None:
@@ -137,10 +135,10 @@ def test_create_params_accept_non_sensitive_runtime_and_proxy_settings() -> None
             "rules": [{"name": "public-api", "match_hosts": ["example.com"]}],
         },
     }
-    create = EnvironmentCreate(name="env", create_params=params)
+    create = WorkspaceCreate(name="env", create_params=params)
 
     assert create.create_params == params
-    assert Environment(slug="env", create_params=params).sandbox_create_params() == params
+    assert Workspace(slug="env", create_params=params).sandbox_create_params() == params
 
 
 @pytest.mark.parametrize(
@@ -165,7 +163,7 @@ def test_create_params_accept_non_sensitive_runtime_and_proxy_settings() -> None
 )
 def test_create_params_reject_persisted_secrets(create_params: dict[str, Any]) -> None:
     with pytest.raises(ValueError, match="must not contain secrets"):
-        EnvironmentCreate(name="env", create_params=create_params)
+        WorkspaceCreate(name="env", create_params=create_params)
 
 
 @pytest.mark.parametrize(
@@ -177,12 +175,12 @@ def test_create_params_reject_persisted_secrets(create_params: dict[str, Any]) -
 )
 def test_create_params_validate_proxy_config_shape(create_params: dict[str, Any]) -> None:
     with pytest.raises(ValueError, match="proxy_config"):
-        EnvironmentCreate(name="env", create_params=create_params)
+        WorkspaceCreate(name="env", create_params=create_params)
 
 
 def test_create_params_enforce_serialized_size_limit() -> None:
     with pytest.raises(ValueError, match="at most"):
-        EnvironmentCreate(
+        WorkspaceCreate(
             name="env",
             create_params={"metadata": "x" * env_store.CREATE_PARAMS_MAX_CHARS},
         )
@@ -190,15 +188,15 @@ def test_create_params_enforce_serialized_size_limit() -> None:
 
 def test_a_capture_in_flight_keeps_serving_the_previous_snapshot() -> None:
     """The new id lands only on success, so the old one is still what runs want."""
-    capturing = Environment(slug="e", snapshot_status="capturing", snapshot_id="s-1")
+    capturing = Workspace(slug="e", snapshot_status="capturing", snapshot_id="s-1")
     assert capturing.ready_snapshot_id == "s-1"
     # Nothing captured yet: a first capture in flight has nothing to fall back to.
-    assert Environment(slug="e", snapshot_status="capturing").ready_snapshot_id is None
+    assert Workspace(slug="e", snapshot_status="capturing").ready_snapshot_id is None
 
 
 def test_environment_prompt_blank_is_none() -> None:
-    assert Environment(slug="e", prompt="   ").instructions is None
-    assert Environment(slug="e", prompt=" build with make ").instructions == "build with make"
+    assert Workspace(slug="e", prompt="   ").instructions is None
+    assert Workspace(slug="e", prompt=" build with make ").instructions == "build with make"
 
 
 # --- CRUD (patched store) ---
@@ -206,11 +204,11 @@ def test_environment_prompt_blank_is_none() -> None:
 
 @pytest.mark.asyncio
 async def test_only_the_environment_named_default_is_resolved(fake_store: FakeStore) -> None:
-    await ENVIRONMENTS.create(EnvironmentCreate(name="Draft"), "ramon")
-    assert await env_store.resolve_default_environment() is None
+    await WORKSPACES.create(WorkspaceCreate(name="Draft"), "ramon")
+    assert await env_store.load_default_workspace() is None
 
-    await ENVIRONMENTS.create(EnvironmentCreate(name="Default"), "ramon")
-    resolved = await env_store.resolve_default_environment()
+    await WORKSPACES.create(WorkspaceCreate(name="Default"), "ramon")
+    resolved = await env_store.load_default_workspace()
 
     assert resolved is not None
     assert resolved.slug == "default"
@@ -218,15 +216,15 @@ async def test_only_the_environment_named_default_is_resolved(fake_store: FakeSt
 
 @pytest.mark.asyncio
 async def test_create_rejects_duplicate_name(fake_store: FakeStore) -> None:
-    await ENVIRONMENTS.create(EnvironmentCreate(name="base"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
     with pytest.raises(ValueError, match="already exists"):
-        await ENVIRONMENTS.create(EnvironmentCreate(name="Base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="Base"), "ramon")
 
 
 @pytest.mark.asyncio
 async def test_update_writes_only_provided_fields(fake_store: FakeStore) -> None:
-    await ENVIRONMENTS.create(
-        EnvironmentCreate(
+    await WORKSPACES.create(
+        WorkspaceCreate(
             name="base",
             prompt="original",
             repos=["o/r"],
@@ -237,7 +235,7 @@ async def test_update_writes_only_provided_fields(fake_store: FakeStore) -> None
         ),
         "ramon",
     )
-    updated = await ENVIRONMENTS.apply_update("base", EnvironmentUpdate(prompt="replaced", vcpus=8))
+    updated = await WORKSPACES.apply_update("base", WorkspaceUpdate(prompt="replaced", vcpus=8))
     assert updated.prompt == "replaced"
     assert updated.repos == ["o/r"]
     assert updated.mem_bytes == 8 * 1024**3
@@ -245,9 +243,9 @@ async def test_update_writes_only_provided_fields(fake_store: FakeStore) -> None
     assert updated.fs_capacity_bytes == 128 * 1024**3
     assert updated.create_params == {"_internal_runtime": "v2"}
 
-    cleared = await ENVIRONMENTS.apply_update(
+    cleared = await WORKSPACES.apply_update(
         "base",
-        EnvironmentUpdate(mem_bytes=None, create_params={}),
+        WorkspaceUpdate(mem_bytes=None, create_params={}),
     )
     assert cleared.mem_bytes is None
     assert cleared.vcpus == 8
@@ -257,9 +255,9 @@ async def test_update_writes_only_provided_fields(fake_store: FakeStore) -> None
 
 @pytest.mark.asyncio
 async def test_update_rejects_a_rename_across_slugs(fake_store: FakeStore) -> None:
-    await ENVIRONMENTS.create(EnvironmentCreate(name="draft"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="draft"), "ramon")
     with pytest.raises(ValueError, match="renaming an environment"):
-        await ENVIRONMENTS.apply_update("draft", EnvironmentUpdate(name="default"))
+        await WORKSPACES.apply_update("draft", WorkspaceUpdate(name="default"))
 
 
 @pytest.mark.asyncio
@@ -268,25 +266,25 @@ async def test_delete_removes_record_and_snapshot(fake_store: FakeStore) -> None
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
     ):
-        await ENVIRONMENTS.create(EnvironmentCreate(name="default"), "ramon")
-        await ENVIRONMENTS.mark_captured(
+        await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
+        await WORKSPACES.mark_captured(
             "default",
             snapshot_id="snap-1",
             snapshot_name="prior",
             source_sandbox_id="sb-prior",
         )
 
-        assert await ENVIRONMENTS.remove("default") is True
-        assert await env_store.resolve_default_environment() is None
+        assert await WORKSPACES.remove("default") is True
+        assert await env_store.load_default_workspace() is None
         delete_snapshot.assert_awaited_once_with("snap-1")
 
 
 @pytest.mark.asyncio
-async def test_resolve_default_environment_swallows_store_failures(fake_store: FakeStore) -> None:
+async def test_load_default_workspace_swallows_store_failures(fake_store: FakeStore) -> None:
     client = MagicMock()
     client.store.get_item = AsyncMock(side_effect=RuntimeError("store down"))
     with patch.object(agent_store, "store_client", return_value=client):
-        assert await env_store.resolve_default_environment() is None
+        assert await env_store.load_default_workspace() is None
 
 
 # --- capture ---
@@ -317,17 +315,17 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
             return_value=_sandbox_client(capture),
         ),
     ):
-        await ENVIRONMENTS.create(EnvironmentCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
         # A prior capture published under the environment's own name, as any real
         # one would: the name is the address, and only the tag moves.
-        await ENVIRONMENTS.mark_captured(
+        await WORKSPACES.mark_captured(
             "base",
             snapshot_id="snap-1",
             snapshot_name="openswe-environment-base",
             source_sandbox_id="sb-prior",
         )
 
-        record = await env_store.capture_environment_snapshot("base", "sb-123")
+        record = await env_store.capture_workspace_snapshot("base", "sb-123")
 
     assert capture.await_args is not None
     assert capture.await_args.args == ("sb-123", "openswe-environment-base")
@@ -350,10 +348,10 @@ async def test_capture_publishes_under_the_environments_own_name(fake_store: Fak
             return_value=_sandbox_client(capture),
         ),
     ):
-        await ENVIRONMENTS.create(
-            EnvironmentCreate(name="base", snapshot_name="acme-monorepo"), "ramon"
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", snapshot_name="acme-monorepo"), "ramon"
         )
-        record = await env_store.capture_environment_snapshot("base", "sb-123")
+        record = await env_store.capture_workspace_snapshot("base", "sb-123")
 
     assert capture.await_args is not None
     assert capture.await_args.args == ("sb-123", "acme-monorepo")
@@ -374,8 +372,8 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot(
             return_value=_sandbox_client(capture),
         ),
     ):
-        await ENVIRONMENTS.create(EnvironmentCreate(name="base"), "ramon")
-        await ENVIRONMENTS.mark_captured(
+        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+        await WORKSPACES.mark_captured(
             "base",
             snapshot_id="snap-1",
             snapshot_name="prior",
@@ -383,9 +381,9 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot(
         )
 
         with pytest.raises(RuntimeError, match="capture exploded"):
-            await env_store.capture_environment_snapshot("base", "sb-123")
+            await env_store.capture_workspace_snapshot("base", "sb-123")
 
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     assert record is not None
     # Still ready, so runs keep booting from snap-1 instead of dropping to the
@@ -405,12 +403,12 @@ async def test_first_capture_failure_marks_the_environment_failed(fake_store: Fa
             return_value=_sandbox_client(capture),
         ),
     ):
-        await ENVIRONMENTS.create(EnvironmentCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
 
         with pytest.raises(RuntimeError, match="capture exploded"):
-            await env_store.capture_environment_snapshot("base", "sb-123")
+            await env_store.capture_workspace_snapshot("base", "sb-123")
 
-        record = await ENVIRONMENTS.get("base")
+        record = await WORKSPACES.get("base")
 
     # Nothing to fall back to, so the record says so rather than claiming ready.
     assert record is not None
@@ -430,9 +428,9 @@ async def test_capture_requires_the_langsmith_provider(
             return_value=_sandbox_client(capture),
         ),
     ):
-        await ENVIRONMENTS.create(EnvironmentCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
         with pytest.raises(RuntimeError, match="SANDBOX_TYPE=langsmith"):
-            await env_store.capture_environment_snapshot("base", "sb-123")
+            await env_store.capture_workspace_snapshot("base", "sb-123")
 
     capture.assert_not_awaited()
 
@@ -447,17 +445,17 @@ async def test_update_clearing_create_params_with_null_stays_readable(
     surface on the next read — as a ValidationError that makes the environment
     unresolvable, unupdatable, and invisible to listings.
     """
-    await ENVIRONMENTS.create(
-        EnvironmentCreate(name="base", create_params={"_internal_runtime": "v2"}), "ramon"
+    await WORKSPACES.create(
+        WorkspaceCreate(name="base", create_params={"_internal_runtime": "v2"}), "ramon"
     )
 
-    updated = await ENVIRONMENTS.apply_update("base", EnvironmentUpdate(create_params=None))
+    updated = await WORKSPACES.apply_update("base", WorkspaceUpdate(create_params=None))
 
     assert updated.create_params == {}
-    reread = await ENVIRONMENTS.get("base")
+    reread = await WORKSPACES.get("base")
     assert reread is not None
     assert reread.create_params == {}
-    assert [record.slug for record in await ENVIRONMENTS.list_all()] == ["base"]
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["base"]
 
 
 @pytest.mark.asyncio
@@ -466,12 +464,12 @@ async def test_a_record_stored_with_null_create_params_is_still_readable(
 ) -> None:
     """Records written before create_params was modelled can hold a null."""
     fake_store.seed(
-        env_store.ENVIRONMENTS_NAMESPACE,
+        env_store.WORKSPACES_NAMESPACE,
         "legacy",
         {"slug": "legacy", "name": "legacy", "create_params": None},
     )
 
-    record = await ENVIRONMENTS.get("legacy")
+    record = await WORKSPACES.get("legacy")
 
     assert record is not None
     assert record.create_params == {}
@@ -479,7 +477,7 @@ async def test_a_record_stored_with_null_create_params_is_still_readable(
 
 
 def test_assignment_is_validated() -> None:
-    record = Environment(slug="base")
+    record = Workspace(slug="base")
     with pytest.raises(ValidationError):
         record.vcpus = "not-an-int"  # type: ignore[assignment]
 
@@ -498,47 +496,47 @@ def test_assignment_is_validated() -> None:
         ("open env:Staging-Box now", "staging-box", "open now"),
     ],
 )
-def test_parse_environment_tag(text: str, expected_slug: str | None, expected_text: str) -> None:
-    assert env_store.parse_environment_tag(text) == (expected_slug, expected_text)
+def test_parse_workspace_tag(text: str, expected_slug: str | None, expected_text: str) -> None:
+    assert env_store.parse_workspace_tag(text) == (expected_slug, expected_text)
 
 
 @pytest.mark.asyncio
-async def test_resolve_environment_prefers_the_selection(fake_store: FakeStore) -> None:
-    await ENVIRONMENTS.create(EnvironmentCreate(name="default"), "ramon")
-    await ENVIRONMENTS.create(EnvironmentCreate(name="staging"), "ramon")
+async def test_load_workspace_prefers_the_selection(fake_store: FakeStore) -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="staging"), "ramon")
 
-    selected = await env_store.resolve_environment("staging")
+    selected = await env_store.load_workspace("staging")
     assert selected is not None
     assert selected.slug == "staging"
 
-    unselected = await env_store.resolve_environment(None)
+    unselected = await env_store.load_workspace(None)
     assert unselected is not None
     assert unselected.slug == "default"
 
     # A selection that no longer exists falls back rather than failing the run.
-    stale = await env_store.resolve_environment("deleted")
+    stale = await env_store.load_workspace("deleted")
     assert stale is not None
     assert stale.slug == "default"
 
 
 @pytest.mark.asyncio
 async def test_environment_options_omit_admin_only_settings(fake_store: FakeStore) -> None:
-    await ENVIRONMENTS.create(
-        EnvironmentCreate(
+    await WORKSPACES.create(
+        WorkspaceCreate(
             name="default",
             prompt="secret-ish prompt",
             create_params={"_internal_runtime": "v2"},
         ),
         "ramon",
     )
-    await ENVIRONMENTS.mark_captured(
+    await WORKSPACES.mark_captured(
         "default",
         snapshot_id="snap-1",
         snapshot_name="prior",
         source_sandbox_id="sb-prior",
     )
-    await ENVIRONMENTS.mark_refresh_settled("default", "success", log="+ TOKEN=hunter2\ndone")
-    options = await env_store.list_environment_options()
+    await WORKSPACES.mark_refresh_settled("default", "success", log="+ TOKEN=hunter2\ndone")
+    options = await env_store.list_workspace_options()
 
     # No prompt, no snapshot id — and no log: `bash -x` expands arguments, so a
     # script that put a credential on a command line has written it there.
@@ -556,16 +554,16 @@ async def test_environment_options_omit_admin_only_settings(fake_store: FakeStor
     ]
     assert options[0]["refresh_finished_at"]
 
-    admin_view = await env_store.list_environment_options(include_logs=True)
+    admin_view = await env_store.list_workspace_options(include_logs=True)
     assert admin_view[0]["refresh_log_excerpt"] == "+ TOKEN=hunter2\ndone"
 
 
 @pytest.mark.asyncio
 async def test_publish_writes_definition_and_image_together(fake_store: FakeStore) -> None:
     """One put carries both, so a record can never show a new definition on an old image."""
-    record = await ENVIRONMENTS.publish(
+    record = await WORKSPACES.publish(
         "base",
-        EnvironmentCreate(name="base", prompt="p1", setup_script="make setup"),
+        WorkspaceCreate(name="base", prompt="p1", setup_script="make setup"),
         snapshot_id="snap-1",
         snapshot_name="openswe-environment-base",
         source_sandbox_id="sb-1",
@@ -574,15 +572,15 @@ async def test_publish_writes_definition_and_image_together(fake_store: FakeStor
     assert (record.prompt, record.snapshot_id, record.snapshot_status) == ("p1", "snap-1", "ready")
     assert record.created_by == "ramon"
 
-    updated = await ENVIRONMENTS.publish(
+    updated = await WORKSPACES.publish(
         "base",
-        EnvironmentUpdate(prompt="p2"),
+        WorkspaceUpdate(prompt="p2"),
         snapshot_id="snap-2",
         snapshot_name="openswe-environment-base",
         source_sandbox_id="sb-2",
         created_by="ramon",
     )
-    stored = await ENVIRONMENTS.get("base")
+    stored = await WORKSPACES.get("base")
     assert stored is not None
     assert (stored.prompt, stored.snapshot_id) == ("p2", "snap-2")
     assert stored.setup_script == "make setup"
@@ -593,11 +591,11 @@ async def test_publish_writes_definition_and_image_together(fake_store: FakeStor
 async def test_publish_refuses_a_create_over_an_existing_environment(
     fake_store: FakeStore,
 ) -> None:
-    await ENVIRONMENTS.create(EnvironmentCreate(name="base"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
     with pytest.raises(ValueError, match="already exists"):
-        await ENVIRONMENTS.publish(
+        await WORKSPACES.publish(
             "base",
-            EnvironmentCreate(name="base"),
+            WorkspaceCreate(name="base"),
             snapshot_id="snap-1",
             snapshot_name="openswe-environment-base",
             source_sandbox_id="sb-1",

@@ -9,7 +9,7 @@ environment is not rebuilt yet. Read progress with
 the running script's live ``bash -x`` trace.
 
 To *author* an environment, do not use this — provision this thread's sandbox
-with ordinary tools and ``publish_environment`` it. A failed refresh keeps the
+with ordinary tools and ``publish_workspace`` it. A failed refresh keeps the
 previous image, so runs never drop to the base snapshot because a script broke.
 
 Args:

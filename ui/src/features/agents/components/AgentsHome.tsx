@@ -101,7 +101,7 @@ export function AgentsHome({
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const environmentOptions = useEnvironmentOptions(cloudEnabled)
-  const environments = environmentOptions.data?.environments ?? []
+  const environments = environmentOptions.data?.workspaces ?? []
   // undefined = untouched, so the run falls back to the default environment.
   const [environmentOverride, setEnvironmentOverride] = useState<string | null>(
     null

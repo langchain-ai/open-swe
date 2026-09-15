@@ -7,14 +7,14 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
-from agent.environments import refresh
-from agent.environments.store import Environment
 from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle
-from agent.tools import environments as env_tools
+from agent.tools import workspaces as env_tools
+from agent.workspaces import refresh
+from agent.workspaces.store import Workspace
 
-_READY = Environment(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
+_READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
 
 
 def _config(**configurable: object) -> RunnableConfig:
@@ -27,7 +27,7 @@ def _config(**configurable: object) -> RunnableConfig:
 @pytest.mark.asyncio
 async def test_default_environment_snapshot_wins_over_base() -> None:
     with (
-        patch.object(lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=_READY),
+        patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=_READY),
         patch.object(
             lifecycle,
             "get_admin_base_snapshot_id",
@@ -43,7 +43,7 @@ async def test_environment_without_a_captured_snapshot_falls_back_to_base() -> N
     never_captured = _READY.model_copy(update={"snapshot_status": "failed", "snapshot_id": None})
     with (
         patch.object(
-            lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=never_captured
+            lifecycle, "load_workspace", new_callable=AsyncMock, return_value=never_captured
         ),
         patch.object(
             lifecycle,
@@ -60,9 +60,7 @@ async def test_a_nightly_capture_does_not_send_runs_to_the_base_image() -> None:
     """The new id lands only on success, so a refresh in flight changes nothing."""
     capturing = _READY.model_copy(update={"snapshot_status": "capturing"})
     with (
-        patch.object(
-            lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=capturing
-        ),
+        patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=capturing),
         patch.object(
             lifecycle,
             "get_admin_base_snapshot_id",
@@ -79,7 +77,7 @@ async def test_snapshot_resolution_passes_the_threads_environment() -> None:
         return_value=_READY.model_copy(update={"slug": "staging", "snapshot_id": "staging-snap"})
     )
     with (
-        patch.object(lifecycle, "resolve_environment", resolve),
+        patch.object(lifecycle, "load_workspace", resolve),
         patch.object(
             lifecycle,
             "get_admin_base_snapshot_id",
@@ -104,7 +102,7 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
         }
     )
     with patch.object(
-        lifecycle, "resolve_environment", new_callable=AsyncMock, return_value=environment
+        lifecycle, "load_workspace", new_callable=AsyncMock, return_value=environment
     ):
         config = await lifecycle.SandboxCreateConfig.resolve("base")
         snapshot_id = config.snapshot_id
@@ -120,10 +118,10 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
     assert create_params == {"_internal_runtime": "v2"}
 
 
-def test_environment_slug_reads_the_run_config() -> None:
-    assert server.environment_slug(RunConfig(environment="staging")) == "staging"
-    assert server.environment_slug(RunConfig(environment="  ")) is None
-    assert server.environment_slug(RunConfig()) is None
+def test_workspace_slug_reads_the_run_config() -> None:
+    assert server.workspace_slug(RunConfig(environment="staging")) == "staging"
+    assert server.workspace_slug(RunConfig(environment="  ")) is None
+    assert server.workspace_slug(RunConfig()) is None
 
 
 # --- admin thread gate ---
@@ -171,11 +169,11 @@ async def test_workspace_admin_resolves_email_for_github_login(
 async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with patch("agent.run_config.get_config", return_value=_config(github_login="someone-else")):
-        assert await env_tools.list_environments() == {
+        assert await env_tools.list_workspaces() == {
             "ok": False,
             "error": "Only workspace admins can manage environments.",
         }
-        result = await env_tools.publish_environment("base", "prompt")
+        result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
 
 
@@ -183,9 +181,9 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _Publish:
-    """Every seam `publish_environment` crosses, patched, with the calls it made."""
+    """Every seam `publish_workspace` crosses, patched, with the calls it made."""
 
-    def __init__(self, existing: Environment | None, saved: Environment) -> None:
+    def __init__(self, existing: Workspace | None, saved: Workspace) -> None:
         self.existing = existing
         self.saved = saved
         self.calls: list[str] = []
@@ -200,7 +198,7 @@ class _Publish:
         self.calls.append("capture")
         return "snap-new"
 
-    async def _publish(self, *_: object, **__: object) -> Environment:
+    async def _publish(self, *_: object, **__: object) -> Workspace:
         self.calls.append("write")
         return self.saved
 
@@ -218,7 +216,7 @@ class _Publish:
                 return_value=_config(github_login="ramonn", thread_id="t-1"),
             ),
             patch.object(
-                env_tools.store.ENVIRONMENTS,
+                env_tools.store.WORKSPACES,
                 "get",
                 new_callable=AsyncMock,
                 return_value=self.existing,
@@ -230,7 +228,7 @@ class _Publish:
             ),
             patch("agent.sandboxes.state.unwrap_sandbox_backend", side_effect=lambda b: b),
             patch.object(env_tools.store, "capture_sandbox_snapshot", self.capture),
-            patch.object(env_tools.store.ENVIRONMENTS, "publish", self.publish),
+            patch.object(env_tools.store.WORKSPACES, "publish", self.publish),
             patch.object(env_tools.store, "discard_unreferenced_snapshot", self.discard),
             patch.object(env_tools.store, "retire_superseded_snapshot", self.retire),
             patch.object(env_tools.refresh, "ensure_refresh_cron", self.ensure_cron),
@@ -242,8 +240,8 @@ class _Publish:
         self._stack.close()
 
 
-def _saved(**fields: Any) -> Environment:
-    return Environment(
+def _saved(**fields: Any) -> Workspace:
+    return Workspace(
         slug="base", name="base", snapshot_status="ready", snapshot_id="snap-new", **fields
     )
 
@@ -255,7 +253,7 @@ async def test_publish_captures_this_sandbox_before_writing_anything(
     """The record is only ever written once the image it points at exists."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with _Publish(existing=None, saved=_saved(prompt="prompt")) as seams:
-        result = await env_tools.publish_environment("base", "prompt")
+        result = await env_tools.publish_workspace("base", "prompt")
 
     assert seams.calls == ["capture", "write"]
     seams.capture.assert_awaited_once_with(
@@ -263,7 +261,7 @@ async def test_publish_captures_this_sandbox_before_writing_anything(
     )
     # Definition and image pointer go in as one write.
     assert seams.publish.await_args is not None
-    assert isinstance(seams.definition, env_tools.store.EnvironmentCreate)
+    assert isinstance(seams.definition, env_tools.store.WorkspaceCreate)
     assert seams.publish.await_args.kwargs["snapshot_id"] == "snap-new"
     assert seams.publish.await_args.kwargs["source_sandbox_id"] == "sb-thread"
     assert result["ok"] is True
@@ -276,7 +274,7 @@ async def test_a_failed_capture_writes_nothing(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with _Publish(existing=None, saved=_saved()) as seams:
         seams.capture.side_effect = RuntimeError("snapshot service unavailable")
-        result = await env_tools.publish_environment("base", "prompt")
+        result = await env_tools.publish_workspace("base", "prompt")
 
     assert result["ok"] is False
     assert "snapshot service unavailable" in result["error"]
@@ -292,7 +290,7 @@ async def test_a_failed_record_write_discards_the_orphaned_image(
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with _Publish(existing=None, saved=_saved()) as seams:
         seams.publish.side_effect = RuntimeError("store unavailable")
-        result = await env_tools.publish_environment("base", "prompt")
+        result = await env_tools.publish_workspace("base", "prompt")
 
     assert result["ok"] is False
     assert "store unavailable" in result["error"]
@@ -307,7 +305,7 @@ async def test_a_bad_definition_is_refused_before_the_capture(
     """Validation is milliseconds; a capture is minutes. Order them accordingly."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with _Publish(existing=None, saved=_saved()) as seams:
-        result = await env_tools.publish_environment("base", "prompt", snapshot_name="bad:name")
+        result = await env_tools.publish_workspace("base", "prompt", snapshot_name="bad:name")
 
     assert result["ok"] is False
     seams.capture.assert_not_awaited()
@@ -318,14 +316,12 @@ async def test_publishing_over_an_existing_environment_retires_its_old_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    existing = Environment(
-        slug="base", name="base", snapshot_id="snap-old", snapshot_status="ready"
-    )
+    existing = Workspace(slug="base", name="base", snapshot_id="snap-old", snapshot_status="ready")
     with _Publish(existing=existing, saved=_saved()) as seams:
-        result = await env_tools.publish_environment("base", "prompt")
+        result = await env_tools.publish_workspace("base", "prompt")
 
     assert seams.calls == ["capture", "write"]
-    assert isinstance(seams.definition, env_tools.store.EnvironmentUpdate)
+    assert isinstance(seams.definition, env_tools.store.WorkspaceUpdate)
     # The old image goes only after the record points at the new one.
     seams.retire.assert_awaited_once_with("base", "snap-old", "snap-new")
     assert result["created"] is False
@@ -337,11 +333,11 @@ async def test_a_setup_script_registers_the_nightly_check_and_its_absence_does_n
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with _Publish(existing=None, saved=_saved(setup_script="make setup")) as seams:
-        await env_tools.publish_environment("base", "prompt", setup_script="make setup")
+        await env_tools.publish_workspace("base", "prompt", setup_script="make setup")
     seams.ensure_cron.assert_awaited_once_with("base")
 
     with _Publish(existing=None, saved=_saved()) as seams:
-        await env_tools.publish_environment("base", "prompt")
+        await env_tools.publish_workspace("base", "prompt")
     seams.ensure_cron.assert_not_awaited()
 
 
@@ -356,7 +352,7 @@ async def test_publish_persists_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) 
         create_params={"_internal_runtime": "v2"},
     )
     with _Publish(existing=None, saved=saved) as seams:
-        result = await env_tools.publish_environment(
+        result = await env_tools.publish_workspace(
             "base",
             "prompt",
             mem_bytes=16 * 1024**3,
@@ -377,8 +373,8 @@ async def test_publish_persists_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.asyncio
 async def test_publish_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with _Publish(existing=Environment(slug="base"), saved=_saved(prompt="prompt")) as seams:
-        result = await env_tools.publish_environment(
+    with _Publish(existing=Workspace(slug="base"), saved=_saved(prompt="prompt")) as seams:
+        result = await env_tools.publish_workspace(
             "base", "prompt", clear_sizing=True, clear_create_params=True
         )
 
@@ -401,14 +397,14 @@ async def test_refresh_start_refuses_an_environment_with_no_script(
     with (
         patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
-            env_tools.store.ENVIRONMENTS,
+            env_tools.store.WORKSPACES,
             "get",
             new_callable=AsyncMock,
-            return_value=Environment(slug="base"),
+            return_value=Workspace(slug="base"),
         ),
         patch.object(env_tools.refresh, "start_refresh_run", start),
     ):
-        result = await env_tools.refresh_environment_start("base")
+        result = await env_tools.refresh_workspace_start("base")
 
     assert result["status"] == "error"
     assert "setup_script" in result["error"]
@@ -424,10 +420,10 @@ async def test_refresh_start_returns_a_task_id_the_unified_poll_understands(
     with (
         patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
-            env_tools.store.ENVIRONMENTS,
+            env_tools.store.WORKSPACES,
             "get",
             new_callable=AsyncMock,
-            return_value=Environment(slug="base", setup_script="make setup"),
+            return_value=Workspace(slug="base", setup_script="make setup"),
         ),
         patch.object(
             env_tools.refresh,
@@ -436,7 +432,7 @@ async def test_refresh_start_returns_a_task_id_the_unified_poll_understands(
             return_value="run-1",
         ),
     ):
-        result = await env_tools.refresh_environment_start("base")
+        result = await env_tools.refresh_workspace_start("base")
 
     # Started, not done: the rebuild is still running when this returns.
     assert result["status"] == "started"
@@ -450,7 +446,7 @@ async def test_refresh_start_refuses_while_one_is_running(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    running = Environment(
+    running = Workspace(
         slug="base",
         setup_script="make setup",
         refresh_status="refreshing",
@@ -461,11 +457,11 @@ async def test_refresh_start_refuses_while_one_is_running(
     with (
         patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
         patch.object(
-            env_tools.store.ENVIRONMENTS, "get", new_callable=AsyncMock, return_value=running
+            env_tools.store.WORKSPACES, "get", new_callable=AsyncMock, return_value=running
         ),
         patch.object(env_tools.refresh, "start_refresh_run", start),
     ):
-        result = await env_tools.refresh_environment_start("base")
+        result = await env_tools.refresh_workspace_start("base")
 
     assert result["status"] == "error"
     assert result["task_id"] == "env-run-1"
