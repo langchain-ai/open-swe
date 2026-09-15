@@ -144,6 +144,7 @@ class RunConfig(BaseModel):
 
     # Model selection
     agent_model_id: str | None = None
+    resolved_agent_model_id: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
     reviewer_model_id: str | None = None

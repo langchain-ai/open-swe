@@ -4,7 +4,7 @@ import json
 from datetime import UTC
 from uuid import UUID
 
-from sqlalchemy import BigInteger, bindparam, text
+from sqlalchemy import BigInteger, Uuid, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.analytics.events import EventEnvelope, EventName
@@ -104,6 +104,38 @@ async def ingest(event: EventEnvelope) -> bool:
     return True
 
 
+async def _repair_pr_attribution(
+    conn: AsyncConnection,
+    *,
+    workspace_id: UUID,
+    pr_id: UUID | None = None,
+    run_id: UUID | None = None,
+) -> None:
+    await conn.execute(
+        text(
+            """
+            UPDATE pr_projection AS pr
+            SET originating_model_id = run.configured_model_id,
+                model_attribution_quality = 'configured',
+                updated_at = clock_timestamp()
+            FROM run_projection AS run
+            WHERE pr.workspace_id = :workspace_id
+              AND run.workspace_id = pr.workspace_id
+              AND run.run_id = pr.opening_run_id
+              AND run.configured_model_id IS NOT NULL
+              AND pr.originating_model_id IS NULL
+              AND pr.model_attribution_quality = 'unavailable'
+              AND (:pr_id IS NULL OR pr.pr_id = :pr_id)
+              AND (:run_id IS NULL OR pr.opening_run_id = :run_id)
+            """
+        ).bindparams(
+            bindparam("pr_id", type_=Uuid),
+            bindparam("run_id", type_=Uuid),
+        ),
+        {"workspace_id": workspace_id, "pr_id": pr_id, "run_id": run_id},
+    )
+
+
 async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
     name = event.event_name
     if name == EventName.RUN_STARTED:
@@ -146,6 +178,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "occurred_at": event.occurred_at,
             },
         )
+        await _repair_pr_attribution(conn, workspace_id=event.workspace_id, run_id=event.run_id)
     elif name in {EventName.RUN_COMPLETED, EventName.RUN_FAILED, EventName.RUN_CANCELED}:
         await _project_run_terminal(conn, event)
     elif name == EventName.RUN_COST_RECORDED:
@@ -219,6 +252,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
             },
         )
         await _reconcile_outcomes(conn, event)
+        await _repair_pr_attribution(conn, workspace_id=event.workspace_id, pr_id=event.pr_id)
     elif name == EventName.PR_RUN_LINKED:
         await conn.execute(
             text(
