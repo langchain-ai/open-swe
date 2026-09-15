@@ -106,3 +106,18 @@ def test_digest_fields_ignore_citation_churn_but_track_the_conclusion():
     assert digest_fields(first) != digest_fields(advanced)
     with_step = report(first.summary, next_steps=["Roll back the deploy"])
     assert digest_fields(first) != digest_fields(with_step)
+
+
+def test_digest_fields_strip_citations_without_erasing_bracketed_findings():
+    """Only evidence references are citation noise; a bracketed errno is part of the finding."""
+    from agent.incidents.models import IncidentReport
+    from agent.incidents.report import digest_fields
+
+    def report(summary: str) -> IncidentReport:
+        return IncidentReport(summary=summary, impact="Impact remains unverified.")
+
+    first = report("Connection failed [Errno 111] [slack:1.0]")
+    changed = report("Connection failed [Errno 104] [slack:2.0]")
+
+    assert digest_fields(first) != digest_fields(changed)
+    assert digest_fields(first)["summary"] == "Connection failed [Errno 111]"

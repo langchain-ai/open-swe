@@ -11,7 +11,11 @@ from agent.incidents.models import Evidence, Hypothesis, IncidentReport
 
 CONTEXT_MARKER = "INCIDENT_CONTEXT "
 _CONTEXT_HEADER = re.compile(r"INCIDENT_CONTEXT (\{[^\n]*\})")
-_CITATION = re.compile(r"\s*\[[^\[\]]+\]")
+# Only a bracket group made entirely of evidence references, as finalize_report appends them
+# ("[slack:1.0]", "[slack:1.0, tool:9fd2…]"). A bracket in the finding itself, such as
+# "[Errno 111]", carries meaning and has to survive into the digest.
+_EVIDENCE_REF = r"[A-Za-z][A-Za-z0-9_-]*:[A-Za-z0-9._:-]+"
+_CITATION = re.compile(rf"\s*\[{_EVIDENCE_REF}(?:\s*,\s*{_EVIDENCE_REF})*\]")
 
 
 class Claim(BaseModel):
