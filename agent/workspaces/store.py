@@ -41,7 +41,9 @@ from agent.store import TypedStore, now_iso
 
 logger = logging.getLogger(__name__)
 
-WORKSPACES_NAMESPACE: list[str] = ["workspaces"]
+# Existing deployments hold their records under this namespace, and the move to
+# PostgreSQL imports them from here, so the rename leaves the storage key alone.
+WORKSPACES_NAMESPACE: list[str] = ["environments"]
 DEFAULT_WORKSPACE_SLUG = "default"
 
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
