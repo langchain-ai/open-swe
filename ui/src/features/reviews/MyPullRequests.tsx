@@ -41,6 +41,10 @@ import {
 } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
+import {
+  readPreferredMergeMethod,
+  writePreferredMergeMethod,
+} from "./mergeMethod"
 import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
 import { PullRequestLinks } from "./PullRequestLinks"
 
@@ -171,12 +175,15 @@ function MergePullRequest({
   pr: OpenPullRequest
   onMerged: () => void
 }) {
-  const [method, setMethod] = useState<"squash" | "merge" | "rebase" | "">("")
+  const [method, setMethod] = useState<MergeMethod | "">(
+    () => readPreferredMergeMethod() ?? ""
+  )
   const merge = useMutation({
     mutationFn: async () => {
       if (!method) throw new Error("Choose a merge method.")
       const result = await api.mergePullRequest(pr, method)
       if (!result.merged) throw new Error("GitHub did not confirm the merge.")
+      writePreferredMergeMethod(method)
     },
     onSuccess: () => {
       toast.success(`Merged ${pr.repo}#${pr.number}`)
@@ -349,7 +356,9 @@ function BulkMergeDialog({
   onCancel: () => void
   onConfirm: (method: MergeMethod) => void
 }) {
-  const [choice, setChoice] = useState<MergeMethod | "">("")
+  const [choice, setChoice] = useState<MergeMethod | "">(
+    () => readPreferredMergeMethod() ?? ""
+  )
   const repos = [...new Set(pullRequests.map((pr) => pr.repo))]
   const settings = useQueries({
     queries: repos.map((repo) => ({
@@ -365,7 +374,9 @@ function BulkMergeDialog({
     settings.every((setting) => setting.data?.mergeMethods.includes(method))
   )
   const only = shared.length === 1 ? shared[0] : undefined
-  const method = only ?? (choice || undefined)
+  // A remembered method the selected repositories do not all allow is no choice.
+  const method =
+    only ?? (shared.includes(choice as MergeMethod) ? choice : undefined)
   return (
     <Dialog
       open
@@ -557,6 +568,7 @@ function BulkActions({
           onCancel={() => setPrompt(null)}
           onConfirm={(method) => {
             setPrompt(null)
+            writePreferredMergeMethod(method)
             bulk.mutate({ action: "merge", pullRequests: selected, method })
           }}
         />

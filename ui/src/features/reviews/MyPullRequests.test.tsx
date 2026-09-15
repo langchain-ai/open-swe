@@ -507,6 +507,41 @@ describe("My PRs", () => {
     expect(bulkButton("Merge").disabled).toBe(true)
   })
 
+  it("offers the merge method used last time", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { reviewDecision: "approved" })],
+    })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({ merged: true })
+    mount()
+    await screen.findByText("Change 1")
+    const select = screen.getByRole("combobox", {
+      name: "Merge method for PR #1",
+    }) as HTMLSelectElement
+    expect(select.value).toBe("")
+    fireEvent.change(select, { target: { value: "rebase" } })
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    await waitFor(() =>
+      expect(window.localStorage.getItem("open-swe.reviews.mergeMethod")).toBe(
+        "rebase"
+      )
+    )
+    cleanup()
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(2, { reviewDecision: "approved" })],
+    })
+    mount()
+    await screen.findByText("Change 2")
+    expect(
+      (
+        screen.getByRole("combobox", {
+          name: "Merge method for PR #2",
+        }) as HTMLSelectElement
+      ).value
+    ).toBe("rebase")
+  })
+
   it("rediscovers a reopened PR on manual refresh", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
