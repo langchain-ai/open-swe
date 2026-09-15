@@ -47,6 +47,7 @@ async def test_serves_the_stored_bytes_with_its_content_type(
         (IMAGE_ID, None),
         (IMAGE_ID, _stored(mime_type="text/html")),
         (IMAGE_ID, _stored(base64="%%%")),
+        (IMAGE_ID, _stored(thread_id="")),
     ],
 )
 async def test_unusable_images_are_not_found(
@@ -57,6 +58,26 @@ async def test_unusable_images_are_not_found(
     with pytest.raises(HTTPException) as exc:
         await images.get_dashboard_thread_image("thread-1", image_id, "alice")
     assert exc.value.status_code == 404
+
+
+async def test_images_of_other_threads_need_that_thread_to_be_readable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked: list[str] = []
+
+    async def readable(thread_id: str, **_: object) -> dict[str, Any]:
+        checked.append(thread_id)
+        if thread_id != "thread-1":
+            raise HTTPException(404, "thread not found")
+        return {}
+
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", readable)
+    monkeypatch.setattr(images, "get_value", AsyncMock(return_value=_stored(thread_id="other")))
+
+    with pytest.raises(HTTPException) as exc:
+        await images.get_dashboard_thread_image("thread-1", IMAGE_ID, "alice")
+    assert exc.value.status_code == 404
+    assert checked == ["thread-1", "other"]
 
 
 async def test_unreadable_threads_hide_their_images(monkeypatch: pytest.MonkeyPatch) -> None:

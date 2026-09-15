@@ -29,6 +29,13 @@ async def get_dashboard_thread_image(
     stored = await get_value(IMAGE_STORE_NAMESPACE, image_id)
     if stored is None:
         raise HTTPException(404, "image not found")
+    owner = stored.get("thread_id")
+    if not isinstance(owner, str) or not owner:
+        raise HTTPException(404, "image not found")
+    # A thread copied from another one references the original's images, so
+    # the caller must be able to read the thread the image was stored under.
+    if owner != thread_id:
+        await _readable_thread_metadata(owner, login=login, email=email)
     mime_type = stored.get("mime_type")
     encoded = stored.get("base64")
     if mime_type not in _SERVABLE_MIME_TYPES or not isinstance(encoded, str):
