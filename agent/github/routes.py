@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from agent.github import webhook as service
 from agent.webhooks import common
+from agent.workspaces.routing import repo_is_routable
 
 router = APIRouter()
 
@@ -46,6 +47,16 @@ async def github_webhook(
         "owner": webhook_repo.get("owner", {}).get("login", ""),
         "name": webhook_repo.get("name", ""),
     }
+
+    if webhook_repo_config["owner"] and webhook_repo_config["name"]:
+        if not await repo_is_routable(webhook_repo_config["owner"], webhook_repo_config["name"]):
+            common.logger.info(
+                "Ignoring GitHub event for a repository no workspace owns",
+                extra={
+                    "repository": f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
+                },
+            )
+            return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

@@ -50,6 +50,7 @@ def _run_process(
         user_email="",
         title="",
         source_context=None,
+        workspace=None,
     ):
         captured["upsert"] = {"github_login": github_login, "user_email": user_email}
         return None

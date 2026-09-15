@@ -160,6 +160,8 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from agent.workspaces.routing import workspace_for_repo
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 __all__ = [
     "Any",
@@ -297,6 +299,7 @@ __all__ = [
     "verify_github_signature",
     "verify_linear_signature",
     "verify_slack_signature",
+    "workspace_for_repo_config",
 ]
 
 logger = logging.getLogger(__name__)
@@ -849,6 +852,15 @@ async def get_thread_workspace(thread_id: str) -> str | None:
     return None
 
 
+async def workspace_for_repo_config(repo_config: dict[str, str] | None) -> str:
+    """The workspace that owns ``repo_config``, or the instance default."""
+    if not repo_config or not repo_config.get("owner") or not repo_config.get("name"):
+        return DEFAULT_WORKSPACE_SLUG
+    return (
+        await workspace_for_repo(repo_config["owner"], repo_config["name"])
+    ) or DEFAULT_WORKSPACE_SLUG
+
+
 async def set_thread_plan_mode(thread_id: str, enabled: bool) -> None:
     """Persist the plan-mode flag onto thread metadata."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -1033,6 +1045,7 @@ async def trigger_or_queue_run(
 ) -> None:
     """Create a new agent run or queue the message if the thread is busy."""
     await authorize_github_thread(thread_id, github_login)
+    workspace = await workspace_for_repo_config(repo_config)
     await upsert_agent_thread_metadata(
         thread_id,
         source="github",
@@ -1040,6 +1053,7 @@ async def trigger_or_queue_run(
         github_login=github_login,
         title=f"PR #{pr_number}" if pr_number else "",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
+        workspace=workspace,
     )
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
@@ -1051,6 +1065,8 @@ async def trigger_or_queue_run(
             "github_user_id": github_user_id,
             "repo": repo_config,
             "pr_number": pr_number,
+            "workspace": workspace,
+            "environment": workspace,
         },
         source="github",
         input=input,
@@ -1130,7 +1146,7 @@ async def store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
         await set_reviewer_thread_metadata(thread_id, extra={"current_reviewer_run_id": run_id})
 
 
-def build_reviewer_configurable(
+async def build_reviewer_configurable(
     *,
     source: str,
     github_login: str,
@@ -1148,6 +1164,7 @@ def build_reviewer_configurable(
     slack_thread_ts: str = "",
 ) -> dict[str, Any]:
     """Assemble the runnable-config ``configurable`` dict for a reviewer run."""
+    workspace = await workspace_for_repo_config(repo_config)
     configurable: dict[str, Any] = {
         "source": source,
         "github_login": github_login,
@@ -1159,6 +1176,8 @@ def build_reviewer_configurable(
         "head_sha": head_sha,
         "review_requested": True,
         "re_review": re_review,
+        "workspace": workspace,
+        "environment": workspace,
     }
     if branch_name:
         configurable["branch_name"] = branch_name

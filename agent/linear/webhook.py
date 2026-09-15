@@ -234,6 +234,10 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
 
+    workspace = await common.workspace_for_repo_config(repo_config)
+    configurable["workspace"] = workspace
+    configurable["environment"] = workspace
+
     await common.upsert_agent_thread_metadata(
         thread_id,
         source="linear",
@@ -242,6 +246,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         user_email=user_email or "",
         title=title or identifier or "Linear issue",
         source_context=SourceContext.parse({"linear_issue": configurable["linear_issue"]}),
+        workspace=workspace,
     )
 
     run_messages = [
