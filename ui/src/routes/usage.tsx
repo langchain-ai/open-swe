@@ -46,13 +46,13 @@ function UsagePage() {
   const session = useSession()
   const options = useOptions()
   const period =
-    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "30d"
+    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
   const navigate = Route.useNavigate()
   const activePeriod: UsageLeaderboardPeriod = ["7d", "30d", "all"].includes(
     period
   )
     ? period
-    : "30d"
+    : "7d"
 
   if (session.isLoading) {
     return (
