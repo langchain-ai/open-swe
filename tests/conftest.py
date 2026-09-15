@@ -14,7 +14,17 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from agent import store as agent_store
 from agent.database import postgres
-from agent.threads import access, diffs, handlers, images, listing, proxy, runs, summary
+from agent.threads import (
+    access,
+    diffs,
+    handlers,
+    images,
+    listing,
+    message_fetch,
+    proxy,
+    runs,
+    summary,
+)
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
 
@@ -24,6 +34,7 @@ _THREAD_MODULES: tuple[ModuleType, ...] = (
     handlers,
     images,
     listing,
+    message_fetch,
     proxy,
     runs,
     summary,
