@@ -3,12 +3,15 @@
 import logging
 from time import perf_counter
 from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from agent.dashboard.user_preferences import get_user_preferences
 from agent.github.pull_request_checks import PullRequestState
 from agent.threads import terminal
 from agent.threads.diffs import (
@@ -51,12 +54,23 @@ from agent.threads.runs import (
     ThreadRenameBody,
     ThreadResolveBody,
 )
+from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["threads"])
 router.include_router(feedback_router)
+
+
+@router.get("/me/local-trace-url/{thread_id}")
+async def api_get_local_trace_url(
+    thread_id: UUID,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, str | None]:
+    preferences = await get_user_preferences(session["sub"])
+    project = preferences["local_tracing_project"] or ENV.LANGSMITH_PROJECT.get()
+    return {"trace_url": await get_langsmith_trace_url(str(thread_id), project_name=project)}
 
 
 @router.get("/threads")
@@ -218,13 +232,18 @@ async def api_get_thread(
     thread_id: str,
     mark_viewed: bool = True,
     session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    return await get_dashboard_thread(
+) -> Response:
+    timings: dict[str, float] = {}
+    started = perf_counter()
+    payload = await get_dashboard_thread(
         thread_id,
         session["sub"],
         email=session.get("email"),
         mark_viewed=mark_viewed,
+        timings=timings,
     )
+    timings["total"] = (perf_counter() - started) * 1000
+    return JSONResponse(payload, headers={"Server-Timing": server_timing_header(timings)})
 
 
 router.include_router(terminal.router)

@@ -8,6 +8,7 @@ from typing import Any
 
 from agent.baby_sit import handle_ci_webhook
 from agent.github.comments import GitHubAuthError
+from agent.github.pull_requests import PullRequest
 from agent.input_messages import (
     PersonIdentity,
     RunInput,
@@ -19,6 +20,7 @@ from agent.input_messages import (
 )
 from agent.prompts import load_prompt, render_prompt
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
+from agent.run_config import Repo
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
 from agent.thread_ids import (
@@ -844,6 +846,19 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                 common.logger.warning(
                     "Failed to persist branch_name metadata for thread %s", thread_id
                 )
+
+    repo = Repo.parse(repo_config)
+    if pr_number and repo is not None and repo.owner and repo.name:
+        try:
+            await PullRequest(owner=repo.owner, repo=repo.name, number=pr_number).link_thread(
+                thread_id, source="github_pr_comment"
+            )
+        except Exception:  # noqa: BLE001
+            common.logger.warning(
+                "Failed to link PR comment thread to its pull request",
+                extra={"pr_repo_full_name": f"{repo.owner}/{repo.name}", "pr_number": pr_number},
+                exc_info=True,
+            )
 
     email = await common.email_for_login(github_login) or ""
     if email:

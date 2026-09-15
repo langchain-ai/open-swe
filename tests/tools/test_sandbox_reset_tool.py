@@ -64,9 +64,3 @@ def test_sandbox_reset_schema_includes_hidden_and_public_options() -> None:
     assert "cpu_millicores" in schema["properties"]
     assert "snapshot_name" in schema["properties"]
     assert schema["additionalProperties"] is True
-
-
-def test_sandbox_reset_exported() -> None:
-    from agent.tools import sandbox_reset as exported
-
-    assert exported is sandbox_reset

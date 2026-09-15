@@ -157,9 +157,11 @@ def _configurable(
         "source": "incidents_agent",
         "incident_id": record.id,
         "slack_thread": slack_thread,
+        # Always written, never omitted: a thread keeps the configurable of its earlier runs,
+        # so an automatic turn that left this out would inherit the last responder question
+        # and keep answering it as though someone had just asked.
+        "incident_request": request,
     }
-    if request is not None:
-        configurable["incident_request"] = request
     if policy.model:
         model, effort = normalize_model_choice(policy.model, None)
         configurable["agent_model_id"] = model

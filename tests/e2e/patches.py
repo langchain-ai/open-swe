@@ -68,7 +68,7 @@ def apply() -> None:
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.
-    authorship._identity_from_github_token = lambda _token: None  # noqa: SLF001
+    authorship._identity_from_github_token = lambda _token, _login=None: None  # noqa: SLF001
 
     # OAuth-token store is an external credential boundary. Stub it so a web
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;

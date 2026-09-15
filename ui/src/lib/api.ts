@@ -95,6 +95,7 @@ export interface SessionUser {
   login: string
   email: string | null
   avatar_url: string | null
+  user_id?: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
@@ -910,7 +911,7 @@ export const api = {
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
   usageLeaderboard: (
-    period: UsageLeaderboardPeriod = "30d",
+    period: UsageLeaderboardPeriod = "7d",
     limit = 10,
     cursor?: string
   ) =>
@@ -926,7 +927,7 @@ export const api = {
       })),
     })),
   prMergeRateByModel: (
-    period: UsageLeaderboardPeriod = "30d",
+    period: UsageLeaderboardPeriod = "7d",
     maturityDays?: number
   ) =>
     request<PRMergeRatePayload>(

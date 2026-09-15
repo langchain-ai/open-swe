@@ -7,7 +7,8 @@ from sqlalchemy import text
 from agent.analytics.capture import fail_soft
 from agent.analytics.identity import opaque_id, opaque_person
 from agent.config import ENV
-from agent.database.analytics import configured, transaction, workspace_id
+from agent.database import configured, transaction
+from agent.database.analytics import workspace_id
 
 
 @fail_soft

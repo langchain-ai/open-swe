@@ -389,3 +389,13 @@ async def test_excluded_channels_are_ignored_after_enrollment(enrolled):
     assert response == mention == {"status": "ignored"}
     turns.queue_context.assert_not_awaited()
     turns.dispatch_turn.assert_not_awaited()
+
+
+async def test_complete_records_the_run_that_completed_it(enrolled):
+    """Reopening is only refused for the run that completed the incident, so record it."""
+    await channels.apply_control(enrolled, "complete", {"id": "agent:incidents"}, keep_run_id="r9")
+    completed = await service.INCIDENTS.get(enrolled.id)
+    assert completed.completed_run_id == "r9"
+
+    await channels.apply_control(completed, "reopen", {"id": "slack:U1"})
+    assert (await service.INCIDENTS.get(enrolled.id)).completed_run_id == ""

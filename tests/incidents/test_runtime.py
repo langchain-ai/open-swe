@@ -268,3 +268,80 @@ async def test_postmortem_failure_records_nothing(incident, monkeypatch):
         await session._record_incident_report(summary=[])
     assert await service.REPORTS.get("incident") is None
     runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
+
+
+async def test_unprompted_findings_wait_out_the_post_floor(incident, monkeypatch):
+    """Nobody asked, so a reworded conclusion holds until the floor elapses."""
+    from datetime import UTC, datetime, timedelta
+
+    session = await runtime.load_incident_session(config())
+    middleware = runtime.IncidentMiddleware(session)
+
+    await middleware.awrap_model_call(request(context_message("1.0")), AsyncMock())
+    first = await session._record_incident_report(
+        summary=[{"text": "Gateway internal errors began", "evidence_ids": ["slack:1.0"]}]
+    )
+    await middleware.awrap_model_call(request(context_message("2.0")), AsyncMock())
+    draft = {"summary": [{"text": "Monitors are back to OK", "evidence_ids": ["slack:2.0"]}]}
+    second = await session._record_incident_report(**draft)
+
+    assert (first["posted"], second["posted"]) == (True, False)
+    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+    # Nobody asked, so it must not present itself as answering anyone.
+    assert runtime.post_slack_thread_reply_with_ts.await_args.args[2].startswith(
+        "*Investigation update*"
+    )
+
+    later = (datetime.now(UTC) + timedelta(minutes=31)).isoformat()
+    monkeypatch.setattr(runtime, "now_iso", lambda: later)
+    third = await session._record_incident_report(**draft)
+
+    assert third["posted"] is True
+    assert runtime.post_slack_thread_reply_with_ts.await_count == 2
+
+
+async def test_questions_are_answered_inside_the_post_floor(incident):
+    """The floor never delays a responder; it only silences unprompted repetition."""
+    unprompted = await runtime.load_incident_session(config())
+    await runtime.IncidentMiddleware(unprompted).awrap_model_call(
+        request(context_message("1.0")), AsyncMock()
+    )
+    await unprompted._record_incident_report(
+        summary=[{"text": "Gateway internal errors began", "evidence_ids": ["slack:1.0"]}]
+    )
+
+    asked = await runtime.load_incident_session(config(incident_request="failure rate?"))
+    await runtime.IncidentMiddleware(asked).awrap_model_call(
+        request(context_message("2.0")), AsyncMock()
+    )
+    answer = await asked._record_incident_report(
+        summary=[{"text": "The endpoint failure rate is 0%", "evidence_ids": ["slack:2.0"]}]
+    )
+
+    assert answer["posted"] is True
+    assert runtime.post_slack_thread_reply_with_ts.await_count == 2
+
+
+async def test_the_same_conclusion_with_a_fresh_citation_never_reposts(incident, monkeypatch):
+    """The overnight repeat: identical findings, but this turn cites the newest nag."""
+    from datetime import UTC, datetime, timedelta
+
+    session = await runtime.load_incident_session(config())
+    middleware = runtime.IncidentMiddleware(session)
+    conclusion = "INC-1722 remains in triage and both EU gateway monitors are OK"
+
+    await middleware.awrap_model_call(request(context_message("1.0")), AsyncMock())
+    first = await session._record_incident_report(
+        summary=[{"text": conclusion, "evidence_ids": ["slack:1.0"]}]
+    )
+
+    # Well past the floor, so only the digest can hold this back.
+    later = (datetime.now(UTC) + timedelta(hours=4)).isoformat()
+    monkeypatch.setattr(runtime, "now_iso", lambda: later)
+    await middleware.awrap_model_call(request(context_message("2.0")), AsyncMock())
+    second = await session._record_incident_report(
+        summary=[{"text": conclusion, "evidence_ids": ["slack:2.0"]}]
+    )
+
+    assert (first["posted"], second["posted"]) == (True, False)
+    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()

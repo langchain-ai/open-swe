@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from agent import database
 from agent.analytics import directory, emitter
 from agent.analytics.capture import fail_soft
 from agent.analytics.events import (
@@ -20,7 +21,7 @@ from agent.analytics.events import (
     StrictPayload,
 )
 from agent.analytics.identity import opaque_id
-from agent.database import analytics as database
+from agent.database import analytics as analytics_db
 from agent.review.findings import coerce_finding, is_surfaced
 from agent.utils.json_types import as_json_object
 from agent.utils.run_usage import RunUsageSummary
@@ -74,7 +75,7 @@ async def _run_status(run_id: UUID) -> dict[str, bool]:
                             AND run_id = :run) AS scheduled
                 """
             ),
-            {"workspace": database.workspace_id(), "run": run_id, "run_text": str(run_id)},
+            {"workspace": analytics_db.workspace_id(), "run": run_id, "run_text": str(run_id)},
         )
         return dict(result.mappings().one())
 
@@ -191,7 +192,7 @@ async def mark_agent_invocation_cost_refresh_scheduled(*, invocation_id: str) ->
                 "INSERT INTO run_cost_refresh (workspace_id, run_id, scheduled_at) "
                 "VALUES (:workspace, :run, clock_timestamp()) ON CONFLICT DO NOTHING"
             ),
-            {"workspace": database.workspace_id(), "run": run_id},
+            {"workspace": analytics_db.workspace_id(), "run": run_id},
         )
 
 

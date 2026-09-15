@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from agent.analytics.events import EventEnvelope, EventName
 from agent.analytics.summaries import mark_dirty
 from agent.config import ENV
-from agent.database.analytics import record_capture, transaction
+from agent.database import transaction
+from agent.database.analytics import record_capture
 
 _INSERT_ID = text(
     "INSERT INTO event_ids(event_id, occurred_at) VALUES (:event_id, :occurred_at) "

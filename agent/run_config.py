@@ -100,6 +100,7 @@ class RunConfig(BaseModel):
     run_id: str | None = None
     invocation_id: str | None = None
     prepare_run_id: str | None = None
+    invocation_started_at: str | None = None
     offload_conversation: bool = False
     source: str | None = None
     task: str | None = None
