@@ -184,10 +184,10 @@ def _user_message_content(
     ]
 
 
-async def _resolve_requested_environment(requested: Any) -> str | None:
-    """Normalize a requested environment slug, dropping one that does not exist.
+async def _resolve_requested_workspace(requested: Any) -> str | None:
+    """Normalize a requested workspace slug, dropping one that does not exist.
 
-    The picker only offers configured environments, so a miss means a stale client
+    The picker only offers configured workspaces, so a miss means a stale client
     — the thread falls back to the default rather than booting from nothing.
     """
     if not isinstance(requested, str) or not requested.strip():
@@ -313,7 +313,7 @@ async def _build_dashboard_configurable(
     if model_selection in {"auto", "explicit"}:
         configurable["model_selection"] = model_selection
     # The agent re-checks the requesting user against CONFIGURED_ADMINS before it
-    # hands out the environment tools, so this only marks intent.
+    # hands out the workspace tools, so this only marks intent.
     if metadata.get("admin_thread") is True:
         configurable["admin_thread"] = True
     continued_from = metadata.get("continued_from_thread_id")
@@ -500,9 +500,7 @@ async def _enrich_run_start_command(
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
             model_selection=model_selection or "auto",
-            environment=await _resolve_requested_environment(
-                client_configurable.get("environment")
-            ),
+            environment=await _resolve_requested_workspace(client_configurable.get("environment")),
         )
         metadata = thread_metadata(thread)
         run_model = _metadata_model_id(metadata)

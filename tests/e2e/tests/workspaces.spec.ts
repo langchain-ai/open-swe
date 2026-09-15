@@ -13,13 +13,13 @@ const DRAFT_SLUG = "staging-box";
 const EXPECTED_SNAPSHOT_NAME = "openswe-environment-default";
 const ALT_NAME = "Alt Box";
 const ALT_SLUG = "alt-box";
-const DEFAULT_ENV_PROMPT = "Default environment: run make test.";
-const ALT_ENV_PROMPT = "Alt environment: run pytest -q.";
-// Mirrors fake_llm.py's environment script.
-const ENVIRONMENT_PROMPT =
+const DEFAULT_WORKSPACE_PROMPT = "Default workspace: run make test.";
+const ALT_WORKSPACE_PROMPT = "Alt workspace: run pytest -q.";
+// Mirrors fake_llm.py's workspace script.
+const WORKSPACE_PROMPT =
   "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`.";
 
-interface Environment {
+interface Workspace {
   slug: string;
   name: string;
   prompt: string;
@@ -47,17 +47,16 @@ async function loginAs(page: Page, user: { login: string; email: string }) {
   expect(res.ok()).toBeTruthy();
 }
 
-async function listWorkspaces(page: Page): Promise<Array<Environment>> {
+async function listWorkspaces(page: Page): Promise<Array<Workspace>> {
   const res = await page.request.get("/dashboard/api/workspaces");
   expect(res.ok()).toBeTruthy();
-  return ((await res.json()) as { workspaces: Array<Environment> })
-    .workspaces;
+  return ((await res.json()) as { workspaces: Array<Workspace> }).workspaces;
 }
 
 async function findWorkspace(
   page: Page,
   slug: string,
-): Promise<Environment | undefined> {
+): Promise<Workspace | undefined> {
   return (await listWorkspaces(page)).find((env) => env.slug === slug);
 }
 
@@ -157,9 +156,9 @@ test.describe("Workspaces", () => {
     await deleteWorkspace(page, DRAFT_SLUG);
     await createWorkspace(page, DRAFT_NAME, "");
 
-    await page.goto("/environments");
+    await page.goto("/workspaces");
     const section = page
-      .getByRole("heading", { name: "Environments", level: 2 })
+      .getByRole("heading", { name: "Workspaces", level: 2 })
       .locator("xpath=ancestor::section");
     await expect(section).toBeVisible();
     await expect(section.getByText(DRAFT_NAME)).toBeVisible();
@@ -181,10 +180,10 @@ test.describe("Workspaces", () => {
     const res = await page.request.get("/dashboard/api/workspaces");
     expect(res.status()).toBe(403);
 
-    await page.goto("/agents/environments");
-    await expect(page).toHaveURL(/\/environments$/);
+    await page.goto("/agents/workspaces");
+    await expect(page).toHaveURL(/\/workspaces$/);
     await expect(
-      page.getByRole("heading", { name: "Environments", level: 2 }),
+      page.getByRole("heading", { name: "Workspaces", level: 2 }),
     ).toBeVisible();
     await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
 
@@ -202,17 +201,17 @@ test.describe("Workspaces", () => {
     await loginAs(page, ADMIN);
     await deleteWorkspace(page, DEFAULT_SLUG);
     await deleteWorkspace(page, ALT_SLUG);
-    await createWorkspace(page, "default", DEFAULT_ENV_PROMPT);
+    await createWorkspace(page, "default", DEFAULT_WORKSPACE_PROMPT);
 
     // One workspace: the choice is already made, so no control is rendered.
     await openNewAgentHome(page);
-    await expect(page.getByRole("button", { name: "Environment" })).toHaveCount(
+    await expect(page.getByRole("button", { name: "Workspace" })).toHaveCount(
       0,
     );
 
-    await createWorkspace(page, ALT_NAME, ALT_ENV_PROMPT);
+    await createWorkspace(page, ALT_NAME, ALT_WORKSPACE_PROMPT);
     await page.reload();
-    const picker = page.getByRole("button", { name: "Environment" });
+    const picker = page.getByRole("button", { name: "Workspace" });
     await expect(picker).toBeVisible();
     // Defaults to the workspace named `default`.
     await expect(picker).toContainText("default");
@@ -221,7 +220,7 @@ test.describe("Workspaces", () => {
     await page.getByRole("button", { name: new RegExp(ALT_NAME) }).click();
     await expect(picker).toContainText(ALT_NAME);
 
-    await typeIntoComposer(page, "Which environment am I in?");
+    await typeIntoComposer(page, "Which workspace am I in?");
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
 
@@ -239,8 +238,10 @@ test.describe("Workspaces", () => {
       .toBe(ALT_SLUG);
     await expect
       .poll(() => lastSystemPrompt(page), { timeout: 30_000 })
-      .toContain(ALT_ENV_PROMPT);
-    expect(await lastSystemPrompt(page)).not.toContain(DEFAULT_ENV_PROMPT);
+      .toContain(ALT_WORKSPACE_PROMPT);
+    expect(await lastSystemPrompt(page)).not.toContain(
+      DEFAULT_WORKSPACE_PROMPT,
+    );
 
     await deleteWorkspace(page, ALT_SLUG);
     await deleteWorkspace(page, DEFAULT_SLUG);
@@ -251,7 +252,7 @@ test.describe("Workspaces", () => {
   }) => {
     await loginAs(page, ADMIN);
     await deleteWorkspace(page, ALT_SLUG);
-    await createWorkspace(page, ALT_NAME, ALT_ENV_PROMPT);
+    await createWorkspace(page, ALT_NAME, ALT_WORKSPACE_PROMPT);
 
     await page.goto("/mock/slack");
     await page.locator("#reset").click();
@@ -268,7 +269,7 @@ test.describe("Workspaces", () => {
     ).toBeVisible();
 
     const systemPrompt = await lastSystemPrompt(page);
-    expect(systemPrompt).toContain(ALT_ENV_PROMPT);
+    expect(systemPrompt).toContain(ALT_WORKSPACE_PROMPT);
     // The tag itself is consumed, so the agent never sees it in the request.
     expect(systemPrompt).not.toContain(`env:${ALT_SLUG}`);
 
@@ -289,7 +290,7 @@ test.describe("Workspaces", () => {
 
     await typeIntoComposer(
       page,
-      "Please set up the default environment for this repo and capture it.",
+      "Please set up the default workspace for this repo and capture it.",
     );
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
@@ -313,7 +314,7 @@ test.describe("Workspaces", () => {
 
     // The agent's own summary, after the real save + capture tools ran.
     await expect(
-      page.getByText(/environment is captured and live/),
+      page.getByText(/workspace is captured and live/),
     ).toBeVisible();
 
     // Publishing captured this thread's sandbox synchronously, so the image is
@@ -332,7 +333,7 @@ test.describe("Workspaces", () => {
     // The record the real tools wrote: prompt, repos, and a ready snapshot.
     const record = await findWorkspace(page, DEFAULT_SLUG);
     expect(record).toBeDefined();
-    expect(record?.prompt).toBe(ENVIRONMENT_PROMPT);
+    expect(record?.prompt).toBe(WORKSPACE_PROMPT);
     expect(record?.repos).toEqual(["fakeorg/demo"]);
     expect(record?.snapshot_status).toBe("ready");
     expect(record?.snapshot_name).toBe(EXPECTED_SNAPSHOT_NAME);
@@ -389,15 +390,15 @@ test.describe("Workspaces", () => {
       page.getByText(/anything else you'd like changed/),
     ).toBeVisible();
     const systemPrompt = await lastSystemPrompt(page);
-    expect(systemPrompt).toContain("### Environment Instructions (default)");
-    expect(systemPrompt).toContain(ENVIRONMENT_PROMPT);
+    expect(systemPrompt).toContain("### Workspace Instructions (default)");
+    expect(systemPrompt).toContain(WORKSPACE_PROMPT);
     // Admin threads also carry the workspace-management instructions.
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
-    await page.goto("/environments");
-    await expect(page.getByText("Default environment")).toBeVisible();
+    await page.goto("/workspaces");
+    await expect(page.getByText("Default workspace")).toBeVisible();
     await expect(
-      page.getByText("Default environment · Snapshot ready"),
+      page.getByText("Default workspace · Snapshot ready"),
     ).toBeVisible();
     // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
     await expect(page.getByText(/^Rebuilt /)).toBeVisible();
@@ -410,8 +411,6 @@ test.describe("Workspaces", () => {
 
     // Leave no default behind: later specs' runs would boot from it.
     await deleteWorkspace(page, DEFAULT_SLUG);
-    await expect
-      .poll(() => findWorkspace(page, DEFAULT_SLUG))
-      .toBeUndefined();
+    await expect.poll(() => findWorkspace(page, DEFAULT_SLUG)).toBeUndefined();
   });
 });

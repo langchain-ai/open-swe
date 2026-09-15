@@ -73,22 +73,22 @@ function RefreshSteps({ steps }: { steps: Array<WorkspaceRefreshStep> }) {
   )
 }
 
-function EnvironmentRow({
-  environment,
+function WorkspaceRow({
+  workspace,
   isDefault,
   isAdmin,
 }: {
-  environment: WorkspaceOption
+  workspace: WorkspaceOption
   isDefault: boolean
   isAdmin: boolean
 }) {
-  const status = environment.refresh_status ?? "never"
-  const when = refreshedAt(environment.refresh_finished_at)
-  const log = environment.refresh_log_excerpt
-  const steps = environment.refresh_steps ?? []
+  const status = workspace.refresh_status ?? "never"
+  const when = refreshedAt(workspace.refresh_finished_at)
+  const log = workspace.refresh_log_excerpt
+  const steps = workspace.refresh_steps ?? []
   const detail = [
-    isDefault ? "Default environment" : null,
-    environment.has_snapshot ? "Snapshot ready" : "No snapshot",
+    isDefault ? "Default workspace" : null,
+    workspace.has_snapshot ? "Snapshot ready" : "No snapshot",
   ]
     .filter(Boolean)
     .join(" · ")
@@ -98,21 +98,21 @@ function EnvironmentRow({
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
         <div className="flex flex-col gap-1">
           <span className="text-sm/none font-medium text-foreground">
-            {environment.name}
+            {workspace.name}
           </span>
           <span className="text-xs/relaxed text-muted-foreground">
             {detail}
           </span>
         </div>
         <span className={`text-xs sm:shrink-0 ${REFRESH_CLASS[status]}`}>
-          {refreshLabel(status, environment.refresh_kind)}
+          {refreshLabel(status, workspace.refresh_kind)}
           {status !== "refreshing" && when ? ` ${when}` : ""}
         </span>
       </div>
       {steps.length > 0 && <RefreshSteps steps={steps} />}
-      {environment.refresh_error && (
+      {workspace.refresh_error && (
         <p className="text-xs/relaxed text-destructive">
-          {environment.refresh_error}
+          {workspace.refresh_error}
         </p>
       )}
       {/* The API omits the log for non-admins; this guard is defence in depth
@@ -129,42 +129,42 @@ function EnvironmentRow({
   )
 }
 
-export function EnvironmentsSection({ isAdmin }: { isAdmin: boolean }) {
-  const environments = useQuery({
-    queryKey: ["environment-options"],
+export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
+  const workspaces = useQuery({
+    queryKey: ["workspace-options"],
     queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     refetchInterval: 5000,
   })
-  const options = environments.data
+  const options = workspaces.data
 
   return (
     <SettingsSection
-      title="Environments"
+      title="Workspaces"
       description={
         isAdmin
-          ? "Each environment is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, start a new agent thread, open the + menu, enable admin mode, and ask Open SWE to make the change."
-          : "Each environment is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, ask a workspace admin to start an admin thread and ask Open SWE to make the change."
+          ? "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, start a new agent thread, open the + menu, enable admin mode, and ask Open SWE to make the change."
+          : "Each workspace is rebuilt nightly from its setup script and, while in use, updated hourly by its update script. To create or edit one, ask a workspace admin to start an admin thread and ask Open SWE to make the change."
       }
     >
-      {environments.isLoading ? (
+      {workspaces.isLoading ? (
         <div className="px-4 py-3.5">
           <Skeleton className="h-8 w-full" />
         </div>
-      ) : environments.isError ? (
+      ) : workspaces.isError ? (
         <p className="px-4 py-3.5 text-xs text-destructive">
-          Could not load environments.
+          Could not load workspaces.
         </p>
       ) : !options || options.workspaces.length === 0 ? (
         <p className="px-4 py-3.5 text-xs text-muted-foreground">
-          No environments are configured.
+          No workspaces are configured.
         </p>
       ) : (
-        options.workspaces.map((environment) => (
-          <EnvironmentRow
-            key={environment.slug}
-            environment={environment}
-            isDefault={environment.slug === options.default_slug}
+        options.workspaces.map((workspace) => (
+          <WorkspaceRow
+            key={workspace.slug}
+            workspace={workspace}
+            isDefault={workspace.slug === options.default_slug}
             isAdmin={isAdmin}
           />
         ))

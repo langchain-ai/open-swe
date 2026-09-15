@@ -9,7 +9,7 @@ import {
   mentionReplacementText,
 } from "./ComposerPromptEditor"
 import { ContextWindowMeter } from "./ContextWindowMeter"
-import { EnvironmentSelector } from "./EnvironmentSelector"
+import { WorkspaceSelector } from "./WorkspaceSelector"
 import {
   LocalBranchSelector,
   LocalProjectSelector,
@@ -121,10 +121,10 @@ export interface ChatComposerProps {
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
-  /** Environments a new thread can boot from. The picker appears only when there are several. */
-  environments?: Array<WorkspaceOption>
-  selectedEnvironment?: string | null
-  onEnvironmentChange?: (slug: string | null) => void
+  /** Workspaces a new thread can boot from. The picker appears only when there are several. */
+  workspaces?: Array<WorkspaceOption>
+  selectedWorkspace?: string | null
+  onWorkspaceChange?: (slug: string | null) => void
   /** Paths offered by `@` autocomplete — in a thread, the files the agent has touched. */
   mentionPaths?: Array<string>
   skills?: Array<Skill>
@@ -247,9 +247,9 @@ export const ChatComposer = memo(function ChatComposer({
   onSelectLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
-  environments = [],
-  selectedEnvironment = null,
-  onEnvironmentChange,
+  workspaces = [],
+  selectedWorkspace = null,
+  onWorkspaceChange,
   mentionPaths = [],
   skills = [],
   contextUsage,
@@ -629,7 +629,7 @@ export const ChatComposer = memo(function ChatComposer({
 
       {(onRepoChange ||
         onRunTargetChange ||
-        onEnvironmentChange ||
+        onWorkspaceChange ||
         onSelectLocalProjectBranch) && (
         <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
           {runTarget !== "local" && onRepoChange && (
@@ -660,11 +660,11 @@ export const ChatComposer = memo(function ChatComposer({
           {runTarget && onRunTargetChange && (
             <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
           )}
-          {runTarget !== "local" && onEnvironmentChange && (
-            <EnvironmentSelector
-              environments={environments}
-              selectedSlug={selectedEnvironment}
-              onChange={onEnvironmentChange}
+          {runTarget !== "local" && onWorkspaceChange && (
+            <WorkspaceSelector
+              workspaces={workspaces}
+              selectedSlug={selectedWorkspace}
+              onChange={onWorkspaceChange}
             />
           )}
           {runTarget === "local" &&

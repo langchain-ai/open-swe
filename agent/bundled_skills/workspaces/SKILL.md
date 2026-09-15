@@ -1,17 +1,17 @@
 ---
-name: environments
-description: How Open SWE environments work and how to change them — create one, edit or fork an existing one, start from scratch, what setup_script and update_script are for, why a nightly refresh failed, where the build logs are, and how to read a rebuild in progress. Read this whenever someone asks about environments, snapshots, sandbox images, or a refresh, whether or not this is an admin thread.
+name: workspaces
+description: How Open SWE workspaces work and how to change them — create one, edit or fork an existing one, start from scratch, what setup_script and update_script are for, why a nightly refresh failed, where the build logs are, and how to read a rebuild in progress. Read this whenever someone asks about workspaces, snapshots, sandbox images, or a refresh, whether or not this is an admin thread.
 ---
 
-# Environments
+# Workspaces
 
 An environment is two things: a **record** (name, prompt, repos, sizing, optional scripts) and a published **sandbox image**, `<prefix>-environment-<slug>:latest`. Runs in that environment boot from the image and get the prompt appended to their system prompt. The environment named `default` is what every run uses unless the thread picked another one.
 
-Only workspace admins can change environments, and only from an admin thread. Anyone can read them on **Workspace settings → Environments**. If the asker is not an admin, tell them what would need to happen and who can do it; do not try the tools.
+Only workspace admins can change workspaces, and only from an admin thread. Anyone can read them on **Workspace settings → Workspaces**. If the asker is not an admin, tell them what would need to happen and who can do it; do not try the tools.
 
 ## The one rule: build here, publish from here
 
-You do not write an environment as a script and hope. You build it in the admin thread's own sandbox with ordinary tools — `execute`, the file tools — and when it works you call `publish_workspace`. That captures **this sandbox** as the image and writes the record only after the capture succeeded. Nothing is half-written on failure, and the environment is usable the moment the call returns.
+You do not write a workspace as a script and hope. You build it in the admin thread's own sandbox with ordinary tools — `execute`, the file tools — and when it works you call `publish_workspace`. That captures **this sandbox** as the image and writes the record only after the capture succeeded. Nothing is half-written on failure, and the workspace is usable the moment the call returns.
 
 Everything on the sandbox filesystem is captured, so provision it fully and leave no tokens, credentials, or proxy secrets on disk.
 
@@ -21,20 +21,20 @@ The image you publish is whatever you are sitting on plus your changes, so start
 
 | You want to… | Start the admin thread… | Then |
 |---|---|---|
-| **Edit** an environment | in that environment (composer → Environment picker) | change it, `publish_workspace` under the **same** name |
-| **Fork** one into a new environment | in the parent | change what differs, `publish_workspace` under a **new** name |
-| Build **from scratch** | in no environment, or `sandbox_reset` with the base `snapshot_id` | provision everything, publish |
+| **Edit** a workspace | in that workspace (composer → Workspace picker) | change it, `publish_workspace` under the **same** name |
+| **Fork** one into a new workspace | in the parent | change what differs, `publish_workspace` under a **new** name |
+| Build **from scratch** | in no workspace, or `sandbox_reset` with the base `snapshot_id` | provision everything, publish |
 
 Already in a thread and need a different image? `sandbox_reset(snapshot_id=…)` with an id from `list_workspaces`, or `sandbox_reset(snapshot="<prefix>-environment-<slug>:latest")`. The old sandbox is detached, not deleted.
 
 ## `setup_script` — the reproducibility contract
 
-Optional. It is **not** the build; you already did the build by hand. It is the record of how to reproduce the image from the base snapshot, and when present a nightly cron replays it on a throwaway sandbox and replaces the image **only if it exits 0**. Anything you did by hand that the script does not do therefore shows up as a *failed refresh* on the Environments page rather than as silent drift. `refresh_workspace_start` runs the same check on demand.
+Optional. It is **not** the build; you already did the build by hand. It is the record of how to reproduce the image from the base snapshot, and when present a nightly cron replays it on a throwaway sandbox and replaces the image **only if it exits 0**. Anything you did by hand that the script does not do therefore shows up as a *failed refresh* on the Workspaces page rather than as silent drift. `refresh_workspace_start` runs the same check on demand.
 
 Two consequences:
 
 - The script must describe the **whole** build from base, even for a fork. By hand you only did the delta on top of the parent; the nightly does not start from the parent.
-- Leaving it off is allowed. The environment then has no nightly check and keeps whatever image was last published.
+- Leaving it off is allowed. The workspace then has no nightly check and keeps whatever image was last published.
 
 Write it non-interactive and safe to re-run: start with `set -euo pipefail`; clone the repos; install `rg`, `gh`, toolchains, dependencies; warm caches. Never write a secret to disk — the proxy injects git auth per run.
 
@@ -56,4 +56,4 @@ Logs are written under `/open-swe/environment/logs/` (`setup.log`, `update.log`)
 
 ## Snapshot names
 
-The name belongs to the environment, not to whichever sandbox produced the image: every publish and every refresh moves the same `latest` tag. Runs boot from the immutable snapshot id on the record, so a capture mid-run cannot change what a reconnecting sandbox comes back to. Override the name with `snapshot_name` on publish; it must not contain a colon.
+The name belongs to the workspace, not to whichever sandbox produced the image: every publish and every refresh moves the same `latest` tag. Runs boot from the immutable snapshot id on the record, so a capture mid-run cannot change what a reconnecting sandbox comes back to. Override the name with `snapshot_name` on publish; it must not contain a colon.

@@ -349,7 +349,7 @@ function CloudAgentsPage() {
           <SettingsNavRow
             to="/agents/sandbox"
             label="Sandbox"
-            description="The snapshot new sandboxes boot from when their environment has none."
+            description="The snapshot new sandboxes boot from when their workspace has none."
           />
         )}
       </SettingsSection>

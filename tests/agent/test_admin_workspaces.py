@@ -25,7 +25,7 @@ def _config(**configurable: object) -> RunnableConfig:
 
 
 @pytest.mark.asyncio
-async def test_default_environment_snapshot_wins_over_base() -> None:
+async def test_default_workspace_snapshot_wins_over_base() -> None:
     with (
         patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=_READY),
         patch.object(
@@ -39,7 +39,7 @@ async def test_default_environment_snapshot_wins_over_base() -> None:
 
 
 @pytest.mark.asyncio
-async def test_environment_without_a_captured_snapshot_falls_back_to_base() -> None:
+async def test_workspace_without_a_captured_snapshot_falls_back_to_base() -> None:
     never_captured = _READY.model_copy(update={"snapshot_status": "failed", "snapshot_id": None})
     with (
         patch.object(
@@ -72,7 +72,7 @@ async def test_a_nightly_capture_does_not_send_runs_to_the_base_image() -> None:
 
 
 @pytest.mark.asyncio
-async def test_snapshot_resolution_passes_the_threads_environment() -> None:
+async def test_snapshot_resolution_passes_the_threads_workspace() -> None:
     resolve = AsyncMock(
         return_value=_READY.model_copy(update={"slug": "staging", "snapshot_id": "staging-snap"})
     )
@@ -92,8 +92,8 @@ async def test_snapshot_resolution_passes_the_threads_environment() -> None:
 
 
 @pytest.mark.asyncio
-async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
-    environment = _READY.model_copy(
+async def test_workspace_sandbox_sizing_is_resolved_with_snapshot() -> None:
+    workspace = _READY.model_copy(
         update={
             "mem_bytes": 32 * 1024**3,
             "vcpus": 16,
@@ -101,9 +101,7 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
             "create_params": {"_internal_runtime": "v2"},
         }
     )
-    with patch.object(
-        lifecycle, "load_workspace", new_callable=AsyncMock, return_value=environment
-    ):
+    with patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=workspace):
         config = await lifecycle.SandboxCreateConfig.resolve("base")
         snapshot_id = config.snapshot_id
         resources = config.resources
@@ -171,7 +169,7 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
     with patch("agent.run_config.get_config", return_value=_config(github_login="someone-else")):
         assert await env_tools.list_workspaces() == {
             "ok": False,
-            "error": "Only workspace admins can manage environments.",
+            "error": "Only workspace admins can manage workspaces.",
         }
         result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
@@ -266,7 +264,7 @@ async def test_publish_captures_this_sandbox_before_writing_anything(
     assert seams.publish.await_args.kwargs["source_sandbox_id"] == "sb-thread"
     assert result["ok"] is True
     assert result["created"] is True
-    assert result["environment"]["snapshot_id"] == "snap-new"
+    assert result["workspace"]["snapshot_id"] == "snap-new"
 
 
 @pytest.mark.asyncio
@@ -312,7 +310,7 @@ async def test_a_bad_definition_is_refused_before_the_capture(
 
 
 @pytest.mark.asyncio
-async def test_publishing_over_an_existing_environment_retires_its_old_image(
+async def test_publishing_over_an_existing_workspace_retires_its_old_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
@@ -366,8 +364,8 @@ async def test_publish_persists_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) 
     assert definition.vcpus == 8
     assert definition.fs_capacity_bytes == 256 * 1024**3
     assert definition.create_params == {"_internal_runtime": "v2"}
-    assert result["environment"]["vcpus"] == 8
-    assert result["environment"]["create_params"] == {"_internal_runtime": "v2"}
+    assert result["workspace"]["vcpus"] == 8
+    assert result["workspace"]["create_params"] == {"_internal_runtime": "v2"}
 
 
 @pytest.mark.asyncio
@@ -389,7 +387,7 @@ async def test_publish_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_refresh_start_refuses_an_environment_with_no_script(
+async def test_refresh_start_refuses_an_workspace_with_no_script(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
@@ -437,7 +435,7 @@ async def test_refresh_start_returns_a_task_id_the_unified_poll_understands(
     # Started, not done: the rebuild is still running when this returns.
     assert result["status"] == "started"
     # Prefixed, so `background_task` routes it to the refresh provider.
-    assert result["task_id"] == "env-run-1"
+    assert result["task_id"] == "ws-run-1"
     assert refresh.owns_task(result["task_id"])
 
 
@@ -464,7 +462,7 @@ async def test_refresh_start_refuses_while_one_is_running(
         result = await env_tools.refresh_workspace_start("base")
 
     assert result["status"] == "error"
-    assert result["task_id"] == "env-run-1"
+    assert result["task_id"] == "ws-run-1"
     start.assert_not_awaited()
 
 
@@ -476,25 +474,25 @@ def test_sender_context_includes_workspace_admin_status() -> None:
     assert "Workspace admin: no." in construct_sender_context(None)
 
 
-def test_environment_instructions_render_in_system_prompt() -> None:
+def test_workspace_instructions_render_in_system_prompt() -> None:
     prompt = construct_system_prompt(
         working_dir="/workspace",
-        environment_name="Base",
-        environment_instructions="Checkouts live in /workspace/repos.",
+        workspace_name="Base",
+        workspace_instructions="Checkouts live in /workspace/repos.",
     )
-    assert "### Environment Instructions (Base)" in prompt
+    assert "### Workspace Instructions (Base)" in prompt
     assert "Checkouts live in /workspace/repos." in prompt
     assert "### Admin Thread: Workspace Setup" not in prompt
 
 
 def test_admin_section_only_for_admin_threads() -> None:
-    prompt = construct_system_prompt(working_dir="/workspace", admin_environments=True)
+    prompt = construct_system_prompt(working_dir="/workspace", admin_workspaces=True)
     assert "### Admin Thread: Workspace Setup" in prompt
     assert "direct them to an admin thread" not in prompt
 
 
-def test_blank_environment_prompt_renders_nothing() -> None:
+def test_blank_workspace_prompt_renders_nothing() -> None:
     prompt = construct_system_prompt(
-        working_dir="/workspace", environment_name="Base", environment_instructions="   "
+        working_dir="/workspace", workspace_name="Base", workspace_instructions="   "
     )
-    assert "Environment Instructions" not in prompt
+    assert "Workspace Instructions" not in prompt

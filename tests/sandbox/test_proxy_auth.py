@@ -447,8 +447,8 @@ class TestCreateSandboxWithProxy:
             mock_get_token.assert_awaited_once_with()
 
     @pytest.mark.asyncio
-    async def test_passes_environment_resources_to_sandbox_creation(self) -> None:
-        environment = Workspace(
+    async def test_passes_workspace_resources_to_sandbox_creation(self) -> None:
+        workspace = Workspace(
             slug="env",
             snapshot_status="ready",
             snapshot_id="env-snap",
@@ -464,7 +464,7 @@ class TestCreateSandboxWithProxy:
             patch(
                 "agent.sandboxes.lifecycle.load_workspace",
                 new_callable=AsyncMock,
-                return_value=environment,
+                return_value=workspace,
             ),
             patch(
                 "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock
@@ -490,12 +490,12 @@ class TestCreateSandboxWithProxy:
             mem_bytes=16,
             vcpus=8,
             fs_capacity_bytes=128,
-            create_params=environment.create_params,
+            create_params=workspace.create_params,
         )
         mock_configure_proxy.assert_awaited_once_with(
             "sandbox-123",
             "ghs_install",
-            base_proxy_config=environment.create_params["proxy_config"],
+            base_proxy_config=workspace.create_params["proxy_config"],
         )
 
     @pytest.mark.asyncio
