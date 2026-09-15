@@ -15,6 +15,7 @@ export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
 interface FilterableThread {
   source?: AgentSource
   threadCategory?: string
+  resolved?: boolean
 }
 
 function threadSource(thread: FilterableThread): AgentSource {
@@ -34,6 +35,7 @@ export function filterThreads<T extends FilterableThread>(
   filters: SidebarFilters
 ): Array<T> {
   return threads.filter((thread) => {
+    if (!filters.includeResolved && thread.resolved === true) return false
     if (
       !filters.includeAutomations &&
       isAutomationThread(thread) &&

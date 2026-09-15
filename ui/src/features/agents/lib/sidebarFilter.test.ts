@@ -39,6 +39,18 @@ describe("filterThreads", () => {
     expect(filterThreads(threads, DEFAULT_SIDEBAR_FILTERS)).toHaveLength(1)
   })
 
+  it("hides archived threads by default", () => {
+    const active = makeThread()
+    const archived = makeThread({ resolved: true })
+
+    expect(filterThreads([active, archived], DEFAULT_SIDEBAR_FILTERS)).toEqual([
+      active,
+    ])
+    expect(
+      filterThreads([active, archived], filters({ includeResolved: true }))
+    ).toEqual([active, archived])
+  })
+
   it("includes automations when requested", () => {
     const ordinary = makeThread()
     const automation = makeThread({
