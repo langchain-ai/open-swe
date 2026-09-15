@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent.dashboard import oauth
+from agent.users import authorization
 
 
 @pytest.mark.parametrize("value", [None, "  ,  "])
@@ -63,7 +64,7 @@ async def test_gate_allows_explicit_user_case_insensitively(monkeypatch) -> None
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", " Alice, bob ")
     monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
     membership = AsyncMock()
-    monkeypatch.setattr(oauth, "is_user_active_org_member", membership)
+    monkeypatch.setattr(authorization, "is_user_active_org_member", membership)
 
     await oauth.enforce_github_login_gate("ALICE")
 
@@ -75,7 +76,7 @@ async def test_gate_allows_member_of_any_configured_org(monkeypatch) -> None:
     monkeypatch.delenv("ALLOWED_GITHUB_USERS", raising=False)
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary, secondary")
     membership = AsyncMock(side_effect=[False, True])
-    monkeypatch.setattr(oauth, "is_user_active_org_member", membership)
+    monkeypatch.setattr(authorization, "is_user_active_org_member", membership)
 
     await oauth.enforce_github_login_gate("Insider")
 
@@ -90,7 +91,7 @@ async def test_gate_uses_union_when_both_allowlists_are_set(
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
     membership = AsyncMock(return_value=authorized_by == "org")
-    monkeypatch.setattr(oauth, "is_user_active_org_member", membership)
+    monkeypatch.setattr(authorization, "is_user_active_org_member", membership)
 
     login = "alice" if authorized_by == "user" else "insider"
     await oauth.enforce_github_login_gate(login)
@@ -105,7 +106,7 @@ async def test_gate_uses_union_when_both_allowlists_are_set(
 async def test_gate_rejects_user_outside_both_allowlists(monkeypatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
-    monkeypatch.setattr(oauth, "is_user_active_org_member", AsyncMock(return_value=False))
+    monkeypatch.setattr(authorization, "is_user_active_org_member", AsyncMock(return_value=False))
 
     with pytest.raises(HTTPException) as exc:
         await oauth.enforce_github_login_gate("stranger")

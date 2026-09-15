@@ -32,7 +32,17 @@ from typing import Literal, Self
 from uuid import UUID, uuid7
 
 from pydantic import AliasPath, BaseModel, Field, ValidationError
-from sqlalchemy import BigInteger, ForeignKey, Text, UniqueConstraint, desc, func, or_, select
+from sqlalchemy import (
+    BigInteger,
+    ForeignKey,
+    Text,
+    UniqueConstraint,
+    desc,
+    func,
+    inspect,
+    or_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -43,6 +53,7 @@ from agent.github.comments import PrState, derive_pr_state
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repositories import Repository
 from agent.review.findings import REVIEWER_THREAD_KIND
+from agent.users.models import UserIdentity
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
@@ -104,6 +115,10 @@ class PullRequest(Base):
     head_ref: Mapped[str] = mapped_column(server_default="", default="")
     base_ref: Mapped[str] = mapped_column(server_default="", default="")
     author: Mapped[str] = mapped_column(server_default="", default="")
+    author_github_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    author_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
     resolves_thread: Mapped[bool] = mapped_column(default=False)
     threads: Mapped[list[ThreadLink]] = relationship(
         default_factory=list,
@@ -121,6 +136,7 @@ class PullRequest(Base):
     )
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    legacy_threads_discovered_at: Mapped[datetime | None] = mapped_column(init=False)
     repository: Mapped[Repository] = relationship(init=False)
 
     @classmethod
@@ -168,7 +184,9 @@ class PullRequest(Base):
         """Write the PR as GitHub describes it and register its repository.
 
         Overwrites the GitHub-owned columns; ``resolves_thread`` can only be set,
-        never cleared. Queued ``threads``/``reviews`` are linked as well.
+        never cleared. Queued ``threads``/``reviews`` are linked as well. The
+        author is linked to a registered user when one matches their GitHub id
+        or, failing that, their login; an unregistered author leaves it unset.
         """
         return await self._write(overwrite=True, repository_private=repository_private)
 
@@ -205,13 +223,15 @@ class PullRequest(Base):
     async def linked_threads(self, *, backfill: bool = True) -> list[str]:
         """Linked agent threads, primary first.
 
-        Falls back to the legacy ``pr_url``/``pr_urls`` thread scan for pull
-        requests that predate the tables, saving what it finds so the scan
-        happens at most once per PR.
+        Until the legacy ``pr_url``/``pr_urls`` thread scan has succeeded once
+        for this PR, run it and link what it finds, so threads that predate the
+        tables are never shadowed by a link made after them.
         """
-        if self.threads or not backfill:
+        if not backfill or self.legacy_threads_discovered_at is not None:
             return self.thread_ids
         discovered = await self.discover_threads()
+        if discovered is None:
+            return self.thread_ids
         logger.info(
             "Backfilled pull request threads from legacy metadata scan",
             extra={
@@ -220,21 +240,24 @@ class PullRequest(Base):
                 "pr_discovered_threads": len(discovered),
             },
         )
-        if not discovered:
-            return []
-        self.threads.extend(
-            ThreadLink(thread_id=thread_id, source="backfill") for thread_id in discovered
-        )
-        return (await self._write(overwrite=False)).thread_ids
+        for thread_id in discovered:
+            if all(link.thread_id != thread_id for link in self.threads):
+                self.threads.append(ThreadLink(thread_id=thread_id, source="backfill"))
+        return (await self._write(overwrite=False, legacy_discovered=True)).thread_ids
 
     async def primary_thread(self, *, backfill: bool = True) -> str | None:
         threads = await self.linked_threads(backfill=backfill)
         return threads[0] if threads else None
 
-    async def discover_threads(self) -> Sequence[str]:
-        """Agent threads whose metadata still points at this PR, oldest first."""
+    async def discover_threads(self) -> Sequence[str] | None:
+        """Agent threads whose metadata still points at this PR, oldest first.
+
+        ``None`` when any search failed, so a partial result is never mistaken
+        for a complete one.
+        """
         client = langgraph_client()
         found: dict[str, str] = {}
+        failed = False
         for metadata_filter in ({"pr_url": self.url}, {"pr_urls": [self.url]}):
             offset = 0
             while True:
@@ -248,6 +271,7 @@ class PullRequest(Base):
                         extra={"pr_url": self.url},
                         exc_info=True,
                     )
+                    failed = True
                     break
                 for thread in page or []:
                     if thread_metadata(thread).get("kind") == REVIEWER_THREAD_KIND:
@@ -258,6 +282,8 @@ class PullRequest(Base):
                 if len(page or []) < _SEARCH_PAGE_SIZE:
                     break
                 offset += _SEARCH_PAGE_SIZE
+        if failed:
+            return None
         return [thread_id for thread_id, _ in sorted(found.items(), key=lambda item: item[1])]
 
     async def fetch(self, session: AsyncSession) -> Self | None:
@@ -274,13 +300,24 @@ class PullRequest(Base):
     def _with_links(cls, statement):  # noqa: ANN001, ANN206
         return statement.options(selectinload(cls.threads), selectinload(cls.reviews))
 
-    async def _write(self, *, overwrite: bool, repository_private: bool | None = None) -> Self:
+    async def _write(
+        self,
+        *,
+        overwrite: bool,
+        repository_private: bool | None = None,
+        legacy_discovered: bool = False,
+    ) -> Self:
+        """Persist this instance's pending (transient) links and reviews onto the stored row."""
         async with postgres.session() as session:
             repository = await Repository(
                 full_name=self.repo_full_name, private=repository_private
             ).save(session)
-            row = await self._upsert(session, repository.id, overwrite=overwrite)
-            for link in self.threads:
+            if overwrite and self.author_user_id is None:
+                self.author_user_id = await self._author_user_id(session)
+            row = await self._upsert(
+                session, repository.id, overwrite=overwrite, legacy_discovered=legacy_discovered
+            )
+            for link in (link for link in self.threads if inspect(link).transient):
                 if all(existing.thread_id != link.thread_id for existing in row.threads):
                     role: ThreadRole = (
                         "secondary" if any(t.role == "primary" for t in row.threads) else "primary"
@@ -288,7 +325,7 @@ class PullRequest(Base):
                     row.threads.append(
                         ThreadLink(thread_id=link.thread_id, role=role, source=link.source)
                     )
-            for review in self.reviews:
+            for review in (review for review in self.reviews if inspect(review).transient):
                 existing = next((r for r in row.reviews if review.same_as(r)), None)
                 if existing is None:
                     row.reviews.append(
@@ -313,7 +350,28 @@ class PullRequest(Base):
             raise RuntimeError(f"pull request {self.url} vanished during save")
         return stored
 
-    async def _upsert(self, session: AsyncSession, repository_id: UUID, *, overwrite: bool) -> Self:
+    async def _author_user_id(self, session: AsyncSession) -> UUID | None:
+        if self.author_github_id is not None:
+            matches = UserIdentity.external_id == str(self.author_github_id)
+        elif self.author:
+            matches = func.lower(UserIdentity.login) == self.author.lower()
+        else:
+            return None
+        return await session.scalar(
+            select(UserIdentity.user_id)
+            .where(UserIdentity.provider == "github", matches)
+            .order_by(UserIdentity.last_seen_at.desc())
+            .limit(1)
+        )
+
+    async def _upsert(
+        self,
+        session: AsyncSession,
+        repository_id: UUID,
+        *,
+        overwrite: bool,
+        legacy_discovered: bool,
+    ) -> Self:
         """Insert or update the row and return it locked for the transaction."""
         cls = type(self)
         upsert = insert(cls).values(
@@ -323,11 +381,21 @@ class PullRequest(Base):
             owner=self.owner,
             repo=self.repo,
             **{column: getattr(self, column) for column in _GITHUB_COLUMNS},
+            author_github_id=self.author_github_id,
+            author_user_id=self.author_user_id,
             resolves_thread=self.resolves_thread,
+            legacy_threads_discovered_at=func.clock_timestamp() if legacy_discovered else None,
+        )
+        discovery_change = (
+            {"legacy_threads_discovered_at": func.clock_timestamp()} if legacy_discovered else {}
         )
         github_changes = (
             {
                 **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
+                "author_github_id": func.coalesce(
+                    upsert.excluded.author_github_id, cls.author_github_id
+                ),
+                "author_user_id": func.coalesce(upsert.excluded.author_user_id, cls.author_user_id),
                 "resolves_thread": or_(cls.resolves_thread, upsert.excluded.resolves_thread),
             }
             if overwrite
@@ -336,7 +404,7 @@ class PullRequest(Base):
         pull_request_id = await session.scalar(
             upsert.on_conflict_do_update(
                 index_elements=[cls.repository_id, cls.number],
-                set_={"updated_at": func.clock_timestamp(), **github_changes},
+                set_={"updated_at": func.clock_timestamp(), **github_changes, **discovery_change},
             ).returning(cls.id)
         )
         row = await session.scalar(
@@ -356,6 +424,7 @@ class PullRequestPayload(BaseModel):
     draft: bool = False
     merged: bool = False
     author: str = Field("", validation_alias=AliasPath("user", "login"))
+    author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
     base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
 
@@ -402,4 +471,5 @@ class PullRequestEvent(BaseModel):
             head_ref=self.pull_request.head_ref,
             base_ref=self.pull_request.base_ref,
             author=self.pull_request.author,
+            author_github_id=self.pull_request.author_id,
         )

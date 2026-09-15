@@ -120,6 +120,7 @@ export interface SessionUser {
   login: string
   email: string | null
   avatar_url: string | null
+  user_id?: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string

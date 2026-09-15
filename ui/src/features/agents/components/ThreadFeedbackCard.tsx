@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ThumbsDown, ThumbsUp } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -44,20 +44,29 @@ export function ThreadFeedbackCard({
   const queryClient = useQueryClient()
   const [showComment, setShowComment] = useState(false)
   const [comment, setComment] = useState("")
+  const [showConfirmation, setShowConfirmation] = useState(false)
   const mutation = useMutation({
     mutationFn: (value: ThreadFeedbackSubmission) =>
       agentsApi.submitThreadFeedback(threadId, value),
     onSuccess: (data, value) => {
       queryClient.setQueryData(["thread-feedback", threadId, login], data)
-      setShowComment(
+      const shouldShowComment =
         "rating" in value &&
-          value.rating === "bad" &&
-          data.status === "completed" &&
-          data.rating === "bad" &&
-          !data.comment
-      )
+        value.rating === "bad" &&
+        data.status === "completed" &&
+        data.rating === "bad" &&
+        !data.comment
+      setShowComment(shouldShowComment)
+      if (!shouldShowComment && data.status === "completed") {
+        setShowConfirmation(true)
+      }
     },
   })
+  useEffect(() => {
+    if (!showConfirmation) return
+    const timeout = window.setTimeout(() => setShowConfirmation(false), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [showConfirmation])
   const query = useQuery({
     queryKey: ["thread-feedback", threadId, login],
     queryFn: () => agentsApi.getThreadFeedback(threadId),
@@ -80,7 +89,11 @@ export function ThreadFeedbackCard({
     return null
   }
 
-  if (feedback.status === "completed" && !showComment) {
+  if (feedback.status === "completed" && !showComment && !showConfirmation) {
+    return null
+  }
+
+  if (showConfirmation) {
     return (
       <div
         role="status"
@@ -173,7 +186,10 @@ export function ThreadFeedbackCard({
             size="sm"
             variant="ghost"
             disabled={mutation.isPending}
-            onClick={() => setShowComment(false)}
+            onClick={() => {
+              setShowComment(false)
+              setShowConfirmation(true)
+            }}
           >
             Skip
           </Button>
