@@ -440,6 +440,33 @@ describe("My PRs", () => {
     expect(api.myPullRequests).toHaveBeenCalledTimes(2)
   })
 
+  it("shows no PRs and offers a repository filter when the search times out", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [],
+      incomplete: true,
+    })
+    vi.mocked(api.repos).mockResolvedValue({
+      installations: [],
+      repositories: [
+        { full_name: "acme/app", private: false },
+        { full_name: "acme/other", private: true },
+      ],
+    })
+    mount()
+    expect(await screen.findByRole("status")).toHaveProperty(
+      "textContent",
+      expect.stringContaining("Filter by repository")
+    )
+    expect(screen.queryByRole("table")).toBeNull()
+    fireEvent.click(screen.getByLabelText("Filter by repository"))
+    expect(
+      (await screen.findAllByRole("menuitemcheckbox")).map(
+        (option) => option.textContent
+      )
+    ).toEqual(["acme/app", "acme/other"])
+  })
+
   it("rediscovers a reopened PR on manual refresh", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,

@@ -453,6 +453,15 @@ async def list_open_pull_requests(
             raise HTTPException(502, "Could not load open PRs from GitHub") from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
             raise HTTPException(502, "Invalid GitHub PR search response")
+        # A timed-out search answers with an arbitrary subset of the matches, so
+        # any list built from it would silently hide most of a user's PRs.
+        if payload.get("incomplete_results") is True:
+            return {
+                "pullRequests": [],
+                "nextPage": None,
+                "incomplete": True,
+                "updatedAt": datetime.now(UTC).isoformat(),
+            }
         semaphore = asyncio.Semaphore(4)
 
         async def load(item: object) -> dict[str, Any] | None:

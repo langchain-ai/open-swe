@@ -143,15 +143,13 @@ async def test_search_failure_is_not_an_empty_success(monkeypatch):
     assert error.value.status_code == 502
 
 
-async def test_search_pages_through_results_and_reports_incomplete(monkeypatch):
+async def test_search_pages_through_results(monkeypatch):
     monkeypatch.setattr(prs, "github_client", client)
-    search = AsyncMock(
-        return_value=response({"items": [], "total_count": 250, "incomplete_results": True})
-    )
+    search = AsyncMock(return_value=response({"items": [], "total_count": 250}))
     monkeypatch.setattr(prs, "github_request", search)
     result = await prs.list_open_pull_requests("octocat", "user-token")
     assert search.await_args.kwargs["params"]["page"] == "1"
-    assert result["nextPage"] == 2 and result["incomplete"] is True
+    assert result["nextPage"] == 2 and result["incomplete"] is False
     result = await prs.list_open_pull_requests("octocat", "user-token", page=3)
     assert search.await_args.kwargs["params"]["page"] == "3"
     assert result["nextPage"] is None
@@ -161,6 +159,33 @@ async def test_search_pages_through_results_and_reports_incomplete(monkeypatch):
     with pytest.raises(HTTPException) as error:
         await prs.list_open_pull_requests("octocat", "user-token", page=11)
     assert error.value.status_code == 422
+
+
+async def test_a_timed_out_search_returns_no_pull_requests(monkeypatch):
+    """GitHub answers a timed-out search with an arbitrary subset of the matches."""
+    monkeypatch.setattr(prs, "github_client", client)
+    monkeypatch.setattr(
+        prs,
+        "github_request",
+        AsyncMock(
+            return_value=response(
+                {
+                    "items": [
+                        {
+                            "number": 1,
+                            "title": "PR 1",
+                            "repository_url": "https://api.github.com/repos/acme/app",
+                        }
+                    ],
+                    "total_count": 86,
+                    "incomplete_results": True,
+                }
+            )
+        ),
+    )
+    result = await prs.list_open_pull_requests("octocat", "user-token", lightweight=True)
+    assert result["pullRequests"] == []
+    assert result["incomplete"] is True and result["nextPage"] is None
 
 
 async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypatch):

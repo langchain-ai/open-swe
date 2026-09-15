@@ -751,11 +751,23 @@ export function MyPullRequests({
     })
   const detailsLoading = detailQueries.some((detail) => detail.isFetching)
   const refreshing = query.isFetching && !query.isFetchingNextPage
+  const incomplete = pages.some((loaded) => loaded.incomplete)
   const reviewRefs = visible.map((pr) => ({ repo: pr.repo, number: pr.number }))
   const reviews = useQuery({
     queryKey: ["my-pr-review-summaries", login, reviewRefs],
     queryFn: () => api.reviewSummaries(reviewRefs),
     enabled: reviewRefs.length > 0,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  })
+  // A timed-out search yields no PRs to name repositories from, and filtering by
+  // repository is the way out of it, so fall back to the installed repositories.
+  const installed = useQuery({
+    queryKey: ["my-pull-requests-repos", login],
+    queryFn: () => api.repos(),
+    enabled: incomplete,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -767,6 +779,7 @@ export function MyPullRequests({
       ...(repos.data?.pages ?? []).flatMap((loaded) =>
         loaded.pullRequests.map((pr) => pr.repo)
       ),
+      ...(installed.data?.repositories ?? []).map((known) => known.full_name),
     ]),
   ].sort()
 
@@ -841,13 +854,17 @@ export function MyPullRequests({
           {query.error.message}
         </p>
       )}
-      {pages.some((loaded) => loaded.incomplete) && (
-        <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
-          GitHub returned incomplete search results. Refresh to try again.
-        </p>
-      )}
       {query.isLoading ? (
         <Skeleton className="h-56 w-full" />
+      ) : incomplete ? (
+        <p
+          role="status"
+          className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-amber-700 dark:text-amber-400"
+        >
+          GitHub&rsquo;s pull request search timed out, and the partial answer
+          it returned would have hidden most of your PRs. Filter by repository
+          to narrow the search, or refresh to try again.
+        </p>
       ) : (
         latest && (
           <>
