@@ -376,13 +376,7 @@ export function SidebarThreadRow({
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
     "text-foreground",
-    isActive
-      ? thread?.adminThread
-        ? "bg-destructive/10"
-        : "bg-accent"
-      : thread?.adminThread
-        ? "bg-destructive/5 group-hover/row:bg-destructive/10"
-        : "group-hover/row:bg-sidebar-row-hover"
+    isActive ? "bg-accent" : "group-hover/row:bg-sidebar-row-hover"
   )
 
   const link =
