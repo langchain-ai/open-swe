@@ -55,6 +55,7 @@ from agent.threads.runs import (
     ThreadRenameBody,
     ThreadResolveBody,
 )
+from agent.threads.state_view import ThreadStateView
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
@@ -394,15 +395,22 @@ async def api_delete_thread(
 @router.get("/threads/{thread_id}/state")
 async def api_get_thread_state(
     thread_id: str,
+    view: ThreadStateView = "full",
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
     timings: dict[str, float] = {}
+    counts: dict[str, int] = {}
     started = perf_counter()
     payload = await get_dashboard_thread_state(
-        thread_id, session["sub"], email=session.get("email"), timings=timings
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+        view=view,
+        timings=timings,
+        counts=counts,
     )
     timings["total"] = (perf_counter() - started) * 1000
-    header = server_timing_header(timings)
+    header = server_timing_header(timings, counts)
     logger.info("thread state timings thread_id=%s %s", thread_id, header)
     return JSONResponse(payload, headers={"Server-Timing": header})
 
