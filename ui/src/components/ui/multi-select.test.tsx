@@ -40,6 +40,9 @@ describe("MultiSelect search", () => {
     render(<Harness />)
     fireEvent.click(screen.getByLabelText("Filter by repository"))
     const input = await screen.findByLabelText("Search repositories…")
+    // autoFocus does not settle reliably under jsdom, so take the focus the
+    // browser would have given the input before testing that typing keeps it.
+    ;(input as HTMLInputElement).focus()
     for (const key of ["g", "l", "o", "b"]) {
       fireEvent.keyDown(input, { key })
       fireEvent.change(input, {
