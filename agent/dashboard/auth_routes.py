@@ -1,7 +1,6 @@
 """Dashboard login, logout, desktop handoff redemption, and the session identity."""
 
 import hmac
-import logging
 from typing import Any
 from urllib.parse import urlencode
 
@@ -40,8 +39,6 @@ from agent.dashboard.profiles import upsert_access_token_from_github_response
 from agent.slack.oauth import slack_base_url, slack_oauth_configured
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_api_base_url
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
 
@@ -145,27 +142,15 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     return response
 
 
-async def _signed_in_user_id(user: GithubUser, email: str | None) -> str | None:
-    """Record the person behind this GitHub account; ``None`` when the write fails.
-
-    A login must survive an unavailable users table, so this never raises.
-    """
-    try:
-        signed_in = await User.sign_in(
-            "github",
-            str(user.id),
-            login=user.login,
-            email=email or "",
-            display_name=user.name or "",
-            avatar_url=user.avatar_url or "",
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Failed to record the signed in user",
-            extra={"github_login": user.login},
-            exc_info=True,
-        )
-        return None
+async def _signed_in_user_id(user: GithubUser, email: str | None) -> str:
+    signed_in = await User.sign_in(
+        "github",
+        str(user.id),
+        login=user.login,
+        email=email or "",
+        display_name=user.name or "",
+        avatar_url=user.avatar_url or "",
+    )
     return str(signed_in.id)
 
 

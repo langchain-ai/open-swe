@@ -193,9 +193,7 @@ async def enforce_github_login_gate(login: str) -> None:
     raise HTTPException(403, "your GitHub account is not authorized")
 
 
-def issue_session(
-    *, login: str, email: str | None, avatar_url: str | None, user_id: str | None = None
-) -> str:
+def issue_session(*, login: str, email: str | None, avatar_url: str | None, user_id: str) -> str:
     now = int(time.time())
     payload = {
         "sub": login,
@@ -336,7 +334,7 @@ def issue_desktop_handoff(
     email: str | None,
     avatar_url: str | None,
     challenge: str,
-    user_id: str | None = None,
+    user_id: str,
 ) -> str:
     """Mint the code the browser hands back after a desktop login."""
     return _mint_handoff(
@@ -349,16 +347,16 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     """Mint the session a desktop handoff code was issued for."""
     payload = _decode_handoff(code=code, verifier=verifier)
     login = payload.get("sub")
-    if not isinstance(login, str) or not login:
+    user_id = payload.get("user_id")
+    if not isinstance(login, str) or not login or not isinstance(user_id, str) or not user_id:
         raise HTTPException(400, "malformed handoff code")
     email = payload.get("email")
     avatar_url = payload.get("avatar_url")
-    user_id = payload.get("user_id")
     return issue_session(
         login=login,
         email=email if isinstance(email, str) else None,
         avatar_url=avatar_url if isinstance(avatar_url, str) else None,
-        user_id=user_id if isinstance(user_id, str) else None,
+        user_id=user_id,
     )
 
 

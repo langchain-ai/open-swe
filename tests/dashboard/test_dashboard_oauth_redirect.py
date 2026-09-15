@@ -14,12 +14,9 @@ from agent.dashboard.oauth import COOKIE_NAME, GithubUser, decode_session, sanit
 from agent.users import User
 
 
-def _stub_sign_in(monkeypatch: pytest.MonkeyPatch, user: User | Exception) -> AsyncMock:
+def _stub_sign_in(monkeypatch: pytest.MonkeyPatch, user: User) -> AsyncMock:
     """Stand in for the users-table write the callback makes."""
-    sign_in = AsyncMock(
-        side_effect=user if isinstance(user, Exception) else None,
-        return_value=None if isinstance(user, Exception) else user,
-    )
+    sign_in = AsyncMock(return_value=user)
     monkeypatch.setattr(auth_routes.User, "sign_in", sign_in)
     return sign_in
 
@@ -268,27 +265,6 @@ def test_auth_callback_session_carries_the_signed_in_user(monkeypatch) -> None:
     assert sign_in.await_args is not None
     assert sign_in.await_args.args == ("github", "42")
     assert sign_in.await_args.kwargs["login"] == "alice"
-
-
-def test_auth_callback_still_signs_in_when_the_users_table_is_unavailable(monkeypatch) -> None:
-    _desktop_login_env(monkeypatch)
-    _stub_sign_in(monkeypatch, RuntimeError("users table unavailable"))
-
-    app = FastAPI()
-    app.include_router(routes.router)
-    with TestClient(app, base_url="https://dashboard.example") as client:
-        login_response = client.get("/dashboard/api/auth/login", follow_redirects=False)
-        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
-        callback_response = client.get(
-            "/dashboard/api/auth/callback",
-            params={"code": "oauth-code", "state": state},
-            follow_redirects=False,
-        )
-
-        assert callback_response.status_code == 302
-        session = decode_session(client.cookies[COOKIE_NAME])
-        assert (session["sub"], session["user_id"]) == ("alice", None)
-        assert client.get("/dashboard/api/me").json()["user_id"] is None
 
 
 def test_desktop_handoff_carries_the_signed_in_user(monkeypatch) -> None:

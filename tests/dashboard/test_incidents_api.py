@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid7
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -26,7 +27,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 def _login(client: TestClient, *, login: str = "sre", email: str = "sre@example.com") -> None:
     client.cookies.set(
         oauth.COOKIE_NAME,
-        oauth.issue_session(login=login, email=email, avatar_url=None),
+        oauth.issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid7())),
     )
 
 

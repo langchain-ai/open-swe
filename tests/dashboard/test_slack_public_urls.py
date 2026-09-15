@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid7
 
 import pytest
 from fastapi import FastAPI
@@ -43,12 +44,16 @@ def test_slack_public_url_applies_to_manifest_and_oauth_without_changing_local_c
     )
     save = AsyncMock()
     monkeypatch.setattr(connect, "upsert_mapping", save)
+    monkeypatch.setattr(connect.User, "get", AsyncMock(return_value=None))
     app = FastAPI()
     app.include_router(routes.router)
     expected_base = (public_url or local_url).rstrip("/")
     expected_callback = f"{expected_base}/dashboard/api/slack/callback"
     with TestClient(app, base_url=local_url) as client:
-        client.cookies.set(COOKIE_NAME, issue_session(login="alice", email=None, avatar_url=None))
+        client.cookies.set(
+            COOKIE_NAME,
+            issue_session(login="alice", email=None, avatar_url=None, user_id=str(uuid7())),
+        )
         settings = client.get("/dashboard/api/me").json()
         assert settings["api_base_url"] == local_url
         assert settings.get("slack_base_url") == expected_base

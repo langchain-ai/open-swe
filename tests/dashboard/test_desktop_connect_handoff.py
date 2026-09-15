@@ -12,6 +12,7 @@ import hashlib
 from typing import Any
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid7
 
 import jwt
 import pytest
@@ -104,7 +105,10 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
     links: list[dict[str, Any]],
 ) -> None:
     with _client() as client:
-        client.cookies.set(COOKIE_NAME, issue_session(login="alice", email=None, avatar_url=None))
+        client.cookies.set(
+            COOKIE_NAME,
+            issue_session(login="alice", email=None, avatar_url=None, user_id=str(uuid7())),
+        )
         handoff = _start_desktop_slack_flow(client)
         assert links == [], "the callback alone must not link an account"
 

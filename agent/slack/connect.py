@@ -161,30 +161,23 @@ async def _link_slack_identity(
 ) -> None:
     """Attach the Slack account to the person the session belongs to.
 
-    Best effort: the Store-backed mapping above is what the rest of the app
-    reads, so a users table hiccup must not fail the connect flow.
+    Sessions minted before the ``user_id`` claim existed fall back to the
+    GitHub login; one without a users row is left unlinked.
     """
     github_login = session["sub"]
-    try:
-        user_id = session_user_id(session)
-        user = (
-            await User.get(user_id)
-            if user_id is not None
-            else await User.for_login("github", github_login)
-        )
-        if user is None:
-            logger.info(
-                "Slack identity not linked — no user for this GitHub login",
-                extra={"github_login": github_login},
-            )
-            return
-        await user.link("slack", slack_user_id, team_id=team_id)
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Failed to link a Slack identity",
+    user_id = session_user_id(session)
+    user = (
+        await User.get(user_id)
+        if user_id is not None
+        else await User.for_login("github", github_login)
+    )
+    if user is None:
+        logger.info(
+            "Slack identity not linked: no user for this GitHub login",
             extra={"github_login": github_login},
-            exc_info=True,
         )
+        return
+    await user.link("slack", slack_user_id, team_id=team_id)
 
 
 @router.post("/slack/desktop/exchange")
