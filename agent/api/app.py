@@ -36,6 +36,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.users import User
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
+    from agent.workspaces.store import import_store_records
 
     pin_single_event_loop()
     validate_github_login_allowlist()
@@ -43,6 +44,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_local_dev_llm_config()
     database.require_configured()
     await database.migrate()
+    try:
+        # Workspaces used to live in the LangGraph Store; this empties it into
+        # the tables and is a no-op once it has.
+        imported = await import_store_records()
+    except Exception:  # noqa: BLE001
+        logger.warning("Importing workspaces from the LangGraph Store failed", exc_info=True)
+    else:
+        logger.info(
+            "Imported workspaces from the LangGraph Store",
+            extra={"imported_workspaces": imported},
+        )
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:

@@ -40,7 +40,7 @@ from collections import defaultdict
 from typing import Any, Literal, TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,7 +49,7 @@ from agent.config import ENV
 from agent.database import postgres
 from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
-from agent.store import now_iso
+from agent.store import delete_value, now_iso, search_all_values
 from agent.utils import ttl_cache
 from agent.workspaces.cache import WORKSPACE_LIST_CACHE_KEY
 from agent.workspaces.rows import (
@@ -1128,6 +1128,51 @@ def _stamp_captured(
 
 
 WORKSPACES = WorkspaceStore()
+
+
+async def import_store_records() -> int:
+    """Copy the workspaces that still live in the LangGraph Store into PostgreSQL.
+
+    Runs once per startup and returns how many records it copied. A slug that
+    already has a row is left alone, and every record it reads is deleted from
+    the Store once it has been dealt with: that makes this idempotent, keeps a
+    legacy namespace from resurrecting a workspace an admin has since deleted,
+    and means a later release can drop this entirely.
+
+    A record the Store cannot be made sense of, or one whose repositories are
+    claimed by another workspace, stays where it is rather than being dropped
+    on the floor.
+    """
+    imported = 0
+    for namespace in (WORKSPACES_NAMESPACE, LEGACY_ENVIRONMENTS_NAMESPACE):
+        for value in await search_all_values(namespace):
+            slug = value.get("slug")
+            if not (isinstance(slug, str) and slug):
+                continue
+            try:
+                record = Workspace.model_validate(value)
+            except ValidationError:
+                logger.warning(
+                    "Skipping an unreadable stored workspace record",
+                    extra={"workspace": slug, "store_namespace": namespace},
+                    exc_info=True,
+                )
+                continue
+            if await WORKSPACES.get(record.slug) is None:
+                try:
+                    await WORKSPACES.put(record.slug, record)
+                except ValueError:
+                    logger.warning(
+                        "Could not import a stored workspace record",
+                        extra={"workspace": record.slug, "store_namespace": namespace},
+                        exc_info=True,
+                    )
+                    continue
+                imported += 1
+            await delete_value(namespace, record.slug)
+    if imported:
+        ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
+    return imported
 
 
 async def load_default_workspace() -> Workspace | None:
