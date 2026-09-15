@@ -54,7 +54,6 @@ import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
-import { cn } from "@/lib/utils"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
 import {
   runTranscriptBuilt,
@@ -295,10 +294,7 @@ export function AgentThreadView({
   return (
     <div className="flex min-w-0 flex-1">
       <div
-        className={cn(
-          "flex min-w-0 flex-1 flex-col",
-          thread.adminThread && "bg-destructive/4"
-        )}
+        className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
