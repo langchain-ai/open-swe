@@ -151,8 +151,37 @@ async def test_username_mention_is_not_marked_untagged() -> None:
     assert await _untagged_flag_for("hey @openswe please fix this", "Ev-name") is False
 
 
-async def test_message_without_a_mention_is_marked_untagged() -> None:
-    assert await _untagged_flag_for("how about now", "Ev-plain") is True
+@pytest.mark.parametrize("channel_type", ["channel", "group", "mpim"])
+async def test_group_reply_without_a_mention_is_ignored(
+    monkeypatch: pytest.MonkeyPatch, channel_type: str
+) -> None:
+    monkeypatch.setattr(
+        slack_service, "slack_user_can_reply_to_ready_plan", AsyncMock(return_value=False)
+    )
+    payload = _message_payload("how about now", "Ev-plain")
+    payload["event"]["channel_type"] = channel_type
+    background_tasks = BackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), background_tasks
+    )
+
+    assert response["status"] == "ignored"
+    assert not background_tasks.tasks
+
+
+async def test_direct_message_without_a_mention_is_accepted() -> None:
+    payload = _message_payload("how about now", "Ev-dm")
+    payload["event"]["channel_type"] = "im"
+    background_tasks = BackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), background_tasks
+    )
+
+    assert response["status"] == "accepted"
+    request = cast(SlackRequest, background_tasks.tasks[0].args[0])
+    assert request.treat_all_messages_as_mentions is True
 
 
 async def test_message_update_queues_only_the_new_text() -> None:
