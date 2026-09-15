@@ -154,7 +154,7 @@ export function useSubmitAgentMessage(threadId: string) {
 
       const message = promptMessage(vars.content, vars.images)
       void stream
-        .submit({ messages: [{ ...message, id }] }, { config })
+        .submit({ messages: [{ ...message, id }] }, { config, multitaskStrategy: "enqueue" })
         .catch(() => {
           updateThread((thread) =>
             setPendingMessage(thread, { ...pendingMessage, status: "failed" })
