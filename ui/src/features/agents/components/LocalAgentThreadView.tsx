@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
+import {
+  ImageSourceProvider,
+  storeImageSrc,
+} from "@/features/agents/lib/imageSource"
+import { createLocalGraphClient } from "@/lib/langgraph-client"
+import type { ImageSourceResolver } from "@/features/agents/lib/imageSource"
 
 import type {
   DesktopLocalPromptInput,
@@ -109,6 +115,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     selection === undefined ? (threadSelection ?? defaultSelection) : selection
   const initialPromptRef = useRef<string | null>(null)
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
+  // Offloaded images live in the local graph's store; there is no dashboard
+  // API on the desktop to stream them from.
+  const resolveLocalImage = useMemo<ImageSourceResolver>(() => {
+    const client = createLocalGraphClient()
+    return (fileId) => storeImageSrc(client, fileId)
+  }, [])
   const streamRef = useRef(stream)
   useEffect(() => {
     streamRef.current = stream
@@ -420,19 +432,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           </div>
         )}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          <Messages
-            contentWidthClass="max-w-3xl"
-            isStreaming={isRunning}
-            isThinking={isRunning}
-            messages={messages}
-            scrollKey={sessionId}
-            onOpenFile={handleOpenFile}
-            queuedMessages={
-              isRunning ? visibleQueuedMessages(queue.queued, messages) : []
-            }
-            streamIsLoading={stream.isLoading}
-            scrollControlRef={scrollControlRef}
-          />
+          <ImageSourceProvider value={resolveLocalImage}>
+            <Messages
+              contentWidthClass="max-w-3xl"
+              isStreaming={isRunning}
+              isThinking={isRunning}
+              messages={messages}
+              scrollKey={sessionId}
+              onOpenFile={handleOpenFile}
+              queuedMessages={
+                isRunning ? visibleQueuedMessages(queue.queued, messages) : []
+              }
+              streamIsLoading={stream.isLoading}
+              scrollControlRef={scrollControlRef}
+            />
+          </ImageSourceProvider>
           <AgentComposerDock>
             {terminalContexts.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">

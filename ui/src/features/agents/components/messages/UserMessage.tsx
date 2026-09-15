@@ -5,11 +5,44 @@ import { useEffect, useRef, useState } from "react"
 import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
-import type { Message } from "@/features/agents/lib/types"
+import { useImageChunkSrc } from "@/features/agents/lib/imageSource"
+import type { ImageChunk, Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
-export function UserMessage({ message }: { message: Message }) {
+function UserImage({
+  image,
+  threadId,
+}: {
+  image: ImageChunk
+  threadId?: string
+}) {
+  const src = useImageChunkSrc(image, threadId)
+  return (
+    <div className="overflow-hidden rounded-lg border border-border/80 bg-background/70">
+      {src ? (
+        <img
+          src={src}
+          alt={image.fileName || "image"}
+          className="block h-auto max-h-[220px] w-full object-cover"
+        />
+      ) : (
+        <div
+          aria-label={image.fileName || "image"}
+          className="h-24 w-full animate-pulse bg-muted"
+        />
+      )}
+    </div>
+  )
+}
+
+export function UserMessage({
+  message,
+  threadId,
+}: {
+  message: Message
+  threadId?: string
+}) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
@@ -90,16 +123,11 @@ export function UserMessage({ message }: { message: Message }) {
             {images.length > 0 && (
               <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                 {images.map((img, i) => (
-                  <div
-                    key={i}
-                    className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                  >
-                    <img
-                      src={`data:${img.mimeType};base64,${img.base64}`}
-                      alt={img.fileName || "image"}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
-                  </div>
+                  <UserImage
+                    key={img.fileId ?? i}
+                    image={img}
+                    threadId={threadId}
+                  />
                 ))}
               </div>
             )}

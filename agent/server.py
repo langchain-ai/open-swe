@@ -121,6 +121,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.image_offload import ImageOffloadMiddleware
 from agent.middleware.model_selection import ModelSelectionState
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
@@ -1414,6 +1415,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 WorkflowPushGuardMiddleware(),
                 refresh_github_proxy_before_model,
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
+                ImageOffloadMiddleware(),
                 TimeoutWrapupMiddleware(),
                 notify_step_limit_reached,
                 record_run_usage,
