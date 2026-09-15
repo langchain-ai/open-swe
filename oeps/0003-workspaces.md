@@ -152,11 +152,37 @@ workspace they belong to.
   connections?
 - Confirm the follow-up scope for public workspaces listed under non-goals.
 
-Repository ownership is resolved: `workspace_repository` keys on `repository.id`, so a workspace
-owns a specific repository row rather than a name. That row is still matched to an inbound webhook
-by `repository.key` (lowercased `owner/name`), so a GitHub rename or transfer does not move
-automatically — the repository row needs updating by hand (or a future reconciliation job) before
-routing follows it. That gap is a remaining follow-up, not something this proposal closes.
+Repository ownership itself is resolved: `workspace_repository` keys on `repository.id`, so a
+workspace owns a specific repository row rather than a name.
+
+## Follow-ups
+
+Known gaps this proposal leaves open, so they survive outside the pull requests that built it.
+
+- **A renamed or transferred repository keeps its old binding.** An inbound webhook is matched to a
+  `repository` row by `repository.key` (lowercased `owner/name`), and nothing updates an existing
+  row's name, so the first event for the new name inserts a second row while the workspace binding
+  stays on the old one. The practical remedy today is to re-save the workspace's repository list
+  with the new name, which rebinds it; under
+  `OPEN_SWE_UNASSIGNED_REPO_WORKSPACE=ignore` the deliveries in between are answered 200 ignored
+  and never retried. A reconciliation job that follows GitHub's `repository.renamed` event would
+  close it.
+- **A corrupt workspace row is skipped rather than repaired.** A record an older release wrote that
+  no longer validates is left out of the listing and reads as missing, logged at error. Nothing
+  reports it to an admin, and there is no way to fix it from the dashboard.
+- **Concurrent edits to one workspace overwrite each other.** `apply_update` reads a record, applies
+  the patch, and writes the whole row back, so the last save wins; two admins editing the same
+  workspace need optimistic concurrency on `updated_at` to notice.
+- **The public-workspace lockdown.** Repository-scoped tokens, a per-workspace MCP allowlist for
+  externally triggered runs, and public-safe prompts and outputs are what a genuinely public
+  workspace needs beyond partitioning. That is the next proposal, and it depends on this one.
+- **The Linear default repository reads the default workspace.** A Linear issue with no repository
+  in it falls back to `default`'s configured repository rather than the resolved workspace's, unlike
+  the Slack path, which scopes a defaulted repository to the workspace that won.
+- **Unfinished dashboard pieces.** `groupSidebarThreadsByWorkspace` has no caller: the sidebar is
+  flat until per-workspace grouping is designed. The review page's guidelines and toggles are
+  per workspace, but the repository list above them is still every installed repository grouped by
+  GitHub owner, which does not say which workspace each one belongs to.
 
 ## Resolution
 
