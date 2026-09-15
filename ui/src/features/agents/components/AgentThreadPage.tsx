@@ -20,11 +20,12 @@ export function AgentThreadPage(props: {
   return (
     <CatchBoundary
       getResetKey={() => props.threadId}
-      errorComponent={({ error }) => (
+      errorComponent={({ error, reset }) => (
         <LoadError
           title="Unable to display thread"
           context={`Thread: ${props.threadId}`}
           error={error}
+          retry={reset}
         />
       )}
     >

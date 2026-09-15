@@ -630,7 +630,7 @@ export function useAgentThread(threadId: string) {
       query.state.data?.status === "running" ? 3000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
-    // would 404 and bounce the route back to /agents.
+    // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
 }

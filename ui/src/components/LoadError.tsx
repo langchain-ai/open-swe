@@ -5,10 +5,14 @@ export function LoadError({
   error,
   title = "Something went wrong",
   context,
+  retry = () => window.location.reload(),
+  back = { label: "Back to threads", href: "agents" },
 }: {
   error: unknown
   title?: string
   context?: string
+  retry?: () => void
+  back?: { label: string; href: string }
 }) {
   const details = [
     context,
@@ -22,7 +26,7 @@ export function LoadError({
   }, [context, error])
 
   return (
-    <main
+    <div
       role="alert"
       className="flex min-w-0 flex-1 items-center justify-center p-6"
     >
@@ -36,18 +40,18 @@ export function LoadError({
           {details}
         </pre>
         <div className="flex gap-2">
-          <Button onClick={() => window.location.reload()}>Try again</Button>
+          <Button onClick={retry}>Try again</Button>
           <Button
             variant="outline"
             onClick={() =>
-              window.location.assign(import.meta.env.BASE_URL + "agents")
+              window.location.assign(import.meta.env.BASE_URL + back.href)
             }
           >
-            Back to threads
+            {back.label}
           </Button>
         </div>
       </div>
-    </main>
+    </div>
   )
 }
 
