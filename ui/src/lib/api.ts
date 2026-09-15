@@ -869,6 +869,8 @@ export const api = {
     }),
   listWorkspaceOptions: () =>
     request<WorkspaceOptionList>("/workspaces/options"),
+  getWorkspace: (slug: string) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`),
   createWorkspace: (body: WorkspaceCreate) =>
     request<WorkspaceRecord>("/workspaces", {
       method: "POST",

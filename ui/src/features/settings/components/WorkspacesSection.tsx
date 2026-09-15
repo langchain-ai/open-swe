@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { SettingsSection } from "@/components/AppShell"
@@ -11,6 +11,7 @@ import {
   api,
   type WorkspaceCreate,
   type WorkspaceOption,
+  type WorkspaceRecord,
   type WorkspaceRefreshStatus,
   type WorkspaceRefreshStep,
   type WorkspaceUpdate,
@@ -113,12 +114,12 @@ interface WorkspaceDraft {
   prompt: string
 }
 
-function draftFromWorkspace(workspace: WorkspaceOption): WorkspaceDraft {
+function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
   return {
     name: workspace.name,
     repos: workspace.repos.join("\n"),
     slackChannelIds: workspace.slack_channel_ids.join("\n"),
-    prompt: "",
+    prompt: workspace.prompt,
   }
 }
 
@@ -187,6 +188,7 @@ function WorkspaceRow({
   isAdmin,
   editing,
   draft,
+  loadError,
   saving,
   saveError,
   onStartEdit,
@@ -199,6 +201,7 @@ function WorkspaceRow({
   isAdmin: boolean
   editing: boolean
   draft: WorkspaceDraft | null
+  loadError: string | null
   saving: boolean
   saveError: string | null
   onStartEdit: () => void
@@ -265,7 +268,7 @@ function WorkspaceRow({
           <WorkspaceEditor
             draft={draft}
             onChange={onDraftChange}
-            promptHint="Leave blank to keep the current instructions"
+            promptHint="Instructions appended to every run in this workspace"
           />
           <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
             {saveError && (
@@ -289,6 +292,17 @@ function WorkspaceRow({
           </div>
         </div>
       )}
+      {editing && !draft && (
+        <div className="-mx-4 border-t border-border px-4 py-3.5 text-xs">
+          {loadError ? (
+            <p role="alert" className="text-destructive">
+              {loadError}
+            </p>
+          ) : (
+            <p className="text-muted-foreground">Loading workspace…</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -305,6 +319,12 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
 
   const [editingSlug, setEditingSlug] = useState<string | null>(null)
   const [draft, setDraft] = useState<WorkspaceDraft | null>(null)
+  const [editLoadError, setEditLoadError] = useState<string | null>(null)
+  // Mirrors `editingSlug` for reads inside async callbacks below: a fetch or
+  // save started for one workspace must not clobber another row's state if
+  // the admin has since switched (or closed) the edit target before it
+  // resolves.
+  const editingSlugRef = useRef<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -314,15 +334,31 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
   const [createError, setCreateError] = useState<string | null>(null)
 
   const startEdit = (workspace: WorkspaceOption) => {
+    editingSlugRef.current = workspace.slug
     setEditingSlug(workspace.slug)
-    setDraft(draftFromWorkspace(workspace))
+    setDraft(null)
     setSaveError(null)
+    setEditLoadError(null)
+    void api.getWorkspace(workspace.slug).then(
+      (record) => {
+        if (editingSlugRef.current !== workspace.slug) return
+        setDraft(draftFromWorkspace(record))
+      },
+      (e) => {
+        if (editingSlugRef.current !== workspace.slug) return
+        setEditLoadError(
+          e instanceof Error ? e.message : "Could not load the workspace"
+        )
+      }
+    )
   }
 
   const cancelEdit = () => {
+    editingSlugRef.current = null
     setEditingSlug(null)
     setDraft(null)
     setSaveError(null)
+    setEditLoadError(null)
   }
 
   const save = async (slug: string) => {
@@ -334,12 +370,15 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
         name: draft.name.trim(),
         repos: parseLines(draft.repos),
         slack_channel_ids: parseLines(draft.slackChannelIds),
+        // The draft is only ever populated from the full record, so a blank
+        // field here is the admin deliberately clearing the instructions.
+        prompt: draft.prompt.trim(),
       }
-      const prompt = draft.prompt.trim()
-      if (prompt) body.prompt = prompt
       await api.updateWorkspace(slug, body)
       await qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
-      cancelEdit()
+      // Only clear the shared edit state if it still belongs to this save —
+      // the admin may have opened a different row while this one was saving.
+      if (editingSlugRef.current === slug) cancelEdit()
     } catch (e) {
       setSaveError(
         e instanceof Error ? e.message : "Could not save the workspace"
@@ -401,6 +440,7 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
             isAdmin={isAdmin}
             editing={editingSlug === workspace.slug}
             draft={editingSlug === workspace.slug ? draft : null}
+            loadError={editingSlug === workspace.slug ? editLoadError : null}
             saving={saving}
             saveError={editingSlug === workspace.slug ? saveError : null}
             onStartEdit={() => startEdit(workspace)}
