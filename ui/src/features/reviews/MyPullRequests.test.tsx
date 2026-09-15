@@ -31,6 +31,9 @@ vi.mock("@/lib/api", () => ({
     openPullRequestThread: vi.fn(),
   },
 }))
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({ data: { login: "octocat" } }),
+}))
 const navigate = vi.hoisted(() => vi.fn())
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigate,
@@ -140,7 +143,21 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.resetAllMocks()
+  // useRepos seeds its query from localStorage, so leftovers would otherwise
+  // supply repository options to the next test.
+  window.localStorage.clear()
 })
+
+const repoOptions = async () => {
+  fireEvent.click(screen.getByLabelText("Filter by repository"))
+  return (await screen.findAllByRole("menuitemcheckbox")).map(
+    (option) => option.textContent
+  )
+}
+const searchRepos = (text: string) =>
+  fireEvent.change(screen.getByLabelText("Search repositories…"), {
+    target: { value: text },
+  })
 
 describe("My PRs", () => {
   it("does not offer a fix while the associated thread is running", async () => {
@@ -459,12 +476,13 @@ describe("My PRs", () => {
       expect.stringContaining("Filter by repository")
     )
     expect(screen.queryByRole("table")).toBeNull()
-    fireEvent.click(screen.getByLabelText("Filter by repository"))
+    expect(await repoOptions()).toEqual(["acme/app", "acme/other"])
+    searchRepos("other")
     expect(
-      (await screen.findAllByRole("menuitemcheckbox")).map(
-        (option) => option.textContent
-      )
-    ).toEqual(["acme/app", "acme/other"])
+      screen
+        .getAllByRole("menuitemcheckbox")
+        .map((option) => option.textContent)
+    ).toEqual(["acme/other"])
   })
 
   it("rediscovers a reopened PR on manual refresh", async () => {
@@ -492,6 +510,14 @@ describe("My PRs", () => {
         (pr) => !repo || repo.split(",").includes(pr.repo)
       ),
     }))
+    vi.mocked(api.repos).mockResolvedValue({
+      installations: [],
+      repositories: [
+        { full_name: "globex/quiet", private: false },
+        { full_name: "acme/other", private: true },
+        { full_name: "acme/app", private: false },
+      ],
+    })
     mount()
     await screen.findByText("Change 1")
     fireEvent.click(screen.getByLabelText("Filter by status"))
@@ -504,9 +530,19 @@ describe("My PRs", () => {
     )
     expect(titles()).toEqual(["Change 2", "Change 1"])
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
-    fireEvent.click(screen.getByLabelText("Filter by repository"))
-    expect(api.repos).not.toHaveBeenCalled()
-    expect(await screen.findAllByRole("menuitemcheckbox")).toHaveLength(2)
+    // Options come from the accessible repository list, so globex/quiet is
+    // offered even though no PR names it.
+    expect(await repoOptions()).toEqual([
+      "acme/app",
+      "acme/other",
+      "globex/quiet",
+    ])
+    searchRepos("ACME/OT")
+    expect(
+      screen
+        .getAllByRole("menuitemcheckbox")
+        .map((option) => option.textContent)
+    ).toEqual(["acme/other"])
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: "acme/other" })
     )
@@ -518,6 +554,7 @@ describe("My PRs", () => {
         1
       )
     )
+    searchRepos("app")
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: "acme/app" })
     )

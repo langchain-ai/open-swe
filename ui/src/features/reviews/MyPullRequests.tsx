@@ -39,6 +39,7 @@ import {
   type OpenPullRequestsPayload,
   type ReviewSummary,
 } from "@/lib/api"
+import { useRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
 import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
 import { PullRequestLinks } from "./PullRequestLinks"
@@ -665,7 +666,7 @@ export function MyPullRequests({
   const queryClient = useQueryClient()
   const [selection, setSelection] = useState<Set<string>>(new Set())
   const query = useOpenPullRequests(login, repo, sort, direction)
-  const repos = useOpenPullRequests(login, [], "updatedAt", "desc")
+  const knownRepos = useRepos()
   const pages = query.data?.pages ?? []
   const latest = pages.at(-1)
   const rows = pages.flatMap((loaded) => loaded.pullRequests)
@@ -762,24 +763,15 @@ export function MyPullRequests({
     refetchOnReconnect: false,
     retry: false,
   })
-  // A timed-out search yields no PRs to name repositories from, and filtering by
-  // repository is the way out of it, so fall back to the installed repositories.
-  const installed = useQuery({
-    queryKey: ["my-pull-requests-repos", login],
-    queryFn: () => api.repos(),
-    enabled: incomplete,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
-  })
+  const accessibleRepos = (knownRepos.data?.repositories ?? []).map(
+    (known) => known.full_name
+  )
+  // A timed-out search returns no PRs, and filtering by repository is the way
+  // out of it, so the options cannot be derived from the PRs themselves.
   const repoNames = [
     ...new Set([
-      ...all.map((pr) => pr.repo),
-      ...(repos.data?.pages ?? []).flatMap((loaded) =>
-        loaded.pullRequests.map((pr) => pr.repo)
-      ),
-      ...(installed.data?.repositories ?? []).map((known) => known.full_name),
+      ...(accessibleRepos.length ? accessibleRepos : all.map((pr) => pr.repo)),
+      ...repo,
     ]),
   ].sort()
 
@@ -803,7 +795,6 @@ export function MyPullRequests({
               predicate: (cached) => cached.state.data === null,
             })
             void query.refetch()
-            if (repo.length) void repos.refetch()
             void queryClient.invalidateQueries({
               queryKey: ["my-pr-details", login],
             })
@@ -820,6 +811,14 @@ export function MyPullRequests({
         <MultiSelect
           label="Filter by repository"
           placeholder="All repositories"
+          searchPlaceholder="Search repositories…"
+          emptyMessage={
+            knownRepos.isPending
+              ? "Loading repositories…"
+              : knownRepos.isError
+                ? "Could not load repositories"
+                : "No matches"
+          }
           options={repoNames}
           value={repo}
           onValueChange={(chosen) =>
