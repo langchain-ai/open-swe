@@ -22,7 +22,21 @@ logger = logging.getLogger(__name__)
 # key or another endpoint (a different workspace) starts over instead of
 # building links with the previous workspace's tenant and project ids.
 _PROJECT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
+_PROJECT_START_CACHE: dict[tuple[tuple[str, str], str], datetime] = {}
 _TENANT_ID_CACHE: dict[tuple[str, str], str] = {}
+
+
+def _project_cache_key(project_id: str) -> tuple[tuple[str, str], str]:
+    return (_workspace_key(), project_id)
+
+
+def _remember_project_start(project_id: str, value: Any) -> datetime | None:
+    start = _parse_langsmith_time(value)
+    if start is not None:
+        _PROJECT_START_CACHE[_project_cache_key(project_id)] = start
+    return start
+
+
 _ASYNC_CLIENTS: dict[tuple[str, str], AsyncLangSmithClient] = {}
 _SYNC_CLIENTS: dict[tuple[str, str], LangSmithClient] = {}
 
@@ -140,7 +154,23 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
     resolved = str(project_id) if project_id else ""
     _PROJECT_ID_CACHE[cache_key] = resolved
     _remember_tenant_id(getattr(project, "tenant_id", None))
+    if resolved:
+        _remember_project_start(resolved, getattr(project, "start_time", None))
     return resolved or None
+
+
+async def _project_lookup_start(project_id: str) -> datetime:
+    cached = _PROJECT_START_CACHE.get(_project_cache_key(project_id))
+    if cached is not None:
+        return cached
+    client = _build_langsmith_client()
+    if client is None:
+        raise LangSmithCostUnavailable("LangSmith credentials are not configured")
+    project = await client.read_project(project_id=project_id)
+    start = _remember_project_start(project_id, getattr(project, "start_time", None))
+    if start is None:
+        raise LangSmithCostUnavailable("LangSmith tracing project start is unavailable")
+    return start
 
 
 async def _compose_langsmith_project_url(project_name: str | None = None) -> str | None:
@@ -278,6 +308,7 @@ async def get_langsmith_thread_cost(
     invocation_id: str,
     *,
     run_only: bool = False,
+    lookup_start: datetime | str | None = None,
 ) -> LangSmithThreadCost | None:
     """Return fresh trace cost correlated to one completed invocation."""
     client = _build_langsmith_client()
@@ -287,13 +318,15 @@ async def get_langsmith_thread_cost(
     if not project_id:
         raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
     try:
+        lookup_start = lookup_start or await _project_lookup_start(project_id)
         matched_roots: dict[str, datetime] = {}
         for field in ("invocation_id", "prepare_run_id"):
-            roots = client.list_runs(
-                project_id=project_id,
+            roots = client.runs.query(
+                project_ids=[project_id],
                 is_root=True,
                 filter=_langsmith_metadata_filter(field, invocation_id),
-                select=["id", "end_time"],
+                selects=["ID", "END_TIME"],
+                min_start_time=lookup_start,
             )
             async for run in roots:
                 root_id = _langsmith_value(run, "id")

@@ -1,10 +1,15 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { Navigate } from "@tanstack/react-router"
 
 import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { useAgentThread } from "@/features/agents/lib/queries"
+import {
+  ensureThreadLoad,
+  threadDetailFailed,
+  threadDetailResolved,
+} from "@/lib/perf/threadLoad"
 
 export function AgentThreadPage({
   threadId,
@@ -17,6 +22,20 @@ export function AgentThreadPage({
 }) {
   const threadQuery = useAgentThread(threadId)
   const title = threadQuery.data?.title
+  const hasDetail = threadQuery.data !== undefined
+  // A detail seeded from the sidebar list is on hand before the fetch returns.
+  const detailCachedOnMount = useRef(hasDetail)
+
+  useEffect(() => {
+    if (active) ensureThreadLoad(threadId)
+  }, [active, threadId])
+
+  useEffect(() => {
+    if (!active) return
+    if (hasDetail)
+      threadDetailResolved(threadId, { cached: detailCachedOnMount.current })
+    else if (threadQuery.isError) threadDetailFailed(threadId)
+  }, [active, hasDetail, threadId, threadQuery.isError])
 
   useEffect(() => {
     if (!active || !title) return

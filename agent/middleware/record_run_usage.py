@@ -51,6 +51,7 @@ class RecordRunUsageMiddleware(OpenSWEMiddleware):
                 await finalize_agent_invocation_usage(
                     invocation_id=cfg.invocation_id,
                     thread_id=cfg.thread_id,
+                    invocation_started_at=cfg.invocation_started_at,
                     state=dict(request.state),
                     status="error",
                     failure_code=(
@@ -83,6 +84,7 @@ class RecordRunUsageMiddleware(OpenSWEMiddleware):
         await finalize_agent_invocation_usage(
             invocation_id=cfg.invocation_id,
             thread_id=cfg.thread_id,
+            invocation_started_at=cfg.invocation_started_at,
             state=dict(state),
         )
         return None

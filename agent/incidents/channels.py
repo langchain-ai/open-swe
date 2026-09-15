@@ -232,6 +232,8 @@ async def apply_control(
         await turns.cancel_active_runs(record.thread_id, keep_run_id=keep_run_id)
         record.status = "completed" if action == "complete" else "paused"
         record.reason = str(actor.get("reason") or f"responder_{action}")
+        # Remember which run closed this, so that same run cannot reopen it moments later.
+        record.completed_run_id = keep_run_id if action == "complete" else ""
         text = (
             "Incident complete."
             if action == "complete"
@@ -247,7 +249,7 @@ async def apply_control(
                     reason="completion",
                 )
     elif action in {"resume", "reopen"}:
-        record.status, record.reason = "watching", ""
+        record.status, record.reason, record.completed_run_id = "watching", "", ""
         text = "Incident watching resumed."
     else:
         raise ValueError(f"unknown incident control {action!r}")
