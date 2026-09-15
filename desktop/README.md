@@ -109,19 +109,15 @@ to `desktop/dist/`.
 
 ## macOS releases
 
-`desktop/package.json` is the latest stable version. Every **Promote main to prod** run publishes a
-prerelease nightly from the promoted commit with a UTC timestamp, such as
-`desktop-v0.2.3-nightly.20260902080000`. Nightly releases never publish the stable version.
+Desktop releases are driven by immutable tags named `desktop-vMAJOR.MINOR.PATCH`, such as
+`desktop-v0.2.10`. Push a tag to build and publish that exact version, or run **Release Desktop**
+manually with the tag to retry a partial release. The workflow derives the app version from the tag,
+so no package-version commit is required.
 
-Stable releases use a deliberate bump, test, release process: bump `desktop/package.json` in a normal
-pull request, merge it to `main`, test the resulting code as needed, then run **Release Desktop**
-manually. The workflow publishes the exact package version and fails if that stable release is
-already complete. A partial stable release remains manually retryable.
-
-Both paths compile the current `ui/` bundle, sign and notarize the Electron app, verify the resulting
-app and DMG, create the tag, and publish the DMG, macOS zip, and app zip. Desktop-prefixed tags keep
-this release stream separate from web and backend releases; the workflow packages the web UI but
-does not deploy or otherwise change the hosted web app.
+The release compiles the current `ui/` bundle, signs and notarizes the Electron app, verifies the
+resulting app and DMG, and publishes the DMG, macOS zip, app zip, update metadata, and blockmap.
+Desktop-prefixed tags keep this release stream separate from web and backend releases; the workflow
+packages the web UI but does not deploy or otherwise change the hosted web app.
 
 The workflow requires these GitHub Actions secrets:
 

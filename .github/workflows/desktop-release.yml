@@ -1,15 +1,15 @@
 name: Release Desktop
 
 on:
-  workflow_call:
-    inputs:
-      release_ref:
-        type: string
-        default: main
-      nightly:
-        type: boolean
-        default: false
+  push:
+    tags:
+      - "desktop-v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Desktop release tag to build
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -20,53 +20,45 @@ concurrency:
 
 jobs:
   release-desktop:
-    if: github.ref == 'refs/heads/main'
     runs-on: macos-latest
 
     steps:
-      - name: Checkout release commit
+      - name: Checkout workflow ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.release_ref || 'main' }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Resolve desktop release
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          NIGHTLY: ${{ inputs.nightly }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          stable_version=$(node -p "require('./desktop/package.json').version")
-          [[ "$stable_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
-          if [ "$NIGHTLY" = "true" ]; then
-            timestamp=$(date -u +%Y%m%d%H%M%S)
-            version="${stable_version}-nightly.${timestamp}"
-            tag="desktop-v${version}"
-            prerelease=true
-            label="Open SWE Desktop Nightly ${timestamp}"
-          else
-            tag="desktop-v${stable_version}"
-            version="$stable_version"
-            prerelease=false
-            label="Open SWE Desktop v${version}"
-            if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
-              if gh release view "$tag" --json assets | jq -e --arg v "$version" '
-                [.assets[].name] as $names |
-                ($names | index("Open-SWE-\($v).app.zip")) != null and
-                ($names | index("latest-mac.yml")) != null and
-                any($names[]; test("^Open-SWE-\($v)-.*-mac\\.zip$")) and
-                any($names[]; test("^Open-SWE-\($v)-.*\\.dmg$")) and
-                any($names[]; test("^Open-SWE-\($v)-.*-mac\\.zip\\.blockmap$"))
-              ' >/dev/null; then
-                echo "$tag already has a complete release"
-                exit 1
-              fi
-              git checkout --detach "$tag"
+          [[ "$RELEASE_TAG" =~ ^desktop-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          release_sha=$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")
+          git fetch --force origin refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$release_sha" refs/remotes/origin/main || exit 1
+          git checkout --detach "$release_sha"
+          version="${RELEASE_TAG#desktop-v}"
+          label="Open SWE Desktop v${version}"
+          if gh release view "$RELEASE_TAG" --json assets >/tmp/release-assets.json 2>/dev/null; then
+            if jq -e --arg v "$version" '
+              [.assets[].name] as $names |
+              ($names | index("Open-SWE-\($v).app.zip")) != null and
+              ($names | index("latest-mac.yml")) != null and
+              any($names[]; test("^Open-SWE-\($v)-.*-mac\\.zip$")) and
+              any($names[]; test("^Open-SWE-\($v)-.*\\.dmg$")) and
+              any($names[]; test("^Open-SWE-\($v)-.*-mac\\.zip\\.blockmap$"))
+            ' /tmp/release-assets.json >/dev/null; then
+              echo "$RELEASE_TAG already has a complete release"
+              exit 1
             fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "prerelease=false" >> "$GITHUB_OUTPUT"
           echo "label=$label" >> "$GITHUB_OUTPUT"
 
       - name: Set build version
@@ -172,33 +164,22 @@ jobs:
           echo "mac_zip=${mac_zips[0]}" >> "$GITHUB_OUTPUT"
           echo "mac_dmg=${mac_dmgs[0]}" >> "$GITHUB_OUTPUT"
           echo "app_zip=$app_zip" >> "$GITHUB_OUTPUT"
-          if [ "${{ steps.release.outputs.prerelease }}" = "false" ]; then
-            test -f desktop/dist/latest-mac.yml
-            test -f "${mac_zips[0]}.blockmap"
-            zip_name=$(basename "${mac_zips[0]}")
-            dmg_name=$(basename "${mac_dmgs[0]}")
-            grep -Fqx "path: ${zip_name}" desktop/dist/latest-mac.yml
-            grep -Fq "url: ${zip_name}" desktop/dist/latest-mac.yml
-            grep -Fq "url: ${dmg_name}" desktop/dist/latest-mac.yml
-            echo "update_metadata=desktop/dist/latest-mac.yml" >> "$GITHUB_OUTPUT"
-            echo "update_blockmap=${mac_zips[0]}.blockmap" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Tag desktop version
-        env:
-          TAG: ${{ steps.release.outputs.tag }}
-        run: |
-          if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
-            git tag "$TAG"
-            git push origin "$TAG"
-          fi
+          test -f desktop/dist/latest-mac.yml
+          test -f "${mac_zips[0]}.blockmap"
+          zip_name=$(basename "${mac_zips[0]}")
+          dmg_name=$(basename "${mac_dmgs[0]}")
+          grep -Fqx "path: ${zip_name}" desktop/dist/latest-mac.yml
+          grep -Fq "url: ${zip_name}" desktop/dist/latest-mac.yml
+          grep -Fq "url: ${dmg_name}" desktop/dist/latest-mac.yml
+          echo "update_metadata=desktop/dist/latest-mac.yml" >> "$GITHUB_OUTPUT"
+          echo "update_blockmap=${mac_zips[0]}.blockmap" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.release.outputs.tag }}
           name: ${{ steps.release.outputs.label }}
-          prerelease: ${{ steps.release.outputs.prerelease }}
+          prerelease: false
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
@@ -209,7 +190,6 @@ jobs:
             ${{ steps.assets.outputs.update_blockmap }}
 
       - name: Generate tap token
-        if: steps.release.outputs.prerelease == 'false'
         id: tap-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -219,7 +199,6 @@ jobs:
           repositories: homebrew-tap
 
       - name: Update Homebrew cask
-        if: steps.release.outputs.prerelease == 'false'
         env:
           GH_TOKEN: ${{ steps.tap-token.outputs.token }}
           TAG: ${{ steps.release.outputs.tag }}
