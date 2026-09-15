@@ -23,9 +23,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
   })
   const html = query.data?.html.trim() ?? ""
   const markdown = query.data?.markdown.trim() ?? ""
-  const planVersion = html || markdown
-
-  if (!planVersion || query.data?.dismissed) return null
+  if ((!html && !markdown) || query.data?.dismissed) return null
 
   return (
     <div className="group relative mt-4">

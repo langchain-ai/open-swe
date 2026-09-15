@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -734,25 +735,22 @@ async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyP
 async def test_dismiss_plan_updates_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent.dashboard import plan_api
 
-    updates: list[dict[str, Any]] = []
+    update = AsyncMock()
+    monkeypatch.setattr(
+        plan_api,
+        "fetch_thread_metadata",
+        AsyncMock(return_value={"source": "dashboard", "github_login": "owner"}),
+    )
+    monkeypatch.setattr(
+        plan_api,
+        "get_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(update=update)),
+    )
 
-    class _Threads:
-        async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-            updates.append({"thread_id": thread_id, "metadata": metadata})
-
-    class _Client:
-        threads = _Threads()
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"source": "dashboard", "github_login": "owner"}
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_client", lambda: _Client())
-
-    result = await plan_api.dismiss_plan("t1", session={"sub": "owner", "email": None})
-
-    assert result == {"dismissed": True}
-    assert updates == [{"thread_id": "t1", "metadata": {"plan_dismissed": True}}]
+    assert await plan_api.dismiss_plan("t1", session={"sub": "owner", "email": None}) == {
+        "dismissed": True
+    }
+    update.assert_awaited_once_with(thread_id="t1", metadata={"plan_dismissed": True})
 
 
 def _patch_update_plan_deps(
