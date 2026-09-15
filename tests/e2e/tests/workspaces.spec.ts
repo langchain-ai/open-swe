@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Environments end-to-end: dashboard management, the admin gate, and an admin
+// Workspaces end-to-end: dashboard management, the admin gate, and an admin
 // thread that creates, provisions, and captures its own sandbox. The agent, the
 // tools, store writes, and prompt injection are real; only the LLM and snapshot
 // service are faked (see patches.py).
@@ -47,18 +47,18 @@ async function loginAs(page: Page, user: { login: string; email: string }) {
   expect(res.ok()).toBeTruthy();
 }
 
-async function listEnvironments(page: Page): Promise<Array<Environment>> {
-  const res = await page.request.get("/dashboard/api/environments");
+async function listWorkspaces(page: Page): Promise<Array<Environment>> {
+  const res = await page.request.get("/dashboard/api/workspaces");
   expect(res.ok()).toBeTruthy();
-  return ((await res.json()) as { environments: Array<Environment> })
-    .environments;
+  return ((await res.json()) as { workspaces: Array<Environment> })
+    .workspaces;
 }
 
-async function findEnvironment(
+async function findWorkspace(
   page: Page,
   slug: string,
 ): Promise<Environment | undefined> {
-  return (await listEnvironments(page)).find((env) => env.slug === slug);
+  return (await listWorkspaces(page)).find((env) => env.slug === slug);
 }
 
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
@@ -67,8 +67,8 @@ const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 // itself but APIRequestContext does not.
 const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
 
-async function deleteEnvironment(page: Page, slug: string) {
-  await page.request.delete(`/dashboard/api/environments/${slug}`, {
+async function deleteWorkspace(page: Page, slug: string) {
+  await page.request.delete(`/dashboard/api/workspaces/${slug}`, {
     headers: SAME_ORIGIN_HEADERS,
   });
 }
@@ -127,12 +127,12 @@ async function openNewAgentHome(page: Page) {
   await expect(page.getByRole("dialog")).toHaveCount(0);
 }
 
-async function createEnvironment(
+async function createWorkspace(
   page: Page,
   name: string,
   prompt: string,
 ): Promise<string> {
-  const created = await page.request.post("/dashboard/api/environments", {
+  const created = await page.request.post("/dashboard/api/workspaces", {
     headers: SAME_ORIGIN_HEADERS,
     data: { name, prompt },
   });
@@ -149,13 +149,13 @@ async function typeIntoComposer(page: Page, text: string) {
   await editor.press("Enter");
 }
 
-test.describe("Environments", () => {
-  test("an admin views environments and editing instructions in Settings", async ({
+test.describe("Workspaces", () => {
+  test("an admin views workspaces and editing instructions in Settings", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
-    await deleteEnvironment(page, DRAFT_SLUG);
-    await createEnvironment(page, DRAFT_NAME, "");
+    await deleteWorkspace(page, DRAFT_SLUG);
+    await createWorkspace(page, DRAFT_NAME, "");
 
     await page.goto("/environments");
     const section = page
@@ -170,15 +170,15 @@ test.describe("Environments", () => {
       0,
     );
 
-    await deleteEnvironment(page, DRAFT_SLUG);
+    await deleteWorkspace(page, DRAFT_SLUG);
   });
 
-  test("a non-admin cannot reach the environments page or API", async ({
+  test("a non-admin cannot reach the workspaces page or API", async ({
     page,
   }) => {
     await loginAs(page, MEMBER);
 
-    const res = await page.request.get("/dashboard/api/environments");
+    const res = await page.request.get("/dashboard/api/workspaces");
     expect(res.status()).toBe(403);
 
     await page.goto("/agents/environments");
@@ -196,37 +196,37 @@ test.describe("Environments", () => {
     ).toHaveCount(0);
   });
 
-  test("the composer picker appears only with several environments, and the pick reaches the run", async ({
+  test("the composer picker appears only with several workspaces, and the pick reaches the run", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
-    await deleteEnvironment(page, DEFAULT_SLUG);
-    await deleteEnvironment(page, ALT_SLUG);
-    await createEnvironment(page, "default", DEFAULT_ENV_PROMPT);
+    await deleteWorkspace(page, DEFAULT_SLUG);
+    await deleteWorkspace(page, ALT_SLUG);
+    await createWorkspace(page, "default", DEFAULT_ENV_PROMPT);
 
-    // One environment: the choice is already made, so no control is rendered.
+    // One workspace: the choice is already made, so no control is rendered.
     await openNewAgentHome(page);
     await expect(page.getByRole("button", { name: "Environment" })).toHaveCount(
       0,
     );
 
-    await createEnvironment(page, ALT_NAME, ALT_ENV_PROMPT);
+    await createWorkspace(page, ALT_NAME, ALT_ENV_PROMPT);
     await page.reload();
     const picker = page.getByRole("button", { name: "Environment" });
     await expect(picker).toBeVisible();
-    // Defaults to the environment named `default`.
+    // Defaults to the workspace named `default`.
     await expect(picker).toContainText("default");
 
     await picker.click();
     await page.getByRole("button", { name: new RegExp(ALT_NAME) }).click();
     await expect(picker).toContainText(ALT_NAME);
 
-    await typeIntoComposer(page, "Which environment am I in?");
+    await typeIntoComposer(page, "Which workspace am I in?");
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
 
     // The thread records the pick, and the run's prompt carries that
-    // environment's instructions — not the default's.
+    // workspace's instructions — not the default's.
     await expect
       .poll(async () => {
         const res = await page.request.get(
@@ -242,16 +242,16 @@ test.describe("Environments", () => {
       .toContain(ALT_ENV_PROMPT);
     expect(await lastSystemPrompt(page)).not.toContain(DEFAULT_ENV_PROMPT);
 
-    await deleteEnvironment(page, ALT_SLUG);
-    await deleteEnvironment(page, DEFAULT_SLUG);
+    await deleteWorkspace(page, ALT_SLUG);
+    await deleteWorkspace(page, DEFAULT_SLUG);
   });
 
-  test("an env: tag on the opening Slack message selects the environment", async ({
+  test("an env: tag on the opening Slack message selects the workspace", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
-    await deleteEnvironment(page, ALT_SLUG);
-    await createEnvironment(page, ALT_NAME, ALT_ENV_PROMPT);
+    await deleteWorkspace(page, ALT_SLUG);
+    await createWorkspace(page, ALT_NAME, ALT_ENV_PROMPT);
 
     await page.goto("/mock/slack");
     await page.locator("#reset").click();
@@ -272,14 +272,14 @@ test.describe("Environments", () => {
     // The tag itself is consumed, so the agent never sees it in the request.
     expect(systemPrompt).not.toContain(`env:${ALT_SLUG}`);
 
-    await deleteEnvironment(page, ALT_SLUG);
+    await deleteWorkspace(page, ALT_SLUG);
   });
 
-  test("an admin thread provisions its sandbox, captures it, and later runs boot with the environment prompt", async ({
+  test("an admin thread provisions its sandbox, captures it, and later runs boot with the workspace prompt", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
-    await deleteEnvironment(page, DEFAULT_SLUG);
+    await deleteWorkspace(page, DEFAULT_SLUG);
     await page.request.post("/control/reset");
 
     await openNewAgentHome(page);
@@ -289,7 +289,7 @@ test.describe("Environments", () => {
 
     await typeIntoComposer(
       page,
-      "Please set up the default environment for this repo and capture it.",
+      "Please set up the default workspace for this repo and capture it.",
     );
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
@@ -313,24 +313,24 @@ test.describe("Environments", () => {
 
     // The agent's own summary, after the real save + capture tools ran.
     await expect(
-      page.getByText(/environment is captured and live/),
+      page.getByText(/workspace is captured and live/),
     ).toBeVisible();
 
     // Publishing captured this thread's sandbox synchronously, so the image is
     // ready as soon as the tool returned. The reproducibility rebuild it then
     // kicked off is a background job; wait for that on the record.
-    expect((await findEnvironment(page, DEFAULT_SLUG))?.snapshot_status).toBe(
+    expect((await findWorkspace(page, DEFAULT_SLUG))?.snapshot_status).toBe(
       "ready",
     );
     await expect
       .poll(
-        async () => (await findEnvironment(page, DEFAULT_SLUG))?.refresh_status,
+        async () => (await findWorkspace(page, DEFAULT_SLUG))?.refresh_status,
         { timeout: 60_000 },
       )
       .toBe("success");
 
     // The record the real tools wrote: prompt, repos, and a ready snapshot.
-    const record = await findEnvironment(page, DEFAULT_SLUG);
+    const record = await findWorkspace(page, DEFAULT_SLUG);
     expect(record).toBeDefined();
     expect(record?.prompt).toBe(ENVIRONMENT_PROMPT);
     expect(record?.repos).toEqual(["fakeorg/demo"]);
@@ -383,15 +383,15 @@ test.describe("Environments", () => {
     expect(captures[1]?.sandbox_id).not.toBe(thread.sandboxId);
     expect(record?.snapshot_id).toBe(captures[1]?.snapshot_id);
 
-    // A later run is told about the environment: the prompt is appended verbatim.
+    // A later run is told about the workspace: the prompt is appended verbatim.
     await typeIntoComposer(page, "Thanks — anything else needed?");
     await expect(
       page.getByText(/anything else you'd like changed/),
     ).toBeVisible();
     const systemPrompt = await lastSystemPrompt(page);
-    expect(systemPrompt).toContain("### Environment Instructions (default)");
+    expect(systemPrompt).toContain("### Workspace Instructions (default)");
     expect(systemPrompt).toContain(ENVIRONMENT_PROMPT);
-    // Admin threads also carry the environment-management instructions.
+    // Admin threads also carry the workspace-management instructions.
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
     await page.goto("/environments");
@@ -409,9 +409,9 @@ test.describe("Environments", () => {
     await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
     // Leave no default behind: later specs' runs would boot from it.
-    await deleteEnvironment(page, DEFAULT_SLUG);
+    await deleteWorkspace(page, DEFAULT_SLUG);
     await expect
-      .poll(() => findEnvironment(page, DEFAULT_SLUG))
+      .poll(() => findWorkspace(page, DEFAULT_SLUG))
       .toBeUndefined();
   });
 });
