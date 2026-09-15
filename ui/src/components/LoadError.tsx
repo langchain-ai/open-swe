@@ -5,12 +5,10 @@ export function LoadError({
   error,
   title = "Something went wrong",
   context,
-  retry = () => window.location.reload(),
 }: {
   error: unknown
   title?: string
   context?: string
-  retry?: () => void
 }) {
   const details = [
     context,
@@ -38,7 +36,7 @@ export function LoadError({
           {details}
         </pre>
         <div className="flex gap-2">
-          <Button onClick={retry}>Try again</Button>
+          <Button onClick={() => window.location.reload()}>Try again</Button>
           <Button
             variant="outline"
             onClick={() =>

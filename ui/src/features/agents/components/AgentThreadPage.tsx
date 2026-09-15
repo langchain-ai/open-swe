@@ -69,20 +69,7 @@ function AgentThreadContent({
     }
   }, [active, title])
 
-  if (!threadQuery.data && (threadQuery.isError || timedOut)) {
-    return (
-      <LoadError
-        title="Unable to load thread"
-        context={`Thread: ${threadId}`}
-        error={
-          threadQuery.error ??
-          "Loading took longer than 30 seconds. Check your connection and try again."
-        }
-      />
-    )
-  }
-
-  if (threadQuery.isPending) {
+  if (threadQuery.isPending && !timedOut) {
     return (
       <main className="flex min-w-0 flex-1 items-center justify-center p-6">
         <Skeleton className="h-40 w-full max-w-md" />
@@ -95,7 +82,12 @@ function AgentThreadContent({
       <LoadError
         title="Unable to load thread"
         context={`Thread: ${threadId}`}
-        error="No thread data was returned."
+        error={
+          threadQuery.error ??
+          (timedOut
+            ? "Loading took longer than 30 seconds. Check your connection and try again."
+            : "No thread data was returned.")
+        }
       />
     )
   }
