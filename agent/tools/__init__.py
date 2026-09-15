@@ -31,6 +31,7 @@ _TOOL_MODULES = {
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
+    "read_only_sql": ".read_only_sql",
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
@@ -91,6 +92,7 @@ __all__ = [
     "open_pull_request",
     "output_iframe",
     "publish_review",
+    "read_only_sql",
     "read_repo_file",
     "read_user_settings",
     "recreate_sandbox",
@@ -166,6 +168,7 @@ if TYPE_CHECKING:
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
     from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
+    from agent.tools.read_only_sql import read_only_sql
     from agent.tools.read_user_settings import read_user_settings
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
