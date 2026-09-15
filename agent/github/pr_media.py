@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 import httpx2
-from sqlalchemy import text
+from sqlalchemy import RowMapping, text
 
 from agent.database import postgres
 from agent.github.http import DEFAULT_TIMEOUT, github_headers
@@ -125,8 +125,8 @@ def now_epoch() -> int:
     return int(datetime.now(UTC).timestamp())
 
 
-def _row_to_record(row: Any) -> dict[str, Any]:
-    return {str(key): value for key, value in dict(row).items()}
+def _row_to_record(row: RowMapping) -> dict[str, Any]:
+    return {str(key): value for key, value in row.items()}
 
 
 async def create_media_request(
