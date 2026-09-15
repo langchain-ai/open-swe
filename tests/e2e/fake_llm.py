@@ -165,7 +165,7 @@ curl --fail --silent --show-error \
 """.strip()
 
 # The system prompt of the most recent model call, so specs can assert what the
-# agent was actually told (e.g. the environment section) rather than infer it.
+# agent was actually told (e.g. the workspace section) rather than infer it.
 LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
@@ -528,14 +528,14 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-ENVIRONMENT_NAME = "default"
-ENVIRONMENT_PROMPT = (
+WORKSPACE_NAME = "default"
+WORKSPACE_PROMPT = (
     "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
 )
-ENVIRONMENT_SETUP_SCRIPT = (
+WORKSPACE_SETUP_SCRIPT = (
     "set -euo pipefail\nmkdir -p repos && echo provisioned > repos/.provisioned && ls -a repos"
 )
-ENVIRONMENT_UPDATE_SCRIPT = "echo refreshed >> repos/.provisioned"
+WORKSPACE_UPDATE_SCRIPT = "echo refreshed >> repos/.provisioned"
 
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
@@ -592,7 +592,7 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
     return thread_id
 
 
-def _environment_poll_step(messages: list[BaseMessage]) -> AIMessage:
+def _workspace_poll_step(messages: list[BaseMessage]) -> AIMessage:
     """Follow the reproducibility rebuild through the one poll tool."""
     task_id = _tool_payload(messages, "refresh_workspace_start").get("task_id")
     if not isinstance(task_id, str):
@@ -959,22 +959,22 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_complete_step),
         StepSpec(content="I'll wait for your review and approval before implementing."),
     ),
-    "environment": (
+    "workspace": (
         # Build here, with ordinary tools, then publish this sandbox as the image.
         _tool_step(
             "Provisioning this sandbox.",
             "execute",
-            {"command": ENVIRONMENT_SETUP_SCRIPT},
+            {"command": WORKSPACE_SETUP_SCRIPT},
             "call-env-provision",
         ),
         _tool_step(
-            "Publishing this sandbox as the environment.",
+            "Publishing this sandbox as the workspace image.",
             "publish_workspace",
             {
-                "name": ENVIRONMENT_NAME,
-                "prompt": ENVIRONMENT_PROMPT,
-                "setup_script": ENVIRONMENT_SETUP_SCRIPT,
-                "update_script": ENVIRONMENT_UPDATE_SCRIPT,
+                "name": WORKSPACE_NAME,
+                "prompt": WORKSPACE_PROMPT,
+                "setup_script": WORKSPACE_SETUP_SCRIPT,
+                "update_script": WORKSPACE_UPDATE_SCRIPT,
                 "repos": [f"{OWNER}/{REPO}"],
             },
             "call-env-publish",
@@ -983,11 +983,11 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Checking the setup script reproduces the image.",
             "refresh_workspace_start",
-            {"name": ENVIRONMENT_NAME},
+            {"name": WORKSPACE_NAME},
             "call-env-refresh",
         ),
-        _dynamic_step(_environment_poll_step),
-        StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
+        _dynamic_step(_workspace_poll_step),
+        StepSpec(content=f"The `{WORKSPACE_NAME}` workspace is captured and live."),
     ),
     "followup": (_dynamic_step(_followup_step),),
 }
@@ -1005,8 +1005,9 @@ def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
 
 
-def _is_environment_request(text: str) -> bool:
-    return "environment" in text.lower()
+def _is_workspace_request(text: str) -> bool:
+    lowered = text.lower()
+    return "workspace" in lowered or "environment" in lowered
 
 
 def _is_breakout_request(text: str) -> bool:
@@ -1066,7 +1067,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
     ),
     ScriptRule(
-        "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
+        "workspace", lambda ctx: ctx.human_count <= 1 and _is_workspace_request(ctx.first_text)
     ),
     ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
     ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),

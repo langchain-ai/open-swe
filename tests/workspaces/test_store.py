@@ -64,12 +64,13 @@ def test_slugify_rejects_names_without_alphanumerics() -> None:
 
 
 def test_snapshot_name_prefix_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ENVIRONMENT_SNAPSHOT_PREFIX", "acme")
+    monkeypatch.setenv("WORKSPACE_SNAPSHOT_PREFIX", "acme")
     assert default_snapshot_name_for("default") == "acme-environment-default"
 
 
 def test_no_generated_snapshot_name_contains_a_colon(monkeypatch: pytest.MonkeyPatch) -> None:
     """A colon separates name from tag, so a name carrying one is unaddressable."""
+    # The pre-rename variable name still works as an alias.
     monkeypatch.setenv("ENVIRONMENT_SNAPSHOT_PREFIX", "acme:v2")
     assert ":" not in default_snapshot_name_for("default")
 
@@ -112,7 +113,7 @@ def test_sandbox_resources_require_positive_integers() -> None:
         WorkspaceUpdate(vcpus=-1)
 
 
-def test_environment_sandbox_resources_omits_invalid_stored_values() -> None:
+def test_workspace_sandbox_resources_omits_invalid_stored_values() -> None:
     ready = Workspace(
         slug="env",
         mem_bytes=16 * 1024**3,
@@ -194,7 +195,7 @@ def test_a_capture_in_flight_keeps_serving_the_previous_snapshot() -> None:
     assert Workspace(slug="e", snapshot_status="capturing").ready_snapshot_id is None
 
 
-def test_environment_prompt_blank_is_none() -> None:
+def test_workspace_prompt_blank_is_none() -> None:
     assert Workspace(slug="e", prompt="   ").instructions is None
     assert Workspace(slug="e", prompt=" build with make ").instructions == "build with make"
 
@@ -203,7 +204,7 @@ def test_environment_prompt_blank_is_none() -> None:
 
 
 @pytest.mark.asyncio
-async def test_only_the_environment_named_default_is_resolved(fake_store: FakeStore) -> None:
+async def test_only_the_workspace_named_default_is_resolved(fake_store: FakeStore) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="Draft"), "ramon")
     assert await env_store.load_default_workspace() is None
 
@@ -256,7 +257,7 @@ async def test_update_writes_only_provided_fields(fake_store: FakeStore) -> None
 @pytest.mark.asyncio
 async def test_update_rejects_a_rename_across_slugs(fake_store: FakeStore) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="draft"), "ramon")
-    with pytest.raises(ValueError, match="renaming an environment"):
+    with pytest.raises(ValueError, match="renaming a workspace"):
         await WORKSPACES.apply_update("draft", WorkspaceUpdate(name="default"))
 
 
@@ -316,7 +317,7 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
         ),
     ):
         await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
-        # A prior capture published under the environment's own name, as any real
+        # A prior capture published under the workspace's own name, as any real
         # one would: the name is the address, and only the tag moves.
         await WORKSPACES.mark_captured(
             "base",
@@ -338,7 +339,7 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
 
 
 @pytest.mark.asyncio
-async def test_capture_publishes_under_the_environments_own_name(fake_store: FakeStore) -> None:
+async def test_capture_publishes_under_the_workspaces_own_name(fake_store: FakeStore) -> None:
     """A stored name is the address; the tag is what each refresh moves."""
     capture = AsyncMock(return_value=_FakeSnapshot("snap-2"))
     with (
@@ -395,7 +396,7 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot(
 
 
 @pytest.mark.asyncio
-async def test_first_capture_failure_marks_the_environment_failed(fake_store: FakeStore) -> None:
+async def test_first_capture_failure_marks_the_workspace_failed(fake_store: FakeStore) -> None:
     capture = AsyncMock(side_effect=RuntimeError("capture exploded"))
     with (
         patch(
@@ -442,7 +443,7 @@ async def test_update_clearing_create_params_with_null_stays_readable(
     """An explicit ``create_params: null`` must not poison the record.
 
     The store mutates records in place, so an unvalidated null would only
-    surface on the next read — as a ValidationError that makes the environment
+    surface on the next read — as a ValidationError that makes the workspace
     unresolvable, unupdatable, and invisible to listings.
     """
     await WORKSPACES.create(
@@ -520,7 +521,7 @@ async def test_load_workspace_prefers_the_selection(fake_store: FakeStore) -> No
 
 
 @pytest.mark.asyncio
-async def test_environment_options_omit_admin_only_settings(fake_store: FakeStore) -> None:
+async def test_workspace_options_omit_admin_only_settings(fake_store: FakeStore) -> None:
     await WORKSPACES.create(
         WorkspaceCreate(
             name="default",
@@ -588,7 +589,7 @@ async def test_publish_writes_definition_and_image_together(fake_store: FakeStor
 
 
 @pytest.mark.asyncio
-async def test_publish_refuses_a_create_over_an_existing_environment(
+async def test_publish_refuses_a_create_over_an_existing_workspace(
     fake_store: FakeStore,
 ) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")

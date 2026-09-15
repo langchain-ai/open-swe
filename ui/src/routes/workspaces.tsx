@@ -2,15 +2,15 @@ import { createFileRoute } from "@tanstack/react-router"
 
 import { AppShell } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
-import { EnvironmentsSection } from "@/features/settings/components/EnvironmentsSection"
+import { WorkspacesSection } from "@/features/settings/components/WorkspacesSection"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
-export const Route = createFileRoute("/environments")({
-  component: EnvironmentsPage,
+export const Route = createFileRoute("/workspaces")({
+  component: WorkspacesPage,
 })
 
-function EnvironmentsPage() {
+function WorkspacesPage() {
   const session = useSession()
 
   if (session.isLoading) {
@@ -25,10 +25,10 @@ function EnvironmentsPage() {
   return (
     <AppShell
       user={session.data}
-      title="Environments"
+      title="Workspaces"
       description="The sandbox images agent runs boot from, and how their nightly rebuilds went."
     >
-      <EnvironmentsSection isAdmin={session.data.is_admin} />
+      <WorkspacesSection isAdmin={session.data.is_admin} />
     </AppShell>
   )
 }

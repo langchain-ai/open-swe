@@ -10104,14 +10104,14 @@
     },
     "/dashboard/api/workspaces": {
       "get": {
-        "operationId": "api_list_environments_dashboard_api_workspaces_get",
+        "operationId": "api_list_workspaces_dashboard_api_workspaces_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api List Environments Dashboard Api Workspaces Get",
+                  "title": "Response Api List Workspaces Dashboard Api Workspaces Get",
                   "type": "object"
                 }
               }
@@ -10124,14 +10124,14 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api List Environments",
+        "summary": "Api List Workspaces",
         "tags": [
           "dashboard",
           "workspaces"
         ]
       },
       "post": {
-        "operationId": "api_create_environment_dashboard_api_workspaces_post",
+        "operationId": "api_create_workspace_dashboard_api_workspaces_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10169,7 +10169,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Create Environment",
+        "summary": "Api Create Workspace",
         "tags": [
           "dashboard",
           "workspaces"
@@ -10178,15 +10178,15 @@
     },
     "/dashboard/api/workspaces/options": {
       "get": {
-        "description": "Pickable environments for any signed-in user; refresh logs only for admins.",
-        "operationId": "api_environment_options_dashboard_api_workspaces_options_get",
+        "description": "Pickable workspaces for any signed-in user; refresh logs only for admins.",
+        "operationId": "api_workspace_options_dashboard_api_workspaces_options_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Environment Options Dashboard Api Workspaces Options Get",
+                  "title": "Response Api Workspace Options Dashboard Api Workspaces Options Get",
                   "type": "object"
                 }
               }
@@ -10199,7 +10199,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Environment Options",
+        "summary": "Api Workspace Options",
         "tags": [
           "dashboard",
           "workspaces"
@@ -10208,7 +10208,7 @@
     },
     "/dashboard/api/workspaces/{slug}": {
       "delete": {
-        "operationId": "api_delete_environment_dashboard_api_workspaces__slug__delete",
+        "operationId": "api_delete_workspace_dashboard_api_workspaces__slug__delete",
         "parameters": [
           {
             "in": "path",
@@ -10245,14 +10245,14 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Delete Environment",
+        "summary": "Api Delete Workspace",
         "tags": [
           "dashboard",
           "workspaces"
         ]
       },
       "get": {
-        "operationId": "api_get_environment_dashboard_api_workspaces__slug__get",
+        "operationId": "api_get_workspace_dashboard_api_workspaces__slug__get",
         "parameters": [
           {
             "in": "path",
@@ -10291,14 +10291,14 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Get Environment",
+        "summary": "Api Get Workspace",
         "tags": [
           "dashboard",
           "workspaces"
         ]
       },
       "put": {
-        "operationId": "api_update_environment_dashboard_api_workspaces__slug__put",
+        "operationId": "api_update_workspace_dashboard_api_workspaces__slug__put",
         "parameters": [
           {
             "in": "path",
@@ -10347,7 +10347,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Update Environment",
+        "summary": "Api Update Workspace",
         "tags": [
           "dashboard",
           "workspaces"
@@ -10356,8 +10356,8 @@
     },
     "/dashboard/api/workspaces/{slug}/refresh": {
       "post": {
-        "description": "Start a snapshot rebuild from the environment's scripts.\n\nStarted in the background rather than awaited: a rebuild takes minutes, and\nthe outcome lands on the record for the dashboard to poll.",
-        "operationId": "api_refresh_environment_dashboard_api_workspaces__slug__refresh_post",
+        "description": "Start a snapshot rebuild from the workspace's scripts.\n\nStarted in the background rather than awaited: a rebuild takes minutes, and\nthe outcome lands on the record for the dashboard to poll.",
+        "operationId": "api_refresh_workspace_dashboard_api_workspaces__slug__refresh_post",
         "parameters": [
           {
             "in": "path",
@@ -10375,7 +10375,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Refresh Environment Dashboard Api Workspaces  Slug  Refresh Post",
+                  "title": "Response Api Refresh Workspace Dashboard Api Workspaces  Slug  Refresh Post",
                   "type": "object"
                 }
               }
@@ -10398,7 +10398,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Refresh Environment",
+        "summary": "Api Refresh Workspace",
         "tags": [
           "dashboard",
           "workspaces"

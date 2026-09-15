@@ -115,7 +115,7 @@ class SandboxCreateConfig:
             # and losing the whole sandbox over a skipped `git pull` is worse
             # than starting from the snapshot as captured.
             logger.warning(
-                "Environment update script could not run in sandbox %s",
+                "Workspace update script could not run in sandbox %s",
                 sandbox_backend.id,
                 exc_info=True,
                 extra={"workspace": workspace.slug},
@@ -123,7 +123,7 @@ class SandboxCreateConfig:
             return
         if result.exit_code != 0:
             logger.warning(
-                "Environment update script exited %s in sandbox %s",
+                "Workspace update script exited %s in sandbox %s",
                 result.exit_code,
                 sandbox_backend.id,
                 extra={

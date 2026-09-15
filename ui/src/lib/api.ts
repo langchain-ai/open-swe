@@ -453,7 +453,7 @@ export interface SandboxSettings {
   updated_by: string | null
 }
 
-/** What a non-admin needs to pick an environment for a new thread. */
+/** What a non-admin needs to pick a workspace for a new thread. */
 export type WorkspaceRefreshStatus =
   | "never"
   | "refreshing"

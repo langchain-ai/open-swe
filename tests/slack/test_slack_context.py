@@ -1961,7 +1961,7 @@ def test_thread_environment_round_trips_through_metadata(
     )
     assert threads.thread is not None
     assert threads.thread["metadata"]["environment"] == "staging"
-    assert asyncio.run(webhook_common.get_thread_environment("thread-id")) == "staging"
+    assert asyncio.run(webhook_common.get_thread_workspace("thread-id")) == "staging"
 
 
 def test_thread_model_choice_round_trips_explicit_metadata(
@@ -2004,7 +2004,7 @@ def test_thread_model_choice_is_none_for_auto_selection(
 def test_thread_environment_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     threads = _FakeThreadsClient({"metadata": {}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
-    assert asyncio.run(webhook_common.get_thread_environment("thread-id")) is None
+    assert asyncio.run(webhook_common.get_thread_workspace("thread-id")) is None
 
 
 def test_thread_environment_is_none_for_a_missing_thread(
@@ -2012,7 +2012,7 @@ def test_thread_environment_is_none_for_a_missing_thread(
 ) -> None:
     threads = _FakeThreadsClient(raise_not_found=True)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
-    assert asyncio.run(webhook_common.get_thread_environment("thread-id")) is None
+    assert asyncio.run(webhook_common.get_thread_workspace("thread-id")) is None
 
 
 def _context_input(messages: list[dict], **kwargs: object) -> list[str]:

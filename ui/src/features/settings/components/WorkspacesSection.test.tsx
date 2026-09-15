@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { EnvironmentsSection } from "./EnvironmentsSection"
+import { WorkspacesSection } from "./WorkspacesSection"
 import { api } from "@/lib/api"
 
 const clients: Array<QueryClient> = []
@@ -23,12 +23,12 @@ function renderSection(isAdmin: boolean) {
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <EnvironmentsSection isAdmin={isAdmin} />
+      <WorkspacesSection isAdmin={isAdmin} />
     </QueryClientProvider>
   )
 }
 
-describe("EnvironmentsSection", () => {
+describe("WorkspacesSection", () => {
   it("shows refresh outcomes without edit controls", async () => {
     vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
@@ -56,9 +56,7 @@ describe("EnvironmentsSection", () => {
     const view = renderSection(true)
 
     expect(await screen.findByText("Preview")).toBeTruthy()
-    expect(
-      screen.getByText("Default environment · Snapshot ready")
-    ).toBeTruthy()
+    expect(screen.getByText("Default workspace · Snapshot ready")).toBeTruthy()
     expect(screen.getByText(/Updated 1 hour ago/)).toBeTruthy()
     expect(screen.getByText(/Refresh failed/)).toBeTruthy()
     expect(screen.getByText("setup script exited 1")).toBeTruthy()
@@ -91,7 +89,7 @@ describe("EnvironmentsSection", () => {
     expect(screen.queryByText(/hunter2/)).toBeNull()
   })
 
-  it("says so when an environment has never been refreshed", async () => {
+  it("says so when a workspace has never been refreshed", async () => {
     vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
       workspaces: [{ slug: "default", name: "Default", has_snapshot: false }],
@@ -100,7 +98,7 @@ describe("EnvironmentsSection", () => {
     renderSection(true)
 
     expect(await screen.findByText("Never refreshed")).toBeTruthy()
-    expect(screen.getByText("Default environment · No snapshot")).toBeTruthy()
+    expect(screen.getByText("Default workspace · No snapshot")).toBeTruthy()
   })
 
   it("directs non-admins to a workspace admin", async () => {
@@ -112,7 +110,7 @@ describe("EnvironmentsSection", () => {
     renderSection(false)
 
     expect(
-      await screen.findByText("No environments are configured.")
+      await screen.findByText("No workspaces are configured.")
     ).toBeTruthy()
     expect(screen.getByText(/ask a workspace admin/)).toBeTruthy()
   })

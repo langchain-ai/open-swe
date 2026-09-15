@@ -492,9 +492,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
         slack_webhook.common, "get_valid_access_token", AsyncMock(return_value="tok")
     )
     monkeypatch.setattr(slack_webhook.common, "thread_exists", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        slack_webhook.common, "get_thread_environment", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr(slack_webhook.common, "get_thread_workspace", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
     monkeypatch.setattr(
         slack_webhook.common, "get_thread_model_choice", AsyncMock(return_value=None)
@@ -565,9 +563,7 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
         slack_webhook.common, "get_valid_access_token", AsyncMock(return_value="tok")
     )
     monkeypatch.setattr(slack_webhook.common, "thread_exists", AsyncMock(return_value=False))
-    monkeypatch.setattr(
-        slack_webhook.common, "get_thread_environment", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr(slack_webhook.common, "get_thread_workspace", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
     monkeypatch.setattr(
         slack_webhook.common, "get_thread_model_choice", AsyncMock(return_value=None)

@@ -24,7 +24,7 @@ import {
   optimisticThread,
   seedAgentThreadLists,
   useAgentSkills,
-  useEnvironmentOptions,
+  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import {
   persistModelSelection,
@@ -100,17 +100,17 @@ export function AgentsHome({
   >(null)
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
-  const environmentOptions = useEnvironmentOptions(cloudEnabled)
-  const environments = environmentOptions.data?.workspaces ?? []
-  // undefined = untouched, so the run falls back to the default environment.
-  const [environmentOverride, setEnvironmentOverride] = useState<string | null>(
+  const workspaceOptions = useWorkspaceOptions(cloudEnabled)
+  const workspaces = workspaceOptions.data?.workspaces ?? []
+  // undefined = untouched, so the run falls back to the default workspace.
+  const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
     null
   )
-  const defaultEnvironmentSlug = environmentOptions.data?.default_slug ?? null
-  const selectedEnvironment =
-    environmentOverride ??
-    (environments.some((env) => env.slug === defaultEnvironmentSlug)
-      ? defaultEnvironmentSlug
+  const defaultWorkspaceSlug = workspaceOptions.data?.default_slug ?? null
+  const selectedWorkspace =
+    workspaceOverride ??
+    (workspaces.some((env) => env.slug === defaultWorkspaceSlug)
+      ? defaultWorkspaceSlug
       : null)
   const [submittedDraft, setSubmittedDraft] =
     useState<CreateAgentThreadVariables | null>(null)
@@ -453,7 +453,7 @@ export function AgentsHome({
     if (repoOverride === null) configurable.repo_explicitly_none = true
     configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
-    if (selectedEnvironment) configurable.environment = selectedEnvironment
+    if (selectedWorkspace) configurable.environment = selectedWorkspace
 
     const handleCloudSubmitError = (error: unknown) => {
       resetPendingSubmit()
@@ -573,11 +573,11 @@ export function AgentsHome({
             onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
-            environments={environments}
-            selectedEnvironment={selectedEnvironment}
-            onEnvironmentChange={
+            workspaces={workspaces}
+            selectedWorkspace={selectedWorkspace}
+            onWorkspaceChange={
               !optimisticDraftThread && runTarget === "cloud"
-                ? setEnvironmentOverride
+                ? setWorkspaceOverride
                 : undefined
             }
             skills={skills.data}

@@ -200,7 +200,7 @@ __all__ = [
     "get_or_resolve_thread_github_token",
     "resolve_slack_channel_context",
     "get_thread_metadata_safe",
-    "get_thread_environment",
+    "get_thread_workspace",
     "get_thread_model_choice",
     "get_thread_plan_mode",
     "is_not_found_error",
@@ -830,14 +830,14 @@ async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
     return (model_id, effort) if model_id and effort else None
 
 
-async def get_thread_environment(thread_id: str) -> str | None:
-    """Return the environment slug persisted for a thread, or ``None`` if unset."""
+async def get_thread_workspace(thread_id: str) -> str | None:
+    """Return the workspace slug persisted for a thread, or ``None`` if unset."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
         thread = await langgraph_client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         if not is_not_found_error(exc):
-            logger.warning("Failed to fetch environment metadata for thread %s", thread_id)
+            logger.warning("Failed to fetch workspace metadata for thread %s", thread_id)
         return None
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     if not isinstance(metadata, dict):
