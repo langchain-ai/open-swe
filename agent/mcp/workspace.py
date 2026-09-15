@@ -97,12 +97,14 @@ async def _migrate_legacy_default() -> None:
 
 
 async def get_workspace_mcp(workspace: str, name: str) -> MCPConnection | None:
+    workspace = workspace.strip().lower()
     if workspace == DEFAULT_WORKSPACE_SLUG:
         await _migrate_legacy_default()
     return await _store(workspace).get(name)
 
 
 async def list_workspace_mcp_records(workspace: str) -> list[MCPConnection]:
+    workspace = workspace.strip().lower()
     if workspace == DEFAULT_WORKSPACE_SLUG:
         await _migrate_legacy_default()
     return sorted(await _store(workspace).search_all(), key=lambda record: record.name)
@@ -130,6 +132,9 @@ async def save_workspace_mcp(
 
 
 async def delete_workspace_mcp(workspace: str, name: str) -> None:
+    workspace = workspace.strip().lower()
+    if workspace == DEFAULT_WORKSPACE_SLUG:
+        await _migrate_legacy_default()
     await _store(workspace).delete(name)
 
 

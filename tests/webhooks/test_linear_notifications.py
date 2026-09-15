@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.tools import BaseTool
 from mcp.types import CallToolResult, TextContent, Tool
 
 from agent import completion
@@ -14,6 +15,7 @@ from agent.linear import notifications
 from agent.mcp import MCPConnectionUpdate, runtime
 from agent.mcp import workspace as workspace_mcps
 from agent.middleware import sandbox_circuit_breaker
+from agent.run_config import RunConfig
 
 
 @dataclass
@@ -258,3 +260,23 @@ async def test_notification_times_out_without_retrying(
     monkeypatch.setattr(linear_mcp, "call_tool", never_finishes)
     assert not await notifications.post_linear_notification("issue-1", "Run failed")
     assert calls == [("save_comment", {"issueId": "issue-1", "body": "Run failed"})]
+
+
+async def test_notification_workspace_resolves_from_active_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The active run's workspace, not ``default``, picks the MCP connection to load."""
+    monkeypatch.setattr(
+        RunConfig, "from_runtime", classmethod(lambda cls: RunConfig(workspace="oss"))
+    )
+    workspaces_seen = []
+
+    async def fake_load_workspace_mcp_tools(
+        workspace: str, *, connection_name: str | None = None
+    ) -> list[BaseTool]:
+        workspaces_seen.append(workspace)
+        return []
+
+    monkeypatch.setattr(notifications, "load_workspace_mcp_tools", fake_load_workspace_mcp_tools)
+    assert not await notifications.post_linear_notification("issue-1", "Run failed")
+    assert workspaces_seen == ["oss"]

@@ -4,6 +4,7 @@ from agent.mcp import workspace as workspace_mcps
 from agent.mcp.models import MCPConnectionUpdate
 from agent.mcp.workspace import (
     WORKSPACE_MCPS_NAMESPACE,
+    delete_workspace_mcp,
     list_workspace_mcps,
     save_workspace_mcp,
     workspace_mcp_source,
@@ -55,6 +56,28 @@ async def test_migration_deletes_the_flat_record_and_does_not_rerun(fake_store: 
     await list_workspace_mcps("default")
     assert fake_store.values(WORKSPACE_MCPS_NAMESPACE) == {}
     assert [c["name"] for c in await list_workspace_mcps("default")] == ["legacy"]
+
+
+async def test_delete_migrates_legacy_default_before_deleting(fake_store: FakeStore) -> None:
+    """Deleting an unmigrated legacy record must not be a silent no-op.
+
+    Without migrating first, the delete targets the nested default-workspace
+    namespace while the record still lives in the flat legacy namespace, so it
+    reappears the next time the default workspace is read.
+    """
+    fake_store.seed(
+        WORKSPACE_MCPS_NAMESPACE,
+        "legacy",
+        {
+            "name": "legacy",
+            "url": "https://mcp.example.com/sse",
+            "transport": "sse",
+            "enabled": True,
+        },
+    )
+    await delete_workspace_mcp("default", "legacy")
+    assert await list_workspace_mcps("default") == []
+    assert fake_store.values(WORKSPACE_MCPS_NAMESPACE) == {}
 
 
 async def test_migration_ignores_records_a_prefix_search_also_matches(

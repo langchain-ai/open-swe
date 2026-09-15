@@ -135,16 +135,10 @@ async def search_all_values(
     page_size: int = _DEFAULT_PAGE_SIZE,
 ) -> list[dict[str, Any]]:
     """Every value in ``namespace``, paging until the store runs out."""
-    values: list[dict[str, Any]] = []
-    offset = 0
-    while True:
-        items = await _search_items(namespace, filter, page_size, offset)
-        if not items:
-            return values
-        values.extend(value for item in items if (value := _unwrap(item)) is not None)
-        if len(items) < page_size:
-            return values
-        offset += len(items)
+    return [
+        entry.value
+        for entry in await search_all_entries(namespace, filter=filter, page_size=page_size)
+    ]
 
 
 async def search_all_entries(
