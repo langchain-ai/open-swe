@@ -9,8 +9,8 @@ from fastapi import HTTPException
 
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
-    _DASHBOARD_SOURCE,
     _SURFACED_SOURCES,
+    DASHBOARD_SOURCE,
     _assert_thread_readable,
     _is_automation_thread,
     _is_thread_resolved,
@@ -65,7 +65,7 @@ def _search_metadata_filter(
     metadata = dict(search_filter)
     if resolved is True:
         metadata["resolved"] = True
-    if source and source != _DASHBOARD_SOURCE:
+    if source and source != DASHBOARD_SOURCE:
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id

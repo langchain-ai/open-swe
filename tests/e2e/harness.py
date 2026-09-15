@@ -780,7 +780,11 @@ async def slack_post_message(request: Request) -> JSONResponse:
         blocks=body.get("blocks"),
         is_bot=True,
     )
-    return _ok({"ts": ts, "message": {"ts": ts}})
+    message: dict[str, Any] = {"ts": ts}
+    thread_ts = body.get("thread_ts") or ""
+    if thread_ts:
+        message["thread_ts"] = thread_ts
+    return _ok({"ts": ts, "message": message})
 
 
 @app.post("/fake-slack/chat.update")
