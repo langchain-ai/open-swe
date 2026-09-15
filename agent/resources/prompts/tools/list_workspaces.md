@@ -4,4 +4,4 @@ List every workspace with its snapshot state.
 repo, Slack channel, tag, or user default routes a run to them.
 
 Returns:
-    ``{"ok": True, "environments": [...]}``.
+    ``{"ok": True, "workspaces": [...]}``.

@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -160,7 +161,7 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
-from agent.workspaces.routing import workspace_for_repo
+from agent.workspaces.routing import workspace_for_repo, workspace_for_slack_channel
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 __all__ = [
@@ -250,6 +251,7 @@ __all__ = [
     "get_profile_default_repo",
     "get_recent_comments",
     "get_slack_channel_context_description",
+    "SlackRepoResolution",
     "get_slack_repo_config",
     "get_slack_user_info",
     "get_slack_user_names",
@@ -683,31 +685,53 @@ async def upsert_agent_thread_metadata(
         return False
 
 
+@dataclass(frozen=True)
+class SlackRepoResolution:
+    """A Slack run's repository, plus whether anything actually named it.
+
+    OEP-0003 puts a named repository ahead of a Slack channel's workspace
+    binding and a deployment-wide default behind it, so routing needs to tell
+    the two apart. ``explicit`` is true only for a repository the thread or the
+    channel description named.
+    """
+
+    repo: Repo | None = None
+    explicit: bool = False
+
+    @property
+    def routing_repo(self) -> tuple[str, str] | None:
+        """The repository allowed to decide the workspace, if any."""
+        if self.repo is None or not self.explicit:
+            return None
+        return (self.repo.owner, self.repo.name)
+
+
 async def get_slack_repo_config(
     channel_id: str,
     thread_ts: str,
     slack_user_id: str | None = None,
     channel_context: dict[str, Any] | None = None,
     thread_id: str | None = None,
-) -> Repo | None:
+) -> SlackRepoResolution:
     """Resolve the default repository hint for a Slack-triggered run, if any source names one.
 
-    Priority:
+    Priority, the first two explicit and the rest defaults:
         1. Repo carried over from the existing Slack thread's metadata.
         2. A ``repo:owner/name`` token in the channel's topic/purpose.
         3. The triggering user's dashboard ``default_repo`` (if they have a
            profile and their Slack email maps to a known GitHub login).
-        4. Team default repo.
+        4. The default repo of the workspace this channel is bound to.
         5. ``SLACK_REPO_*`` env defaults.
 
-    ``None`` is not an error: the agent clones lazily and the message itself
-    usually names the repository when one matters.
+    An empty resolution is not an error: the agent clones lazily and the message
+    itself usually names the repository when one matters.
     """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
     repo_config: dict[str, str] | None = None
+    explicit = False
 
     try:
         resolved_thread_id = thread_id or await resolve_slack_thread_id(
@@ -717,6 +741,7 @@ async def get_slack_repo_config(
         thread_repo_config = _extract_repo_config_from_thread(thread)
         if thread_repo_config:
             repo_config = thread_repo_config
+            explicit = True
     except Exception as exc:  # noqa: BLE001
         if not is_not_found_error(exc):
             logger.debug(
@@ -742,6 +767,7 @@ async def get_slack_repo_config(
                         channel_repo_config["name"],
                     )
                     repo_config = channel_repo_config
+                    explicit = True
         except Exception:  # noqa: BLE001
             logger.exception("Failed to resolve repo from Slack channel description")
 
@@ -768,12 +794,16 @@ async def get_slack_repo_config(
             logger.exception("Failed to apply dashboard default_repo for Slack user")
 
     if not repo_config:
-        repo_config = await get_team_default_repo()
+        # A channel bound to a workspace takes that workspace's default
+        # repository, not whatever `default` happens to have configured.
+        repo_config = await get_team_default_repo(await workspace_for_slack_channel(channel_id))
 
     if not repo_config and default_owner and default_name:
         repo_config = {"owner": default_owner, "name": default_name}
 
-    return Repo.model_validate(repo_config) if repo_config else None
+    if not repo_config:
+        return SlackRepoResolution()
+    return SlackRepoResolution(Repo.model_validate(repo_config), explicit)
 
 
 async def thread_exists(thread_id: str) -> bool:
@@ -840,7 +870,10 @@ async def get_thread_workspace(thread_id: str) -> str | None:
         thread = await langgraph_client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         if not is_not_found_error(exc):
-            logger.warning("Failed to fetch workspace metadata for thread %s", thread_id)
+            logger.warning(
+                "Failed to fetch workspace metadata for thread",
+                extra={"agent_thread_id": thread_id},
+            )
         return None
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     if not isinstance(metadata, dict):
@@ -1193,12 +1226,14 @@ async def build_reviewer_configurable(
     return configurable
 
 
-async def draft_review_enabled_for_author(author_login: str) -> bool:
+async def draft_review_enabled_for_author(
+    author_login: str, repo_config: dict[str, str] | None = None
+) -> bool:
     """Return whether draft PRs by ``author_login`` should auto-review.
 
     Tri-state: the PR author's profile ``review_draft_prs`` wins when set to
-    True/False; ``None`` (or no profile, e.g. external contributors) falls
-    back to the team-wide default.
+    True/False; ``None`` (or no profile, e.g. external contributors) falls back
+    to the default of the workspace that owns ``repo_config``.
     """
     if author_login:
         profile = await get_profile(author_login)
@@ -1206,7 +1241,7 @@ async def draft_review_enabled_for_author(author_login: str) -> bool:
             override = profile.get("review_draft_prs")
             if isinstance(override, bool):
                 return override
-    team = await get_team_settings()
+    team = await get_team_settings(await workspace_for_repo_config(repo_config))
     return bool(team.get("review_draft_prs"))
 
 

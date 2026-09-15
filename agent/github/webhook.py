@@ -481,7 +481,12 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     if is_draft:
         author = pull_request.get("user") or {}
         author_login = author.get("login", "") if isinstance(author, dict) else ""
-        if not await common.draft_review_enabled_for_author(author_login):
+        repository = payload.get("repository", {})
+        draft_repo_config = {
+            "owner": (repository.get("owner") or {}).get("login", ""),
+            "name": repository.get("name", ""),
+        }
+        if not await common.draft_review_enabled_for_author(author_login, draft_repo_config):
             common.logger.info(
                 "Skipping auto-review of draft PR by %s: review_draft_prs is disabled",
                 author_login or "<unknown>",
@@ -528,7 +533,7 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
     if action == "converted_to_draft":
         author = pull_request.get("user") or {}
         author_login = author.get("login", "") if isinstance(author, dict) else ""
-        if await common.draft_review_enabled_for_author(author_login):
+        if await common.draft_review_enabled_for_author(author_login, repo_config):
             common.logger.info(
                 "PR %s/%s#%s converted to draft but author %s has draft reviews enabled; keeping watch",
                 repo_config.get("owner"),

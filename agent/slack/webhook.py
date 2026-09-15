@@ -41,7 +41,7 @@ from agent.utils.thread_ops import (
 )
 from agent.utils.thread_ops import queue_message_for_thread
 from agent.webhooks import common
-from agent.workspaces.routing import resolve_workspace
+from agent.workspaces.routing import resolve_workspace, workspace_for_repo
 from agent.workspaces.store import WORKSPACES, parse_workspace_tag
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
@@ -577,12 +577,14 @@ def _slack_context_input(
     return {"messages": run_messages}
 
 
-async def process_slack_mention(request: SlackRequest, repo: Repo | None) -> None:
+async def process_slack_mention(
+    request: SlackRequest, repo: common.SlackRepoResolution | None
+) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
     try:
         await _process_slack_mention_impl(request, repo)
     except Exception as exc:  # noqa: BLE001
-        await _notify_slack_processing_error(request, repo, exc)
+        await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
 
 async def process_slack_plan_approval(request: SlackRequest, repo: Repo | None) -> None:
@@ -617,6 +619,23 @@ async def _notify_slack_processing_error(
     if thread_id:
         await _mark_slack_thread_errored(thread_id, request, repo)
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
+
+
+async def _workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo | None:
+    """Keep a defaulted repository unless it belongs to another workspace.
+
+    Nobody named this repository, so it did not pick the workspace. Handing an
+    `oss` run a repository `default` owns would cross the boundary the
+    workspace exists to draw, so that workspace's own default repository takes
+    over — and there may not be one.
+    """
+    if not workspace:
+        return candidate
+    owner = await workspace_for_repo(candidate.owner, candidate.name)
+    if owner is None or owner == workspace:
+        return candidate
+    scoped = await common.get_team_default_repo(workspace)
+    return Repo.model_validate(scoped) if scoped else None
 
 
 async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
@@ -687,8 +706,11 @@ async def _mark_slack_thread_errored(
         common.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
 
 
-async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) -> None:
-    repo_dict = repo.model_dump() if repo else None
+async def _process_slack_mention_impl(
+    request: SlackRequest, repo_resolution: common.SlackRepoResolution | None
+) -> None:
+    resolution = repo_resolution or common.SlackRepoResolution()
+    repo = resolution.repo
     channel_id = request.channel_id
     thread_ts = request.thread_ts
     event_ts = request.event_ts
@@ -883,22 +905,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     slack_thread_section = _format_slack_thread_section(
         channel_id, thread_ts, context_source, channel_context
     )
-    repo_hint_section = (
-        f"## Default Repository Hint\n{repo.full_name}\n"
-        "Use this only if the Slack conversation does not identify a different repository.\n\n"
-        if repo
-        else ""
-    )
-    operational_context = (
-        _slack_prompt_preamble(untagged_reply, message_update)
-        + repo_hint_section
-        + f"## Triggered by\n{trigger_user}\n\n"
-        f"{trigger_user_timezone_section}"
-        f"{slack_thread_section}\n\n"
-        f"{await _format_slack_run_links_section(thread_id)}"
-        + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
-        + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
-    )
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
     image_urls = common.dedupe_urls(
@@ -1010,6 +1016,44 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if code_channel and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
+    # Routing comes before the run's repository: a repository nobody named
+    # must not outrank the channel's binding, and once a workspace has won, a
+    # default repository another workspace owns has to give way to its own.
+    # Later mentions carry no tag, so the thread's workspace comes back from
+    # metadata — a follow-up must not be told about `default` while its sandbox
+    # was built from the workspace the opening message resolved to.
+    if is_first_mention:
+        thread_workspace = (
+            await resolve_workspace(
+                tag=tagged_slug,
+                repo=resolution.routing_repo,
+                slack_channel_id=channel_id,
+                login=mapped_login,
+            )
+        ).slug
+    else:
+        thread_workspace = await common.get_thread_workspace(thread_id)
+    if repo is not None and not resolution.explicit:
+        repo = await _workspace_scoped_default_repo(repo, thread_workspace)
+    repo_dict = repo.model_dump() if repo else None
+
+    repo_hint_section = (
+        f"## Default Repository Hint\n{repo.full_name}\n"
+        "Use this only if the Slack conversation does not identify a different repository.\n\n"
+        if repo
+        else ""
+    )
+    operational_context = (
+        _slack_prompt_preamble(untagged_reply, message_update)
+        + repo_hint_section
+        + f"## Triggered by\n{trigger_user}\n\n"
+        f"{trigger_user_timezone_section}"
+        f"{slack_thread_section}\n\n"
+        f"{await _format_slack_run_links_section(thread_id)}"
+        + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
+        + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
+    )
+
     configurable: dict[str, Any] = {
         "repo": repo_dict,
         "slack_thread": slack_thread_context,
@@ -1019,19 +1063,6 @@ async def _process_slack_mention_impl(request: SlackRequest, repo: Repo | None) 
     if mapped_login:
         configurable["github_login"] = mapped_login
         logins_by_user_id[user_id] = mapped_login
-    # Later mentions carry no tag, so the thread's workspace comes back from
-    # metadata — a follow-up must not be told about `default` while its sandbox
-    # was built from the workspace the opening message resolved to.
-    if is_first_mention:
-        resolution = await resolve_workspace(
-            tag=tagged_slug,
-            repo=(repo.owner, repo.name) if repo else None,
-            slack_channel_id=channel_id,
-            login=mapped_login,
-        )
-        thread_workspace = resolution.slug
-    else:
-        thread_workspace = await common.get_thread_workspace(thread_id)
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace

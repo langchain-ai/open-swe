@@ -11,6 +11,8 @@ from typing import Any
 
 import pytest
 
+from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
+from agent.run_config import Repo
 from agent.slack import webhook as slack_webhooks
 from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
@@ -61,3 +63,87 @@ async def test_first_mention_in_bound_channel_dispatches_with_its_workspace(
     # `environment` is kept alongside `workspace` for one release so a run started
     # before this change lands and one started after read the same key back.
     assert configurable["environment"] == "oss"
+
+
+async def test_a_bound_channel_outranks_a_defaulted_repository(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    """A repository nobody named does not decide the workspace.
+
+    `get_slack_repo_config` almost always produces one — the team default or
+    `SLACK_REPO_*` — so if a defaulted repository counted, a bound channel's
+    workspace would never win.
+    """
+    captured: dict[str, Any] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+
+    await WORKSPACES.create(WorkspaceCreate(name="Default", repos=["acme/internal"]), "alice")
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
+    )
+    await upsert_team_settings(TeamSettingsUpdate(default_repo="acme/oss"), workspace="oss")
+
+    request = SlackRequest.model_validate(
+        {
+            "channel_id": "C0SS",
+            "thread_ts": "1700000000.000100",
+            "event_ts": "1700000000.000200",
+            "user_id": "U123",
+            "text": "<@UBOT> hello",
+            "bot_user_id": "UBOT",
+        }
+    )
+
+    # The deployment's default repository belongs to `default`, and nothing in
+    # the thread, the message, or the channel description named it.
+    await slack_webhooks._process_slack_mention_impl(
+        request,
+        webhook_common.SlackRepoResolution(Repo(owner="acme", name="internal"), explicit=False),
+    )
+
+    configurable = captured["run_create"]["kwargs"]["config"]["configurable"]
+    assert configurable["workspace"] == "oss"
+    # ...so the run gets the winning workspace's own default repository.
+    assert configurable["repo"] == {"owner": "acme", "name": "oss"}
+
+
+async def test_a_named_repository_still_outranks_a_bound_channel(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    captured: dict[str, Any] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+
+    await WORKSPACES.create(WorkspaceCreate(name="Internal", repos=["acme/internal"]), "alice")
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
+    )
+
+    request = SlackRequest.model_validate(
+        {
+            "channel_id": "C0SS",
+            "thread_ts": "1700000000.000100",
+            "event_ts": "1700000000.000200",
+            "user_id": "U123",
+            "text": "<@UBOT> hello",
+            "bot_user_id": "UBOT",
+        }
+    )
+
+    await slack_webhooks._process_slack_mention_impl(
+        request,
+        webhook_common.SlackRepoResolution(Repo(owner="acme", name="internal"), explicit=True),
+    )
+
+    configurable = captured["run_create"]["kwargs"]["config"]["configurable"]
+    assert configurable["workspace"] == "internal"
+    assert configurable["repo"] == {"owner": "acme", "name": "internal"}

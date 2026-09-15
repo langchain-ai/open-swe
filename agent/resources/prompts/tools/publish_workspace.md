@@ -67,6 +67,6 @@ Args:
         with ``create_params``.
 
 Returns:
-    ``{"ok": True, "environment": {...}, "created": bool}`` with the new
+    ``{"ok": True, "workspace": {...}, "created": bool}`` with the new
     snapshot id on the workspace record, or ``ok: False`` with the capture or
     validation error and nothing written.
