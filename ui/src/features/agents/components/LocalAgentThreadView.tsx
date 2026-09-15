@@ -61,7 +61,11 @@ import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
-import { threadHydrated, threadTranscriptPainted } from "@/lib/perf/threadLoad"
+import {
+  threadHydrated,
+  threadHydrationFailed,
+  threadTranscriptPainted,
+} from "@/lib/perf/threadLoad"
 
 function skillFiles(skills: DesktopLocalPromptInput["skills"]) {
   return Object.fromEntries(
@@ -237,6 +241,17 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     ]
   }, [sessionId, stream.messages, stream.toolCalls, thread])
 
+  // A rejected state fetch also clears `isThreadLoading`, so abandon the span
+  // before the hooks below could record it as a fast, empty load.
+  useEffect(() => {
+    let active = true
+    stream.hydrationPromise.catch(() => {
+      if (active) threadHydrationFailed(sessionId)
+    })
+    return () => {
+      active = false
+    }
+  }, [sessionId, stream.hydrationPromise])
   useEffect(() => {
     if (!stream.isThreadLoading) threadHydrated(sessionId)
   }, [sessionId, stream.isThreadLoading])
