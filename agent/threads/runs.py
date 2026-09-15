@@ -185,7 +185,7 @@ def _user_message_content(
 
 
 async def _resolve_requested_workspace(
-    requested: Any, repo_config: dict[str, str] | None, *, login: str | None
+    requested: object, repo_config: dict[str, str] | None, *, login: str | None
 ) -> str:
     """The workspace a new dashboard thread lands in.
 
