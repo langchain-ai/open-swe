@@ -115,6 +115,7 @@ class PullRequest(Base):
     head_ref: Mapped[str] = mapped_column(server_default="", default="")
     base_ref: Mapped[str] = mapped_column(server_default="", default="")
     author: Mapped[str] = mapped_column(server_default="", default="")
+    author_github_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
     author_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
@@ -179,9 +180,7 @@ class PullRequest(Base):
             link.thread_id for link in self.threads if link.role != "primary"
         ]
 
-    async def save(
-        self, *, repository_private: bool | None = None, author_github_id: int | None = None
-    ) -> Self:
+    async def save(self, *, repository_private: bool | None = None) -> Self:
         """Write the PR as GitHub describes it and register its repository.
 
         Overwrites the GitHub-owned columns; ``resolves_thread`` can only be set,
@@ -189,9 +188,7 @@ class PullRequest(Base):
         author is linked to a registered user when one matches their GitHub id
         or, failing that, their login; an unregistered author leaves it unset.
         """
-        return await self._write(
-            overwrite=True, repository_private=repository_private, author_github_id=author_github_id
-        )
+        return await self._write(overwrite=True, repository_private=repository_private)
 
     async def link_thread(self, thread_id: str, *, source: str = "") -> Self:
         """Associate a thread with this PR, as primary when it has none yet."""
@@ -308,7 +305,6 @@ class PullRequest(Base):
         *,
         overwrite: bool,
         repository_private: bool | None = None,
-        author_github_id: int | None = None,
         legacy_discovered: bool = False,
     ) -> Self:
         """Persist this instance's pending (transient) links and reviews onto the stored row."""
@@ -317,7 +313,7 @@ class PullRequest(Base):
                 full_name=self.repo_full_name, private=repository_private
             ).save(session)
             if overwrite and self.author_user_id is None:
-                self.author_user_id = await self._author_user_id(session, author_github_id)
+                self.author_user_id = await self._author_user_id(session)
             row = await self._upsert(
                 session, repository.id, overwrite=overwrite, legacy_discovered=legacy_discovered
             )
@@ -354,11 +350,9 @@ class PullRequest(Base):
             raise RuntimeError(f"pull request {self.url} vanished during save")
         return stored
 
-    async def _author_user_id(
-        self, session: AsyncSession, author_github_id: int | None
-    ) -> UUID | None:
-        if author_github_id is not None:
-            matches = UserIdentity.external_id == str(author_github_id)
+    async def _author_user_id(self, session: AsyncSession) -> UUID | None:
+        if self.author_github_id is not None:
+            matches = UserIdentity.external_id == str(self.author_github_id)
         elif self.author:
             matches = func.lower(UserIdentity.login) == self.author.lower()
         else:
@@ -387,6 +381,7 @@ class PullRequest(Base):
             owner=self.owner,
             repo=self.repo,
             **{column: getattr(self, column) for column in _GITHUB_COLUMNS},
+            author_github_id=self.author_github_id,
             author_user_id=self.author_user_id,
             resolves_thread=self.resolves_thread,
             legacy_threads_discovered_at=func.clock_timestamp() if legacy_discovered else None,
@@ -397,6 +392,9 @@ class PullRequest(Base):
         github_changes = (
             {
                 **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
+                "author_github_id": func.coalesce(
+                    upsert.excluded.author_github_id, cls.author_github_id
+                ),
                 "author_user_id": func.coalesce(upsert.excluded.author_user_id, cls.author_user_id),
                 "resolves_thread": or_(cls.resolves_thread, upsert.excluded.resolves_thread),
             }
@@ -473,4 +471,5 @@ class PullRequestEvent(BaseModel):
             head_ref=self.pull_request.head_ref,
             base_ref=self.pull_request.base_ref,
             author=self.pull_request.author,
+            author_github_id=self.pull_request.author_id,
         )

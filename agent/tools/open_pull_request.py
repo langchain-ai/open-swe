@@ -684,12 +684,10 @@ async def _record_pr_telemetry(
                     head_ref=head,
                     base_ref=base,
                     author=author if isinstance(author, str) else "",
+                    author_github_id=author_id if isinstance(author_id, int) else None,
                     resolves_thread=resolves_thread,
                     threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
-                ).save(
-                    repository_private=repo_private,
-                    author_github_id=author_id if isinstance(author_id, int) else None,
-                )
+                ).save(repository_private=repo_private)
             except Exception:  # noqa: BLE001
                 # The PR exists on GitHub either way; failing the tool over the
                 # registry write would lose the agent's work.

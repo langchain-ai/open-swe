@@ -20,8 +20,12 @@ from pydantic import BaseModel
 from starlette.requests import HTTPConnection
 
 from agent.config import ENV
-from agent.github.org_membership import is_user_active_org_member
 from agent.github.token_auth import bearer_github_token
+from agent.users.authorization import (
+    allowed_logins,
+    allowed_orgs,
+    is_authorized_github_login,
+)
 from agent.utils.dashboard_links import (
     dashboard_api_base_url,
     dashboard_base_url,
@@ -163,16 +167,8 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     return fallback
 
 
-def _allowed_login_orgs() -> tuple[str, ...]:
-    return tuple(dict.fromkeys(org.lower() for org in ENV.ALLOWED_GITHUB_ORGS.get_list()))
-
-
-def _allowed_login_users() -> tuple[str, ...]:
-    return tuple(dict.fromkeys(user.lower() for user in ENV.ALLOWED_GITHUB_USERS.get_list()))
-
-
 def validate_github_login_allowlist() -> None:
-    if ENV.OPEN_SWE_LOCAL_AUTH_TOKEN.is_set() or _allowed_login_orgs() or _allowed_login_users():
+    if ENV.OPEN_SWE_LOCAL_AUTH_TOKEN.is_set() or allowed_orgs() or allowed_logins():
         return
     message = "ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured"
     logger.error(message)
@@ -180,12 +176,8 @@ def validate_github_login_allowlist() -> None:
 
 
 async def enforce_github_login_gate(login: str) -> None:
-    normalized_login = login.strip().lower()
-    if any(hmac.compare_digest(normalized_login, user) for user in _allowed_login_users()):
+    if await is_authorized_github_login(login):
         return
-    for org in _allowed_login_orgs():
-        if await is_user_active_org_member(normalized_login, org):
-            return
     logger.warning(
         "Rejected dashboard login",
         extra={"github_login": login, "reason": "not in allowed users or orgs"},

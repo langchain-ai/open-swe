@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from agent.database import postgres
 from agent.database.orm import NOW, Base
+from agent.users.authorization import UnauthorizedUser, is_authorized_github_login
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,8 @@ class User(Base):
 
         Known values win; empty ones leave what is stored alone. ``admin`` is
         written only when given, so callers without an opinion leave it be.
+        Creating a person requires an authorized GitHub login and raises
+        :class:`UnauthorizedUser` otherwise; an existing one is only updated.
         """
         async with postgres.session() as session:
             user_id = await cls._claim(
@@ -211,6 +214,7 @@ class User(Base):
         )
         speculative = uuid7() if owner is None else None
         if speculative is not None:
+            await _authorize(provider, login)
             await session.execute(insert(cls).values(id=speculative))
         upsert = insert(UserIdentity).values(
             user_id=owner or speculative,
@@ -255,3 +259,19 @@ class User(Base):
 def _known(**values: str) -> dict[str, str]:
     """Only the values a caller actually knows, so empty ones never clobber."""
     return {name: value for name, value in values.items() if value}
+
+
+async def _authorize(provider: Provider, login: str) -> None:
+    """Refuse to create a person who may not use Open SWE.
+
+    GitHub membership is the only proof of authorization, so a Slack account
+    reaches a user record by ``link``-ing to one, never by creating its own.
+    """
+    if provider != "github":
+        raise UnauthorizedUser(f"a {provider} account cannot establish a new user")
+    if not await is_authorized_github_login(login):
+        logger.warning(
+            "Refused to create a user for an unauthorized GitHub login",
+            extra={"github_login": login},
+        )
+        raise UnauthorizedUser(f"{login or '(no login)'} is not authorized to use Open SWE")

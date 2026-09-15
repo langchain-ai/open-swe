@@ -19,10 +19,15 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 _PEOPLE = {"U_ADA": ("ada", "1"), "U_GRACE": ("grace", "2"), "U_LINUS": ("linus", "3")}
 
 
+@pytest.fixture(autouse=True)
+def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", ",".join(login for login, _ in _PEOPLE.values()))
+
+
 async def _register_people() -> None:
     for slack_id, (login, github_id) in _PEOPLE.items():
-        user = await User.sign_in("slack", slack_id, team_id="T1")
-        await user.link("github", github_id, login=login)
+        user = await User.sign_in("github", github_id, login=login)
+        await user.link("slack", slack_id, team_id="T1")
 
 
 def _ready(head_sha: str = "abc123") -> Readiness:

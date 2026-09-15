@@ -15,8 +15,14 @@ def _no_legacy_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(resolve, "login_for_slack_id", AsyncMock(return_value=None))
 
 
+@pytest.fixture(autouse=True)
+def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "OctoCat,grace")
+
+
 async def test_slack_identity_resolves_to_its_person() -> None:
-    user = await User.sign_in("slack", "U1", team_id="T1")
+    user = await User.sign_in("github", "1001", login="OctoCat")
+    await user.link("slack", "U1", team_id="T1")
 
     resolved = await resolve_person({"id": "slack:U1", "platform": "slack"})
 
