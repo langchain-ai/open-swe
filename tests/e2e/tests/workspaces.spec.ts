@@ -221,7 +221,7 @@ test.describe("Workspaces", () => {
     await page.getByRole("button", { name: new RegExp(ALT_NAME) }).click();
     await expect(picker).toContainText(ALT_NAME);
 
-    await typeIntoComposer(page, "Which workspace am I in?");
+    await typeIntoComposer(page, "Which environment am I in?");
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
 
