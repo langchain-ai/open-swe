@@ -7,7 +7,7 @@ from agent.dashboard.user_preferences import (
     set_user_preferences,
 )
 from agent.workspaces import routing
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate
 from tests.conftest import FakeStore
 
 
@@ -75,3 +75,12 @@ async def test_unassigned_repo_policy(
     monkeypatch.setenv(ENV.OPEN_SWE_UNASSIGNED_REPO_WORKSPACE.name, "ignore")
     assert await routing.repo_is_routable("acme", "unowned") is False
     assert await routing.repo_is_routable("acme", "oss") is True
+
+
+async def test_store_writes_invalidate_the_routing_cache(fake_store: FakeStore) -> None:
+    assert await routing.workspace_for_repo("acme", "oss") is None
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
+    assert await routing.workspace_for_repo("acme", "oss") == "oss"
+    await WORKSPACES.apply_update("oss", WorkspaceUpdate(repos=["acme/other"]))
+    assert await routing.workspace_for_repo("acme", "oss") is None
+    assert await routing.workspace_for_repo("acme", "other") == "oss"
