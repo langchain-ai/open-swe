@@ -8,6 +8,7 @@ SQLite as it is written.
 
 import logging
 import os
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 DB_PATH_ENV = "OPEN_SWE_LOCAL_CHECKPOINT_DB"
 STATE_DIR = Path(".langgraph_api")
+
+_claim_lock = threading.Lock()
+_claimed_imports: set[Path] = set()
 
 
 @asynccontextmanager
@@ -37,22 +41,25 @@ async def create_checkpointer() -> AsyncIterator[AsyncSqliteSaver]:
 async def _import_pickled_checkpoints(saver: AsyncSqliteSaver, db_path: Path) -> None:
     """Copy ``langgraph dev``'s pickled checkpoints into ``saver`` once.
 
-    A marker file next to the database claims the import atomically. The pickle
-    files are left in place and a failed import never blocks startup.
+    The dev server enters the checkpointer once per event-loop thread, so the
+    first caller in this process claims the import. The completion marker is
+    written only after the copy succeeds: an import interrupted by a crash
+    reruns on the next start, which is safe because the saver upserts. The
+    pickle files are left in place and a failed import never blocks startup.
     """
-    if not any(STATE_DIR.glob(".langgraph_checkpoint.*.pckl")):
-        return
     marker = db_path.with_name(db_path.name + ".imported-pickles")
-    try:
-        marker.touch(exist_ok=False)
-    except FileExistsError:
+    if marker.exists() or not any(STATE_DIR.glob(".langgraph_checkpoint.*.pckl")):
         return
+    with _claim_lock:
+        if db_path in _claimed_imports:
+            return
+        _claimed_imports.add(db_path)
     try:
         imported = await _copy_pickled_checkpoints(saver)
     except Exception:
-        marker.unlink(missing_ok=True)
         logger.exception("Could not import pickled checkpoints into SQLite")
         return
+    marker.touch()
     logger.info("Imported pickled checkpoints into SQLite", extra={"count": imported})
 
 
