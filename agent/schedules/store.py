@@ -851,14 +851,20 @@ async def launch_github_issue_automations(
     repo: dict[str, Any] = repo_value if isinstance(repo_value, dict) else {}
     owner_value = repo.get("owner")
     owner: dict[str, Any] = owner_value if isinstance(owner_value, dict) else {}
-    resolved_name = _repo_full_name({"owner": owner.get("login"), "name": repo.get("name")})
-    if not resolved_name:
+    owner_login = owner.get("login")
+    repo_name = repo.get("name")
+    if (
+        not isinstance(owner_login, str)
+        or not owner_login
+        or not isinstance(repo_name, str)
+        or not repo_name
+    ):
         logger.error(
             "GitHub issue automation payload is missing repository identity",
             extra={"github_delivery": delivery_id},
         )
         return []
-    full_name = resolved_name.lower()
+    full_name = f"{owner_login}/{repo_name}".lower()
     results: list[dict[str, Any]] = []
     matched = 0
     for record in await search_all_values(SCHEDULES_NAMESPACE):

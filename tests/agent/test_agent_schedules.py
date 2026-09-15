@@ -925,17 +925,34 @@ async def test_launch_github_issue_automations_isolates_launch_failures(
     assert retried == []
 
 
+@pytest.mark.parametrize(
+    "repository",
+    [
+        None,
+        {},
+        {"owner": {}, "name": ""},
+        {"owner": {"login": "langchain-ai"}},
+        {"owner": None, "name": "open-swe"},
+        {"owner": {"login": None}, "name": "open-swe"},
+        {"owner": {"login": ""}, "name": "open-swe"},
+        {"owner": {"login": 123}, "name": "open-swe"},
+        {"owner": {"login": "langchain-ai"}, "name": None},
+        {"owner": {"login": "langchain-ai"}, "name": ""},
+        {"owner": {"login": "langchain-ai"}, "name": 123},
+    ],
+)
 async def test_launch_github_issue_automations_reports_unusable_payload(
-    fake_client: _FakeClient, caplog: pytest.LogCaptureFixture
+    fake_client: _FakeClient, caplog: pytest.LogCaptureFixture, repository: object
 ) -> None:
     with caplog.at_level(logging.ERROR, logger=schedules.logger.name):
         results = await schedules.launch_github_issue_automations(
-            {"repository": {"owner": {}, "name": ""}, "issue": {"number": 42}},
+            {"repository": repository, "issue": {"number": 42}},
             "delivery-unusable",
         )
 
     assert results == []
     assert "missing repository identity" in caplog.text
+    assert fake_client.runs.created == []
 
 
 async def test_switching_to_issue_trigger_clears_the_cron_expression(
