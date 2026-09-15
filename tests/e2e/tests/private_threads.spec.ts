@@ -68,6 +68,11 @@ test("private threads are owner-only and visibility is fixed at creation", async
       page.getByRole("menuitemradio", { name: "Workspace" }),
     ).toBeDisabled();
     await page.keyboard.press("Escape");
+    await page
+      .getByText("Private planning notes", { exact: true })
+      .first()
+      .hover();
+    await expect(page.getByLabel("Private thread")).toBeVisible();
 
     // Visibility cannot be changed in place; the PATCH only knows titles.
     const flip = await page.request.patch(

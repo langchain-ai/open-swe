@@ -9,6 +9,7 @@ import {
   FolderIcon,
   GitMergeIcon,
   GitPullRequestIcon,
+  LockIcon,
   PushPinIcon,
   PushPinSlashIcon,
   WarningCircleIcon,
@@ -480,6 +481,12 @@ function ThreadHoverCard({
         <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
           {item.title}
         </span>
+        {item.location === "cloud" && item.thread.visibility === "private" && (
+          <LockIcon
+            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            aria-label="Private thread"
+          />
+        )}
         <EnvironmentIcon
           className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
           aria-label={environmentLabel}
