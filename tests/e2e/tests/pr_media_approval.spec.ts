@@ -2,7 +2,6 @@ import {
   expect,
   test,
   type APIRequestContext,
-  type Page,
   type Playwright,
 } from "@playwright/test";
 
@@ -137,7 +136,7 @@ test("screenshot: the approval card as Alice, denied as Bob", async ({
 }, testInfo) => {
   const api = await loginApi(playwright, ALICE);
   const threadId = await seedOwnedThread(api, ALICE.login);
-  const { pullNumber } = await createMediaRequest(api, threadId);
+  await createMediaRequest(api, threadId);
 
   await page.request.post("/control/login", { data: ALICE });
   await page.goto(`/agents/${threadId}`);

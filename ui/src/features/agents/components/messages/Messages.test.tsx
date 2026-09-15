@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { Messages } from "./Messages"
 
+vi.mock("@/features/agents/components/MediaApprovalCard", () => ({
+  MediaApprovalCard: () => null,
+}))
+
 vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
   WorkflowApprovalCard: ({ threadId }: { threadId: string }) => (
     <div data-testid="workflow-approval-card">Approval for {threadId}</div>

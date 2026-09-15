@@ -746,9 +746,7 @@ export function useMediaRequests(
     enabled: Boolean(threadId),
     refetchInterval: (query) =>
       options.pollWhileActive ||
-      query.state.data?.requests.some(
-        (request) => request.status === "pending"
-      )
+      query.state.data?.requests.some((request) => request.status === "pending")
         ? 3000
         : false,
     retry: false,
