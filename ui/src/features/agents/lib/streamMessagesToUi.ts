@@ -190,9 +190,23 @@ function imageChunks(content: unknown): Array<Chunk> {
     if (type === "image") {
       const data = block.data ?? block.base64
       const mime = block.mime_type ?? block.mimeType
+      const fileId = block.file_id
       if (typeof data === "string" && typeof mime === "string") {
         base64 = data
         mimeType = mime
+      } else if (
+        typeof fileId === "string" &&
+        fileId &&
+        typeof mime === "string"
+      ) {
+        const fileName = block.fileName ?? block.file_name
+        chunks.push({
+          kind: "image",
+          fileId,
+          mimeType: mime,
+          ...(typeof fileName === "string" && fileName ? { fileName } : {}),
+        })
+        continue
       }
     } else if (type === "image_url") {
       const imageUrl = block.image_url

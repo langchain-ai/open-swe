@@ -154,9 +154,12 @@ export interface TodoChunk {
 
 export interface ImageChunk {
   kind: "image"
-  base64: string
   mimeType: string
   fileName?: string
+  /** Inline bytes: composer previews and messages written before images were offloaded. */
+  base64?: string
+  /** Store reference left by the agent's image offload middleware. */
+  fileId?: string
 }
 
 export type Chunk =

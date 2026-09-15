@@ -262,3 +262,31 @@ describe("streamMessagesToUi", () => {
     ).toBeUndefined()
   })
 })
+
+describe("offloaded images", () => {
+  it("renders a stored image reference without inline bytes", () => {
+    const [message] = streamMessagesToUi([
+      new HumanMessage({
+        id: "h1",
+        content: [
+          {
+            type: "image",
+            file_id: "a".repeat(32),
+            mime_type: "image/png",
+            file_name: "shot.png",
+          },
+          { type: "text", text: "look" },
+        ],
+      }),
+    ])
+    expect(message?.chunks).toEqual([
+      {
+        kind: "image",
+        fileId: "a".repeat(32),
+        mimeType: "image/png",
+        fileName: "shot.png",
+      },
+      expect.objectContaining({ kind: "text", text: "look" }),
+    ])
+  })
+})

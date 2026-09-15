@@ -35,6 +35,7 @@ from agent.threads.handlers import (
     resolve_dashboard_thread,
     send_dashboard_message,
 )
+from agent.threads.images import get_dashboard_thread_image
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_projects,
@@ -404,6 +405,17 @@ async def api_get_thread_state(
     header = server_timing_header(timings)
     logger.info("thread state timings thread_id=%s %s", thread_id, header)
     return JSONResponse(payload, headers={"Server-Timing": header})
+
+
+@router.get("/threads/{thread_id}/images/{image_id}")
+async def api_get_thread_image(
+    thread_id: str,
+    image_id: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    return await get_dashboard_thread_image(
+        thread_id, image_id, session["sub"], email=session.get("email")
+    )
 
 
 @router.post("/threads/{thread_id}/stream/events")

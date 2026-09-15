@@ -3,6 +3,20 @@ import type { ApprovalCallbacks } from "./types"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { ToolExecution } from "@/features/agents/components/chat/ToolExecution"
+import { useImageChunkSrc } from "@/features/agents/lib/imageSource"
+import type { ImageChunk } from "@/features/agents/lib/types"
+
+function ChunkImage({ chunk }: { chunk: ImageChunk }) {
+  const src = useImageChunkSrc(chunk)
+  if (!src) return null
+  return (
+    <img
+      src={src}
+      alt={chunk.fileName || "image"}
+      className="max-h-48 max-w-48 rounded border border-border"
+    />
+  )
+}
 
 export function ChunkRenderer({
   chunk,
@@ -44,12 +58,6 @@ export function ChunkRenderer({
         />
       )
     case "image":
-      return (
-        <img
-          src={`data:${chunk.mimeType};base64,${chunk.base64}`}
-          alt={chunk.fileName || "image"}
-          className="max-h-48 max-w-48 rounded border border-border"
-        />
-      )
+      return <ChunkImage chunk={chunk} />
   }
 }
