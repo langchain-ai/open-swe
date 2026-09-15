@@ -3,53 +3,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select, text
 
-from agent import store as agent_store
+from agent.database import postgres
+from agent.github.repositories import Repository
+from agent.store import now_iso
 from agent.workspaces import store as env_store
+from agent.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
 from agent.workspaces.store import (
+    LEGACY_ENVIRONMENTS_NAMESPACE,
     WORKSPACES,
+    WORKSPACES_NAMESPACE,
+    RefreshStep,
     Workspace,
     WorkspaceCreate,
     WorkspaceUpdate,
     default_snapshot_name_for,
+    import_store_records,
     log_excerpt,
     slugify,
 )
 from tests.conftest import FakeStore
-
-
-def _fake_client() -> tuple[MagicMock, dict[tuple[Any, ...], Any]]:
-    store: dict[tuple[Any, ...], Any] = {}
-    client = MagicMock()
-
-    async def put_item(ns: list[str], key: str, value: dict[str, Any]) -> None:
-        store[(tuple(ns), key)] = value
-
-    async def get_item(ns: list[str], key: str) -> dict[str, Any] | None:
-        value = store.get((tuple(ns), key))
-        return {"value": value} if value is not None else None
-
-    async def delete_item(ns: list[str], key: str) -> None:
-        store.pop((tuple(ns), key), None)
-
-    async def search_items(
-        ns: list[str],
-        *,
-        filter: dict[str, Any] | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        items = [
-            {"value": value} for (namespace, _key), value in store.items() if namespace == tuple(ns)
-        ]
-        return {"items": items[offset : offset + limit]}
-
-    client.store.put_item = AsyncMock(side_effect=put_item)
-    client.store.get_item = AsyncMock(side_effect=get_item)
-    client.store.delete_item = AsyncMock(side_effect=delete_item)
-    client.store.search_items = AsyncMock(side_effect=search_items)
-    return client, store
-
 
 # --- slug + snapshot naming (sync) ---
 
@@ -104,6 +78,12 @@ def test_log_excerpt_keeps_the_head_and_the_tail() -> None:
 def test_create_validates_repo_full_names() -> None:
     create = WorkspaceCreate(name="env", repos=["https://github.com/owner/repo.git", "owner/repo"])
     assert create.repos == ["owner/repo"]
+
+
+def test_repos_are_deduped_however_they_are_capitalized() -> None:
+    """One ``repository`` row per name, so two spellings cannot both be bound."""
+    create = WorkspaceCreate(name="env", repos=["Acme/API", "acme/api"])
+    assert create.repos == ["Acme/API"]
 
 
 def test_sandbox_resources_require_positive_integers() -> None:
@@ -200,12 +180,13 @@ def test_workspace_prompt_blank_is_none() -> None:
     assert Workspace(slug="e", prompt=" build with make ").instructions == "build with make"
 
 
-# --- CRUD (patched store) ---
+# --- CRUD (PostgreSQL) ---
 
 
 @pytest.mark.asyncio
-async def test_only_the_workspace_named_default_is_resolved(fake_store: FakeStore) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="Draft"), "ramon")
+@pytest.mark.usefixtures("registry_db")
+async def test_only_the_workspace_named_default_is_resolved() -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="Draft", repos=["acme/draft"]), "ramon")
     assert await env_store.load_default_workspace() is None
 
     await WORKSPACES.create(WorkspaceCreate(name="Default"), "ramon")
@@ -216,14 +197,16 @@ async def test_only_the_workspace_named_default_is_resolved(fake_store: FakeStor
 
 
 @pytest.mark.asyncio
-async def test_create_rejects_duplicate_name(fake_store: FakeStore) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+@pytest.mark.usefixtures("registry_db")
+async def test_create_rejects_duplicate_name() -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
     with pytest.raises(ValueError, match="already exists"):
-        await WORKSPACES.create(WorkspaceCreate(name="Base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="Base", repos=["acme/base"]), "ramon")
 
 
 @pytest.mark.asyncio
-async def test_update_writes_only_provided_fields(fake_store: FakeStore) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_update_writes_only_provided_fields() -> None:
     await WORKSPACES.create(
         WorkspaceCreate(
             name="base",
@@ -255,14 +238,16 @@ async def test_update_writes_only_provided_fields(fake_store: FakeStore) -> None
 
 
 @pytest.mark.asyncio
-async def test_update_rejects_a_rename_across_slugs(fake_store: FakeStore) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="draft"), "ramon")
+@pytest.mark.usefixtures("registry_db")
+async def test_update_rejects_a_rename_across_slugs() -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="draft", repos=["acme/draft"]), "ramon")
     with pytest.raises(ValueError, match="renaming a workspace"):
         await WORKSPACES.apply_update("draft", WorkspaceUpdate(name="default"))
 
 
 @pytest.mark.asyncio
-async def test_delete_removes_record_and_snapshot(fake_store: FakeStore) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_delete_removes_record_and_snapshot() -> None:
     delete_snapshot = AsyncMock()
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
@@ -281,11 +266,12 @@ async def test_delete_removes_record_and_snapshot(fake_store: FakeStore) -> None
 
 
 @pytest.mark.asyncio
-async def test_load_default_workspace_swallows_store_failures(fake_store: FakeStore) -> None:
-    client = MagicMock()
-    client.store.get_item = AsyncMock(side_effect=RuntimeError("store down"))
-    with patch.object(agent_store, "store_client", return_value=client):
-        assert await env_store.load_default_workspace() is None
+async def test_load_default_workspace_swallows_database_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sandbox is being created; no workspace beats failing the run."""
+    monkeypatch.delenv("POSTGRES_URI", raising=False)
+    assert await env_store.load_default_workspace() is None
 
 
 # --- capture ---
@@ -306,7 +292,8 @@ def _sandbox_client(capture: AsyncMock) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: FakeStore) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_capture_tags_latest_and_replaces_previous_snapshot() -> None:
     capture = AsyncMock(return_value=_FakeSnapshot("snap-2"))
     delete_snapshot = AsyncMock()
     with (
@@ -316,7 +303,7 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
             return_value=_sandbox_client(capture),
         ),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
         # A prior capture published under the workspace's own name, as any real
         # one would: the name is the address, and only the tag moves.
         await WORKSPACES.mark_captured(
@@ -339,7 +326,8 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot(fake_store: Fa
 
 
 @pytest.mark.asyncio
-async def test_capture_publishes_under_the_workspaces_own_name(fake_store: FakeStore) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_capture_publishes_under_the_workspaces_own_name() -> None:
     """A stored name is the address; the tag is what each refresh moves."""
     capture = AsyncMock(return_value=_FakeSnapshot("snap-2"))
     with (
@@ -350,7 +338,8 @@ async def test_capture_publishes_under_the_workspaces_own_name(fake_store: FakeS
         ),
     ):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", snapshot_name="acme-monorepo"), "ramon"
+            WorkspaceCreate(name="base", repos=["acme/base"], snapshot_name="acme-monorepo"),
+            "ramon",
         )
         record = await env_store.capture_workspace_snapshot("base", "sb-123")
 
@@ -361,9 +350,8 @@ async def test_capture_publishes_under_the_workspaces_own_name(fake_store: FakeS
 
 
 @pytest.mark.asyncio
-async def test_failed_recapture_keeps_booting_from_the_previous_snapshot(
-    fake_store: FakeStore,
-) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_failed_recapture_keeps_booting_from_the_previous_snapshot() -> None:
     capture = AsyncMock(side_effect=RuntimeError("capture exploded"))
     delete_snapshot = AsyncMock()
     with (
@@ -373,7 +361,7 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot(
             return_value=_sandbox_client(capture),
         ),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
         await WORKSPACES.mark_captured(
             "base",
             snapshot_id="snap-1",
@@ -396,7 +384,8 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot(
 
 
 @pytest.mark.asyncio
-async def test_first_capture_failure_marks_the_workspace_failed(fake_store: FakeStore) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_first_capture_failure_marks_the_workspace_failed() -> None:
     capture = AsyncMock(side_effect=RuntimeError("capture exploded"))
     with (
         patch(
@@ -404,7 +393,7 @@ async def test_first_capture_failure_marks_the_workspace_failed(fake_store: Fake
             return_value=_sandbox_client(capture),
         ),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
 
         with pytest.raises(RuntimeError, match="capture exploded"):
             await env_store.capture_workspace_snapshot("base", "sb-123")
@@ -418,9 +407,8 @@ async def test_first_capture_failure_marks_the_workspace_failed(fake_store: Fake
 
 
 @pytest.mark.asyncio
-async def test_capture_requires_the_langsmith_provider(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_capture_requires_the_langsmith_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANDBOX_TYPE", "local")
     capture = AsyncMock()
     with (
@@ -429,7 +417,7 @@ async def test_capture_requires_the_langsmith_provider(
             return_value=_sandbox_client(capture),
         ),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
         with pytest.raises(RuntimeError, match="SANDBOX_TYPE=langsmith"):
             await env_store.capture_workspace_snapshot("base", "sb-123")
 
@@ -437,9 +425,8 @@ async def test_capture_requires_the_langsmith_provider(
 
 
 @pytest.mark.asyncio
-async def test_update_clearing_create_params_with_null_stays_readable(
-    fake_store: FakeStore,
-) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_update_clearing_create_params_with_null_stays_readable() -> None:
     """An explicit ``create_params: null`` must not poison the record.
 
     The store mutates records in place, so an unvalidated null would only
@@ -447,7 +434,10 @@ async def test_update_clearing_create_params_with_null_stays_readable(
     unresolvable, unupdatable, and invisible to listings.
     """
     await WORKSPACES.create(
-        WorkspaceCreate(name="base", create_params={"_internal_runtime": "v2"}), "ramon"
+        WorkspaceCreate(
+            name="base", repos=["acme/base"], create_params={"_internal_runtime": "v2"}
+        ),
+        "ramon",
     )
 
     updated = await WORKSPACES.apply_update("base", WorkspaceUpdate(create_params=None))
@@ -460,15 +450,17 @@ async def test_update_clearing_create_params_with_null_stays_readable(
 
 
 @pytest.mark.asyncio
-async def test_a_record_stored_with_null_create_params_is_still_readable(
+@pytest.mark.usefixtures("registry_db")
+async def test_an_imported_record_with_null_create_params_is_still_readable(
     fake_store: FakeStore,
 ) -> None:
     """Records written before create_params was modelled can hold a null."""
     fake_store.seed(
-        env_store.WORKSPACES_NAMESPACE,
+        WORKSPACES_NAMESPACE,
         "legacy",
         {"slug": "legacy", "name": "legacy", "create_params": None},
     )
+    assert await import_store_records() == 1
 
     record = await WORKSPACES.get("legacy")
 
@@ -502,9 +494,10 @@ def test_parse_workspace_tag(text: str, expected_slug: str | None, expected_text
 
 
 @pytest.mark.asyncio
-async def test_load_workspace_prefers_the_selection(fake_store: FakeStore) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_load_workspace_prefers_the_selection() -> None:
     await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
-    await WORKSPACES.create(WorkspaceCreate(name="staging"), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="staging", repos=["acme/staging"]), "ramon")
 
     selected = await env_store.load_workspace("staging")
     assert selected is not None
@@ -521,7 +514,8 @@ async def test_load_workspace_prefers_the_selection(fake_store: FakeStore) -> No
 
 
 @pytest.mark.asyncio
-async def test_workspace_options_omit_admin_only_settings(fake_store: FakeStore) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_workspace_options_omit_admin_only_settings() -> None:
     await WORKSPACES.create(
         WorkspaceCreate(
             name="default",
@@ -545,6 +539,9 @@ async def test_workspace_options_omit_admin_only_settings(fake_store: FakeStore)
         {
             "slug": "default",
             "name": "default",
+            "repos": [],
+            "slack_channel_ids": [],
+            "is_default": True,
             "has_snapshot": True,
             "refresh_status": "success",
             "refresh_kind": None,
@@ -560,11 +557,12 @@ async def test_workspace_options_omit_admin_only_settings(fake_store: FakeStore)
 
 
 @pytest.mark.asyncio
-async def test_publish_writes_definition_and_image_together(fake_store: FakeStore) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_publish_writes_definition_and_image_together() -> None:
     """One put carries both, so a record can never show a new definition on an old image."""
     record = await WORKSPACES.publish(
         "base",
-        WorkspaceCreate(name="base", prompt="p1", setup_script="make setup"),
+        WorkspaceCreate(name="base", repos=["acme/base"], prompt="p1", setup_script="make setup"),
         snapshot_id="snap-1",
         snapshot_name="openswe-environment-base",
         source_sandbox_id="sb-1",
@@ -589,10 +587,9 @@ async def test_publish_writes_definition_and_image_together(fake_store: FakeStor
 
 
 @pytest.mark.asyncio
-async def test_publish_refuses_a_create_over_an_existing_workspace(
-    fake_store: FakeStore,
-) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="base"), "ramon")
+@pytest.mark.usefixtures("registry_db")
+async def test_publish_refuses_a_create_over_an_existing_workspace() -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
     with pytest.raises(ValueError, match="already exists"):
         await WORKSPACES.publish(
             "base",
@@ -602,3 +599,328 @@ async def test_publish_refuses_a_create_over_an_existing_workspace(
             source_sandbox_id="sb-1",
             created_by="ramon",
         )
+
+
+# --- Slack channels, uniqueness, and the one-off Store import ---
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_create_rejects_repo_owned_by_another_workspace() -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
+    with pytest.raises(ValueError, match="acme/api already belongs to workspace core"):
+        await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["ACME/API"]), "alice")
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_update_rejects_slack_channel_owned_by_another_workspace() -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["C123"]), "alice"
+    )
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
+    with pytest.raises(ValueError, match="C123 already belongs to workspace core"):
+        await WORKSPACES.apply_update("oss", WorkspaceUpdate(slack_channel_ids=["c123"]))
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_non_default_workspace_requires_a_repo() -> None:
+    with pytest.raises(ValueError, match="at least one repository"):
+        await WORKSPACES.create(WorkspaceCreate(name="Empty"), "alice")
+    record = await WORKSPACES.create(WorkspaceCreate(name="Default"), "alice")
+    assert record.slug == "default" and record.repos == []
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_slack_channel_ids_are_normalized() -> None:
+    record = await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=[" c123 ", "C123"]),
+        "alice",
+    )
+    assert record.slack_channel_ids == ["C123"]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_stored_records_are_imported_from_both_namespaces(fake_store: FakeStore) -> None:
+    fake_store.seed(
+        LEGACY_ENVIRONMENTS_NAMESPACE,
+        "default",
+        {"slug": "default", "name": "Default", "prompt": "hi", "repos": []},
+    )
+    fake_store.seed(
+        WORKSPACES_NAMESPACE,
+        "oss",
+        {"slug": "oss", "name": "OSS", "repos": ["acme/oss"], "slack_channel_ids": ["C0SS"]},
+    )
+
+    assert await import_store_records() == 2
+
+    stored = {record.slug: record for record in await WORKSPACES.list_all()}
+    assert sorted(stored) == ["default", "oss"]
+    assert stored["default"].prompt == "hi"
+    assert stored["oss"].repos == ["acme/oss"]
+    assert stored["oss"].slack_channel_ids == ["C0SS"]
+    # Consumed, not merely copied, so neither namespace can write them back.
+    assert fake_store.values(WORKSPACES_NAMESPACE) == {}
+    assert fake_store.values(LEGACY_ENVIRONMENTS_NAMESPACE) == {}
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_one_unimportable_record_does_not_stop_the_others(fake_store: FakeStore) -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
+    fake_store.seed(
+        WORKSPACES_NAMESPACE, "taken", {"slug": "taken", "name": "Taken", "repos": ["acme/api"]}
+    )
+    fake_store.seed(
+        WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}
+    )
+
+    assert await import_store_records() == 1
+
+    assert sorted(record.slug for record in await WORKSPACES.list_all()) == ["core", "oss"]
+    # The one whose repository another workspace owns stays where it is.
+    assert sorted(fake_store.values(WORKSPACES_NAMESPACE)) == ["taken"]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_importing_twice_imports_nothing_the_second_time(fake_store: FakeStore) -> None:
+    fake_store.seed(
+        WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}
+    )
+
+    assert await import_store_records() == 1
+    assert await import_store_records() == 0
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["oss"]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_deleting_an_imported_workspace_does_not_resurrect_it(
+    fake_store: FakeStore,
+) -> None:
+    fake_store.seed(
+        LEGACY_ENVIRONMENTS_NAMESPACE,
+        "oss",
+        {"slug": "oss", "name": "OSS", "prompt": "hi", "repos": ["acme/oss"]},
+    )
+    assert await import_store_records() == 1
+
+    assert await WORKSPACES.remove("oss") is True
+
+    assert await import_store_records() == 0
+    assert await WORKSPACES.list_all() == []
+    assert await WORKSPACES.get("oss") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_list_all_skips_a_row_that_fails_to_validate() -> None:
+    """A hand-edited or pre-model row must not take the whole listing down.
+
+    ``refresh_steps`` is ``jsonb`` with no schema of its own; a step missing
+    the required ``label`` field fails ``RefreshStep`` validation the same way
+    an older release's stray write would.
+    """
+    await WORKSPACES.create(WorkspaceCreate(name="Healthy", repos=["acme/healthy"]), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="Corrupt", repos=["acme/corrupt"]), "ramon")
+    async with postgres.session() as session:
+        await session.execute(
+            text(
+                "UPDATE workspace SET refresh_steps = '[{\"bogus\": 1}]'::jsonb WHERE slug = :slug"
+            ),
+            {"slug": "corrupt"},
+        )
+
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["healthy"]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_get_reads_an_unreadable_row_as_a_missing_workspace() -> None:
+    """A corrupt row must not raise at every caller that resolves a workspace."""
+    await WORKSPACES.create(WorkspaceCreate(name="Corrupt", repos=["acme/corrupt"]), "ramon")
+    async with postgres.session() as session:
+        await session.execute(
+            text(
+                "UPDATE workspace SET refresh_steps = '[{\"bogus\": 1}]'::jsonb WHERE slug = :slug"
+            ),
+            {"slug": "corrupt"},
+        )
+
+    assert await WORKSPACES.get("corrupt") is None
+
+
+# --- rows ---
+
+
+def _fully_populated(now: str) -> Workspace:
+    """A record with nothing left at its default, so a dropped field shows up."""
+    return Workspace(
+        slug="base",
+        name="Base",
+        prompt="build with make",
+        setup_script="make setup",
+        update_script="git pull",
+        base_snapshot_id="snap-base",
+        repos=["acme/api"],
+        slack_channel_ids=["C0API"],
+        mem_bytes=8 * 1024**3,
+        vcpus=4,
+        fs_capacity_bytes=128 * 1024**3,
+        create_params={"_internal_runtime": "v2", "proxy_config": {"rules": [{"name": "api"}]}},
+        snapshot_id="snap-1",
+        snapshot_name="acme-monorepo",
+        snapshot_status="ready",
+        status_message="captured",
+        snapshot_tag="latest",
+        source_sandbox_id="sb-1",
+        last_captured_at=now,
+        refresh_status="success",
+        refresh_kind="update",
+        refresh_run_id="run-1",
+        refresh_started_at=now,
+        refresh_finished_at=now,
+        refresh_log="+ make setup",
+        refresh_error="a previous attempt timed out",
+        refresh_cron_id="cron-1",
+        refresh_steps=[
+            RefreshStep(
+                label="setup",
+                status="success",
+                started_at=now,
+                finished_at=now,
+                exit_code=0,
+                log_path="/open-swe/environment/logs/setup.log",
+            )
+        ],
+        refresh_sandbox_id="sb-builder",
+        created_by="ramon",
+        created_at=now,
+        updated_at=now,
+    )
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_every_field_of_a_record_round_trips_through_its_row() -> None:
+    record = _fully_populated(now_iso())
+    defaults = Workspace(slug="base")
+    assert [
+        field
+        for field in Workspace.model_fields
+        if field != "slug" and getattr(record, field) == getattr(defaults, field)
+    ] == []
+
+    await WORKSPACES.put(record.slug, record)
+
+    assert await WORKSPACES.get("base") == record
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_owner_of_repo_matches_however_the_repository_is_written() -> None:
+    """The lookup goes through ``repository.key``, which GitHub casing cannot change."""
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["Acme/API"]), "alice")
+
+    assert await WORKSPACES.owner_of_repo("acme/api") == "core"
+    assert await WORKSPACES.owner_of_repo("ACME/API") == "core"
+    assert await WORKSPACES.owner_of_repo("https://github.com/Acme/Api.git") == "core"
+    assert await WORKSPACES.owner_of_repo("acme/other") is None
+    # Routing asks about whatever an inbound event carried, so an unparseable
+    # name reads as unowned rather than raising.
+    assert await WORKSPACES.owner_of_repo("acme") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_saving_a_workspace_is_not_activity_on_its_repositories() -> None:
+    """``repository.last_activity_at`` says when work happened, not when settings changed."""
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
+
+    async def last_activity() -> object:
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(Repository.last_activity_at).where(Repository.key == "acme/api")
+            )
+
+    before = await last_activity()
+    await WORKSPACES.apply_update("core", WorkspaceUpdate(prompt="build with make"))
+
+    assert await last_activity() == before
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_write_returns_the_repository_casing_it_stored() -> None:
+    """``put`` answers with the stored view, so it agrees with ``get``."""
+    async with postgres.session() as session:
+        await Repository(full_name="acme/api").save(session)
+
+    written = await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["ACME/API"]), "alice")
+
+    assert written.repos == ["acme/api"]
+    assert await WORKSPACES.get("core") == written
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_owner_of_slack_channel_normalizes_the_channel_id() -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["C0API"]), "alice"
+    )
+
+    assert await WORKSPACES.owner_of_slack_channel(" c0api ") == "core"
+    assert await WORKSPACES.owner_of_slack_channel("C0OTHER") is None
+    assert await WORKSPACES.owner_of_slack_channel("") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_an_update_releases_the_bindings_it_drops() -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(
+            name="Core", repos=["acme/api", "acme/web"], slack_channel_ids=["C0API", "C0WEB"]
+        ),
+        "alice",
+    )
+
+    await WORKSPACES.apply_update(
+        "core", WorkspaceUpdate(repos=["acme/web"], slack_channel_ids=["C0WEB"])
+    )
+
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert stored.repos == ["acme/web"]
+    assert stored.slack_channel_ids == ["C0WEB"]
+    # What it let go of is free for another workspace to claim.
+    released = await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/api"], slack_channel_ids=["C0API"]), "alice"
+    )
+    assert released.repos == ["acme/api"]
+    assert await WORKSPACES.owner_of_slack_channel("C0API") == "oss"
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_binding_written_outside_the_store_is_respected() -> None:
+    """The rows are the authority, not a listing a caller built earlier."""
+    async with postgres.session() as session:
+        repository = await Repository(full_name="acme/api").save(session)
+        workspace = WorkspaceRow(slug="core", name="Core")
+        session.add(workspace)
+        await session.flush()
+        session.add(WorkspaceRepositoryRow(repository_id=repository.id, workspace_id=workspace.id))
+
+    with pytest.raises(ValueError, match="acme/api already belongs to workspace core"):
+        await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["ACME/API"]), "alice")
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_claim_that_races_the_pre_check_still_names_the_owner() -> None:
+    """The primary keys are the guarantee; the pre-check only makes it readable.
+
+    ``put`` is where a create lands once its pre-check has passed, so writing
+    through it is the claim that arrives while another one is in flight.
+    """
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["C0API"]), "alice"
+    )
+
+    with pytest.raises(ValueError, match="acme/api already belongs to workspace core"):
+        await WORKSPACES.put("oss", Workspace(slug="oss", name="OSS", repos=["acme/api"]))
+    with pytest.raises(ValueError, match="C0API already belongs to workspace core"):
+        await WORKSPACES.put(
+            "oss",
+            Workspace(slug="oss", name="OSS", repos=["acme/oss"], slack_channel_ids=["C0API"]),
+        )
+
+    # Neither claim left a half-written workspace behind.
+    assert await WORKSPACES.get("oss") is None

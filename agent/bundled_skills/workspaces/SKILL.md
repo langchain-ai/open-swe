@@ -1,17 +1,31 @@
 ---
 name: workspaces
-description: How Open SWE workspaces work and how to change them — create one, edit or fork an existing one, start from scratch, what setup_script and update_script are for, why a nightly refresh failed, where the build logs are, and how to read a rebuild in progress. Read this whenever someone asks about workspaces, snapshots, sandbox images, or a refresh, whether or not this is an admin thread.
+description: How an Open SWE workspace's sandbox image works and how to change it — create one, edit or fork an existing one, start from scratch, what setup_script and update_script are for, why a nightly refresh failed, where the build logs are, and how to read a rebuild in progress. Read this whenever someone asks about workspaces, workspaces, snapshots, sandbox images, or a refresh, whether or not this is an admin thread.
 ---
 
 # Workspaces
 
-An environment is two things: a **record** (name, prompt, repos, sizing, optional scripts) and a published **sandbox image**, `<prefix>-environment-<slug>:latest`. Runs in that environment boot from the image and get the prompt appended to their system prompt. The environment named `default` is what every run uses unless the thread picked another one.
+A workspace owns repositories, Slack channels, MCP connections, and team
+settings, plus the sandbox image its runs boot from. That image is two
+things: a **record** (name, prompt, repos, sizing, optional scripts) and a
+published **sandbox image**, `<prefix>-environment-<slug>:latest`. Runs
+routed to a workspace boot from its image and get its prompt appended to
+their system prompt. The workspace named `default` is what a run uses when
+routing picks no other.
 
-Only workspace admins can change workspaces, and only from an admin thread. Anyone can read them on **Workspace settings → Workspaces**. If the asker is not an admin, tell them what would need to happen and who can do it; do not try the tools.
+Only workspace admins can change a workspace's image, and only from an admin
+thread. Anyone can read workspaces on the **Workspaces** page. If the asker
+is not an admin, tell them what would need to happen and who can do it; do
+not try the tools.
 
 ## The one rule: build here, publish from here
 
-You do not write a workspace as a script and hope. You build it in the admin thread's own sandbox with ordinary tools — `execute`, the file tools — and when it works you call `publish_workspace`. That captures **this sandbox** as the image and writes the record only after the capture succeeded. Nothing is half-written on failure, and the workspace is usable the moment the call returns.
+You do not write a workspace's image as a script and hope. You build it in
+the admin thread's own sandbox with ordinary tools — `execute`, the file
+tools — and when it works you call `publish_workspace`. That captures **this
+sandbox** as the image and writes the record only after the capture
+succeeded. Nothing is half-written on failure, and the image is usable the
+moment the call returns.
 
 Everything on the sandbox filesystem is captured, so provision it fully and leave no tokens, credentials, or proxy secrets on disk.
 
@@ -21,7 +35,7 @@ The image you publish is whatever you are sitting on plus your changes, so start
 
 | You want to… | Start the admin thread… | Then |
 |---|---|---|
-| **Edit** a workspace | in that workspace (composer → Workspace picker) | change it, `publish_workspace` under the **same** name |
+| **Edit** a workspace's image | in that workspace (composer → Workspace picker) | change it, `publish_workspace` under the **same** name |
 | **Fork** one into a new workspace | in the parent | change what differs, `publish_workspace` under a **new** name |
 | Build **from scratch** | in no workspace, or `sandbox_reset` with the base `snapshot_id` | provision everything, publish |
 
@@ -52,7 +66,7 @@ A rebuild takes minutes to an hour and runs on a throwaway builder, not the thre
 
 When it fails: the stage that broke is marked `failed` with its exit code, `error` names the script, and `output` is the log. The **previous image stays in place** — runs never drop to the base snapshot because a script broke. Fix the script, `publish_workspace` with the new `setup_script`, and run the check again.
 
-Logs are written under `/open-swe/environment/logs/` (`setup.log`, `update.log`) with the scripts beside them, and are captured into the image — so any sandbox booted from an environment can read how its own image was built.
+Logs are written under `/open-swe/environment/logs/` (`setup.log`, `update.log`) with the scripts beside them, and are captured into the image — so any sandbox booted from a workspace's image can read how it was built.
 
 ## Snapshot names
 

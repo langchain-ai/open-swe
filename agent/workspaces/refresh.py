@@ -121,7 +121,7 @@ async def ensure_refresh_cron(slug: str) -> str | None:
             metadata={"kind": REFRESH_TASK, "workspace": slug},
         )
     except Exception:
-        logger.exception("Failed to create refresh cron for workspace %s", slug)
+        logger.exception("Failed to create refresh cron", extra={"workspace": slug})
         return None
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
     if not (isinstance(cron_id, str) and cron_id):
@@ -138,7 +138,11 @@ async def remove_refresh_cron(record: Workspace | None) -> None:
     try:
         await _client().crons.delete(record.refresh_cron_id)
     except Exception:
-        logger.debug("Could not delete refresh cron %s", record.refresh_cron_id, exc_info=True)
+        logger.debug(
+            "Could not delete refresh cron",
+            extra={"cron_id": record.refresh_cron_id, "workspace": record.slug},
+            exc_info=True,
+        )
 
 
 async def _release_builder_sandbox(sandbox_id: str) -> None:
@@ -153,7 +157,9 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
         async with get_async_sandbox_client() as client:
             await client.stop_sandbox(sandbox_id)
     except Exception:
-        logger.warning("Failed to stop builder sandbox %s", sandbox_id, exc_info=True)
+        logger.warning(
+            "Failed to stop builder sandbox", extra={"sandbox_id": sandbox_id}, exc_info=True
+        )
 
 
 async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
@@ -240,7 +246,9 @@ async def maybe_start_update(record: Workspace | None) -> str | None:
     try:
         return await start_refresh_run(record.slug, kind="update")
     except Exception:
-        logger.warning("Could not start workspace update for %s", record.slug, exc_info=True)
+        logger.warning(
+            "Could not start workspace update", extra={"workspace": record.slug}, exc_info=True
+        )
         return None
 
 
@@ -314,7 +322,7 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
         await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
         await WORKSPACES.finish_refresh_step(slug, "capture", "success")
     except Exception as exc:
-        logger.warning("Refresh failed for workspace %s", slug, exc_info=True)
+        logger.warning("Refresh failed", extra={"workspace": slug}, exc_info=True)
         await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=str(exc))
         return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
     finally:
@@ -323,7 +331,10 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
 
     elapsed = int((datetime.now(UTC) - started).total_seconds())
     await WORKSPACES.mark_refresh_settled(slug, "success", log=log)
-    logger.info("Refreshed workspace %s (%s) in %ss", slug, kind, elapsed)
+    logger.info(
+        "Refreshed workspace",
+        extra={"workspace": slug, "refresh_kind": kind, "elapsed_seconds": elapsed},
+    )
     return {"status": "success", "slug": slug, "kind": kind, "seconds": elapsed, "log": log}
 
 
@@ -343,7 +354,7 @@ async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None
             on_completion="delete",
         )
     except Exception:
-        logger.exception("Failed to start refresh run for workspace %s", slug)
+        logger.exception("Failed to start refresh run", extra={"workspace": slug})
         return None
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     if not isinstance(run_id, str):
@@ -414,7 +425,9 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
             timeout=LIVE_LOG_READ_TIMEOUT_SECONDS,
         )
     except Exception:
-        logger.debug("Builder sandbox %s is not readable", sandbox_id, exc_info=True)
+        logger.debug(
+            "Builder sandbox is not readable", extra={"sandbox_id": sandbox_id}, exc_info=True
+        )
         return None
     return (result.output or "").strip() or None
 
@@ -488,7 +501,9 @@ async def task_stop(task_id: str) -> dict[str, Any]:
     try:
         await _client().runs.cancel(None, run_id)
     except Exception:
-        logger.warning("Could not cancel refresh run %s", run_id, exc_info=True)
+        logger.warning(
+            "Could not cancel refresh run", extra={"refresh_run_id": run_id}, exc_info=True
+        )
         return {"error": "could not cancel the refresh run", "task_id": task_id}
     await WORKSPACES.mark_refresh_settled(record.slug, "failed", error="cancelled")
     if record.refresh_sandbox_id:

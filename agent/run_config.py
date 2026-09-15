@@ -105,6 +105,7 @@ class RunConfig(BaseModel):
     source: str | None = None
     task: str | None = None
     environment: str | None = None
+    workspace: str | None = None
     local_project_path: str | None = None
 
     # Actor
@@ -268,3 +269,10 @@ class RunConfig(BaseModel):
     @property
     def is_eval(self) -> bool:
         return self.eval is True or self.reviewer_eval is True
+
+    @property
+    def workspace_slug(self) -> str | None:
+        for value in (self.workspace, self.environment):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None

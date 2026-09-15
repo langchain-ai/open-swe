@@ -1,6 +1,7 @@
 List every workspace with its snapshot state.
 
-The one named ``default`` is what runs boot from; the rest are drafts.
+``default`` is the workspace runs fall back to; the rest are drafts until a
+repo, Slack channel, tag, or user default routes a run to them.
 
 Returns:
     ``{"ok": True, "workspaces": [...]}``.

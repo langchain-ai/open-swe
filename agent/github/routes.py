@@ -1,10 +1,11 @@
 """Github webhook HTTP routes."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
 from agent.schedules import store as schedules
 from agent.webhooks import common
+from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
 router = APIRouter()
 
@@ -21,7 +22,7 @@ async def _launch_issue_automations(payload: dict[str, object], delivery_id: str
 
 @router.post("/webhooks/github")
 async def github_webhook(
-    request: common.Request, background_tasks: common.BackgroundTasks
+    request: common.Request, response: Response, background_tasks: common.BackgroundTasks
 ) -> dict[str, str]:
     """Handle GitHub webhooks for issue and PR events that tag @open-swe."""
     body = await request.body()
@@ -57,6 +58,29 @@ async def github_webhook(
         "owner": webhook_repo.get("owner", {}).get("login", ""),
         "name": webhook_repo.get("name", ""),
     }
+
+    if webhook_repo_config["owner"] and webhook_repo_config["name"]:
+        repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
+        try:
+            routable = await repo_is_routable(
+                webhook_repo_config["owner"], webhook_repo_config["name"]
+            )
+        except WorkspaceLookupError:
+            # Ownership is unknown, so dropping the delivery may drop real work.
+            # GitHub retries a 5xx and nothing else, so answer 503 and let it.
+            common.logger.error(
+                "Workspace lookup failed for a GitHub delivery; asking GitHub to retry",
+                extra={"repository": repository, "github_delivery": delivery_id},
+                exc_info=True,
+            )
+            response.status_code = 503
+            return {"status": "error", "reason": "workspace ownership is temporarily unreadable"}
+        if not routable:
+            common.logger.info(
+                "Ignoring GitHub event for a repository no workspace owns",
+                extra={"repository": repository},
+            )
+            return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

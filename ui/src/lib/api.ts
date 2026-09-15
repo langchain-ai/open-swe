@@ -100,6 +100,7 @@ export interface SessionUser {
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
+  default_workspace: string | null
 }
 
 export interface ModelOption {
@@ -473,6 +474,9 @@ export interface WorkspaceRefreshStep {
 export interface WorkspaceOption {
   slug: string
   name: string
+  repos: Array<string>
+  slack_channel_ids: Array<string>
+  is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
   refresh_kind?: "full" | "update" | null
@@ -857,24 +861,31 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
-  revealWorkspaceMCPHeaders: (name: string) =>
+  getWorkspaceMCPs: (workspace: string) =>
+    request<MCPConnection[]>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps`
+    ),
+  revealWorkspaceMCPHeaders: (workspace: string, name: string) =>
     request<Record<string, string>>(
-      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}/headers/reveal`,
       { method: "POST", cache: "no-store" }
     ),
-  saveWorkspaceMCP: (body: MCPConnectionUpdate) =>
-    request<MCPConnection>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  deleteWorkspaceMCP: (name: string) =>
-    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    }),
-  discoverWorkspaceMCP: (body: MCPConnectionUpdate) =>
+  saveWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
+    request<MCPConnection>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  deleteWorkspaceMCP: (workspace: string, name: string) =>
+    request<void>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}`,
+      { method: "DELETE" }
+    ),
+  discoverWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
     request<{ name: string; description: string }[]>(
-      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
   getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),
@@ -911,7 +922,7 @@ export const api = {
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
   usageLeaderboard: (
-    period: UsageLeaderboardPeriod = "7d",
+    period: UsageLeaderboardPeriod = "30d",
     limit = 10,
     cursor?: string
   ) =>
@@ -927,7 +938,7 @@ export const api = {
       })),
     })),
   prMergeRateByModel: (
-    period: UsageLeaderboardPeriod = "7d",
+    period: UsageLeaderboardPeriod = "30d",
     maturityDays?: number
   ) =>
     request<PRMergeRatePayload>(

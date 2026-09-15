@@ -1,11 +1,13 @@
-"""Named workspaces: a prompt plus the scripts that build and boot their sandboxes.
+"""Workspaces: repos, Slack channels, and team settings, plus the sandbox they boot.
 
-A workspace is a definition, not a frozen image. It holds a prompt appended to
-the agent's system prompt, a ``setup_script`` that provisions a sandbox from the
-base snapshot (clone the repos, install toolchains, warm caches), and an optional
-``update_script`` that freshens what goes stale in an image — a ``git pull``, a
-dependency sync — run against the current snapshot at most hourly, and only while
-the workspace is actually in use.
+A workspace owns one or more repositories (a repo belongs to exactly one
+workspace), zero or more Slack channels, its MCP connections, and its team
+settings. It also carries the former "environment" fields: a prompt appended
+to the agent's system prompt, a ``setup_script`` that provisions a sandbox from
+the base snapshot (clone the repos, install toolchains, warm caches), and an
+optional ``update_script`` that freshens what goes stale in an image — a
+``git pull``, a dependency sync — run against the current snapshot at most
+hourly, and only while the workspace is actually in use.
 
 :mod:`agent.workspaces.refresh` runs both scripts in a throwaway
 sandbox and captures the result, nightly on a cron and on demand. Because the
@@ -14,15 +16,18 @@ outcome — status, timestamps, and a capped log — rides on the record for the
 dashboard to show.
 
 Snapshots are Docker-style: a workspace owns a name (its own, or
-``<prefix>-environment-<slug>`` from ``WORKSPACE_SNAPSHOT_PREFIX``) and each
+``<prefix>-environment-<slug>`` from ``WORKSPACE_SNAPSHOT_PREFIX`` — the
+snapshot name keeps the legacy "environment" form intentionally) and each
 refresh publishes under ``name:latest``, moving the tag to the new content. Runs
 boot from the immutable snapshot id on the record, not from the tag, so a refresh
 mid-run cannot change what a reconnecting sandbox comes back to. The superseded
 snapshot is deleted once the new one is ready, so one workspace costs one image.
 
-A run uses the workspace it selected — from the dashboard picker, or an
-``env:<name>`` tag on the Slack message that opened the thread — and otherwise
-the one named ``default``. Nothing here is required: with no workspace, or one
+Routing for new work picks a workspace in this order, first match wins: the
+existing thread's workspace, a ``workspace:<slug>`` tag on the opening message
+(``env:<slug>`` remains an accepted alias), the repository's owning workspace,
+the Slack channel's bound workspace, the user's default workspace preference,
+then ``default``. Nothing here is required: with no workspace resolved, or one
 whose snapshot is not ready, runs fall back to the configured base snapshot.
 """
 
@@ -31,20 +36,74 @@ import json
 import logging
 import re
 import shlex
+from collections import defaultdict
 from typing import Any, Literal, TypedDict
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, field_validator
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.config import ENV
+from agent.database import postgres
+from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
-from agent.store import TypedStore, now_iso
+from agent.store import delete_value, now_iso, search_all_values
+from agent.workspaces.rows import (
+    WorkspaceRepositoryRow,
+    WorkspaceRow,
+    WorkspaceSlackChannelRow,
+    apply_workspace,
+    to_workspace,
+)
 
 logger = logging.getLogger(__name__)
 
-# Existing deployments hold their records under this namespace, and the move to
-# PostgreSQL imports them from here, so the rename leaves the storage key alone.
-WORKSPACES_NAMESPACE: list[str] = ["environments"]
+WORKSPACES_NAMESPACE: list[str] = ["workspaces"]
 DEFAULT_WORKSPACE_SLUG = "default"
+LEGACY_ENVIRONMENTS_NAMESPACE: list[str] = ["environments"]
+MAX_SLACK_CHANNELS = 50
+# Real Slack channel ids are longer, but the fixed prefix is what a workspace
+# record actually depends on; a looser minimum keeps short test/fixture ids valid.
+_SLACK_CHANNEL_RE = re.compile(r"^[CG][A-Z0-9]+$")
+
+
+def normalize_slack_channel_id(value: str) -> str:
+    channel_id = (value or "").strip().upper()
+    if not _SLACK_CHANNEL_RE.fullmatch(channel_id):
+        raise ValueError("slack channel ids must be Slack channel ids starting with C or G")
+    return channel_id
+
+
+def _validate_slack_channel_ids(value: list[str] | None) -> list[str]:
+    if not value:
+        return []
+    if len(value) > MAX_SLACK_CHANNELS:
+        raise ValueError(f"at most {MAX_SLACK_CHANNELS} Slack channels per workspace")
+    return list(dict.fromkeys(normalize_slack_channel_id(entry) for entry in value))
+
+
+class WorkspaceConflictError(ValueError):
+    """Another workspace already holds the slug or binding this write claims.
+
+    A ``ValueError`` so every caller that already treats a rejected definition
+    as a bad request keeps working; the HTTP layer answers 409 for this one and
+    400 for the rest.
+    """
+
+
+# The unique constraints a workspace write can land on that mean "taken", as
+# opposed to a constraint failure that is a bug and must propagate.
+_CONFLICT_CONSTRAINTS = frozenset(
+    {"workspace_slug_key", "workspace_repository_pkey", "workspace_slack_channel_pkey"}
+)
+
+
+def _violated_constraint(error: IntegrityError) -> str | None:
+    """The constraint ``error`` landed on, as the driver reported it."""
+    return getattr(getattr(error.orig, "__cause__", None), "constraint_name", None)
+
 
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
 RefreshStatus = Literal["never", "refreshing", "success", "failed"]
@@ -114,8 +173,9 @@ _SENSITIVE_CREATE_PARAM_PREFIXES = (
     "token_",
 )
 _SENSITIVE_HEADER_NAMES = frozenset({"authorization", "cookie", "proxy_authorization", "x_api_key"})
-# `env:my-box` anywhere in a message, as a whole word.
-_ENV_TAG_RE = re.compile(r"(?:(?<=\s)|^)env:([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)")
+# `workspace:my-box` (or the legacy `env:my-box` spelling) anywhere in a message,
+# as a whole word.
+_ENV_TAG_RE = re.compile(r"(?:(?<=\s)|^)(?:env|workspace):([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)")
 
 
 def slugify(name: str) -> str:
@@ -139,16 +199,20 @@ def snapshot_name_prefix() -> str:
     prefix = ENV.WORKSPACE_SNAPSHOT_PREFIX.get("").strip()
     if ":" in prefix:
         logger.warning(
-            "WORKSPACE_SNAPSHOT_PREFIX %r contains a colon, which snapshot names "
-            "may not; falling back to the default prefix",
-            prefix,
+            "snapshot prefix contains a colon, which snapshot names may not; "
+            "falling back to the default prefix",
+            extra={"snapshot_prefix": prefix},
         )
         prefix = ""
     return prefix or "openswe"
 
 
 def default_snapshot_name_for(slug: str) -> str:
-    """``<prefix>-environment-<slug>``: the name an environment publishes under."""
+    """``<prefix>-environment-<slug>``: the name a workspace publishes under.
+
+    The ``-environment-`` infix is deliberate: renaming it would orphan every
+    snapshot captured before workspaces existed.
+    """
     return f"{snapshot_name_prefix()}-environment-{slug}"
 
 
@@ -275,7 +339,13 @@ def _validate_repos(value: list[str] | None) -> list[str]:
         return []
     if len(value) > MAX_REPOS:
         raise ValueError(f"at most {MAX_REPOS} repositories per workspace")
-    return list(dict.fromkeys(normalize_repo_full_name(entry) for entry in value))
+    # One ``repository`` row per name however it is capitalized, so `Acme/API`
+    # and `acme/api` are the same entry rather than two that collide on save.
+    deduped: dict[str, str] = {}
+    for entry in value:
+        full_name = normalize_repo_full_name(entry)
+        deduped.setdefault(full_name.lower(), full_name)
+    return list(deduped.values())
 
 
 def _normalize_create_param_name(value: str) -> str:
@@ -338,6 +408,7 @@ class WorkspaceCreate(BaseModel):
     base_snapshot_id: str | None = None
     snapshot_name: str | None = None
     repos: list[str] = Field(default_factory=list)
+    slack_channel_ids: list[str] = Field(default_factory=list)
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -373,6 +444,11 @@ class WorkspaceCreate(BaseModel):
     def _check_repos(cls, v: list[str]) -> list[str]:
         return _validate_repos(v)
 
+    @field_validator("slack_channel_ids")
+    @classmethod
+    def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
+        return _validate_slack_channel_ids(v)
+
     @field_validator("create_params")
     @classmethod
     def _check_create_params(cls, v: dict[str, JsonValue]) -> dict[str, JsonValue]:
@@ -389,6 +465,7 @@ class WorkspaceUpdate(BaseModel):
     base_snapshot_id: str | None = None
     snapshot_name: str | None = None
     repos: list[str] | None = None
+    slack_channel_ids: list[str] | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -418,6 +495,11 @@ class WorkspaceUpdate(BaseModel):
     @classmethod
     def _check_repos(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _validate_repos(v)
+
+    @field_validator("slack_channel_ids")
+    @classmethod
+    def _check_slack_channel_ids(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _validate_slack_channel_ids(v)
 
     @field_validator("create_params")
     @classmethod
@@ -456,6 +538,7 @@ class Workspace(BaseModel):
     update_script: str = ""
     base_snapshot_id: str | None = None
     repos: list[str] = Field(default_factory=list)
+    slack_channel_ids: list[str] = Field(default_factory=list)
     mem_bytes: int | None = None
     vcpus: int | None = None
     fs_capacity_bytes: int | None = None
@@ -494,6 +577,11 @@ class Workspace(BaseModel):
         """Stripped on the way in, so ``if record.setup_script`` is the whole test."""
         return v.strip() if isinstance(v, str) else ("" if v is None else v)
 
+    @field_validator("slack_channel_ids")
+    @classmethod
+    def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
+        return _validate_slack_channel_ids(v)
+
     @classmethod
     def seed(cls, create: WorkspaceCreate, created_by: str) -> Workspace:
         now = now_iso()
@@ -506,6 +594,7 @@ class Workspace(BaseModel):
             base_snapshot_id=create.base_snapshot_id,
             snapshot_name=create.snapshot_name or default_snapshot_name_for(slugify(create.name)),
             repos=create.repos,
+            slack_channel_ids=create.slack_channel_ids,
             mem_bytes=create.mem_bytes,
             vcpus=create.vcpus,
             fs_capacity_bytes=create.fs_capacity_bytes,
@@ -560,7 +649,7 @@ class Workspace(BaseModel):
         try:
             return _validate_create_params(self.create_params)
         except ValueError:
-            logger.warning("Ignoring invalid sandbox create params for workspace %s", self.slug)
+            logger.warning("Ignoring invalid sandbox create params", extra={"workspace": self.slug})
             return {}
 
     def option(self, *, include_log: bool = False) -> dict[str, Any]:
@@ -573,6 +662,9 @@ class Workspace(BaseModel):
         option = {
             "slug": self.slug,
             "name": self.name,
+            "repos": list(self.repos),
+            "slack_channel_ids": list(self.slack_channel_ids),
+            "is_default": self.slug == DEFAULT_WORKSPACE_SLUG,
             "has_snapshot": self.snapshot_status == "ready",
             "refresh_status": self.refresh_status,
             "refresh_kind": self.refresh_kind,
@@ -585,14 +677,199 @@ class Workspace(BaseModel):
         return option
 
 
-class WorkspaceStore(TypedStore[Workspace]):
+class WorkspaceStore:
+    """Workspaces and their bindings, in PostgreSQL.
+
+    A record is one ``workspace`` row plus the ``workspace_repository`` and
+    ``workspace_slack_channel`` rows that route to it. Those two tables key on
+    the bound resource, so the database is what guarantees a repository or a
+    Slack channel has exactly one owner; :meth:`_assert_unique` runs the same
+    check first only to produce a readable message, and a write that races past
+    it lands on the constraint and is translated into the same one.
+    """
+
     def __init__(self) -> None:
-        super().__init__(WORKSPACES_NAMESPACE, Workspace)
+        # Set once :func:`import_store_records` has emptied the LangGraph Store
+        # into these tables. Until then an empty ``workspace`` table may only
+        # mean this process failed to populate it, which
+        # :meth:`routing_is_populated` refuses to read as "nobody owns this".
+        self.import_completed = False
+
+    async def get(self, slug: str) -> Workspace | None:
+        """The workspace stored under ``slug``, or ``None``.
+
+        An unreadable row reads as a missing one, logged at error, the way
+        :meth:`list_all` skips it: a record an older release wrote must not make
+        the workspace unreachable to every caller that resolves one.
+        """
+        async with postgres.session() as session:
+            row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+            if row is None:
+                return None
+            repos = await _bound_repos(session, row.id)
+            channels = await _bound_channels(session, row.id)
+        try:
+            return to_workspace(row, repos, channels)
+        except ValidationError:
+            logger.error(
+                "Unreadable workspace record", extra={"workspace_slug": slug}, exc_info=True
+            )
+            return None
+
+    async def slug_exists(self, slug: str) -> bool:
+        """Whether a workspace is stored under ``slug``, without reading the record.
+
+        An indexed lookup, like the repository and Slack-channel ownership
+        queries: routing checks a tag or a user's default against it, and a
+        workspace an admin just created has to resolve at once.
+        """
+        async with postgres.session() as session:
+            return (
+                await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
+            ) is not None
+
+    async def routing_is_populated(self) -> bool:
+        """Whether an "unowned repository" answer can be trusted.
+
+        The LangGraph Store import is what fills these tables on a deployment
+        that predates them, so until it has succeeded an empty table cannot be
+        told apart from one this process never managed to write.
+        """
+        if self.import_completed:
+            return True
+        async with postgres.session() as session:
+            return (await session.scalar(select(WorkspaceRow.id).limit(1))) is not None
 
     async def list_all(self) -> list[Workspace]:
-        records = await self.search_all()
-        records.sort(key=lambda record: record.name)
+        """Every workspace, skipping a row that fails to validate.
+
+        Mirrors ``TypedStore._parse_all``: one unreadable ``create_params`` or
+        ``refresh_steps`` value — written by an older release, or edited by
+        hand — must not take the whole listing down.
+        """
+        async with postgres.session() as session:
+            rows = list(await session.scalars(select(WorkspaceRow).order_by(WorkspaceRow.name)))
+            repos = await _repos_by_workspace(session)
+            channels = await _channels_by_workspace(session)
+        records: list[Workspace] = []
+        for row in rows:
+            try:
+                records.append(to_workspace(row, repos.get(row.id, []), channels.get(row.id, [])))
+            except ValidationError:
+                logger.error(
+                    "Skipping unreadable workspace record",
+                    extra={"workspace_slug": row.slug},
+                    exc_info=True,
+                )
         return records
+
+    async def put(self, slug: str, record: Workspace) -> Workspace:
+        """Write the row and replace its bindings, in one transaction.
+
+        Returns the stored view rather than the record it was handed: a
+        repository already known under another capitalization keeps the casing
+        its ``repository`` row carries, which is what :meth:`get` reads back.
+        """
+        try:
+            async with postgres.session() as session:
+                row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                if row is None:
+                    row = WorkspaceRow(slug=slug, name=record.name)
+                    session.add(row)
+                apply_workspace(row, record)
+                await session.flush()
+                await _bind_repos(session, row.id, record.repos)
+                await _bind_channels(session, row.id, record.slack_channel_ids)
+                await session.flush()
+                stored_repos = await _bound_repos(session, row.id)
+                stored_channels = await _bound_channels(session, row.id)
+            return record.model_copy(
+                update={"repos": stored_repos, "slack_channel_ids": stored_channels}
+            )
+        except IntegrityError as exc:
+            conflict = await self._conflict(exc, slug, record)
+            if conflict is None:
+                raise
+            raise conflict from exc
+
+    async def _conflict(
+        self, exc: IntegrityError, slug: str, record: Workspace
+    ) -> WorkspaceConflictError | None:
+        """The conflict a failed write should raise, or ``None`` to propagate it.
+
+        A write that races past :meth:`_assert_unique` lands on one of the
+        unique constraints instead, and the transaction it happened in is gone
+        by now — so the owner that beat it is looked up in a new one. Any other
+        constraint is a bug rather than a busy slug or binding.
+        """
+        constraint = _violated_constraint(exc)
+        if constraint not in _CONFLICT_CONSTRAINTS:
+            return None
+        if constraint == "workspace_slug_key":
+            return WorkspaceConflictError(f"workspace {slug!r} already exists")
+        try:
+            await self._assert_bindings_free(record)
+        except WorkspaceConflictError as conflict:
+            return conflict
+        return WorkspaceConflictError(
+            "another workspace claimed one of these bindings; reload and try again"
+        )
+
+    async def delete(self, slug: str) -> None:
+        async with postgres.session() as session:
+            await session.execute(delete(WorkspaceRow).where(WorkspaceRow.slug == slug))
+
+    async def owner_of_repo(self, full_name: str) -> str | None:
+        """The slug of the workspace this repository belongs to, if any."""
+        try:
+            key = normalize_repo_full_name(full_name).lower()
+        except ValueError:
+            return None
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(WorkspaceRow.slug)
+                .join(
+                    WorkspaceRepositoryRow, WorkspaceRepositoryRow.workspace_id == WorkspaceRow.id
+                )
+                .join(Repository, Repository.id == WorkspaceRepositoryRow.repository_id)
+                .where(Repository.key == key)
+            )
+
+    async def owner_of_slack_channel(self, channel_id: str) -> str | None:
+        """The slug of the workspace this Slack channel is bound to, if any."""
+        channel = (channel_id or "").strip().upper()
+        if not channel:
+            return None
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(WorkspaceRow.slug)
+                .join(
+                    WorkspaceSlackChannelRow,
+                    WorkspaceSlackChannelRow.workspace_id == WorkspaceRow.id,
+                )
+                .where(WorkspaceSlackChannelRow.channel_id == channel)
+            )
+
+    async def _assert_unique(self, record: Workspace) -> None:
+        if record.slug != DEFAULT_WORKSPACE_SLUG and not record.repos:
+            raise ValueError("a workspace must list at least one repository")
+        await self._assert_bindings_free(record)
+
+    async def _assert_bindings_free(self, record: Workspace) -> None:
+        """Raise when another workspace already owns one of these bindings."""
+        async with postgres.session() as session:
+            repo_owners = await _repo_owners(session, record.repos, record.slug)
+            channel_owners = await _channel_owners(session, record.slack_channel_ids, record.slug)
+        for repo in record.repos:
+            if owner := repo_owners.get(repo.lower()):
+                raise WorkspaceConflictError(
+                    f"repository {repo.lower()} already belongs to workspace {owner}"
+                )
+        for channel in record.slack_channel_ids:
+            if owner := channel_owners.get(channel):
+                raise WorkspaceConflictError(
+                    f"slack channel {channel} already belongs to workspace {owner}"
+                )
 
     async def save(self, record: Workspace) -> Workspace:
         record.updated_at = now_iso()
@@ -600,15 +877,40 @@ class WorkspaceStore(TypedStore[Workspace]):
 
     async def create(self, create: WorkspaceCreate, created_by: str) -> Workspace:
         record = Workspace.seed(create, created_by)
-        if await self.get(record.slug) is not None:
-            raise ValueError(f"workspace {create.name!r} already exists")
+        await self._assert_unique(record)
+        if await self.slug_exists(record.slug):
+            raise WorkspaceConflictError(f"workspace {create.name!r} already exists")
         return await self.put(record.slug, record)
 
     async def apply_update(self, slug: str, update: WorkspaceUpdate) -> Workspace:
         record = await self.get(slug)
         if record is None:
             raise ValueError(f"no workspace named {slug!r}")
-        return await self.save(_apply(record, update))
+        record = _apply(record, update)
+        await self._assert_unique(record)
+        return await self.save(record)
+
+    async def assert_publishable(
+        self, slug: str, definition: WorkspaceCreate | WorkspaceUpdate
+    ) -> None:
+        """Run the save-time checks now, before an expensive snapshot capture.
+
+        ``publish`` repeats them: minutes of capture pass in between, and
+        another workspace may claim a repository while they do.
+        """
+        await self._assert_unique(await self._publishable_record(slug, definition, "open-swe"))
+
+    async def _publishable_record(
+        self, slug: str, definition: WorkspaceCreate | WorkspaceUpdate, created_by: str
+    ) -> Workspace:
+        if isinstance(definition, WorkspaceCreate):
+            if await self.get(slug) is not None:
+                raise WorkspaceConflictError(f"workspace {definition.name!r} already exists")
+            return Workspace.seed(definition, created_by)
+        existing = await self.get(slug)
+        if existing is None:
+            raise ValueError(f"no workspace named {slug!r}")
+        return _apply(existing, definition)
 
     async def publish(
         self,
@@ -626,15 +928,8 @@ class WorkspaceStore(TypedStore[Workspace]):
         record that carries the new definition but still points at the old image,
         or a new workspace with no image at all. One ``put`` cannot land half.
         """
-        if isinstance(definition, WorkspaceCreate):
-            if await self.get(slug) is not None:
-                raise ValueError(f"workspace {definition.name!r} already exists")
-            record = Workspace.seed(definition, created_by)
-        else:
-            existing = await self.get(slug)
-            if existing is None:
-                raise ValueError(f"no workspace named {slug!r}")
-            record = _apply(existing, definition)
+        record = await self._publishable_record(slug, definition, created_by)
+        await self._assert_unique(record)
         _stamp_captured(
             record,
             snapshot_id=snapshot_id,
@@ -778,6 +1073,140 @@ class WorkspaceStore(TypedStore[Workspace]):
         return await self.save(record)
 
 
+async def _bound_repos(session: AsyncSession, workspace_id: UUID) -> list[str]:
+    return list(
+        await session.scalars(
+            select(Repository.full_name)
+            .join(WorkspaceRepositoryRow, WorkspaceRepositoryRow.repository_id == Repository.id)
+            .where(WorkspaceRepositoryRow.workspace_id == workspace_id)
+            .order_by(Repository.key)
+        )
+    )
+
+
+async def _bound_channels(session: AsyncSession, workspace_id: UUID) -> list[str]:
+    return list(
+        await session.scalars(
+            select(WorkspaceSlackChannelRow.channel_id)
+            .where(WorkspaceSlackChannelRow.workspace_id == workspace_id)
+            .order_by(WorkspaceSlackChannelRow.channel_id)
+        )
+    )
+
+
+async def _repos_by_workspace(session: AsyncSession) -> dict[UUID, list[str]]:
+    """Every workspace's repositories at once, so a listing is a fixed query count."""
+    grouped: dict[UUID, list[str]] = defaultdict(list)
+    rows = await session.execute(
+        select(WorkspaceRepositoryRow.workspace_id, Repository.full_name)
+        .join(Repository, Repository.id == WorkspaceRepositoryRow.repository_id)
+        .order_by(Repository.key)
+    )
+    for workspace_id, full_name in rows:
+        grouped[workspace_id].append(full_name)
+    return grouped
+
+
+async def _channels_by_workspace(session: AsyncSession) -> dict[UUID, list[str]]:
+    grouped: dict[UUID, list[str]] = defaultdict(list)
+    rows = await session.execute(
+        select(WorkspaceSlackChannelRow.workspace_id, WorkspaceSlackChannelRow.channel_id).order_by(
+            WorkspaceSlackChannelRow.channel_id
+        )
+    )
+    for workspace_id, channel_id in rows:
+        grouped[workspace_id].append(channel_id)
+    return grouped
+
+
+async def _bind_repos(session: AsyncSession, workspace_id: UUID, repos: list[str]) -> None:
+    """Make this workspace's ``workspace_repository`` rows exactly ``repos``.
+
+    The binding references a ``repository`` row, and a workspace may name one
+    Open SWE has never seen, so the ones it does not know are inserted first.
+    The ones it already knows are only read: ``Repository.save`` bumps
+    ``last_activity_at``, and editing a workspace is not activity on its
+    repositories. Bindings already in place are left alone too, so ``linked_at``
+    keeps saying when the repository joined.
+    """
+    wanted: set[UUID] = set()
+    known: dict[str, UUID] = {}
+    if repos:
+        rows = await session.execute(
+            select(Repository.key, Repository.id).where(
+                Repository.key.in_([full_name.lower() for full_name in repos])
+            )
+        )
+        known = dict(rows.tuples().all())
+    for full_name in repos:
+        repository_id = known.get(full_name.lower())
+        if repository_id is None:
+            repository_id = (await Repository(full_name=full_name).save(session)).id
+        wanted.add(repository_id)
+    current = set(
+        await session.scalars(
+            select(WorkspaceRepositoryRow.repository_id).where(
+                WorkspaceRepositoryRow.workspace_id == workspace_id
+            )
+        )
+    )
+    if stale := current - wanted:
+        await session.execute(
+            delete(WorkspaceRepositoryRow).where(
+                WorkspaceRepositoryRow.workspace_id == workspace_id,
+                WorkspaceRepositoryRow.repository_id.in_(stale),
+            )
+        )
+    for repository_id in wanted - current:
+        session.add(WorkspaceRepositoryRow(repository_id=repository_id, workspace_id=workspace_id))
+
+
+async def _bind_channels(session: AsyncSession, workspace_id: UUID, channels: list[str]) -> None:
+    wanted = set(channels)
+    current = set(
+        await session.scalars(
+            select(WorkspaceSlackChannelRow.channel_id).where(
+                WorkspaceSlackChannelRow.workspace_id == workspace_id
+            )
+        )
+    )
+    if stale := current - wanted:
+        await session.execute(
+            delete(WorkspaceSlackChannelRow).where(
+                WorkspaceSlackChannelRow.workspace_id == workspace_id,
+                WorkspaceSlackChannelRow.channel_id.in_(stale),
+            )
+        )
+    for channel_id in wanted - current:
+        session.add(WorkspaceSlackChannelRow(channel_id=channel_id, workspace_id=workspace_id))
+
+
+async def _repo_owners(session: AsyncSession, repos: list[str], excluding: str) -> dict[str, str]:
+    """Which workspace owns each of ``repos``, keyed by ``repository.key``."""
+    if not repos:
+        return {}
+    rows = await session.execute(
+        select(Repository.key, WorkspaceRow.slug)
+        .join(WorkspaceRepositoryRow, WorkspaceRepositoryRow.repository_id == Repository.id)
+        .join(WorkspaceRow, WorkspaceRow.id == WorkspaceRepositoryRow.workspace_id)
+        .where(Repository.key.in_([repo.lower() for repo in repos]), WorkspaceRow.slug != excluding)
+    )
+    return dict(rows.tuples().all())
+
+
+async def _channel_owners(
+    session: AsyncSession, channels: list[str], excluding: str
+) -> dict[str, str]:
+    if not channels:
+        return {}
+    rows = await session.execute(
+        select(WorkspaceSlackChannelRow.channel_id, WorkspaceRow.slug)
+        .join(WorkspaceRow, WorkspaceRow.id == WorkspaceSlackChannelRow.workspace_id)
+        .where(WorkspaceSlackChannelRow.channel_id.in_(channels), WorkspaceRow.slug != excluding)
+    )
+    return dict(rows.tuples().all())
+
+
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
     if update.name is not None and slugify(update.name) != record.slug:
@@ -788,6 +1217,8 @@ def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
         record.prompt = update.prompt
     if update.repos is not None:
         record.repos = update.repos
+    if update.slack_channel_ids is not None:
+        record.slack_channel_ids = update.slack_channel_ids
     if update.setup_script is not None:
         record.setup_script = update.setup_script
     if update.update_script is not None:
@@ -825,12 +1256,70 @@ def _stamp_captured(
 WORKSPACES = WorkspaceStore()
 
 
+async def import_store_records() -> int:
+    """Copy the workspaces that still live in the LangGraph Store into PostgreSQL.
+
+    Runs once per startup and returns how many records it copied. A slug that
+    already has a row is left alone, and every record it reads is deleted from
+    the Store once it has been dealt with: that makes this idempotent, keeps a
+    legacy namespace from resurrecting a workspace an admin has since deleted,
+    and means a later release can drop this entirely.
+
+    A record the Store cannot be made sense of, or one whose repositories are
+    claimed by another workspace, stays where it is rather than being dropped
+    on the floor.
+
+    Raising leaves ``WorkspaceStore.import_completed`` unset, which is what
+    keeps :func:`agent.workspaces.routing.repo_is_routable` from reading the
+    empty table it may have left behind as "nobody owns this repository".
+    """
+    imported = 0
+    skipped = 0
+    for namespace in (WORKSPACES_NAMESPACE, LEGACY_ENVIRONMENTS_NAMESPACE):
+        for value in await search_all_values(namespace):
+            slug = value.get("slug")
+            if not (isinstance(slug, str) and slug):
+                continue
+            try:
+                record = Workspace.model_validate(value)
+            except ValidationError:
+                skipped += 1
+                logger.error(
+                    "Skipping an unreadable stored workspace record",
+                    extra={"workspace": slug, "store_namespace": namespace},
+                    exc_info=True,
+                )
+                continue
+            if await WORKSPACES.get(record.slug) is None:
+                try:
+                    await WORKSPACES.put(record.slug, record)
+                except ValueError, IntegrityError:
+                    # One record another workspace has since claimed, or one a
+                    # constraint refuses, must not cost the rest their import.
+                    skipped += 1
+                    logger.error(
+                        "Could not import a stored workspace record",
+                        extra={"workspace": record.slug, "store_namespace": namespace},
+                        exc_info=True,
+                    )
+                    continue
+                imported += 1
+            await delete_value(namespace, record.slug)
+    WORKSPACES.import_completed = True
+    log = logger.error if skipped else logger.info
+    log(
+        "Stored workspace records processed",
+        extra={"imported_workspaces": imported, "skipped_workspaces": skipped},
+    )
+    return imported
+
+
 async def load_default_workspace() -> Workspace | None:
     """Return the workspace named ``default``, or ``None``.
 
     Fail-soft on purpose: this runs while a sandbox is being created, and a
-    store failure must fall back to the base snapshot with no workspace
-    prompt rather than fail the run.
+    store failure must fall back to the base snapshot with no workspace prompt
+    rather than fail the run.
     """
     try:
         return await WORKSPACES.get(DEFAULT_WORKSPACE_SLUG)
@@ -850,10 +1339,13 @@ async def load_workspace(slug: str | None) -> Workspace | None:
     try:
         record = await WORKSPACES.get(slug)
     except Exception:
-        logger.warning("workspace resolution failed for %s", slug, exc_info=True)
+        logger.warning("workspace resolution failed", extra={"workspace": slug}, exc_info=True)
         record = None
     if record is None:
-        logger.info("Workspace %s is not configured; falling back to the default", slug)
+        logger.info(
+            "Workspace is not configured; falling back to the default",
+            extra={"workspace": slug},
+        )
         return await load_default_workspace()
     return record
 
@@ -868,11 +1360,12 @@ async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str
 
 
 def parse_workspace_tag(text: str) -> tuple[str | None, str]:
-    """Split a leading-or-inline ``env:<name>`` tag off a message.
+    """Split a leading-or-inline ``workspace:<name>`` tag off a message.
 
-    Returns ``(slug, text_without_the_tag)``; ``(None, text)`` when there is no
-    tag. The caller decides whether the slug names a real workspace — an
-    unresolvable tag should be left in the text rather than silently dropped.
+    ``env:<name>`` is still accepted as an alias. Returns
+    ``(slug, text_without_the_tag)``; ``(None, text)`` when there is no tag. The
+    caller decides whether the slug names a real workspace — an unresolvable tag
+    should be left in the text rather than silently dropped.
     """
     match = _ENV_TAG_RE.search(text or "")
     if match is None:
@@ -904,7 +1397,11 @@ async def _delete_snapshot(snapshot_id: object) -> None:
         async with get_async_sandbox_client() as client:
             await client.delete_snapshot(snapshot_id)
     except Exception:  # noqa: BLE001
-        logger.warning("failed to delete superseded snapshot %s", snapshot_id, exc_info=True)
+        logger.warning(
+            "failed to delete superseded snapshot",
+            extra={"snapshot_id": snapshot_id},
+            exc_info=True,
+        )
 
 
 async def capture_workspace_snapshot(
@@ -939,7 +1436,7 @@ async def capture_workspace_snapshot(
     try:
         snapshot_id = await capture_sandbox_snapshot(sandbox_id, snapshot_name, timeout=timeout)
     except Exception as exc:
-        logger.warning("snapshot capture failed for workspace %s", slug, exc_info=True)
+        logger.warning("snapshot capture failed", extra={"workspace": slug}, exc_info=True)
         await WORKSPACES.mark_capture_settled(
             slug,
             "ready" if previous_was_ready else "failed",
@@ -976,11 +1473,13 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
             client, sandbox_id, snapshot_name, SNAPSHOT_TAG, timeout=timeout
         )
     logger.info(
-        "Captured snapshot %s as %s:%s from sandbox %s",
-        snapshot.id,
-        snapshot_name,
-        SNAPSHOT_TAG,
-        sandbox_id,
+        "Captured snapshot",
+        extra={
+            "snapshot_id": str(snapshot.id),
+            "snapshot_name": snapshot_name,
+            "snapshot_tag": SNAPSHOT_TAG,
+            "sandbox_id": sandbox_id,
+        },
     )
     return str(snapshot.id)
 

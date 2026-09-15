@@ -21,8 +21,9 @@ Args:
     name: Display name. Also the snapshot name stem, so keep it short and
         hyphenated (``langsmith-monorepo``). Saving under an existing name
         updates that workspace rather than creating a second one. The name
-        ``default`` is the workspace every run boots from; any other name
-        is a draft nobody boots from.
+        ``default`` is the workspace runs fall back to when routing picks no
+        other; any other name is a draft until a repo, Slack channel, tag, or
+        user default routes a run to it.
     prompt: The complete instruction text appended to every run's system
         prompt in this workspace. This is a full replacement — pass the
         whole text, not a delta. Empty string clears it.
@@ -67,5 +68,5 @@ Args:
 
 Returns:
     ``{"ok": True, "workspace": {...}, "created": bool}`` with the new
-    snapshot id on the record, or ``ok: False`` with the capture or
+    snapshot id on the workspace record, or ``ok: False`` with the capture or
     validation error and nothing written.

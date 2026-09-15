@@ -7,7 +7,6 @@ import pytest
 from agent.workspaces import refresh
 from agent.workspaces import store as env_store
 from agent.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate
-from tests.conftest import FakeStore
 
 
 class _Result:
@@ -81,10 +80,9 @@ def test_a_wedged_refresh_does_not_block_forever() -> None:
 # --- refresh ---
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_refresh_runs_the_script_then_captures_and_cleans_up(
-    fake_store: FakeStore,
-) -> None:
+async def test_refresh_runs_the_script_then_captures_and_cleans_up() -> None:
     backend = _backend(_Result("cloning acme/repo\ndone", 0))
     capture = AsyncMock()
     release = AsyncMock()
@@ -93,7 +91,9 @@ async def test_refresh_runs_the_script_then_captures_and_cleans_up(
         patch.object(refresh, "_release_builder_sandbox", release),
         patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+        )
         result = await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
@@ -110,10 +110,9 @@ async def test_refresh_runs_the_script_then_captures_and_cleans_up(
     assert record.refresh_finished_at
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_the_update_script_runs_after_setup_and_gates_the_capture(
-    fake_store: FakeStore,
-) -> None:
+async def test_the_update_script_runs_after_setup_and_gates_the_capture() -> None:
     """A broken update script must be caught here, not by the next hourly update."""
     backend = _backend(_Result("provisioned", 0), _Result("fatal: not a git repository", 1))
     capture = AsyncMock()
@@ -123,7 +122,12 @@ async def test_the_update_script_runs_after_setup_and_gates_the_capture(
         patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
+            WorkspaceCreate(
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+                update_script="git pull",
+            ),
             "ramon",
         )
         result = await refresh.refresh_workspace("base")
@@ -141,8 +145,9 @@ async def test_the_update_script_runs_after_setup_and_gates_the_capture(
     assert "fatal: not a git repository" in record.refresh_log
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_a_failing_script_is_never_captured(fake_store: FakeStore) -> None:
+async def test_a_failing_script_is_never_captured() -> None:
     backend = _backend(_Result("gcc: fatal error", 2))
     capture = AsyncMock()
     with (
@@ -150,7 +155,9 @@ async def test_a_failing_script_is_never_captured(fake_store: FakeStore) -> None
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
         patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+        )
         # A snapshot from an earlier refresh; runs must keep booting from it.
         await WORKSPACES.mark_captured(
             "base",
@@ -169,10 +176,9 @@ async def test_a_failing_script_is_never_captured(fake_store: FakeStore) -> None
     assert record.ready_snapshot_id == "snap-1"
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_a_sandbox_that_never_boots_still_records_the_failure(
-    fake_store: FakeStore,
-) -> None:
+async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
     release = AsyncMock()
     with (
         patch.object(
@@ -182,7 +188,9 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure(
         ),
         patch.object(refresh, "_release_builder_sandbox", release),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+        )
         result = await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
@@ -193,12 +201,14 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure(
     assert record.refresh_error == "no capacity"
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-@pytest.mark.asyncio
-async def test_a_refresh_in_flight_blocks_a_second_one(fake_store: FakeStore) -> None:
+async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
     create = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create):
-        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+        )
         await WORKSPACES.mark_refreshing("base")
         result = await refresh.refresh_workspace("base")
 
@@ -206,30 +216,31 @@ async def test_a_refresh_in_flight_blocks_a_second_one(fake_store: FakeStore) ->
     create.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_refresh_requires_the_langsmith_provider(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_refresh_requires_the_langsmith_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANDBOX_TYPE", "local")
     create = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create):
-        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+        )
         result = await refresh.refresh_workspace("base")
 
     assert result["status"] == "unsupported"
     create.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_the_nightly_sweep_only_visits_scripted_workspaces(
-    fake_store: FakeStore,
-) -> None:
+async def test_the_nightly_sweep_only_visits_scripted_workspaces() -> None:
     refreshed = AsyncMock(return_value={"status": "success"})
     with patch.object(refresh, "refresh_workspace", refreshed):
         await WORKSPACES.create(
-            WorkspaceCreate(name="scripted", setup_script="make setup"), "ramon"
+            WorkspaceCreate(name="scripted", repos=["acme/scripted"], setup_script="make setup"),
+            "ramon",
         )
-        await WORKSPACES.create(WorkspaceCreate(name="bare"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="bare", repos=["acme/bare"]), "ramon")
         await refresh.run_workspace_refresh_tick(None)
 
     assert [call.args[0] for call in refreshed.await_args_list] == ["scripted"]
@@ -238,10 +249,9 @@ async def test_the_nightly_sweep_only_visits_scripted_workspaces(
 # --- update kind + lazy trigger ---
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_update_script(
-    fake_store: FakeStore,
-) -> None:
+async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_update_script() -> None:
     backend = _backend(_Result("Already up to date.", 0))
     create_builder = AsyncMock(return_value=backend)
     capture = AsyncMock()
@@ -251,7 +261,12 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
         patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
+            WorkspaceCreate(
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+                update_script="git pull",
+            ),
             "ramon",
         )
         await WORKSPACES.mark_captured(
@@ -274,12 +289,18 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
     assert record.refresh_kind == "update"
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_an_update_needs_a_snapshot_to_update(fake_store: FakeStore) -> None:
+async def test_an_update_needs_a_snapshot_to_update() -> None:
     create_builder = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create_builder):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
+            WorkspaceCreate(
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+                update_script="git pull",
+            ),
             "ramon",
         )
         result = await refresh.refresh_workspace("base", "update")
@@ -374,20 +395,24 @@ async def test_a_failed_trigger_never_reaches_the_sandbox_creation() -> None:
 # --- cron ---
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_cron_registration_is_idempotent(fake_store: FakeStore) -> None:
+async def test_cron_registration_is_idempotent() -> None:
     client = MagicMock()
     client.crons.create = AsyncMock(return_value={"cron_id": "cron-1"})
     with patch.object(refresh, "_client", return_value=client):
-        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+        )
         assert await refresh.ensure_refresh_cron("base") == "cron-1"
         assert await refresh.ensure_refresh_cron("base") == "cron-1"
 
     client.crons.create.assert_awaited_once()
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_deleting_an_workspace_removes_its_cron(fake_store: FakeStore) -> None:
+async def test_deleting_an_workspace_removes_its_cron() -> None:
     client = MagicMock()
     client.crons.create = AsyncMock(return_value={"cron_id": "cron-1"})
     client.crons.delete = AsyncMock()
@@ -395,15 +420,18 @@ async def test_deleting_an_workspace_removes_its_cron(fake_store: FakeStore) -> 
         patch.object(refresh, "_client", return_value=client),
         patch.object(env_store, "_delete_snapshot", AsyncMock()),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+        )
         await refresh.ensure_refresh_cron("base")
         assert await WORKSPACES.remove("base") is True
 
     client.crons.delete.assert_awaited_once_with("cron-1")
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_a_refresh_records_every_stage_it_reaches(fake_store: FakeStore) -> None:
+async def test_a_refresh_records_every_stage_it_reaches() -> None:
     """A rebuild runs for minutes to an hour; the stage list is how it is followed."""
     backend = _backend(_Result("provisioned", 0), _Result("Already up to date.", 0))
     with (
@@ -412,7 +440,12 @@ async def test_a_refresh_records_every_stage_it_reaches(fake_store: FakeStore) -
         patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
     ):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", setup_script="make setup", update_script="git pull"),
+            WorkspaceCreate(
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+                update_script="git pull",
+            ),
             "ramon",
         )
         await refresh.refresh_workspace("base")
@@ -431,15 +464,18 @@ async def test_a_refresh_records_every_stage_it_reaches(fake_store: FakeStore) -
     assert paths["boot"] is None
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_the_step_that_broke_is_the_one_left_failed(fake_store: FakeStore) -> None:
+async def test_the_step_that_broke_is_the_one_left_failed() -> None:
     backend = _backend(_Result("gcc: fatal error", 2))
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
         patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+        )
         await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
@@ -450,10 +486,9 @@ async def test_the_step_that_broke_is_the_one_left_failed(fake_store: FakeStore)
     ]
 
 
+@pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_the_builder_is_published_while_it_lives_and_cleared_after(
-    fake_store: FakeStore,
-) -> None:
+async def test_the_builder_is_published_while_it_lives_and_cleared_after() -> None:
     """A poll reads the running trace off the builder, so its id must be current."""
     backend = _backend(_Result("provisioned", 0))
     published: list[str | None] = []
@@ -467,7 +502,9 @@ async def test_the_builder_is_published_while_it_lives_and_cleared_after(
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
         patch.object(refresh, "capture_workspace_snapshot", _capture),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="base", setup_script="make setup"), "ramon")
+        await WORKSPACES.create(
+            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+        )
         await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 

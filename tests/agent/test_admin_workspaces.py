@@ -185,6 +185,7 @@ class _Publish:
         self.existing = existing
         self.saved = saved
         self.calls: list[str] = []
+        self.validate = AsyncMock()
         self.capture = AsyncMock(side_effect=self._capture)
         self.publish = AsyncMock(side_effect=self._publish)
         self.discard = AsyncMock()
@@ -225,6 +226,7 @@ class _Publish:
                 return_value=backend,
             ),
             patch("agent.sandboxes.state.unwrap_sandbox_backend", side_effect=lambda b: b),
+            patch.object(env_tools.store.WORKSPACES, "assert_publishable", self.validate),
             patch.object(env_tools.store, "capture_sandbox_snapshot", self.capture),
             patch.object(env_tools.store.WORKSPACES, "publish", self.publish),
             patch.object(env_tools.store, "discard_unreferenced_snapshot", self.discard),
@@ -307,6 +309,23 @@ async def test_a_bad_definition_is_refused_before_the_capture(
 
     assert result["ok"] is False
     seams.capture.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_repository_another_workspace_owns_is_refused_before_the_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ownership and the min-one-repo rule are store rules, so they gate the capture too."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    with _Publish(existing=None, saved=_saved()) as seams:
+        seams.validate.side_effect = ValueError(
+            "repository acme/api already belongs to workspace core"
+        )
+        result = await env_tools.publish_workspace("oss", "prompt", repos=["acme/api"])
+
+    assert result == {"ok": False, "error": "repository acme/api already belongs to workspace core"}
+    seams.capture.assert_not_awaited()
+    seams.publish.assert_not_awaited()
 
 
 @pytest.mark.asyncio

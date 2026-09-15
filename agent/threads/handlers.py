@@ -469,12 +469,20 @@ _CONTINUED_METADATA_KEYS = (
     "resolved_model",
     "resolved_effort",
     "plan_mode",
-    "environment",
     "repo_owner",
     "repo_name",
     "repo_explicitly_none",
     THREAD_SETTINGS_KEY,
 )
+
+
+def _continued_workspace(metadata: Mapping[str, Any]) -> str | None:
+    """The workspace to carry into a private continuation; ``environment`` is the pre-workspace key."""
+    for key in ("workspace", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 async def continue_thread_privately(
@@ -507,6 +515,9 @@ async def continue_thread_privately(
     new_metadata: dict[str, Any] = {
         key: metadata[key] for key in _CONTINUED_METADATA_KEYS if metadata.get(key) is not None
     }
+    workspace = _continued_workspace(metadata)
+    if workspace is not None:
+        new_metadata["workspace"] = workspace
     new_metadata.update(
         {
             "source": _DASHBOARD_SOURCE,

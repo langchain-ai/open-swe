@@ -131,9 +131,12 @@ async function createWorkspace(
   name: string,
   prompt: string,
 ): Promise<string> {
+  // A workspace owns at least one repository and a repository has exactly one
+  // owner, so every test workspace claims one named after itself.
+  const repo = `e2e/${name.toLowerCase().replace(/\s+/g, "-")}`;
   const created = await page.request.post("/dashboard/api/workspaces", {
     headers: SAME_ORIGIN_HEADERS,
-    data: { name, prompt },
+    data: { name, prompt, repos: [repo] },
   });
   expect(created.ok()).toBeTruthy();
   // No snapshot: the prompt applies on its own, and the sandbox falls back to
@@ -232,7 +235,7 @@ test.describe("Workspaces", () => {
           `/dashboard/api/threads/${threadId}?mark_viewed=false`,
         );
         return res.ok()
-          ? ((await res.json()) as { environment?: string | null }).environment
+          ? ((await res.json()) as { workspace?: string | null }).workspace
           : undefined;
       })
       .toBe(ALT_SLUG);

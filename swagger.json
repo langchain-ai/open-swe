@@ -2104,6 +2104,17 @@
             "title": "Default Visibility",
             "type": "string"
           },
+          "default_workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Workspace"
+          },
           "local_tracing_project": {
             "anyOf": [
               {
@@ -2387,6 +2398,13 @@
             "title": "Setup Script",
             "type": "string"
           },
+          "slack_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Slack Channel Ids",
+            "type": "array"
+          },
           "slug": {
             "title": "Slug",
             "type": "string"
@@ -2550,6 +2568,13 @@
             "title": "Setup Script",
             "type": "string"
           },
+          "slack_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Slack Channel Ids",
+            "type": "array"
+          },
           "snapshot_name": {
             "anyOf": [
               {
@@ -2683,6 +2708,20 @@
               }
             ],
             "title": "Setup Script"
+          },
+          "slack_channel_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Channel Ids"
           },
           "snapshot_name": {
             "anyOf": [
@@ -4898,7 +4937,20 @@
     },
     "/dashboard/api/options": {
       "get": {
+        "description": "The models and defaults a composer may offer for ``workspace``.\n\nModel defaults and the Fable flag are per workspace, so a picker that asked\nwithout one would advertise ``default``'s settings wherever the run will\nnot land there.",
         "operationId": "options_dashboard_api_options_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "workspace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4911,6 +4963,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Options",
@@ -7909,6 +7971,18 @@
     "/dashboard/api/team-settings": {
       "get": {
         "operationId": "api_get_team_settings_dashboard_api_team_settings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "workspace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7921,6 +7995,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -7936,6 +8020,18 @@
       },
       "put": {
         "operationId": "api_put_team_settings_dashboard_api_team_settings_put",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "workspace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9864,244 +9960,6 @@
         ]
       }
     },
-    "/dashboard/api/workspace-mcps": {
-      "get": {
-        "operationId": "api_list_workspace_mcps_dashboard_api_workspace_mcps_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MCPConnectionPublic"
-                  },
-                  "title": "Response Api List Workspace Mcps Dashboard Api Workspace Mcps Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Workspace Mcps",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/workspace-mcps/{name}": {
-      "delete": {
-        "operationId": "api_delete_workspace_mcp_dashboard_api_workspace_mcps__name__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Delete Workspace Mcp",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "put": {
-        "operationId": "api_save_workspace_mcp_dashboard_api_workspace_mcps__name__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MCPConnectionUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MCPConnectionPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Save Workspace Mcp",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/workspace-mcps/{name}/discover": {
-      "post": {
-        "operationId": "api_discover_workspace_mcp_dashboard_api_workspace_mcps__name__discover_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/MCPConnectionUpdate"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Update"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MCPToolDescription"
-                  },
-                  "title": "Response Api Discover Workspace Mcp Dashboard Api Workspace Mcps  Name  Discover Post",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Discover Workspace Mcp",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/workspace-mcps/{name}/headers/reveal": {
-      "post": {
-        "operationId": "api_reveal_workspace_mcp_headers_dashboard_api_workspace_mcps__name__headers_reveal_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Reveal Workspace Mcp Headers",
-        "tags": [
-          "dashboard"
-        ]
-      }
-    },
     "/dashboard/api/workspaces": {
       "get": {
         "operationId": "api_list_workspaces_dashboard_api_workspaces_get",
@@ -10402,6 +10260,301 @@
         "tags": [
           "dashboard",
           "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/mcps": {
+      "get": {
+        "operationId": "api_list_workspace_mcps_dashboard_api_workspaces__workspace__mcps_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MCPConnectionPublic"
+                  },
+                  "title": "Response Api List Workspace Mcps Dashboard Api Workspaces  Workspace  Mcps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Workspace Mcps",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/mcps/{name}": {
+      "delete": {
+        "operationId": "api_delete_workspace_mcp_dashboard_api_workspaces__workspace__mcps__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Workspace Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "api_save_workspace_mcp_dashboard_api_workspaces__workspace__mcps__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPConnectionPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Save Workspace Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/mcps/{name}/discover": {
+      "post": {
+        "operationId": "api_discover_workspace_mcp_dashboard_api_workspaces__workspace__mcps__name__discover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MCPConnectionUpdate"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MCPToolDescription"
+                  },
+                  "title": "Response Api Discover Workspace Mcp Dashboard Api Workspaces  Workspace  Mcps  Name  Discover Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Discover Workspace Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/mcps/{name}/headers/reveal": {
+      "post": {
+        "operationId": "api_reveal_workspace_mcp_headers_dashboard_api_workspaces__workspace__mcps__name__headers_reveal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reveal Workspace Mcp Headers",
+        "tags": [
+          "dashboard"
         ]
       }
     },

@@ -53,6 +53,20 @@ Instance-level configuration stays in the environment: the GitHub App and its in
 Slack app, model provider keys, sandbox provider and sandbox credentials, `CONFIGURED_ADMINS`, the
 sign-in allowlist, and the base snapshot fallback.
 
+### Storage, run context, and API
+
+Workspaces, and the repository and Slack-channel bindings that route to them, live in PostgreSQL,
+not the LangGraph Store: a `workspace` table (one row per workspace, slug unique) plus
+`workspace_repository` and `workspace_slack_channel`, which key on the bound resource — the
+`workspace_repository` primary key is `repository_id`, referencing the `repository` table the
+pull-request work added — rather than on the workspace, so the database itself enforces that a
+repository or a Slack channel belongs to at most one workspace, instead of the application
+re-checking it on every save. Settings and MCP connections stay exactly where this proposal put
+them: in the LangGraph Store, keyed by workspace slug. `Workspace`, `WorkspaceCreate`, and
+`WorkspaceUpdate` remain the domain and API shape that the dashboard, the agent tools, and routing
+read and write; the tables are an implementation detail behind `WorkspaceStore`, swappable again
+without touching a caller.
+
 ### Routing
 
 Every thread records its workspace at creation and never changes it. Resolution for new work, in
@@ -90,6 +104,14 @@ settings and MCP connections become the `default` workspace's. Existing threads 
 workspace read as `default`. The `environment` key in thread metadata and run configuration is
 read as an alias for `workspace` so in-flight threads keep working.
 
+Environment records that predate PostgreSQL storage still live in the LangGraph Store, under the
+`["workspaces"]` namespace and the legacy `["environments"]` namespace before that. At startup,
+right after migrations run, `import_store_records()` reads both namespaces once, writes any slug
+that has no PostgreSQL row yet, and deletes the Store record once it has been dealt with — so this
+runs exactly once per record, resurrects nothing an admin has since deleted, and a later release
+can drop the whole path. A Store outage at that moment is logged and simply retried on the next
+boot; nothing blocks startup on it.
+
 ### Non-goals
 
 - Per-workspace roles or membership. Everyone sees everything in this version.
@@ -126,11 +148,41 @@ workspace they belong to.
 ## Unresolved questions
 
 - Should memory become per workspace, per user and workspace, or stay per user?
-- Repository ownership keys by `owner/name` today; keying by GitHub repository id would survive
-  renames and transfers. Worth doing before public repositories rely on it?
 - Which settings should inherit from `default` when that lands, and which must not, such as MCP
   connections?
 - Confirm the follow-up scope for public workspaces listed under non-goals.
+
+Repository ownership itself is resolved: `workspace_repository` keys on `repository.id`, so a
+workspace owns a specific repository row rather than a name.
+
+## Follow-ups
+
+Known gaps this proposal leaves open, so they survive outside the pull requests that built it.
+
+- **A renamed or transferred repository keeps its old binding.** An inbound webhook is matched to a
+  `repository` row by `repository.key` (lowercased `owner/name`), and nothing updates an existing
+  row's name, so the first event for the new name inserts a second row while the workspace binding
+  stays on the old one. The practical remedy today is to re-save the workspace's repository list
+  with the new name, which rebinds it; under
+  `OPEN_SWE_UNASSIGNED_REPO_WORKSPACE=ignore` the deliveries in between are answered 200 ignored
+  and never retried. A reconciliation job that follows GitHub's `repository.renamed` event would
+  close it.
+- **A corrupt workspace row is skipped rather than repaired.** A record an older release wrote that
+  no longer validates is left out of the listing and reads as missing, logged at error. Nothing
+  reports it to an admin, and there is no way to fix it from the dashboard.
+- **Concurrent edits to one workspace overwrite each other.** `apply_update` reads a record, applies
+  the patch, and writes the whole row back, so the last save wins; two admins editing the same
+  workspace need optimistic concurrency on `updated_at` to notice.
+- **The public-workspace lockdown.** Repository-scoped tokens, a per-workspace MCP allowlist for
+  externally triggered runs, and public-safe prompts and outputs are what a genuinely public
+  workspace needs beyond partitioning. That is the next proposal, and it depends on this one.
+- **The Linear default repository reads the default workspace.** A Linear issue with no repository
+  in it falls back to `default`'s configured repository rather than the resolved workspace's, unlike
+  the Slack path, which scopes a defaulted repository to the workspace that won.
+- **Unfinished dashboard pieces.** `groupSidebarThreadsByWorkspace` has no caller: the sidebar is
+  flat until per-workspace grouping is designed. The review page's guidelines and toggles are
+  per workspace, but the repository list above them is still every installed repository grouped by
+  GitHub owner, which does not say which workspace each one belongs to.
 
 ## Resolution
 
