@@ -33,20 +33,17 @@ async def test_manual_offload_preserves_history_and_hides_summary_stream(tmp_pat
         )
     ]
     assert not [data for mode, data in chunks if mode == "messages"]
-    statuses = [data for mode, data in chunks if mode == "custom"]
-    assert [event["status"] for event in statuses] == ["started", "completed"]
-    assert statuses[-1]["trigger"] == "manual"
+    events = [data for mode, data in chunks if mode == "custom"]
+    assert [event["status"] for event in events] == ["started", "completed", "completed"]
+    assert events[-1]["trigger"] == "manual"
     state = await graph.aget_state(config)
     assert state.values["messages"] == messages
-    event = state.values["_summarization_event"]
-    assert event["cutoff_index"] == 2
-    assert "private summary" in event["summary_message"].content
-    assert "deployment decision" in (tmp_path / event["file_path"].lstrip("/")).read_text()
-    assert state.values["conversation_offloading"]["status"] == "completed"
+    assert "deployment decision" in (tmp_path / events[-2]["file_path"].lstrip("/")).read_text()
+    assert not any(key.startswith("conversation_offloading") for key in state.values)
 
     chunks = [chunk async for chunk in graph.astream({}, config, stream_mode="custom")]
-    assert chunks[-1]["status"] == "skipped"
-    assert (await graph.aget_state(config)).values["_summarization_event"] == event
+    assert [chunk["status"] for chunk in chunks] == ["started", "completed", "completed"]
+    assert (await graph.aget_state(config)).values["messages"] == messages
 
     normal = ConversationOffloadingMiddleware(
         model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
@@ -85,13 +82,13 @@ async def test_automatic_completion_precedes_handler_and_suppresses_tokens(
     if not suppress:
         middleware.model.tags = [tag for tag in (middleware.model.tags or []) if tag != "nostream"]
     events = []
-    original_status = middleware._status
+    original_emit = middleware._emit
 
-    def status(value, **details):
-        events.append(value)
-        return original_status(value, **details)
+    def emit(status, **details):
+        events.append(status)
+        return original_emit(status, **details)
 
-    monkeypatch.setattr(middleware, "_status", status)
+    monkeypatch.setattr(middleware, "_emit", emit)
 
     async def handler(request: ModelRequest) -> ModelResponse:
         assert events == ["started", "completed"]
@@ -123,10 +120,9 @@ async def test_automatic_completion_precedes_handler_and_suppresses_tokens(
     ]
     streamed = "".join(str(data[0].content) for mode, data in chunks if mode == "messages")
     assert ("PRIVATE SUMMARY" in streamed) is not suppress
-    assert events == ["started", "completed"]
-    assert (await graph.aget_state(config)).values["conversation_offloading"][
-        "status"
-    ] == "completed"
+    assert events == ["started", "completed", "completed"]
+    custom = [data for mode, data in chunks if mode == "custom"]
+    assert custom and custom[-1]["status"] == "completed"
 
 
 async def test_manual_before_model_runs_after_prepare(tmp_path, monkeypatch):
@@ -141,14 +137,13 @@ async def test_manual_before_model_runs_after_prepare(tmp_path, monkeypatch):
     middleware = ConversationOffloadingMiddleware(
         model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True), manual=True
     )
-    original_status = middleware._status
+    original_emit = middleware._emit
 
-    def status(value, **details):
+    def emit(status, **details):
         assert prepared == [True]
-        return original_status(value, **details)
+        return original_emit(status, **details)
 
-    monkeypatch.setattr(middleware, "_status", status)
+    monkeypatch.setattr(middleware, "_emit", emit)
     graph = create_agent(model=model, middleware=[middleware, Prepare()])
     state = await graph.ainvoke({"messages": [HumanMessage(content="hello")]})
     assert state["run_prepared"] is True
-    assert state["conversation_offloading"]["status"] == "skipped"

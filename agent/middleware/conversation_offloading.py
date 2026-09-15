@@ -2,11 +2,10 @@
 
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Any, NotRequired
+from typing import Any
 
 from deepagents.middleware.summarization import (
     SummarizationMiddleware,
-    SummarizationState,
     compute_summarization_defaults,
 )
 from langchain.agents.middleware.types import (
@@ -23,13 +22,7 @@ from langgraph.runtime import Runtime
 _manual = ContextVar("manual_offloading", default=False)
 
 
-class OffloadingState(SummarizationState):
-    conversation_offloading: NotRequired[dict[str, Any]]
-
-
 class ConversationOffloadingMiddleware(SummarizationMiddleware):
-    state_schema = OffloadingState
-
     @property
     def name(self) -> str:
         return "SummarizationMiddleware"
@@ -43,14 +36,15 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
         )
         self.manual = manual
 
-    def _status(self, status: str, **details: Any) -> dict[str, Any]:
-        payload = {
-            "status": status,
-            "trigger": "manual" if _manual.get() else "automatic",
-            **details,
-        }
-        get_stream_writer()({"type": "conversation_offloading", **payload})
-        return payload
+    def _emit(self, status: str, **details: Any) -> None:
+        get_stream_writer()(
+            {
+                "type": "conversation_offloading",
+                "status": status,
+                "trigger": "manual" if _manual.get() else "automatic",
+                **details,
+            }
+        )
 
     def _should_summarize(self, messages: list[AnyMessage], total_tokens: int) -> bool:
         return _manual.get() or super()._should_summarize(messages, total_tokens)
@@ -62,18 +56,18 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
         return cutoff
 
     async def _acreate_summary(self, messages_to_summarize: list[AnyMessage]) -> str:
-        self._status("started")
+        self._emit("started")
         try:
             return await super()._acreate_summary(messages_to_summarize)
         except Exception:
-            self._status("failed")
+            self._emit("failed")
             raise
 
     def _build_new_messages_with_path(
         self, summary: str, file_path: str | None
     ) -> list[AnyMessage]:
         messages = super()._build_new_messages_with_path(summary, file_path)
-        self._status("completed", file_path=file_path)
+        self._emit("completed", file_path=file_path)
         return messages
 
     async def awrap_model_call(
@@ -84,13 +78,8 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
         response = await super().awrap_model_call(request, handler)
         if isinstance(response, ExtendedModelResponse) and response.command:
             update = response.command.update
-            if isinstance(update, dict) and (event := update.get("_summarization_event")):
-                update["conversation_offloading"] = {
-                    "status": "completed",
-                    "trigger": "manual" if _manual.get() else "automatic",
-                    "cutoff_index": event["cutoff_index"],
-                    "file_path": event["file_path"],
-                }
+            if isinstance(update, dict) and update.get("_summarization_event"):
+                self._emit("completed")
         return response
 
     @hook_config(can_jump_to=["end"])
@@ -103,7 +92,7 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
 
         token = _manual.set(True)
         try:
-            response = await self.awrap_model_call(
+            await self.awrap_model_call(
                 ModelRequest(
                     model=self.model,
                     messages=state.get("messages", []),
@@ -113,13 +102,6 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
                 ),
                 finish,
             )
-            update = (
-                response.command.update
-                if isinstance(response, ExtendedModelResponse) and response.command
-                else None
-            )
-            if not isinstance(update, dict):
-                update = {"conversation_offloading": self._status("skipped")}
-            return {**update, "jump_to": "end"}
+            return {"jump_to": "end"}
         finally:
             _manual.reset(token)
