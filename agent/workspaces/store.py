@@ -675,11 +675,25 @@ class WorkspaceStore:
             )
 
     async def list_all(self) -> list[Workspace]:
+        """Every workspace, skipping a row that fails to validate.
+
+        Mirrors ``TypedStore._parse_all``: one unreadable ``create_params`` or
+        ``refresh_steps`` value — written by an older release, or edited by
+        hand — must not take the whole listing down.
+        """
         async with postgres.session() as session:
             rows = list(await session.scalars(select(WorkspaceRow).order_by(WorkspaceRow.name)))
             repos = await _repos_by_workspace(session)
             channels = await _channels_by_workspace(session)
-        return [to_workspace(row, repos.get(row.id, []), channels.get(row.id, [])) for row in rows]
+        records: list[Workspace] = []
+        for row in rows:
+            try:
+                records.append(to_workspace(row, repos.get(row.id, []), channels.get(row.id, [])))
+            except ValidationError:
+                logger.warning(
+                    "Skipping unreadable workspace record", extra={"workspace_slug": row.slug}
+                )
+        return records
 
     async def put(self, slug: str, record: Workspace) -> Workspace:
         """Write the row and replace its bindings, in one transaction."""

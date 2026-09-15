@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import text
 
 from agent.database import postgres
 from agent.github.repositories import Repository
@@ -682,6 +683,27 @@ async def test_deleting_an_imported_workspace_does_not_resurrect_it(
     assert await import_store_records() == 0
     assert await WORKSPACES.list_all() == []
     assert await WORKSPACES.get("oss") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_list_all_skips_a_row_that_fails_to_validate() -> None:
+    """A hand-edited or pre-model row must not take the whole listing down.
+
+    ``refresh_steps`` is ``jsonb`` with no schema of its own; a step missing
+    the required ``label`` field fails ``RefreshStep`` validation the same way
+    an older release's stray write would.
+    """
+    await WORKSPACES.create(WorkspaceCreate(name="Healthy", repos=["acme/healthy"]), "ramon")
+    await WORKSPACES.create(WorkspaceCreate(name="Corrupt", repos=["acme/corrupt"]), "ramon")
+    async with postgres.session() as session:
+        await session.execute(
+            text(
+                "UPDATE workspace SET refresh_steps = '[{\"bogus\": 1}]'::jsonb WHERE slug = :slug"
+            ),
+            {"slug": "corrupt"},
+        )
+
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["healthy"]
 
 
 # --- rows ---
