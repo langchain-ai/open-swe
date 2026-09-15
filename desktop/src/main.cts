@@ -614,6 +614,37 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return backendSupervisor.credentialStatus(modelId);
   });
+  ipcMain.handle("desktop:open-local-trace", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    try {
+      if (!backendUrl || typeof threadId !== "string" || !threadId)
+        throw new Error("The local trace is unavailable.");
+      const response = await backendFetch(
+        new URL(
+          `/dashboard/api/me/local-trace-url/${encodeURIComponent(threadId)}`,
+          backendUrl,
+        ).toString(),
+      );
+      if (!response.ok) throw new Error("Could not load the local trace.");
+      const payload = await response.json();
+      if (typeof payload?.trace_url !== "string" || !payload.trace_url)
+        throw new Error("No trace is available for this thread yet.");
+      const url = new URL(payload.trace_url);
+      if (url.protocol !== "http:" && url.protocol !== "https:")
+        throw new Error("The trace URL must use HTTP or HTTPS.");
+      await shell.openExternal(url.href);
+      return true;
+    } catch (error) {
+      await dialog.showMessageBox({
+        type: "error",
+        title: "Open trace",
+        message: "Unable to open trace",
+        detail: error instanceof Error ? error.message : "Please try again.",
+      });
+      return false;
+    }
+  });
+
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
     if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");

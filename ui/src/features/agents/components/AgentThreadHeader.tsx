@@ -208,6 +208,7 @@ export function AgentThreadHeader({
   const menuItems = (
     <ThreadMenuItems
       thread={thread ?? null}
+      localThread={localThread}
       pinned={pinned}
       archived={archived}
       isDeleting={isDeleting}
