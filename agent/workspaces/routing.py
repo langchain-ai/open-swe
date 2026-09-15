@@ -5,9 +5,9 @@ Resolution order, first match wins: the thread's recorded workspace, a
 Slack channel's owner, the user's default, then ``default``. The order is the
 one OEP-0003 specifies; callers never guess on their own.
 
-A store failure is not an answer: "nothing owns this repository" and "we could
-not find out" lead to opposite decisions, so the lookups here never report an
-unreadable workspace list as an empty one. They raise
+A storage failure is not an answer: "nothing owns this repository" and "we
+could not find out" lead to opposite decisions, so the lookups here never
+report an unreadable binding as a missing one. They raise
 :class:`WorkspaceLookupError` internally, and this module decides per entry
 point who sees it. :func:`repo_is_routable` propagates, because the GitHub
 webhook route can answer 503 and have the delivery retried; a false answer
@@ -36,7 +36,7 @@ ResolvedBy = Literal["thread", "tag", "repo", "channel", "user_default", "instan
 
 
 class WorkspaceLookupError(RuntimeError):
-    """The workspace list could not be read, so ownership is unknown."""
+    """Workspaces could not be read, so ownership is unknown."""
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ def invalidate_routing_cache() -> None:
 
 
 async def _all_workspaces() -> list[Workspace]:
-    """Every workspace, cached briefly: webhooks call this on every delivery."""
+    """Every workspace, cached briefly: a tag or a default is checked against it."""
     try:
         return await ttl_cache.cached(
             WORKSPACE_LIST_CACHE_KEY, WORKSPACE_LIST_CACHE_TTL_SECONDS, WORKSPACES.list_all
@@ -64,25 +64,23 @@ async def _slug_exists(slug: str) -> bool:
 
 
 async def _repo_owner(owner: str, name: str) -> str | None:
-    """The workspace listing this repository; raises when the list is unreadable."""
-    wanted = f"{owner}/{name}".strip().lower()
-    if wanted == "/":
-        return None
-    for record in await _all_workspaces():
-        if any(repo.lower() == wanted for repo in record.repos):
-            return record.slug
-    return None
+    """The workspace owning this repository; raises when ownership is unreadable.
+
+    An indexed lookup rather than a scan of the cached list: the binding is a
+    row keyed on the repository, and a webhook only ever asks about one.
+    """
+    try:
+        return await WORKSPACES.owner_of_repo(f"{owner}/{name}")
+    except Exception as exc:
+        raise WorkspaceLookupError("workspace repository lookup failed") from exc
 
 
 async def _channel_owner(channel_id: str) -> str | None:
     """The workspace this Slack channel is bound to; raises when unreadable."""
-    wanted = (channel_id or "").strip().upper()
-    if not wanted:
-        return None
-    for record in await _all_workspaces():
-        if wanted in record.slack_channel_ids:
-            return record.slug
-    return None
+    try:
+        return await WORKSPACES.owner_of_slack_channel(channel_id)
+    except Exception as exc:
+        raise WorkspaceLookupError("workspace Slack channel lookup failed") from exc
 
 
 async def workspace_for_repo(owner: str, name: str) -> str | None:
@@ -107,7 +105,7 @@ async def workspace_for_repo(owner: str, name: str) -> str | None:
 async def workspace_for_slack_channel(channel_id: str) -> str | None:
     """Which workspace this Slack channel is bound to, if any.
 
-    Fails soft like :func:`workspace_for_repo`: an unreadable list reads as an
+    Fails soft like :func:`workspace_for_repo`: a failed lookup reads as an
     unbound channel.
     """
     try:

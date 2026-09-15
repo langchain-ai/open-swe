@@ -36,15 +36,29 @@ import json
 import logging
 import re
 import shlex
+from collections import defaultdict
 from typing import Any, Literal, TypedDict
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.config import ENV
+from agent.database import postgres
+from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
-from agent.store import TypedStore, delete_value, now_iso, search_all_values
+from agent.store import now_iso
 from agent.utils import ttl_cache
 from agent.workspaces.cache import WORKSPACE_LIST_CACHE_KEY
+from agent.workspaces.rows import (
+    WorkspaceRepositoryRow,
+    WorkspaceRow,
+    WorkspaceSlackChannelRow,
+    apply_workspace,
+    to_workspace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -638,69 +652,105 @@ class Workspace(BaseModel):
         return option
 
 
-class WorkspaceStore(TypedStore[Workspace]):
-    def __init__(self) -> None:
-        super().__init__(WORKSPACES_NAMESPACE, Workspace)
+class WorkspaceStore:
+    """Workspaces and their bindings, in PostgreSQL.
+
+    A record is one ``workspace`` row plus the ``workspace_repository`` and
+    ``workspace_slack_channel`` rows that route to it. Those two tables key on
+    the bound resource, so the database is what guarantees a repository or a
+    Slack channel has exactly one owner; :meth:`_assert_unique` runs the same
+    check first only to produce a readable message, and a write that races past
+    it lands on the constraint and is translated into the same one.
+    """
+
+    async def get(self, slug: str) -> Workspace | None:
+        async with postgres.session() as session:
+            row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+            if row is None:
+                return None
+            return to_workspace(
+                row,
+                await _bound_repos(session, row.id),
+                await _bound_channels(session, row.id),
+            )
 
     async def list_all(self) -> list[Workspace]:
-        await self._migrate_legacy()
-        records = await self.search_all()
-        records.sort(key=lambda record: record.name)
-        return records
+        async with postgres.session() as session:
+            rows = list(await session.scalars(select(WorkspaceRow).order_by(WorkspaceRow.name)))
+            repos = await _repos_by_workspace(session)
+            channels = await _channels_by_workspace(session)
+        return [to_workspace(row, repos.get(row.id, []), channels.get(row.id, [])) for row in rows]
 
-    async def get(self, key: str) -> Workspace | None:
-        record = await super().get(key)
-        if record is None:
-            await self._migrate_legacy()
-            record = await super().get(key)
+    async def put(self, slug: str, record: Workspace) -> Workspace:
+        """Write the row and replace its bindings, in one transaction."""
+        try:
+            async with postgres.session() as session:
+                row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                if row is None:
+                    row = WorkspaceRow(slug=slug, name=record.name)
+                    session.add(row)
+                apply_workspace(row, record)
+                await session.flush()
+                await _bind_repos(session, row.id, record.repos)
+                await _bind_channels(session, row.id, record.slack_channel_ids)
+                await session.flush()
+        except IntegrityError:
+            # The transaction is gone, so the owner is looked up in a new one.
+            await self._assert_bindings_free(record)
+            raise
         return record
 
-    async def _migrate_legacy(self) -> None:
-        """Copy pre-workspace environment records forward, then delete them.
+    async def delete(self, slug: str) -> None:
+        async with postgres.session() as session:
+            await session.execute(delete(WorkspaceRow).where(WorkspaceRow.slug == slug))
 
-        Deleting each one as it lands makes this self-cleaning and idempotent:
-        there is nothing left to migrate after the first run, so the legacy
-        namespace cannot resurrect a workspace an admin has since deleted, and
-        the double lookup does not become permanent.
-        """
-        legacy = await search_all_values(LEGACY_ENVIRONMENTS_NAMESPACE)
-        if not legacy:
-            return
-        existing = {record.slug for record in await self.search_all()}
-        migrated = False
-        for value in legacy:
-            slug = value.get("slug")
-            if not (isinstance(slug, str) and slug):
-                continue
-            try:
-                record = Workspace.model_validate(value)
-            except ValidationError:
-                logger.warning("skipping unreadable legacy environment", extra={"slug": slug})
-                continue
-            if record.slug not in existing:
-                await self.put(record.slug, record)
-                migrated = True
-            await delete_value(LEGACY_ENVIRONMENTS_NAMESPACE, record.slug)
-        if migrated:
-            ttl_cache.invalidate(WORKSPACE_LIST_CACHE_KEY)
+    async def owner_of_repo(self, full_name: str) -> str | None:
+        """The slug of the workspace this repository belongs to, if any."""
+        try:
+            key = normalize_repo_full_name(full_name).lower()
+        except ValueError:
+            return None
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(WorkspaceRow.slug)
+                .join(
+                    WorkspaceRepositoryRow, WorkspaceRepositoryRow.workspace_id == WorkspaceRow.id
+                )
+                .join(Repository, Repository.id == WorkspaceRepositoryRow.repository_id)
+                .where(Repository.key == key)
+            )
+
+    async def owner_of_slack_channel(self, channel_id: str) -> str | None:
+        """The slug of the workspace this Slack channel is bound to, if any."""
+        channel = (channel_id or "").strip().upper()
+        if not channel:
+            return None
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(WorkspaceRow.slug)
+                .join(
+                    WorkspaceSlackChannelRow,
+                    WorkspaceSlackChannelRow.workspace_id == WorkspaceRow.id,
+                )
+                .where(WorkspaceSlackChannelRow.channel_id == channel)
+            )
 
     async def _assert_unique(self, record: Workspace) -> None:
         if record.slug != DEFAULT_WORKSPACE_SLUG and not record.repos:
             raise ValueError("a workspace must list at least one repository")
-        for other in await self.list_all():
-            if other.slug == record.slug:
-                continue
-            theirs = {repo.lower() for repo in other.repos}
-            for repo in record.repos:
-                if repo.lower() in theirs:
-                    raise ValueError(
-                        f"repository {repo.lower()} already belongs to workspace {other.slug}"
-                    )
-            for channel in record.slack_channel_ids:
-                if channel in other.slack_channel_ids:
-                    raise ValueError(
-                        f"slack channel {channel} already belongs to workspace {other.slug}"
-                    )
+        await self._assert_bindings_free(record)
+
+    async def _assert_bindings_free(self, record: Workspace) -> None:
+        """Raise when another workspace already owns one of these bindings."""
+        async with postgres.session() as session:
+            repo_owners = await _repo_owners(session, record.repos, record.slug)
+            channel_owners = await _channel_owners(session, record.slack_channel_ids, record.slug)
+        for repo in record.repos:
+            if owner := repo_owners.get(repo.lower()):
+                raise ValueError(f"repository {repo.lower()} already belongs to workspace {owner}")
+        for channel in record.slack_channel_ids:
+            if owner := channel_owners.get(channel):
+                raise ValueError(f"slack channel {channel} already belongs to workspace {owner}")
 
     async def save(self, record: Workspace) -> Workspace:
         record.updated_at = now_iso()
@@ -907,6 +957,128 @@ class WorkspaceStore(TypedStore[Workspace]):
             for step in record.refresh_steps
         ]
         return await self.save(record)
+
+
+async def _bound_repos(session: AsyncSession, workspace_id: UUID) -> list[str]:
+    return list(
+        await session.scalars(
+            select(Repository.full_name)
+            .join(WorkspaceRepositoryRow, WorkspaceRepositoryRow.repository_id == Repository.id)
+            .where(WorkspaceRepositoryRow.workspace_id == workspace_id)
+            .order_by(Repository.key)
+        )
+    )
+
+
+async def _bound_channels(session: AsyncSession, workspace_id: UUID) -> list[str]:
+    return list(
+        await session.scalars(
+            select(WorkspaceSlackChannelRow.channel_id)
+            .where(WorkspaceSlackChannelRow.workspace_id == workspace_id)
+            .order_by(WorkspaceSlackChannelRow.channel_id)
+        )
+    )
+
+
+async def _repos_by_workspace(session: AsyncSession) -> dict[UUID, list[str]]:
+    """Every workspace's repositories at once, so a listing is a fixed query count."""
+    grouped: dict[UUID, list[str]] = defaultdict(list)
+    rows = await session.execute(
+        select(WorkspaceRepositoryRow.workspace_id, Repository.full_name)
+        .join(Repository, Repository.id == WorkspaceRepositoryRow.repository_id)
+        .order_by(Repository.key)
+    )
+    for workspace_id, full_name in rows:
+        grouped[workspace_id].append(full_name)
+    return grouped
+
+
+async def _channels_by_workspace(session: AsyncSession) -> dict[UUID, list[str]]:
+    grouped: dict[UUID, list[str]] = defaultdict(list)
+    rows = await session.execute(
+        select(WorkspaceSlackChannelRow.workspace_id, WorkspaceSlackChannelRow.channel_id).order_by(
+            WorkspaceSlackChannelRow.channel_id
+        )
+    )
+    for workspace_id, channel_id in rows:
+        grouped[workspace_id].append(channel_id)
+    return grouped
+
+
+async def _bind_repos(session: AsyncSession, workspace_id: UUID, repos: list[str]) -> None:
+    """Make this workspace's ``workspace_repository`` rows exactly ``repos``.
+
+    Each repository is upserted first, because the binding references the
+    ``repository`` row and a workspace may name one Open SWE has never seen.
+    Bindings that are already in place are left alone, so ``linked_at`` keeps
+    saying when the repository joined.
+    """
+    wanted: set[UUID] = set()
+    for full_name in repos:
+        stored = await Repository(full_name=full_name).save(session)
+        wanted.add(stored.id)
+    current = set(
+        await session.scalars(
+            select(WorkspaceRepositoryRow.repository_id).where(
+                WorkspaceRepositoryRow.workspace_id == workspace_id
+            )
+        )
+    )
+    if stale := current - wanted:
+        await session.execute(
+            delete(WorkspaceRepositoryRow).where(
+                WorkspaceRepositoryRow.workspace_id == workspace_id,
+                WorkspaceRepositoryRow.repository_id.in_(stale),
+            )
+        )
+    for repository_id in wanted - current:
+        session.add(WorkspaceRepositoryRow(repository_id=repository_id, workspace_id=workspace_id))
+
+
+async def _bind_channels(session: AsyncSession, workspace_id: UUID, channels: list[str]) -> None:
+    wanted = set(channels)
+    current = set(
+        await session.scalars(
+            select(WorkspaceSlackChannelRow.channel_id).where(
+                WorkspaceSlackChannelRow.workspace_id == workspace_id
+            )
+        )
+    )
+    if stale := current - wanted:
+        await session.execute(
+            delete(WorkspaceSlackChannelRow).where(
+                WorkspaceSlackChannelRow.workspace_id == workspace_id,
+                WorkspaceSlackChannelRow.channel_id.in_(stale),
+            )
+        )
+    for channel_id in wanted - current:
+        session.add(WorkspaceSlackChannelRow(channel_id=channel_id, workspace_id=workspace_id))
+
+
+async def _repo_owners(session: AsyncSession, repos: list[str], excluding: str) -> dict[str, str]:
+    """Which workspace owns each of ``repos``, keyed by ``repository.key``."""
+    if not repos:
+        return {}
+    rows = await session.execute(
+        select(Repository.key, WorkspaceRow.slug)
+        .join(WorkspaceRepositoryRow, WorkspaceRepositoryRow.repository_id == Repository.id)
+        .join(WorkspaceRow, WorkspaceRow.id == WorkspaceRepositoryRow.workspace_id)
+        .where(Repository.key.in_([repo.lower() for repo in repos]), WorkspaceRow.slug != excluding)
+    )
+    return dict(rows.tuples().all())
+
+
+async def _channel_owners(
+    session: AsyncSession, channels: list[str], excluding: str
+) -> dict[str, str]:
+    if not channels:
+        return {}
+    rows = await session.execute(
+        select(WorkspaceSlackChannelRow.channel_id, WorkspaceRow.slug)
+        .join(WorkspaceRow, WorkspaceRow.id == WorkspaceSlackChannelRow.workspace_id)
+        .where(WorkspaceSlackChannelRow.channel_id.in_(channels), WorkspaceRow.slug != excluding)
+    )
+    return dict(rows.tuples().all())
 
 
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
