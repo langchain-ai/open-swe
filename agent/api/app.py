@@ -11,6 +11,7 @@ from agent.api.health import router as health_router
 from agent.api.tracing import add_trace_resource_names
 from agent.config import ENV
 from agent.dashboard import router as dashboard_router
+from agent.github.pr_media_api import router as pr_media_router
 from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
 from agent.slack.routes import router as slack_webhook_router
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)
+    app.include_router(pr_media_router)
     app.include_router(linear_webhook_router)
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
