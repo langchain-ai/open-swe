@@ -707,7 +707,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert ElementTree.fromstring(messages[0]["content"]).attrib["kind"] == "system"
     prompt = ElementTree.fromstring(messages[-1]["content"])
     assert prompt.findtext("content") == record["prompt"]
-    assert run["durability"] == "sync"
+    assert run["durability"] == "exit"
     assert run["multitask_strategy"] == "interrupt"
     assert run["if_not_exists"] == "create"
     assert run["config"]["configurable"]["source"] == "schedule"

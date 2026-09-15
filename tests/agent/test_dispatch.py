@@ -99,7 +99,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
 
     assert run == {"run_id": "run-1"}
     created = client.runs.created[0]
-    assert created["durability"] == "sync"
+    assert created["durability"] == "exit"
     assert created["multitask_strategy"] == "interrupt"
     assert created["if_not_exists"] == "create"
     assert created["webhook"] == "https://app/webhooks/run-complete"
