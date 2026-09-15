@@ -3,9 +3,10 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 
-from agent.dashboard import routes, workspace_mcps
-from agent.dashboard import user_mcps as mcps
+from agent.dashboard import oauth, routes
 from agent.mcp import MCPConnectionUpdate, load_mcp_tools
+from agent.mcp import user as mcps
+from agent.mcp import workspace as workspace_mcps
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +43,7 @@ async def test_routes_serve_only_the_signed_in_users_connections(fake_store, mon
     app = FastAPI()
     app.include_router(routes.router)
     session = {"sub": "alice", "email": "alice@example.com"}
-    app.dependency_overrides[routes.require_session] = lambda: session
+    app.dependency_overrides[oauth.require_session] = lambda: session
     body = {
         "name": "linear",
         "url": "https://mcp.linear.app/mcp",

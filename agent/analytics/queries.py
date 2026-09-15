@@ -1,7 +1,11 @@
 """Bounded indexed analytics queries for dashboard metrics."""
 
+import base64
+import binascii
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -114,6 +118,55 @@ async def pr_merge_rate_by_model(
     }
 
 
+def _encode_usage_cursor(as_of: datetime, offset: int, workspace: UUID, period: str) -> str:
+    payload = json.dumps(
+        {
+            "as_of": as_of.isoformat(),
+            "offset": offset,
+            "period": period,
+            "workspace_id": str(workspace),
+        },
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[datetime, int]:
+    try:
+        encoded = cursor.encode("ascii")
+        payload = json.loads(
+            base64.b64decode(encoded + b"=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+        )
+        if not isinstance(payload, dict) or set(payload) != {
+            "as_of",
+            "offset",
+            "period",
+            "workspace_id",
+        }:
+            raise ValueError
+        as_of = datetime.fromisoformat(payload["as_of"])
+        offset = payload["offset"]
+        if (
+            payload["workspace_id"] != str(workspace)
+            or payload["period"] != period
+            or as_of.tzinfo is None
+            or not isinstance(offset, int)
+            or isinstance(offset, bool)
+            or offset < 0
+        ):
+            raise ValueError
+        return as_of.astimezone(UTC), offset
+    except (
+        binascii.Error,
+        TypeError,
+        UnicodeEncodeError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+    ):
+        raise ValueError("invalid usage leaderboard cursor") from None
+
+
 _USAGE_SQL = """
 WITH runs AS (
     SELECT COALESCE(a.person_id, r.user_id) AS person_id, r.configured_model_id,
@@ -216,7 +269,7 @@ WITH runs AS (
             'invocations_without_cost', invocations_without_cost,
             'invocations_with_partial_cost', invocations_with_partial_cost
         ) AS row
-    FROM ranked WHERE rank <= :limit OR is_current
+    FROM ranked WHERE rank > :offset AND rank <= :offset + :limit
 )
 SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY rank), '[]'::jsonb) FROM selected) AS rows,
     count(*) AS total_members,
@@ -269,16 +322,23 @@ async def usage_leaderboard(
     limit: int,
     current_login: str | None,
     current_email: str | None,
+    offset: int = 0,
+    cursor: str | None = None,
     admin: bool = False,
 ) -> dict[str, Any]:
     """Read usage and review cohorts from one bounded PostgreSQL snapshot."""
     normalized = period if period in {"7d", "30d", "all"} else "30d"
-    as_of = datetime.now(UTC)
+    workspace = workspace_id()
+    if cursor:
+        as_of, offset = _decode_usage_cursor(cursor, workspace, normalized)
+    else:
+        as_of = datetime.now(UTC)
     generated_at_ms = int(as_of.timestamp() * 1000)
     parameters = {
-        "workspace_id": workspace_id(),
+        "workspace_id": workspace,
         "as_of": as_of,
         "limit": min(max(limit, 1), 100),
+        "offset": max(offset, 0),
         "current_login": (current_login or "").strip().lower(),
         "current_email": (current_email or "").strip().lower(),
         "admin": admin,
@@ -303,6 +363,14 @@ async def usage_leaderboard(
     return {
         "period": normalized,
         **usage,
+        "next_cursor": (
+            _encode_usage_cursor(
+                as_of, parameters["offset"] + len(usage["rows"]), workspace, normalized
+            )
+            if len(usage["rows"]) == parameters["limit"]
+            and parameters["offset"] + len(usage["rows"]) < usage["total_members"]
+            else None
+        ),
         "generated_at_ms": generated_at_ms,
         "reviewer_stats": reviewer,
         **metadata,

@@ -25,6 +25,11 @@ async def _pr_registry(registry_db_if_available: bool, monkeypatch: pytest.Monke
     monkeypatch.setattr(pull_requests, "langgraph_client", lambda: webhook_common.get_client())
 
 
+@pytest.fixture(autouse=True)
+def _no_feedback_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agent.thread_feedback.schedule_pr_feedback", AsyncMock())
+
+
 def _pr_payload(*, state: str, merged: bool = False, draft: bool = False) -> dict[str, Any]:
     return {
         "repository": {"full_name": "lc/repo"},

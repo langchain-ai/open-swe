@@ -19,7 +19,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, NamedTuple
 
-from agent.dashboard import environment_refresh
+from agent.environments import refresh as environment_refresh
 from agent.tools.admin_gate import require_admin
 
 logger = logging.getLogger(__name__)

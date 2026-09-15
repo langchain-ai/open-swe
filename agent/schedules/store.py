@@ -18,7 +18,6 @@ from agent.dashboard.repo_access import (
     require_repo_access_for_workspace,
 )
 from agent.dashboard.team_settings import get_team_fable_enabled
-from agent.dashboard.threads.access import agent_version_metadata, resolve_run_email
 from agent.dispatch import create_durable_run
 from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
@@ -31,6 +30,7 @@ from agent.slack.client import (
 )
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
+from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 

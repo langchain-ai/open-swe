@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import profiles, routes
+from agent.dashboard import oauth, profiles, routes
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def client(
     monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="test-token"))
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[routes.require_session] = lambda: {
+    app.dependency_overrides[oauth.require_session] = lambda: {
         "sub": "alice",
         "email": "alice@example.com",
     }
@@ -108,7 +108,7 @@ def test_admin_can_add_list_and_remove_bot(client: TestClient, directory: dict[s
 def test_non_admin_cannot_manage_bots(
     client: TestClient, method: str, path: str, body: Any
 ) -> None:
-    client.app.dependency_overrides[routes.require_session] = lambda: {"sub": "mallory"}
+    client.app.dependency_overrides[oauth.require_session] = lambda: {"sub": "mallory"}
     assert client.request(method, path, json=body).status_code == 403
 
 
@@ -134,7 +134,7 @@ def test_duplicate_add_does_not_transfer_ownership(client: TestClient) -> None:
     assert (
         client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"}).status_code == 200
     )
-    client.app.dependency_overrides[routes.require_session] = lambda: {"sub": "bob"}
+    client.app.dependency_overrides[oauth.require_session] = lambda: {"sub": "bob"}
     response = client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"})
     assert response.status_code == 409
     assert client.get("/dashboard/api/slack/allowed-bots").json()[0]["created_by"] == "alice"

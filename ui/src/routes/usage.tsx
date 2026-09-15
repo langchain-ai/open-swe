@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
+import { useState } from "react"
 
 import type {
   AnalyticsMetadata,
@@ -10,6 +11,7 @@ import type {
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -29,6 +31,8 @@ export const Route = createFileRoute("/usage")({
   }),
   component: UsagePage,
 })
+
+const PAGE_SIZES = [10, 25, 50, 100] as const
 
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "7d": "Last 7 days",
@@ -81,9 +85,56 @@ export function UsageAnalytics({
   isAdmin: boolean
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
+  const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
+
+  return (
+    <UsageAnalyticsPeriod
+      key={activePeriod}
+      period={activePeriod}
+      login={login}
+      isAdmin={isAdmin}
+      pageSize={leaderboardPageSize}
+      onPageSizeChange={setLeaderboardPageSize}
+      onPeriodChange={onPeriodChange}
+    />
+  )
+}
+
+function UsageAnalyticsPeriod({
+  period: activePeriod,
+  login,
+  isAdmin,
+  pageSize: leaderboardPageSize,
+  onPageSizeChange: setLeaderboardPageSize,
+  onPeriodChange,
+}: {
+  period: UsageLeaderboardPeriod
+  login: string
+  isAdmin: boolean
+  pageSize: number
+  onPageSizeChange: (pageSize: number) => void
+  onPeriodChange: (period: UsageLeaderboardPeriod) => void
+}) {
+  const [leaderboardPage, setLeaderboardPage] = useState(1)
+  const [leaderboardCursors, setLeaderboardCursors] = useState<
+    (string | undefined)[]
+  >([undefined])
   const leaderboard = useQuery({
-    queryKey: ["usageLeaderboard", activePeriod, login, isAdmin],
-    queryFn: () => api.usageLeaderboard(activePeriod, 10),
+    queryKey: [
+      "usageLeaderboard",
+      activePeriod,
+      login,
+      isAdmin,
+      leaderboardPage,
+      leaderboardPageSize,
+      leaderboardCursors[leaderboardPage - 1],
+    ],
+    queryFn: () =>
+      api.usageLeaderboard(
+        activePeriod,
+        leaderboardPageSize,
+        leaderboardCursors[leaderboardPage - 1]
+      ),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
@@ -145,7 +196,7 @@ export function UsageAnalytics({
               Retry usage analytics
             </button>
           </div>
-        ) : !leaderboard.data?.rows.length ? (
+        ) : !leaderboard.data?.total_members ? (
           <div className="p-6 text-center text-xs text-muted-foreground">
             No Open SWE Agent usage has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
@@ -154,6 +205,24 @@ export function UsageAnalytics({
           <UsageTable
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
+            page={leaderboardPage}
+            pageSize={leaderboardPageSize}
+            onPageChange={(page) => {
+              const nextCursor = leaderboard.data.next_cursor
+              if (page > leaderboardPage && nextCursor) {
+                setLeaderboardCursors((cursors) => {
+                  const updated = cursors.slice(0, leaderboardPage)
+                  updated[leaderboardPage] = nextCursor
+                  return updated
+                })
+              }
+              setLeaderboardPage(page)
+            }}
+            onPageSizeChange={(pageSize) => {
+              setLeaderboardPageSize(pageSize)
+              setLeaderboardPage(1)
+              setLeaderboardCursors([undefined])
+            }}
           />
         )}
       </SettingsSection>
@@ -281,7 +350,7 @@ function PRMergeRateSection({
           </button>
         </div>
       ) : data?.status === "ready" ? (
-        <PRMergeRateTable cohorts={data.cohorts} />
+        <PRMergeRateTable key={data.period} cohorts={data.cohorts} />
       ) : (
         <p
           className="p-6 text-center text-xs text-muted-foreground"
@@ -340,6 +409,15 @@ function PRMergeRateSection({
 }
 
 function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const pageCount = Math.max(1, Math.ceil(cohorts.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const rows = cohorts.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  )
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] text-xs">
@@ -357,7 +435,7 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {cohorts.map((cohort) => (
+          {rows.map((cohort) => (
             <tr key={`${cohort.model_id}-${cohort.model_attribution_quality}`}>
               <td className="px-4 py-3">
                 <div className="font-medium">
@@ -393,6 +471,16 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
           ))}
         </tbody>
       </table>
+      <TablePagination
+        page={currentPage}
+        pageSize={pageSize}
+        total={cohorts.length}
+        onPageChange={setPage}
+        onPageSizeChange={(value) => {
+          setPageSize(value)
+          setPage(1)
+        }}
+      />
     </div>
   )
 }
@@ -400,9 +488,17 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
 function UsageTable({
   rows,
   totalMembers,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
 }: {
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
+  page: number
+  pageSize: number
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
 }) {
   return (
     <div className="overflow-x-auto">
@@ -463,9 +559,75 @@ function UsageTable({
           ))}
         </tbody>
       </table>
-      <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-        Top {Math.min(10, totalMembers)} of {formatNumber(totalMembers)} member
-        {totalMembers === 1 ? "" : "s"}
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={totalMembers}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
+    </div>
+  )
+}
+
+function TablePagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number
+  pageSize: number
+  total: number
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
+}) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const start = total ? (page - 1) * pageSize + 1 : 0
+  const end = Math.min(page * pageSize, total)
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+      <span>
+        {formatNumber(start)}–{formatNumber(end)} of {formatNumber(total)}
+      </span>
+      <div className="flex items-center gap-2">
+        <span>Rows per page</span>
+        <Select
+          value={String(pageSize)}
+          onValueChange={(value) => onPageSizeChange(Number(value))}
+        >
+          <SelectTrigger aria-label="Rows per page" className="w-20">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PAGE_SIZES.map((size) => (
+              <SelectItem key={size} value={String(size)}>
+                {size}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={page === 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          Previous
+        </Button>
+        <span>
+          Page {page} of {pageCount}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next
+        </Button>
       </div>
     </div>
   )
@@ -633,7 +795,7 @@ function UsageCost({ row }: { row: UsageLeaderboardRow }) {
     ? [
         unavailable ? "No costs have been recorded." : "Recorded cost so far.",
         missing > 0
-          ? `Costs are missing for ${missing} of ${row.invocations} invocations.`
+          ? `Costs are missing for ${missing} of ${row.invocations} invocations (${formatPercent(missing / row.invocations)}).`
           : "",
         partial > 0
           ? `Costs are partial for ${partial} of ${row.invocations} invocations.`

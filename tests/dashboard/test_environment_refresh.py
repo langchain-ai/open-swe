@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.dashboard import environment_refresh as refresh
-from agent.dashboard import environments as env_store
-from agent.dashboard.environments import ENVIRONMENTS, Environment, EnvironmentCreate
+from agent.environments import refresh
+from agent.environments import store as env_store
+from agent.environments.store import ENVIRONMENTS, Environment, EnvironmentCreate
 from tests.conftest import FakeStore
 
 

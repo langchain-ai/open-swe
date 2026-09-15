@@ -22,7 +22,6 @@ from agent.dashboard.agent_overrides import (
     resolve_agent_model_id,  # noqa: F401
     resolve_login_from_email_async,
 )
-from agent.dashboard.enabled_repos import is_review_repo_enabled
 from agent.dashboard.oauth import build_settings_url
 from agent.dashboard.options import (
     default_vision_model_pair,
@@ -38,7 +37,6 @@ from agent.dashboard.team_settings import (
     get_team_default_repo,
     get_team_settings,
 )
-from agent.dashboard.threads.summary import thread_is_private, thread_is_promptable
 from agent.dashboard.user_mappings import (
     email_for_login,  # noqa: F401
     login_for_email,  # noqa: F401
@@ -47,7 +45,6 @@ from agent.dashboard.user_mappings import (
 from agent.dashboard.user_mappings import (
     refresh_cache as refresh_user_mapping_cache,  # noqa: F401
 )
-from agent.dashboard.workflow_approval import decide_workflow_push_approval
 from agent.dispatch import dispatch_agent_run
 from agent.github.app import (
     get_github_app_installation_token,  # noqa: F401
@@ -83,6 +80,7 @@ from agent.github.token import (
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.prompts import render_prompt
 from agent.pull_requests import PullRequestEvent
+from agent.review.enabled_repos import is_review_repo_enabled
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -142,6 +140,8 @@ from agent.slack.feedback import (
 )
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
+from agent.threads.summary import thread_is_private, thread_is_promptable
+from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.json_types import ThreadLike, as_thread_dict

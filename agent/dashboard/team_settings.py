@@ -9,9 +9,11 @@ import logging
 from collections.abc import Mapping
 from typing import Any, Literal
 
+from fastapi import APIRouter
 from pydantic import BaseModel, field_validator, model_validator
 
 from agent.config import ENV
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
@@ -665,3 +667,21 @@ def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
     if provider_pair is not None:
         return provider_pair
     return default_model_pair()
+
+
+router = APIRouter(tags=["team-settings"])
+
+
+@router.get("/team-settings")
+async def api_get_team_settings(
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_team_settings()
+
+
+@router.put("/team-settings")
+async def api_put_team_settings(
+    update: TeamSettingsUpdate,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, Any]:
+    return await upsert_team_settings(update)

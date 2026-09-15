@@ -15,15 +15,15 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
 from agent.config import ENV
-from agent.dashboard.environment_refresh import is_snapshot_stale, maybe_start_update
-from agent.dashboard.environments import (
+from agent.environments.refresh import is_snapshot_stale, maybe_start_update
+from agent.environments.sandbox_settings import get_admin_base_snapshot_id
+from agent.environments.store import (
     Environment,
     SandboxResources,
     resolve_environment,
     sandbox_update_timeout,
     script_command,
 )
-from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.sandboxes.providers.langsmith import (

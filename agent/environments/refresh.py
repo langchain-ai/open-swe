@@ -35,7 +35,8 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from agent.config import ENV, EnvVar
-from agent.dashboard.environments import (
+from agent.environments.sandbox_settings import resolve_base_snapshot_id
+from agent.environments.store import (
     ENVIRONMENTS,
     Environment,
     RefreshKind,
@@ -44,7 +45,6 @@ from agent.dashboard.environments import (
     script_command,
     script_log_path,
 )
-from agent.dashboard.sandbox_settings import resolve_base_snapshot_id
 
 logger = logging.getLogger(__name__)
 

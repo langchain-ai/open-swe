@@ -56,17 +56,12 @@ from agent.dashboard.agent_overrides import (
     profile_model_routing_enabled,
     resolve_github_login,
 )
-from agent.dashboard.environments import (
-    resolve_environment,
-)
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
-from agent.dashboard.schedules import authorized_admin_schedule
-from agent.dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_agent_routing_models,
@@ -79,10 +74,11 @@ from agent.dashboard.team_settings import (
     get_team_settings,
 )
 from agent.dashboard.user_mappings import email_for_login
-from agent.dashboard.user_mcps import user_mcp_source
-from agent.dashboard.workspace_mcps import workspace_mcp_source
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
+from agent.environments.store import (
+    resolve_environment,
+)
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
@@ -93,6 +89,8 @@ from agent.input_messages import (
     visible_dynamic_context_hashes,
 )
 from agent.mcp import load_mcp_tools
+from agent.mcp.user import user_mcp_source
+from agent.mcp.workspace import workspace_mcp_source
 from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -152,6 +150,8 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
+from agent.schedules.store import authorized_admin_schedule
+from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (

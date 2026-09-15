@@ -152,7 +152,7 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     await run(outsider, workspace_id=foreign)
     await pr(outsider, state="merged", additions=10000, workspace_id=foreign)
 
-    result = await report(limit=1, current_login=" ALICE ")
+    result = await report(limit=2, current_login=" ALICE ")
     assert result["total_members"] == 3
     assert result["current_user_rank"] == 2
     assert [r["rank"] for r in result["rows"]] == [1, 2]
@@ -179,6 +179,7 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     assert result["rows"][0]["user"]["email"] is None
     assert result["rows"][0]["user"]["github_login"] is None
     assert (await report(limit=0))["rows"][0]["rank"] == 1
+    assert [row["rank"] for row in (await report(limit=1, offset=1))["rows"]] == [2]
 
 
 async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):

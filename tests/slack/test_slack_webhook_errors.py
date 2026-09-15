@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.dashboard import plan_api
 from agent.run_config import Repo
 from agent.slack import failures as slack_failures
 from agent.slack import webhook as slack_webhook
 from agent.slack.request import SlackRequest
+from agent.threads import plan_api
 
 
 class _FakeThreads:
@@ -496,6 +496,9 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
         slack_webhook.common, "get_thread_environment", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_webhook.common, "get_thread_model_choice", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook, "queue_message_for_thread", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
@@ -566,6 +569,9 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
         slack_webhook.common, "get_thread_environment", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_webhook.common, "get_thread_model_choice", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(
         slack_webhook.common, "upsert_agent_thread_metadata", AsyncMock(return_value=False)
     )
