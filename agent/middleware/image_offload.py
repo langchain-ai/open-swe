@@ -21,10 +21,10 @@ from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
 
 from agent.middleware.trace import OpenSWEMiddleware
+from agent.thread_images import IMAGE_STORE_NAMESPACE, image_owner_threads
 
 logger = logging.getLogger(__name__)
 
-IMAGE_STORE_NAMESPACE: tuple[str, ...] = ("thread_images",)
 IMAGE_UNAVAILABLE_TEXT = "[image no longer available]"
 _REHYDRATE_CACHE_SIZE = 32
 
@@ -91,18 +91,6 @@ def _configurable() -> dict[str, object]:
     except RuntimeError:
         return {}
     return configurable if isinstance(configurable, dict) else {}
-
-
-def image_owner_threads(thread_id: str, continued_from_thread_id: object) -> frozenset[str]:
-    """Threads whose stored images ``thread_id`` may show.
-
-    A private continuation copies the transcript of the collaborative thread it
-    was made from, so its messages reference images stored under that thread.
-    """
-    owners = {thread_id} if thread_id else set[str]()
-    if isinstance(continued_from_thread_id, str) and continued_from_thread_id:
-        owners.add(continued_from_thread_id)
-    return frozenset(owners)
 
 
 async def offload_message_images(

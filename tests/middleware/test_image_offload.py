@@ -6,11 +6,8 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.store.memory import InMemoryStore
 
-from agent.middleware.image_offload import (
-    IMAGE_STORE_NAMESPACE,
-    IMAGE_UNAVAILABLE_TEXT,
-    ImageOffloadMiddleware,
-)
+from agent.middleware.image_offload import IMAGE_UNAVAILABLE_TEXT, ImageOffloadMiddleware
+from agent.thread_images import IMAGE_STORE_NAMESPACE
 
 PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 40).decode()
 

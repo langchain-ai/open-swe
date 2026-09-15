@@ -6,8 +6,8 @@ import re
 
 from fastapi import HTTPException, Response
 
-from agent.middleware.image_offload import IMAGE_STORE_NAMESPACE, image_owner_threads
 from agent.store import get_value
+from agent.thread_images import IMAGE_STORE_NAMESPACE, image_owner_threads
 from agent.threads.access import _readable_thread_metadata
 
 _IMAGE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
