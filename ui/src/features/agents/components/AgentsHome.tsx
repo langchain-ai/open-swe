@@ -24,7 +24,7 @@ import {
   optimisticThread,
   seedAgentThreadLists,
   useAgentSkills,
-  useEnvironmentOptions,
+  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import {
   persistModelSelection,
@@ -100,18 +100,14 @@ export function AgentsHome({
   >(null)
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
-  const environmentOptions = useEnvironmentOptions(cloudEnabled)
-  const environments = environmentOptions.data?.workspaces ?? []
-  // undefined = untouched, so the run falls back to the default environment.
-  const [environmentOverride, setEnvironmentOverride] = useState<string | null>(
+  const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
+  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
+  // undefined = untouched, so the run falls back to the repo's own workspace,
+  // then the default one.
+  const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
     null
   )
-  const defaultEnvironmentSlug = environmentOptions.data?.default_slug ?? null
-  const selectedEnvironment =
-    environmentOverride ??
-    (environments.some((env) => env.slug === defaultEnvironmentSlug)
-      ? defaultEnvironmentSlug
-      : null)
+  const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
   const [submittedDraft, setSubmittedDraft] =
     useState<CreateAgentThreadVariables | null>(null)
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
@@ -175,6 +171,20 @@ export function AgentsHome({
     repoOverride === undefined
       ? (profileQuery.data?.default_repo ?? null)
       : repoOverride
+
+  // Follows the selected repo's owning workspace until the user overrides it;
+  // falls back to the instance default when no workspace claims this repo.
+  const repoWorkspaceSlug = repo
+    ? (workspaces.find((workspace) =>
+        workspace.repos.some((r) => r.toLowerCase() === repo.toLowerCase())
+      )?.slug ?? null)
+    : null
+  const selectedWorkspace =
+    workspaceOverride ??
+    repoWorkspaceSlug ??
+    (workspaces.some((workspace) => workspace.slug === defaultWorkspaceSlug)
+      ? defaultWorkspaceSlug
+      : null)
 
   // Holds the just-submitted prompt until the SDK mints the thread id.
   const draftRef = useRef<CreateAgentThreadVariables | null>(null)
@@ -453,7 +463,7 @@ export function AgentsHome({
     if (repoOverride === null) configurable.repo_explicitly_none = true
     configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
-    if (selectedEnvironment) configurable.environment = selectedEnvironment
+    if (selectedWorkspace) configurable.workspace = selectedWorkspace
 
     const handleCloudSubmitError = (error: unknown) => {
       resetPendingSubmit()
@@ -573,11 +583,11 @@ export function AgentsHome({
             onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
-            environments={environments}
-            selectedEnvironment={selectedEnvironment}
-            onEnvironmentChange={
+            workspaceOptions={workspaces}
+            selectedWorkspace={selectedWorkspace}
+            onWorkspaceChange={
               !optimisticDraftThread && runTarget === "cloud"
-                ? setEnvironmentOverride
+                ? setWorkspaceOverride
                 : undefined
             }
             skills={skills.data}

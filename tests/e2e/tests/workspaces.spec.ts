@@ -157,9 +157,9 @@ test.describe("Workspaces", () => {
     await deleteWorkspace(page, DRAFT_SLUG);
     await createWorkspace(page, DRAFT_NAME, "");
 
-    await page.goto("/environments");
+    await page.goto("/workspaces");
     const section = page
-      .getByRole("heading", { name: "Environments", level: 2 })
+      .getByRole("heading", { name: "Workspaces", level: 2 })
       .locator("xpath=ancestor::section");
     await expect(section).toBeVisible();
     await expect(section.getByText(DRAFT_NAME)).toBeVisible();
@@ -181,10 +181,10 @@ test.describe("Workspaces", () => {
     const res = await page.request.get("/dashboard/api/workspaces");
     expect(res.status()).toBe(403);
 
-    await page.goto("/agents/environments");
-    await expect(page).toHaveURL(/\/environments$/);
+    await page.goto("/agents/workspaces");
+    await expect(page).toHaveURL(/\/workspaces$/);
     await expect(
-      page.getByRole("heading", { name: "Environments", level: 2 }),
+      page.getByRole("heading", { name: "Workspaces", level: 2 }),
     ).toBeVisible();
     await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
 
@@ -206,13 +206,13 @@ test.describe("Workspaces", () => {
 
     // One workspace: the choice is already made, so no control is rendered.
     await openNewAgentHome(page);
-    await expect(page.getByRole("button", { name: "Environment" })).toHaveCount(
+    await expect(page.getByRole("button", { name: "Workspace" })).toHaveCount(
       0,
     );
 
     await createWorkspace(page, ALT_NAME, ALT_ENV_PROMPT);
     await page.reload();
-    const picker = page.getByRole("button", { name: "Environment" });
+    const picker = page.getByRole("button", { name: "Workspace" });
     await expect(picker).toBeVisible();
     // Defaults to the workspace named `default`.
     await expect(picker).toContainText("default");
@@ -394,11 +394,9 @@ test.describe("Workspaces", () => {
     // Admin threads also carry the workspace-management instructions.
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
-    await page.goto("/environments");
-    await expect(page.getByText("Default environment")).toBeVisible();
-    await expect(
-      page.getByText("Default environment · Snapshot ready"),
-    ).toBeVisible();
+    await page.goto("/workspaces");
+    await expect(page.getByText("Default")).toBeVisible();
+    await expect(page.getByText("Snapshot ready")).toBeVisible();
     // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
     await expect(page.getByText(/^Rebuilt /)).toBeVisible();
     await expect(page.getByText("Refresh log")).toBeVisible();

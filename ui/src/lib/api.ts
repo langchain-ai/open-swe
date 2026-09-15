@@ -420,6 +420,7 @@ export interface UserPreferences {
   default_visibility: ThreadVisibility
   local_tracing_project: string | null
   default_local_tracing_project: string
+  default_workspace: string | null
 }
 
 export interface Skill {
@@ -454,7 +455,7 @@ export interface SandboxSettings {
   updated_by: string | null
 }
 
-/** What a non-admin needs to pick an environment for a new thread. */
+/** What a non-admin needs to pick a workspace for a new thread. */
 export type WorkspaceRefreshStatus =
   | "never"
   | "refreshing"
@@ -489,6 +490,31 @@ export interface WorkspaceOption {
 export interface WorkspaceOptionList {
   workspaces: Array<WorkspaceOption>
   default_slug: string
+}
+
+/** Body for `POST /workspaces`; `name` is the only required field. */
+export interface WorkspaceCreate {
+  name: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+}
+
+/** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
+export interface WorkspaceUpdate {
+  name?: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+}
+
+/** The fields `createWorkspace`/`updateWorkspace` are guaranteed to return. */
+export interface WorkspaceRecord {
+  slug: string
+  name: string
+  prompt: string
+  repos: Array<string>
+  slack_channel_ids: Array<string>
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -843,6 +869,20 @@ export const api = {
     }),
   listWorkspaceOptions: () =>
     request<WorkspaceOptionList>("/workspaces/options"),
+  createWorkspace: (body: WorkspaceCreate) =>
+    request<WorkspaceRecord>("/workspaces", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateWorkspace: (slug: string, body: WorkspaceUpdate) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteWorkspace: (slug: string) =>
+    request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    }),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
@@ -862,7 +902,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
   getWorkspaceMCPs: (workspace: string) =>
-    request<MCPConnection[]>(`/workspaces/${encodeURIComponent(workspace)}/mcps`),
+    request<MCPConnection[]>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps`
+    ),
   revealWorkspaceMCPHeaders: (workspace: string, name: string) =>
     request<Record<string, string>>(
       `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}/headers/reveal`,

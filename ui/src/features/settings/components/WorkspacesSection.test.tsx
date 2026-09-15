@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { EnvironmentsSection } from "./EnvironmentsSection"
+import { WorkspacesSection } from "./WorkspacesSection"
 import { api } from "@/lib/api"
 
 const clients: Array<QueryClient> = []
@@ -23,13 +23,13 @@ function renderSection(isAdmin: boolean) {
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <EnvironmentsSection isAdmin={isAdmin} />
+      <WorkspacesSection isAdmin={isAdmin} />
     </QueryClientProvider>
   )
 }
 
-describe("EnvironmentsSection", () => {
-  it("shows refresh outcomes without edit controls", async () => {
+describe("WorkspacesSection", () => {
+  it("shows refresh outcomes and an edit control for admins", async () => {
     vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
       workspaces: [
@@ -59,17 +59,53 @@ describe("EnvironmentsSection", () => {
       ],
     })
 
-    const view = renderSection(true)
+    renderSection(true)
 
     expect(await screen.findByText("Preview")).toBeTruthy()
-    expect(
-      screen.getByText("Default environment · Snapshot ready")
-    ).toBeTruthy()
+    expect(screen.getByText("Snapshot ready")).toBeTruthy()
     expect(screen.getByText(/Updated 1 hour ago/)).toBeTruthy()
     expect(screen.getByText(/Refresh failed/)).toBeTruthy()
     expect(screen.getByText("setup script exited 1")).toBeTruthy()
     expect(screen.getByText("Refresh log")).toBeTruthy()
-    expect(view.container.querySelector("button, input, textarea")).toBeNull()
+    expect(screen.getByRole("button", { name: "Edit Default" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Edit Preview" })).toBeTruthy()
+  })
+
+  it("renders a workspace's repos under its row, and a Default badge on the default workspace", async () => {
+    vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
+      default_slug: "default",
+      workspaces: [
+        {
+          slug: "default",
+          name: "Primary",
+          repos: ["acme/oss"],
+          slack_channel_ids: [],
+          is_default: true,
+          has_snapshot: true,
+        },
+        {
+          slug: "preview",
+          name: "Preview",
+          repos: [],
+          slack_channel_ids: [],
+          is_default: false,
+          has_snapshot: false,
+        },
+      ],
+    })
+
+    renderSection(true)
+
+    const defaultRow = (await screen.findByText("Primary")).closest(
+      "[data-workspace-row]"
+    ) as HTMLElement
+    const previewRow = screen
+      .getByText("Preview")
+      .closest("[data-workspace-row]") as HTMLElement
+    expect(defaultRow).toBeTruthy()
+    expect(within(defaultRow).getByText("acme/oss")).toBeTruthy()
+    expect(within(defaultRow).getByText("Default")).toBeTruthy()
+    expect(within(previewRow).queryByText("Default")).toBeNull()
   })
 
   it("never renders a refresh log for non-admins, even if one arrives", async () => {
@@ -100,7 +136,7 @@ describe("EnvironmentsSection", () => {
     expect(screen.queryByText(/hunter2/)).toBeNull()
   })
 
-  it("says so when an environment has never been refreshed", async () => {
+  it("says so when a workspace has never been refreshed", async () => {
     vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
       workspaces: [
@@ -118,7 +154,7 @@ describe("EnvironmentsSection", () => {
     renderSection(true)
 
     expect(await screen.findByText("Never refreshed")).toBeTruthy()
-    expect(screen.getByText("Default environment · No snapshot")).toBeTruthy()
+    expect(screen.getByText("No snapshot")).toBeTruthy()
   })
 
   it("directs non-admins to a workspace admin", async () => {
@@ -130,7 +166,7 @@ describe("EnvironmentsSection", () => {
     renderSection(false)
 
     expect(
-      await screen.findByText("No environments are configured.")
+      await screen.findByText("No workspaces are configured.")
     ).toBeTruthy()
     expect(screen.getByText(/ask a workspace admin/)).toBeTruthy()
   })
