@@ -99,7 +99,11 @@ function AdminPage() {
         value={workspace}
         onChange={setSelectedWorkspace}
       />
-      <MCPConnectionsSection scope="workspace" workspace={workspace} />
+      <MCPConnectionsSection
+        key={workspace}
+        scope="workspace"
+        workspace={workspace}
+      />
 
       <LLMGatewaySection workspace={workspace} />
 
@@ -504,22 +508,44 @@ function gatewayModeValue(mode: GatewayMode): boolean | null {
   return null
 }
 
-function LLMGatewaySection({ workspace }: { workspace: string }) {
+interface TeamSettingsSave {
+  body: TeamSettings
+  workspace: string
+}
+
+/**
+ * Saves team settings for `workspace` and caches the response under that
+ * workspace. The target travels in the mutation variables because TanStack
+ * Query rebinds a pending mutation's callbacks to the latest render: a save
+ * started before the admin switched workspaces must not land in the newly
+ * selected workspace's cache.
+ */
+function useSaveTeamSettings(workspace: string, onSaved?: () => void) {
   const qc = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const mutation = useMutation({
+    mutationFn: (variables: TeamSettingsSave) =>
+      api.saveTeamSettings(variables.body, variables.workspace),
+    onSuccess: (saved, variables) => {
+      qc.setQueryData(["teamSettings", variables.workspace], saved)
+      setError(null)
+      onSaved?.()
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+  return {
+    mutate: (body: TeamSettings) => mutation.mutate({ body, workspace }),
+    isPending: mutation.isPending,
+    error,
+  }
+}
+
+function LLMGatewaySection({ workspace }: { workspace: string }) {
   const settings = useQuery({
     queryKey: ["teamSettings", workspace],
     queryFn: () => api.getTeamSettings(workspace),
   })
-  const [error, setError] = useState<string | null>(null)
-
-  const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body, workspace),
-    onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings", workspace], saved)
-      setError(null)
-    },
-    onError: (e: Error) => setError(e.message),
-  })
+  const save = useSaveTeamSettings(workspace)
 
   const mode = gatewayMode(settings.data?.gateway_enabled)
 
@@ -558,27 +584,23 @@ function LLMGatewaySection({ workspace }: { workspace: string }) {
           }
         />
       </div>
-      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+      {save.error && (
+        <p className="px-4 pb-3 text-xs text-destructive">{save.error}</p>
+      )}
     </SettingsSection>
   )
 }
 
-function FableSection({ workspace }: { workspace: string }) {
+export function FableSection({ workspace }: { workspace: string }) {
   const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings", workspace],
     queryFn: () => api.getTeamSettings(workspace),
   })
-  const [error, setError] = useState<string | null>(null)
-  const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body, workspace),
-    onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings", workspace], saved)
-      qc.invalidateQueries({ queryKey: ["options"] }) // refresh pickers so Fable appears/disappears
-      setError(null)
-    },
-    onError: (e: Error) => setError(e.message),
-  })
+  // Refresh the pickers so Fable appears or disappears.
+  const save = useSaveTeamSettings(workspace, () =>
+    qc.invalidateQueries({ queryKey: ["options"] })
+  )
   return (
     <SettingsSection
       title="Fable"
@@ -600,7 +622,9 @@ function FableSection({ workspace }: { workspace: string }) {
           }
         />
       </div>
-      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+      {save.error && (
+        <p className="px-4 pb-3 text-xs text-destructive">{save.error}</p>
+      )}
     </SettingsSection>
   )
 }
@@ -612,22 +636,12 @@ function GlobalDefaultsSection({
   workspace: string
   models: Array<ModelOption>
 }) {
-  const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings", workspace],
     queryFn: () => api.getTeamSettings(workspace),
   })
   const repos = useRepos()
-  const [error, setError] = useState<string | null>(null)
-
-  const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body, workspace),
-    onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings", workspace], saved)
-      setError(null)
-    },
-    onError: (e: Error) => setError(e.message),
-  })
+  const save = useSaveTeamSettings(workspace)
 
   return (
     <SettingsSection
@@ -861,7 +875,9 @@ function GlobalDefaultsSection({
           disabled={!settings.data || save.isPending}
         />
       </div>
-      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+      {save.error && (
+        <p className="px-4 pb-3 text-xs text-destructive">{save.error}</p>
+      )}
     </SettingsSection>
   )
 }

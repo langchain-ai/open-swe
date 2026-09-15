@@ -9,6 +9,7 @@ import type {
 } from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
+import { pickComposerWorkspace } from "@/features/agents/lib/composerWorkspace"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -171,18 +172,19 @@ export function AgentsHome({
       : repoOverride
 
   // Follows the selected repo's owning workspace until the user overrides it;
-  // falls back to the instance default when no workspace claims this repo.
+  // falls back to the user's own default, then the instance default.
   const repoWorkspaceSlug = repo
     ? (workspaces.find((workspace) =>
         workspace.repos.some((r) => r.toLowerCase() === repo.toLowerCase())
       )?.slug ?? null)
     : null
-  const selectedWorkspace =
-    workspaceOverride ??
-    repoWorkspaceSlug ??
-    (workspaces.some((workspace) => workspace.slug === defaultWorkspaceSlug)
-      ? defaultWorkspaceSlug
-      : null)
+  const selectedWorkspace = pickComposerWorkspace({
+    override: workspaceOverride,
+    repoWorkspace: repoWorkspaceSlug,
+    userDefault: preferences.data?.default_workspace,
+    instanceDefault: defaultWorkspaceSlug,
+    workspaces,
+  })
 
   // The picker offers the workspace being composed in its own models and
   // default, not the deployment default's.

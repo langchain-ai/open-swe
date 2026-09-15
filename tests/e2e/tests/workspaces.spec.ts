@@ -207,14 +207,15 @@ test.describe("Workspaces", () => {
     await createWorkspace(page, "default", DEFAULT_WORKSPACE_PROMPT);
 
     // One workspace: the choice is already made, so no control is rendered.
+    // Exact: the sidebar's "Workspaces" group header is a button too.
     await openNewAgentHome(page);
-    await expect(page.getByRole("button", { name: "Workspace" })).toHaveCount(
-      0,
-    );
+    await expect(
+      page.getByRole("button", { name: "Workspace", exact: true }),
+    ).toHaveCount(0);
 
     await createWorkspace(page, ALT_NAME, ALT_WORKSPACE_PROMPT);
     await page.reload();
-    const picker = page.getByRole("button", { name: "Workspace" });
+    const picker = page.getByRole("button", { name: "Workspace", exact: true });
     await expect(picker).toBeVisible();
     // Defaults to the workspace named `default`.
     await expect(picker).toContainText("default");
