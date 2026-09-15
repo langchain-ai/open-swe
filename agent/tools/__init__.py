@@ -39,6 +39,7 @@ _TOOL_MODULES = {
     "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
+    "request_pr_media_upload": ".request_pr_media_upload",
     "delete_organization_skill": ".organization_skills",
     "publish_environment": ".environments",
     "save_organization_skill": ".organization_skills",
@@ -99,6 +100,7 @@ __all__ = [
     "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
+    "request_pr_media_upload",
     "publish_environment",
     "save_organization_skill",
     "delete_organization_skill",
@@ -170,6 +172,7 @@ if TYPE_CHECKING:
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
     from agent.tools.report_platform_issue import report_platform_issue
+    from agent.tools.request_pr_media_upload import request_pr_media_upload
     from agent.tools.resolve_finding_thread import resolve_finding_thread
     from agent.tools.sandbox_reset import sandbox_reset
     from agent.tools.save_plan import save_plan
