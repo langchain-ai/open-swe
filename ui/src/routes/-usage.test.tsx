@@ -416,7 +416,7 @@ it("hides a GitHub login when it duplicates the user name", async () => {
   client.clear()
 })
 
-it("links the user name to their GitHub profile only when a login exists", async () => {
+it("links the user name and avatar to their GitHub profile only when a login exists", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
@@ -440,6 +440,11 @@ it("links the user name to their GitHub profile only when a login exists", async
   expect(linked.getAttribute("target")).toBe("_blank")
   expect(linked.getAttribute("rel")).toBe("noreferrer")
   expect(screen.queryByRole("link", { name: "Anonymous Reader" })).toBeNull()
+  const avatarLink = screen.getByText("CR").closest("a")
+  expect(avatarLink?.getAttribute("href")).toBe("https://github.com/reader")
+  expect(avatarLink?.getAttribute("target")).toBe("_blank")
+  expect(avatarLink?.getAttribute("rel")).toBe("noreferrer")
+  expect(screen.getByText("AR").closest("a")).toBeNull()
   client.clear()
 })
 
