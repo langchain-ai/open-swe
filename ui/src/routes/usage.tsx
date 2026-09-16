@@ -1,5 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
+import {
+  CaretDownIcon,
+  CheckCircleIcon,
+  ClockCountdownIcon,
+  WarningCircleIcon,
+} from "@phosphor-icons/react"
 import { useState } from "react"
 
 import type {
@@ -150,7 +156,6 @@ function UsageAnalyticsPeriod({
 
   return (
     <>
-      <AnalyticsCoverage reports={metadata} />
       <PRMergeRateSection report={report} />
 
       <SettingsSection
@@ -254,11 +259,7 @@ function UsageAnalyticsPeriod({
           </div>
         )}
       </SettingsSection>
-      {!leaderboard.isError && leaderboard.data?.generated_at_ms ? (
-        <p className="text-right text-xs text-muted-foreground">
-          Updated {formatTime(leaderboard.data.generated_at_ms)}
-        </p>
-      ) : null}
+      <AnalyticsCoverage reports={metadata} />
     </>
   )
 }
@@ -266,31 +267,80 @@ function UsageAnalyticsPeriod({
 function AnalyticsCoverage({ reports }: { reports: AnalyticsMetadata[] }) {
   if (!reports.length) return null
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
+  const hasPendingEvents = reports.some((data) => data.has_pending_events)
+  const hasFailedEvents = reports.some((data) => data.has_failed_events)
+  const status = hasFailedEvents
+    ? {
+        label: "Analytics need attention",
+        description:
+          "Some events could not be processed. Reports may be incomplete.",
+        icon: WarningCircleIcon,
+        tone: "text-destructive",
+      }
+    : hasPendingEvents
+      ? {
+          label: "Analytics are updating",
+          description: "New activity is still being processed.",
+          icon: ClockCountdownIcon,
+          tone: "text-amber-600 dark:text-amber-400",
+        }
+      : {
+          label: "Analytics are up to date",
+          description: latest.last_processed_at
+            ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}.`
+            : "No events have been processed yet.",
+          icon: CheckCircleIcon,
+          tone: "text-emerald-600 dark:text-emerald-400",
+        }
+  const StatusIcon = status.icon
+
   return (
-    <div
-      className="space-y-1 text-xs text-muted-foreground"
-      role="status"
-      aria-label="Analytics coverage"
-    >
-      <p>
-        Reporting since{" "}
-        <time dateTime={latest.reporting_cutover_at}>
-          {new Date(latest.reporting_cutover_at).toLocaleString()}
-        </time>
-        .
-      </p>
-      <p>
-        {latest.last_processed_at
-          ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}. `
-          : "No events have been processed yet. "}
-        {reports.some((data) => data.has_pending_events)
-          ? "Some captured events are still waiting to be processed. "
-          : ""}
-        {reports.some((data) => data.has_failed_events)
-          ? "Some events could not be processed. Reports may be incomplete. "
-          : ""}
-        Reports checked {new Date(latest.as_of).toLocaleString()}.
-      </p>
+    <div role="status" aria-label="Analytics coverage">
+      <details className="group rounded-xl border border-border bg-card text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+          <StatusIcon
+            aria-hidden="true"
+            className={`size-4 shrink-0 ${status.tone}`}
+            weight="fill"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium text-foreground">
+              {status.label}
+            </span>
+            <span className="mt-0.5 block text-muted-foreground">
+              {status.description}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground group-open:text-foreground">
+            Details
+            <CaretDownIcon
+              aria-hidden="true"
+              className="size-3.5 transition-transform group-open:rotate-180"
+            />
+          </span>
+        </summary>
+        <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
+          <p>
+            Reporting since{" "}
+            <time dateTime={latest.reporting_cutover_at}>
+              {new Date(latest.reporting_cutover_at).toLocaleString()}
+            </time>
+            .
+          </p>
+          <p>
+            {latest.last_processed_at
+              ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}. `
+              : "No events have been processed yet. "}
+            {hasPendingEvents
+              ? "Some captured events are still waiting to be processed. "
+              : ""}
+            {hasFailedEvents
+              ? "Some events could not be processed. Reports may be incomplete. "
+              : ""}
+            Reports checked {new Date(latest.as_of).toLocaleString()}.
+          </p>
+        </div>
+      </details>
     </div>
   )
 }
@@ -821,13 +871,6 @@ function initialsFor(name: string): string {
   const second = parts[1]
   if (!second) return first.slice(0, 2).toUpperCase()
   return `${first[0] ?? ""}${second[0] ?? ""}`.toUpperCase()
-}
-
-function formatTime(value: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(value)
 }
 
 function formatNumber(value: number): string {
