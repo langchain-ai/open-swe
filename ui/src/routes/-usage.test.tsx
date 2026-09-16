@@ -342,6 +342,41 @@ it("resets leaderboard pagination when the period changes outside the selector",
   client.clear()
 })
 
+it("switches the usage count and average duration to threads", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      {
+        ...costRow,
+        invocations: 4,
+        threads: 2,
+        avg_invocation_seconds: 30,
+        avg_thread_seconds: 90,
+      },
+    ],
+  })
+  const client = mountReport()
+  expect(
+    await screen.findByRole("columnheader", { name: "Invocations" })
+  ).toBeTruthy()
+  expect(
+    screen.getByRole("columnheader", { name: "Avg Invocation Duration" })
+  ).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("button", { name: "threads" }))
+
+  expect(screen.getByRole("columnheader", { name: "Threads" })).toBeTruthy()
+  expect(
+    screen.getByRole("columnheader", { name: "Avg Thread Duration" })
+  ).toBeTruthy()
+  const row = screen.getByText("Cost Reader").closest("tr")!
+  expect(within(row).getByText("2")).toBeTruthy()
+  expect(within(row).getByText("2m")).toBeTruthy()
+  client.clear()
+})
+
 it("distinguishes unavailable usage from empty usage and recovers without duplicate coverage notices", async () => {
   vi.mocked(api.usageLeaderboard).mockRejectedValue(
     new ApiError(503, "unavailable")

@@ -42,6 +42,8 @@ export const Route = createFileRoute("/usage")({
 
 const PAGE_SIZES = [10, 25, 50, 100] as const
 
+type UsageScope = "invocations" | "threads"
+
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "7d": "Last 7 days",
   "30d": "Last 30 days",
@@ -124,6 +126,7 @@ function UsageAnalyticsPeriod({
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   const [leaderboardPage, setLeaderboardPage] = useState(1)
+  const [usageScope, setUsageScope] = useState<UsageScope>("invocations")
   const [leaderboardCursors, setLeaderboardCursors] = useState<
     (string | undefined)[]
   >([undefined])
@@ -160,25 +163,50 @@ function UsageAnalyticsPeriod({
 
       <SettingsSection
         title="Agent leaderboard"
-        description="Ranked by merged PRs, then agent lines of code, PRs opened, and invocations."
+        description="Ranked by merged PRs, then agent lines of code and PRs opened."
         action={
-          <Select
-            value={activePeriod}
-            onValueChange={(value) =>
-              onPeriodChange(value as UsageLeaderboardPeriod)
-            }
-          >
-            <SelectTrigger className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(PERIOD_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
-                </SelectItem>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex rounded-md bg-muted p-0.5"
+              role="group"
+              aria-label="Usage scope"
+            >
+              {(["invocations", "threads"] as const).map((scope) => (
+                <Button
+                  key={scope}
+                  type="button"
+                  size="sm"
+                  variant={usageScope === scope ? "secondary" : "ghost"}
+                  aria-pressed={usageScope === scope}
+                  className="capitalize"
+                  onClick={() => {
+                    setUsageScope(scope)
+                    setLeaderboardPage(1)
+                    setLeaderboardCursors([undefined])
+                  }}
+                >
+                  {scope}
+                </Button>
               ))}
-            </SelectContent>
-          </Select>
+            </div>
+            <Select
+              value={activePeriod}
+              onValueChange={(value) =>
+                onPeriodChange(value as UsageLeaderboardPeriod)
+              }
+            >
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(PERIOD_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         }
       >
         {leaderboard.isLoading ? (
@@ -210,6 +238,7 @@ function UsageAnalyticsPeriod({
           </div>
         ) : (
           <UsageTable
+            scope={usageScope}
             currentUserRank={leaderboard.data.current_user_rank}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
@@ -540,6 +569,7 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
 }
 
 function UsageTable({
+  scope,
   currentUserRank,
   rows,
   totalMembers,
@@ -548,6 +578,7 @@ function UsageTable({
   onPageChange,
   onPageSizeChange,
 }: {
+  scope: UsageScope
   currentUserRank: number | null
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
@@ -564,11 +595,15 @@ function UsageTable({
             <th className="w-14 px-4 py-3 text-left font-normal">Rank</th>
             <th className="px-2 py-3 text-left font-normal">User</th>
             <th className="px-2 py-3 text-left font-normal">Favorite Model</th>
-            <th className="px-2 py-3 text-right font-normal">Invocations</th>
+            <th className="px-2 py-3 text-right font-normal">
+              {scope === "threads" ? "Threads" : "Invocations"}
+            </th>
             <th className="px-2 py-3 text-right font-normal">Tokens</th>
             <th className="px-2 py-3 text-right font-normal">Cost</th>
             <th className="px-2 py-3 text-right font-normal">
-              Avg Invocation Duration
+              {scope === "threads"
+                ? "Avg Thread Duration"
+                : "Avg Invocation Duration"}
             </th>
             <th className="px-2 py-3 text-right font-normal">PRs Opened</th>
             <th className="px-2 py-3 text-right font-normal">Merged PRs</th>
@@ -591,7 +626,9 @@ function UsageTable({
                 {safeModelLabel(row.favorite_model) || "Unavailable"}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
-                {formatNumber(row.invocations)}
+                {formatNumber(
+                  scope === "threads" ? (row.threads ?? 0) : row.invocations
+                )}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.total_tokens)}
@@ -600,7 +637,11 @@ function UsageTable({
                 <UsageCost row={row} />
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
-                {formatDuration(row.avg_invocation_seconds)}
+                {formatDuration(
+                  scope === "threads"
+                    ? (row.avg_thread_seconds ?? 0)
+                    : row.avg_invocation_seconds
+                )}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.prs_opened)}
