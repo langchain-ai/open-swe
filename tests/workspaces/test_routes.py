@@ -58,10 +58,15 @@ async def test_duplicate_repo_on_update_is_a_409(admin_client: httpx.AsyncClient
     assert "already belongs to workspace core" in response.json()["detail"]
 
 
+async def test_deleting_the_default_workspace_is_a_400(admin_client: httpx.AsyncClient) -> None:
+    response = await admin_client.delete("/dashboard/api/workspaces/default")
+    assert response.status_code == 400
+    assert "cannot be deleted" in response.json()["detail"]
+
+
 async def test_options_carry_repos_channels_and_default_flag(
     admin_client: httpx.AsyncClient,
 ) -> None:
-    await admin_client.post("/dashboard/api/workspaces", json={"name": "Default"})
     await admin_client.post(
         "/dashboard/api/workspaces",
         json={"name": "OSS", "repos": ["acme/oss"], "slack_channel_ids": ["C0SS"]},

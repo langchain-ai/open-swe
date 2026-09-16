@@ -751,12 +751,19 @@ class WorkspaceStore:
 
         The LangGraph Store import is what fills these tables on a deployment
         that predates them, so until it has succeeded an empty table cannot be
-        told apart from one this process never managed to write.
+        told apart from one this process never managed to write. The default
+        workspace is created by migration, so it is not evidence of an import.
         """
         if self.import_completed:
             return True
         async with postgres.session() as session:
-            return (await session.scalar(select(WorkspaceRow.id).limit(1))) is not None
+            return (
+                await session.scalar(
+                    select(WorkspaceRow.id)
+                    .where(WorkspaceRow.slug != DEFAULT_WORKSPACE_SLUG)
+                    .limit(1)
+                )
+            ) is not None
 
     async def list_all(self) -> list[Workspace]:
         """Every workspace, skipping a row that fails to validate.
@@ -957,6 +964,9 @@ class WorkspaceStore:
         return await self.save(record)
 
     async def remove(self, slug: str) -> bool:
+        """Delete a workspace; the default one is permanent, so it is refused."""
+        if slug == DEFAULT_WORKSPACE_SLUG:
+            raise ValueError("The default workspace cannot be deleted")
         record = await self.get(slug)
         if record is None:
             return False
@@ -1278,10 +1288,10 @@ async def import_store_records() -> int:
     """Copy the workspaces that still live in the LangGraph Store into PostgreSQL.
 
     Runs once per startup and returns how many records it copied. A slug that
-    already has a row is left alone, and every record it reads is deleted from
-    the Store once it has been dealt with: that makes this idempotent, keeps a
-    legacy namespace from resurrecting a workspace an admin has since deleted,
-    and means a later release can drop this entirely.
+    already has a row is left alone, ``default`` excepted, and every record it
+    reads is deleted from the Store once it has been dealt with: that makes this
+    idempotent, keeps a legacy namespace from resurrecting a workspace an admin
+    has since deleted, and means a later release can drop this entirely.
 
     A record the Store cannot be made sense of, or one whose repositories are
     claimed by another workspace, stays where it is for the next startup rather
@@ -1313,7 +1323,9 @@ async def import_store_records() -> int:
                     exc_info=True,
                 )
                 continue
-            if await WORKSPACES.get(record.slug) is None:
+            # The default row exists from migration, so the Store's version of it
+            # is the real one and must replace the placeholder.
+            if record.slug == DEFAULT_WORKSPACE_SLUG or await WORKSPACES.get(record.slug) is None:
                 try:
                     await WORKSPACES.put(record.slug, record)
                 except ValueError, IntegrityError:

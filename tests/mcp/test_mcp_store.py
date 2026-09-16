@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Sequence
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid7
 
 import pytest
 from sqlalchemy import delete, select, update
@@ -15,6 +15,7 @@ from agent.mcp.user import USER_MCPS_NAMESPACE
 from agent.mcp.workspace import WORKSPACE_MCPS_NAMESPACE
 from agent.store import now_iso
 from agent.users import User
+from agent.workspaces.rows import WorkspaceRow
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 from tests.conftest import FakeStore
 
@@ -60,6 +61,29 @@ async def stored_user_names(user_id: UUID) -> list[str]:
     async with postgres.session() as session:
         names = await session.scalars(
             select(UserMCPConnectionRow.name).where(UserMCPConnectionRow.user_id == user_id)
+        )
+        return sorted(names)
+
+
+async def make_workspace(slug: str) -> UUID:
+    """The ``workspace`` row a shared connection hangs off."""
+    workspace_id = uuid7()
+    async with postgres.session() as session:
+        session.add(WorkspaceRow(id=workspace_id, slug=slug, name=slug))
+    return workspace_id
+
+
+async def workspace_id_of(slug: str) -> UUID | None:
+    async with postgres.session() as session:
+        return await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
+
+
+async def stored_workspace_names(workspace_id: UUID) -> list[str]:
+    async with postgres.session() as session:
+        names = await session.scalars(
+            select(WorkspaceMCPConnectionRow.name).where(
+                WorkspaceMCPConnectionRow.workspace_id == workspace_id
+            )
         )
         return sorted(names)
 
@@ -119,9 +143,15 @@ async def test_a_connection_round_trips_through_its_row() -> None:
     await store.delete("linear")
 
 
+async def test_the_default_workspace_exists_in_a_fresh_schema() -> None:
+    """Its connections need a row to hang off, so the migration writes one."""
+    assert await workspace_id_of(DEFAULT_WORKSPACE_SLUG) is not None
+
+
 async def test_one_name_in_two_scopes_or_two_owners_is_two_connections() -> None:
     await make_user("acme")
     await make_user("other")
+    await make_workspace("acme")
     user = MCPConnectionStore("user", "acme")
     workspace = MCPConnectionStore("workspace", "acme")
     await user.put("linear", connection("linear", url="https://user.example/mcp"))
@@ -154,6 +184,29 @@ async def test_a_login_with_no_user_row_reads_empty_and_cannot_save() -> None:
     await store.delete("linear")
     with pytest.raises(ValueError, match="Sign in again"):
         await store.put("linear", connection("linear"))
+
+
+async def test_a_slug_with_no_workspace_row_reads_empty_and_cannot_save() -> None:
+    """A workspace an admin has deleted has nothing to hang a connection off."""
+    store = MCPConnectionStore("workspace", "ghost")
+
+    assert await store.get("docs") is None
+    assert await store.list_all() == []
+    await store.delete("docs")
+    with pytest.raises(ValueError, match="Workspace does not exist"):
+        await store.put("docs", connection("docs"))
+
+
+async def test_deleting_a_workspace_deletes_its_connections() -> None:
+    workspace_id = await make_workspace("oss")
+    store = MCPConnectionStore("workspace", "oss")
+    await store.put("docs", connection("docs"))
+    assert await stored_workspace_names(workspace_id) == ["docs"]
+
+    async with postgres.session() as session:
+        await session.execute(delete(WorkspaceRow).where(WorkspaceRow.id == workspace_id))
+
+    assert await stored_workspace_names(workspace_id) == []
 
 
 async def test_deleting_a_user_deletes_their_connections() -> None:
@@ -216,6 +269,7 @@ async def test_import_moves_every_scope_into_rows_and_empties_the_store(
     prefix_store: FakeStore,
 ) -> None:
     await make_user("alice")
+    await make_workspace("oss")
     prefix_store.seed(
         [*USER_MCPS_NAMESPACE, "alice"], "linear", connection("linear").model_dump(mode="json")
     )
@@ -240,6 +294,9 @@ async def test_import_moves_every_scope_into_rows_and_empties_the_store(
     assert legacy is not None
     assert legacy.transport == "sse"
     assert legacy.revision and legacy.updated_at
+    default_id = await workspace_id_of(DEFAULT_WORKSPACE_SLUG)
+    assert default_id is not None
+    assert await stored_workspace_names(default_id) == ["legacy"]
 
     assert prefix_store.values([*USER_MCPS_NAMESPACE, "alice"]) == {}
     assert prefix_store.values([*WORKSPACE_MCPS_NAMESPACE, "oss"]) == {}
@@ -289,7 +346,25 @@ async def test_import_leaves_a_record_whose_login_has_no_user(prefix_store: Fake
     assert sorted(prefix_store.values([*USER_MCPS_NAMESPACE, "ghost"])) == ["docs"]
 
 
+async def test_import_leaves_a_record_whose_slug_has_no_workspace(prefix_store: FakeStore) -> None:
+    await make_workspace("oss")
+    prefix_store.seed(
+        [*WORKSPACE_MCPS_NAMESPACE, "oss"], "docs", connection("docs").model_dump(mode="json")
+    )
+    prefix_store.seed(
+        [*WORKSPACE_MCPS_NAMESPACE, "ghost"], "charts", connection("charts").model_dump(mode="json")
+    )
+
+    assert await import_store_records() == 1
+
+    imported = await MCPConnectionStore("workspace", "oss").list_all()
+    assert [record.name for record in imported] == ["docs"]
+    assert prefix_store.values([*WORKSPACE_MCPS_NAMESPACE, "oss"]) == {}
+    assert sorted(prefix_store.values([*WORKSPACE_MCPS_NAMESPACE, "ghost"])) == ["charts"]
+
+
 async def test_import_does_not_overwrite_a_row_it_already_has(prefix_store: FakeStore) -> None:
+    await make_workspace("oss")
     store = MCPConnectionStore("workspace", "oss")
     kept = connection("docs", url="https://kept.example/mcp")
     await store.put("docs", kept)

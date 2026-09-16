@@ -17,6 +17,7 @@ from agent.encryption import decrypt_token
 from agent.mcp import MCPConnectionUpdate, runtime
 from agent.mcp import workspace as mcps
 from agent.mcp.rows import WorkspaceMCPConnectionRow
+from agent.workspaces.rows import WorkspaceRow
 
 
 @pytest.fixture(autouse=True)
@@ -24,13 +25,17 @@ def encryption(monkeypatch):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 
+async def workspace_id_of(slug):
+    async with postgres.session() as session:
+        return await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
+
+
 async def stored_workspace_row(slug, name):
     async with postgres.session() as session:
         return await session.scalar(
-            select(WorkspaceMCPConnectionRow).where(
-                WorkspaceMCPConnectionRow.workspace_slug == slug,
-                WorkspaceMCPConnectionRow.name == name,
-            )
+            select(WorkspaceMCPConnectionRow)
+            .join(WorkspaceRow, WorkspaceRow.id == WorkspaceMCPConnectionRow.workspace_id)
+            .where(WorkspaceRow.slug == slug, WorkspaceMCPConnectionRow.name == name)
         )
 
 
@@ -64,11 +69,12 @@ async def test_corrupt_record_does_not_hide_other_connections_or_log_values(regi
     saved = await mcps.save_workspace_mcp(
         "default", "example", MCPConnectionUpdate(name="example", url="https://example.com/mcp")
     )
+    workspace_id = await workspace_id_of("default")
     async with postgres.session() as session:
         await session.execute(
             insert(WorkspaceMCPConnectionRow).values(
                 id=uuid7(),
-                workspace_slug="default",
+                workspace_id=workspace_id,
                 name="broken",
                 url="https://example.com/mcp",
                 revision="broken-revision",

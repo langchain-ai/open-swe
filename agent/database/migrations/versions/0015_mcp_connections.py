@@ -1,10 +1,12 @@
-"""MCP connections, one table per scope.
+"""MCP connections, one table per scope, each row deleted with its owner.
 
-A personal connection belongs to a ``users`` row, so it is deleted with the
-person. A workspace one keys on the slug with no foreign key: the ``default``
-workspace is allowed to have no ``workspace`` row.
+The ``default`` workspace is inserted when missing, so the workspace foreign
+key always has a row to point at.
 """
 
+import uuid
+
+import sqlalchemy as sa
 from alembic import op
 
 revision = "0015"
@@ -36,11 +38,20 @@ def upgrade() -> None:
         """
     )
 
+    op.get_bind().execute(
+        sa.text(
+            "INSERT INTO workspace (id, slug, name, created_by) "
+            "SELECT :id, 'default', 'Default', 'open-swe' "
+            "WHERE NOT EXISTS (SELECT 1 FROM workspace WHERE slug = 'default')"
+        ),
+        {"id": uuid.uuid7()},
+    )
+
     op.execute(
         """
         CREATE TABLE workspace_mcp_connection (
             id uuid PRIMARY KEY,
-            workspace_slug text NOT NULL,
+            workspace_id uuid NOT NULL REFERENCES workspace (id) ON DELETE CASCADE,
             name text NOT NULL,
             url text NOT NULL,
             transport text NOT NULL DEFAULT 'streamable_http' CHECK (transport IN ('streamable_http', 'sse')),
@@ -53,7 +64,7 @@ def upgrade() -> None:
             revision text NOT NULL,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            UNIQUE (workspace_slug, name)
+            UNIQUE (workspace_id, name)
         )
         """
     )

@@ -1,35 +1,36 @@
 """MCP connections in PostgreSQL, one store per owner.
 
-An owner is a GitHub login in the ``user`` scope — resolved to a ``users`` row
-on every call, so a connection follows the person rather than the handle — or a
-workspace slug in the ``workspace`` scope.
+An owner is a GitHub login in the ``user`` scope or a workspace slug in the
+``workspace`` scope, and either way it is resolved to the owning row's id on
+every call — so a connection follows the person or the workspace rather than
+the handle it was saved under.
 """
 
 import logging
+from collections.abc import Sequence
 from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import ColumnElement, delete, select
 
 from agent.database import postgres
 from agent.mcp.models import MCPConnection
-from agent.mcp.rows import (
-    MCPConnectionRow,
-    UserMCPConnectionRow,
-    WorkspaceMCPConnectionRow,
-    apply_connection,
-    to_connection,
-)
+from agent.mcp.rows import MCPConnectionColumns, UserMCPConnectionRow, WorkspaceMCPConnectionRow
 from agent.store import StoreEntry, delete_value, now_iso, search_all_entries
 from agent.users import User
+from agent.workspaces.rows import WorkspaceRow
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 logger = logging.getLogger(__name__)
 
 type MCPScope = Literal["user", "workspace"]
 
+USER_MCPS_NAMESPACE: list[str] = ["user_mcps"]
+WORKSPACE_MCPS_NAMESPACE: list[str] = ["workspace_mcps"]
+
 _SIGN_IN_AGAIN = "Sign in again before saving personal MCP connections"
+_NO_WORKSPACE = "Workspace does not exist"
 
 
 class MCPConnectionStore:
@@ -50,7 +51,7 @@ class MCPConnectionStore:
         if not rows:
             return None
         try:
-            return to_connection(rows[0])
+            return rows[0].to_connection()
         except ValidationError:
             logger.error(
                 "Unreadable MCP connection record",
@@ -68,7 +69,7 @@ class MCPConnectionStore:
         records: list[MCPConnection] = []
         for row in await self._rows():
             try:
-                records.append(to_connection(row))
+                records.append(row.to_connection())
             except ValidationError:
                 logger.error(
                     "Skipping unreadable MCP connection record",
@@ -79,77 +80,64 @@ class MCPConnectionStore:
 
     async def put(self, name: str, record: MCPConnection) -> None:
         """Store ``record`` under ``name``, keeping the row's ``created_at``."""
-        if self.scope == "workspace":
-            async with postgres.session() as session:
-                workspace_row = await session.scalar(
-                    select(WorkspaceMCPConnectionRow).where(
-                        WorkspaceMCPConnectionRow.workspace_slug == self.owner,
-                        WorkspaceMCPConnectionRow.name == name,
-                    )
-                )
-                if workspace_row is None:
-                    workspace_row = WorkspaceMCPConnectionRow(workspace_slug=self.owner, name=name)
-                    session.add(workspace_row)
-                apply_connection(workspace_row, record)
-            return
-        user_id = await self._user_id()
-        if user_id is None:
-            raise ValueError(_SIGN_IN_AGAIN)
+        owner_id = await self._owner_id()
+        if owner_id is None:
+            raise ValueError(_SIGN_IN_AGAIN if self.scope == "user" else _NO_WORKSPACE)
+        row_type = self._row_type()
         async with postgres.session() as session:
-            user_row = await session.scalar(
-                select(UserMCPConnectionRow).where(
-                    UserMCPConnectionRow.user_id == user_id,
-                    UserMCPConnectionRow.name == name,
-                )
+            row: MCPConnectionColumns | None = await session.scalar(
+                select(row_type).where(self._owned_by(owner_id), row_type.name == name)
             )
-            if user_row is None:
-                user_row = UserMCPConnectionRow(user_id=user_id, name=name)
-                session.add(user_row)
-            apply_connection(user_row, record)
+            if row is None:
+                row = self._new_row(owner_id, name)
+                session.add(row)
+            row.apply(record)
 
     async def delete(self, name: str) -> None:
         """Remove the connection stored under ``name``, if there is one."""
-        if self.scope == "workspace":
-            statement = delete(WorkspaceMCPConnectionRow).where(
-                WorkspaceMCPConnectionRow.workspace_slug == self.owner,
-                WorkspaceMCPConnectionRow.name == name,
-            )
-        else:
-            user_id = await self._user_id()
-            if user_id is None:
-                return
-            statement = delete(UserMCPConnectionRow).where(
-                UserMCPConnectionRow.user_id == user_id,
-                UserMCPConnectionRow.name == name,
-            )
+        owner_id = await self._owner_id()
+        if owner_id is None:
+            return
+        row_type = self._row_type()
         async with postgres.session() as session:
-            await session.execute(statement)
-
-    async def _user_id(self) -> UUID | None:
-        """The person this login belongs to, or ``None`` when nobody has signed in as it."""
-        user = await User.for_login("github", self.owner)
-        return None if user is None else user.id
-
-    async def _rows(self, name: str | None = None) -> list[MCPConnectionRow]:
-        """This owner's rows by name, or just the one named; empty for an unknown login."""
-        if self.scope == "workspace":
-            workspace_query = select(WorkspaceMCPConnectionRow).where(
-                WorkspaceMCPConnectionRow.workspace_slug == self.owner
+            await session.execute(
+                delete(row_type).where(self._owned_by(owner_id), row_type.name == name)
             )
-            if name is not None:
-                workspace_query = workspace_query.where(WorkspaceMCPConnectionRow.name == name)
-            async with postgres.session() as session:
-                return list(
-                    await session.scalars(workspace_query.order_by(WorkspaceMCPConnectionRow.name))
-                )
-        user_id = await self._user_id()
-        if user_id is None:
+
+    async def _owner_id(self) -> UUID | None:
+        """The row this owner's connections hang off, or ``None`` when there is none."""
+        if self.scope == "user":
+            user = await User.for_login("github", self.owner)
+            return None if user is None else user.id
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(WorkspaceRow.id).where(WorkspaceRow.slug == self.owner)
+            )
+
+    def _row_type(self) -> type[UserMCPConnectionRow] | type[WorkspaceMCPConnectionRow]:
+        return UserMCPConnectionRow if self.scope == "user" else WorkspaceMCPConnectionRow
+
+    def _owned_by(self, owner_id: UUID) -> ColumnElement[bool]:
+        if self.scope == "user":
+            return UserMCPConnectionRow.user_id == owner_id
+        return WorkspaceMCPConnectionRow.workspace_id == owner_id
+
+    def _new_row(self, owner_id: UUID, name: str) -> MCPConnectionColumns:
+        if self.scope == "user":
+            return UserMCPConnectionRow(user_id=owner_id, name=name)
+        return WorkspaceMCPConnectionRow(workspace_id=owner_id, name=name)
+
+    async def _rows(self, name: str | None = None) -> Sequence[MCPConnectionColumns]:
+        """This owner's rows by name, or just the one named; empty for an unknown owner."""
+        owner_id = await self._owner_id()
+        if owner_id is None:
             return []
-        user_query = select(UserMCPConnectionRow).where(UserMCPConnectionRow.user_id == user_id)
+        row_type = self._row_type()
+        query = select(row_type).where(self._owned_by(owner_id))
         if name is not None:
-            user_query = user_query.where(UserMCPConnectionRow.name == name)
+            query = query.where(row_type.name == name)
         async with postgres.session() as session:
-            return list(await session.scalars(user_query.order_by(UserMCPConnectionRow.name)))
+            return list(await session.scalars(query.order_by(row_type.name)))
 
 
 async def import_store_records() -> int:
@@ -158,12 +146,9 @@ async def import_store_records() -> int:
     Runs once per startup and returns how many rows it inserted. A name that
     already has a row keeps it, and every record that has been dealt with is
     deleted from the Store, so a second run has nothing left to do. A record
-    that cannot be read, or whose login nobody has signed in as, stays where it
-    is for the next startup rather than being dropped on the floor.
+    that cannot be read, or whose owner has no row, stays where it is for the
+    next startup rather than being dropped on the floor.
     """
-    from agent.mcp.user import USER_MCPS_NAMESPACE
-    from agent.mcp.workspace import WORKSPACE_MCPS_NAMESPACE
-
     sources: tuple[tuple[MCPScope, list[str]], ...] = (
         ("user", USER_MCPS_NAMESPACE),
         ("workspace", WORKSPACE_MCPS_NAMESPACE),
@@ -201,9 +186,10 @@ async def import_store_records() -> int:
                     await store.put(record.name, record)
                 except ValueError:
                     skipped += 1
+                    owner_field = "github_login" if scope == "user" else "workspace_slug"
                     logger.warning(
-                        "Leaving a personal MCP connection whose login has no user in the Store",
-                        extra={"github_login": owner, "mcp_name": record.name},
+                        "Leaving an MCP connection whose owner has no row in the Store",
+                        extra={owner_field: owner, "mcp_name": record.name},
                     )
                     continue
                 imported += 1

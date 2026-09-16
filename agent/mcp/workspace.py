@@ -10,9 +10,8 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from agent.mcp import MCPConnection, MCPConnectionUpdate, MCPSource, prepare_connection
-from agent.mcp.store import MCPConnectionStore
+from agent.mcp.store import WORKSPACE_MCPS_NAMESPACE, MCPConnectionStore
 
-WORKSPACE_MCPS_NAMESPACE = ["workspace_mcps"]
 _VALIDATION_MESSAGES = {
     "name": (
         "Connection name must start with a lowercase letter and contain only lowercase "

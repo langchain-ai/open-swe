@@ -1,5 +1,6 @@
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
@@ -188,9 +189,7 @@ def test_workspace_prompt_blank_is_none() -> None:
 @pytest.mark.usefixtures("registry_db")
 async def test_only_the_workspace_named_default_is_resolved() -> None:
     await WORKSPACES.create(WorkspaceCreate(name="Draft", repos=["acme/draft"]), "ramon")
-    assert await env_store.load_default_workspace() is None
 
-    await WORKSPACES.create(WorkspaceCreate(name="Default"), "ramon")
     resolved = await env_store.load_default_workspace()
 
     assert resolved is not None
@@ -253,17 +252,27 @@ async def test_delete_removes_record_and_snapshot() -> None:
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="Draft", repos=["acme/draft"]), "ramon")
         await WORKSPACES.mark_captured(
-            "default",
+            "draft",
             snapshot_id="snap-1",
             snapshot_name="prior",
             source_sandbox_id="sb-prior",
         )
 
-        assert await WORKSPACES.remove("default") is True
-        assert await env_store.load_default_workspace() is None
+        assert await WORKSPACES.remove("draft") is True
+        assert await WORKSPACES.get("draft") is None
         delete_snapshot.assert_awaited_once_with("snap-1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_the_default_workspace_cannot_be_deleted() -> None:
+    """Workspace MCP connections key on its row, which must always be there."""
+    with pytest.raises(ValueError, match="default workspace cannot be deleted"):
+        await WORKSPACES.remove("default")
+
+    assert await WORKSPACES.get("default") is not None
 
 
 @pytest.mark.asyncio
@@ -447,7 +456,7 @@ async def test_update_clearing_create_params_with_null_stays_readable() -> None:
     reread = await WORKSPACES.get("base")
     assert reread is not None
     assert reread.create_params == {}
-    assert [record.slug for record in await WORKSPACES.list_all()] == ["base"]
+    assert sorted(record.slug for record in await WORKSPACES.list_all()) == ["base", "default"]
 
 
 @pytest.mark.asyncio
@@ -497,7 +506,6 @@ def test_parse_workspace_tag(text: str, expected_slug: str | None, expected_text
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_load_workspace_prefers_the_selection() -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
     await WORKSPACES.create(WorkspaceCreate(name="staging", repos=["acme/staging"]), "ramon")
 
     selected = await env_store.load_workspace("staging")
@@ -517,13 +525,13 @@ async def test_load_workspace_prefers_the_selection() -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_workspace_options_omit_admin_only_settings() -> None:
-    await WORKSPACES.create(
-        WorkspaceCreate(
+    await WORKSPACES.apply_update(
+        "default",
+        WorkspaceUpdate(
             name="default",
             prompt="secret-ish prompt",
             create_params={"_internal_runtime": "v2"},
         ),
-        "ramon",
     )
     await WORKSPACES.mark_captured(
         "default",
@@ -626,7 +634,7 @@ async def test_update_rejects_slack_channel_owned_by_another_workspace() -> None
 async def test_non_default_workspace_requires_a_repo() -> None:
     with pytest.raises(ValueError, match="at least one repository"):
         await WORKSPACES.create(WorkspaceCreate(name="Empty"), "alice")
-    record = await WORKSPACES.create(WorkspaceCreate(name="Default"), "alice")
+    record = await WORKSPACES.apply_update("default", WorkspaceUpdate(prompt="anything"))
     assert record.slug == "default" and record.repos == []
 
 
@@ -683,7 +691,11 @@ async def test_one_unimportable_record_does_not_stop_the_others(
 
     assert await import_store_records() == 1
 
-    assert sorted(record.slug for record in await WORKSPACES.list_all()) == ["core", "oss"]
+    assert sorted(record.slug for record in await WORKSPACES.list_all()) == [
+        "core",
+        "default",
+        "oss",
+    ]
     # The one whose repository another workspace owns stays where it is, and the
     # import is not complete until it is dealt with.
     assert sorted(fake_store.values(WORKSPACES_NAMESPACE)) == ["taken"]
@@ -731,7 +743,7 @@ async def test_importing_twice_imports_nothing_the_second_time(fake_store: FakeS
 
     assert await import_store_records() == 1
     assert await import_store_records() == 0
-    assert [record.slug for record in await WORKSPACES.list_all()] == ["oss"]
+    assert sorted(record.slug for record in await WORKSPACES.list_all()) == ["default", "oss"]
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -748,8 +760,47 @@ async def test_deleting_an_imported_workspace_does_not_resurrect_it(
     assert await WORKSPACES.remove("oss") is True
 
     assert await import_store_records() == 0
-    assert await WORKSPACES.list_all() == []
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["default"]
     assert await WORKSPACES.get("oss") is None
+
+
+async def _workspace_id(slug: str) -> UUID | None:
+    async with postgres.session() as session:
+        return await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_the_import_overwrites_the_placeholder_default_workspace(
+    fake_store: FakeStore,
+) -> None:
+    """A deployment whose real default still lives in the Store must not lose it."""
+    placeholder_id = await _workspace_id("default")
+    fake_store.seed(
+        WORKSPACES_NAMESPACE,
+        "default",
+        {"slug": "default", "name": "Default", "prompt": "hi", "repos": []},
+    )
+
+    assert await import_store_records() == 1
+
+    record = await WORKSPACES.get("default")
+    assert record is not None and record.prompt == "hi"
+    # Kept, so the connections keyed on this row survive the overwrite.
+    assert await _workspace_id("default") == placeholder_id
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_the_placeholder_default_row_is_not_a_populated_routing_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counting it would lose the fail-closed guard the moment the migration runs."""
+    monkeypatch.setattr(WORKSPACES, "import_completed", False)
+
+    assert await WORKSPACES.routing_is_populated() is False
+
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "ramon")
+
+    assert await WORKSPACES.routing_is_populated() is True
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -770,7 +821,7 @@ async def test_list_all_skips_a_row_that_fails_to_validate() -> None:
             {"slug": "corrupt"},
         )
 
-    assert [record.slug for record in await WORKSPACES.list_all()] == ["healthy"]
+    assert sorted(record.slug for record in await WORKSPACES.list_all()) == ["default", "healthy"]
 
 
 @pytest.mark.usefixtures("registry_db")

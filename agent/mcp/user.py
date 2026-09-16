@@ -10,9 +10,7 @@ from agent.mcp import (
     discover_tools,
     prepare_connection,
 )
-from agent.mcp.store import MCPConnectionStore
-
-USER_MCPS_NAMESPACE = ["user_mcps"]
+from agent.mcp.store import USER_MCPS_NAMESPACE, MCPConnectionStore
 
 
 def _store(login: str) -> MCPConnectionStore:
