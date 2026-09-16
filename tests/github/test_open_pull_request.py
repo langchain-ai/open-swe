@@ -987,6 +987,53 @@ def test_resolves_thread_flag_defaults_to_false(monkeypatch: pytest.MonkeyPatch)
     assert record_telemetry.await_args.kwargs["resolves_thread"] is False
 
 
+@pytest.mark.parametrize(
+    ("record_opening", "expected_keys"),
+    [(True, ["pr_opened"]), (False, [])],
+)
+async def test_record_pr_telemetry_records_pr_opened_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+    record_opening: bool,
+    expected_keys: list[str],
+) -> None:
+    """``pr_opened`` is the averageable denominator, so it fires once per new PR."""
+    _set_config(monkeypatch, {"source": "slack", "thread_id": "t1", "github_login": "octo"})
+    monkeypatch.setattr(opr, "record_agent_pr_usage", AsyncMock())
+    monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
+    create_feedback = AsyncMock(return_value=True)
+    monkeypatch.setattr(opr, "create_langsmith_thread_feedback", create_feedback)
+    langgraph = MagicMock()
+    langgraph.threads.get = AsyncMock(return_value={"metadata": {}})
+    langgraph.threads.update = AsyncMock()
+    monkeypatch.setattr(opr, "get_client", lambda: langgraph)
+    details = {
+        "html_url": "https://github.com/langchain-ai/open-swe/pull/3",
+        "number": 3,
+        "state": "open",
+        "draft": False,
+        "merged": False,
+        "title": "feat: x",
+        "user": {"login": "octo"},
+    }
+    client = _FakeClient(post=_FakeResponse(201, {}), get=_FakeResponse(200, details))
+
+    await opr._record_pr_telemetry(
+        client=client,  # type: ignore[arg-type]
+        token="tok",
+        owner="langchain-ai",
+        repo="open-swe",
+        head="open-swe/feature",
+        base="main",
+        pr=details,
+        record_opening=record_opening,
+    )
+
+    assert [call.args[1] for call in create_feedback.await_args_list] == expected_keys
+    if expected_keys:
+        assert create_feedback.await_args.kwargs["score"] == 1.0
+        assert create_feedback.await_args.kwargs["comment"] == details["html_url"]
+
+
 @pytest.mark.parametrize("top_level_run_id", [False, True])
 async def test_record_pr_telemetry_persists_resolves_thread_flag(
     monkeypatch: pytest.MonkeyPatch,
