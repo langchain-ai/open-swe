@@ -17,7 +17,6 @@ from agent.github import webhook as github_webhooks
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
 from agent.slack.client import GitHubPrRef
-from agent.slack.dm import DM_SESSION_TS
 from agent.slack.request import SlackRequest
 from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
@@ -888,17 +887,17 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["message"] == "Slack mention queued"
     assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
-    # The whole DM is one session, so the message's own timestamp names no thread.
+    # Nobody turned the one-session DM on, so the message opens its own thread.
     assert captured["repo_config_request"] == {
         "channel_id": "D123",
-        "thread_ts": DM_SESSION_TS,
+        "thread_ts": "1700000000.000200",
         "slack_user_id": "U123",
     }
     event_data = captured["event_data"]
     assert isinstance(event_data, SlackRequest)
     assert event_data.text == "please check my branch"
-    assert event_data.thread_ts == DM_SESSION_TS
-    assert event_data.dm_session is True
+    assert event_data.thread_ts == "1700000000.000200"
+    assert event_data.dm_session is False
     assert event_data.treat_all_messages_as_mentions is True
 
 

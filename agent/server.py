@@ -151,7 +151,7 @@ from agent.sandboxes.state import (
 )
 from agent.schedules.store import authorized_admin_schedule
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
-from agent.slack.dm import is_dm_channel
+from agent.slack.dm import is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
@@ -588,9 +588,11 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
 
 
 def _slack_dm_run(cfg: RunConfig) -> bool:
-    """Whether this run answers in a bot DM rather than a channel."""
-    return _slack_tools_enabled(cfg) and is_dm_channel(
-        cfg.slack_thread.channel_context if cfg.slack_thread else None
+    """Whether this run answers in a bot DM the owner runs as one session."""
+    return (
+        _slack_tools_enabled(cfg)
+        and cfg.slack_thread is not None
+        and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
     )
 
 

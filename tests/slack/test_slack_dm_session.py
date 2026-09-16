@@ -1,4 +1,6 @@
-"""A bot DM is one session: every message routes to the same agent thread."""
+"""A bot DM, for someone who turned the one-session mode on: every message routes
+to the same agent thread. Off by default, where a DM keeps a thread per message.
+"""
 
 import json
 from typing import Any, cast
@@ -88,6 +90,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
     monkeypatch.setattr(slack_service, "process_slack_mention", AsyncMock())
+    monkeypatch.setattr(slack_routes, "dm_session_enabled", AsyncMock(return_value=True))
 
 
 async def _queued_request(payload: dict[str, Any]) -> SlackRequest:
@@ -125,6 +128,19 @@ async def test_dm_thread_reply_keeps_the_session_but_answers_in_the_thread() -> 
 
     assert request.thread_ts == DM_SESSION_TS
     assert request.reply_thread_ts == "1786573300.000000"
+
+
+async def test_dm_keeps_a_thread_per_message_until_the_person_opts_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default: a DM behaves as it always has, but still answers untagged messages."""
+    monkeypatch.setattr(slack_routes, "dm_session_enabled", AsyncMock(return_value=False))
+
+    request = await _queued_request(_dm_payload("Ev-dm-off"))
+
+    assert request.thread_ts == "1786573369.551099"
+    assert request.dm_session is False
+    assert request.treat_all_messages_as_mentions is True
 
 
 async def test_channel_message_still_uses_its_own_slack_thread(

@@ -30,7 +30,7 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
-from agent.slack.dm import dm_thread_title, is_dm_channel
+from agent.slack.dm import dm_thread_title, is_dm_session
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
@@ -669,7 +669,7 @@ async def _mark_slack_thread_errored(
     try:
         owner_login = await _slack_login(request.user_id)
         visibility = _slack_thread_visibility(request.channel_context)
-        dm_session = request.dm_session or is_dm_channel(request.channel_context)
+        dm_session = request.dm_session or is_dm_session(request.channel_context, request.thread_ts)
         # An unlinked sender is turned away at the account gate; a private thread
         # nobody owns would be unreachable, so persist nothing for them.
         if not request.triggering_bot_id and (visibility == "public" or owner_login):
@@ -738,7 +738,7 @@ async def _process_slack_mention_impl(
     treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
     untagged_reply = request.untagged_reply
     code_channel = request.code_channel
-    dm_session = request.dm_session or is_dm_channel(channel_context)
+    dm_session = request.dm_session or is_dm_session(channel_context, thread_ts)
 
     if not channel_id or not thread_ts or not event_ts:
         common.logger.warning(

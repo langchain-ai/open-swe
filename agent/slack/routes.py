@@ -11,7 +11,7 @@ from langgraph_sdk.client import LangGraphClient
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.client import SlackChannelContext
-from agent.slack.dm import DM_SESSION_TS, is_dm_channel
+from agent.slack.dm import DM_SESSION_TS, dm_session_enabled, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
     SlackRequestTarget,
@@ -426,13 +426,18 @@ async def slack_webhook(
     if in_code_channel:
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
-    # A DM is one private session for as long as it exists, so every message in it
-    # routes to the same agent thread rather than opening a Slack thread per request.
-    in_dm = not in_code_channel and (event.channel_type == "im" or is_dm_channel(channel_context))
+    in_dm_channel = not in_code_channel and (
+        event.channel_type == "im" or is_dm_channel(channel_context)
+    )
+    # Only for someone who turned it on: their DM is one private session for as
+    # long as it exists, so every message routes to the same agent thread rather
+    # than opening a Slack thread per request. Everyone else keeps a thread per
+    # message. Untagged messages count as requests in a DM either way.
+    in_dm = in_dm_channel and await dm_session_enabled(user_id)
     if in_dm:
         thread_ts = DM_SESSION_TS
 
-    is_direct_message = not is_message_update and in_dm and bool(user_id)
+    is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     is_untagged_two_party_reply = False
     if (
         event.type != "app_mention"
@@ -674,7 +679,7 @@ async def slack_interactivity(
     # A DM's buttons hang off unthreaded messages, so the clicked message's own
     # timestamp maps to nothing: the whole DM is one session. A button clicked
     # inside a Slack thread still has to be answered in that thread.
-    in_dm = is_dm_channel(channel_context)
+    in_dm = is_dm_channel(channel_context) and await dm_session_enabled(user_id)
     thread_ts = DM_SESSION_TS if in_dm else interaction.thread_ts
     reply_thread_ts = (
         (interaction.message.thread_ts or interaction.container.thread_ts) if in_dm else ""
