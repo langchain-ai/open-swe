@@ -44,7 +44,8 @@ A workspace has an immutable slug and a display name, plus:
   the refresh schedule. Snapshot names keep their current form so existing snapshots stay valid.
 - **Slack channels.** Zero or more channel ids whose messages route here. A channel routes to one
   workspace.
-- **MCP connections**, moved from the instance-wide set into the workspace.
+- **MCP connections** of its own, layered over the instance-wide set that existed before
+  workspaces (see "Settings tiers").
 - **Settings**, the former team settings: model defaults, review toggles, organization
   guidelines, gateway and Fable toggles, default repository. These are tiered; see
   "Settings tiers" below.
@@ -74,8 +75,8 @@ MCP connections follow the same shape without a thread tier: **instance** connec
 (`/dashboard/api/mcps`) are loaded for every run, the **workspace** connections are added, then
 the **user's** personal connections. A later tier's connection replaces a same-named one from
 the tier before, which is how a workspace or a user swaps in different credentials for a shared
-server. The `default` workspace's existing connections stay where they are; admins move a
-connection to the instance tier by recreating it there.
+server. The connections configured before workspaces existed are the instance tier: they
+keep applying to every workspace, as they always did.
 
 An inherited default repository is still subject to ownership: a workspace never uses a
 default repository that another workspace owns, even when it inherited it from the instance.
