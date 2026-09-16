@@ -464,36 +464,32 @@ def _slack_thread_dashboard_url(
     return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
 
 
-def _format_token_count(count: int) -> str:
-    if count >= 1_000_000:
-        return f"{count / 1_000_000:.1f}M"
-    if count >= 1_000:
-        return f"{count / 1_000:.1f}K"
-    return str(count)
-
-
 def _safe_model_label(model: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)
     return sanitized.rsplit("/", 1)[-1][:48].strip("-")
 
 
+SLACK_COST_PENDING_LABEL = "calculating cost"
+
+
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     if usage is None:
-        return ""
+        return SLACK_COST_PENDING_LABEL
     labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
     model_text = " + ".join(labels[:3])
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
     parts = [model_text] if model_text else []
-    if usage.session_cost_usd is not None:
-        parts.append(format_slack_session_cost(usage.session_cost_usd))
-    elif usage.total_tokens is not None:
-        parts.append(f"{_format_token_count(usage.total_tokens)} main-agent tokens")
+    parts.append(
+        format_slack_session_cost(usage.session_cost_usd)
+        if usage.session_cost_usd is not None
+        else SLACK_COST_PENDING_LABEL
+    )
     return " • ".join(parts)
 
 
 _SESSION_COST_LABEL_RE = re.compile(
-    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)(?: session cost)?$"
+    rf"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|{re.escape(SLACK_COST_PENDING_LABEL)})(?: session cost)?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -539,7 +535,7 @@ def with_slack_session_cost(
             value_text = value.get("text")
             if not isinstance(value_text, str):
                 continue
-            if "main-agent tokens" in value_text:
+            if "main-agent tokens" in value_text or SLACK_COST_PENDING_LABEL in value_text:
                 candidates.append(value)
             elif SLACK_WEB_LINK_FOOTER_LABEL in value_text:
                 fallback_candidates.append(value)
