@@ -28,19 +28,6 @@ UsageSort = Literal[
 ]
 SortDirection = Literal["asc", "desc"]
 
-_USAGE_SORT_SQL: dict[UsageSort, str] = {
-    "rank": "rank",
-    "user": "lower(CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL THEN name ELSE 'Open SWE user' END)",
-    "favorite_model": "lower(favorite_model)",
-    "invocations": "invocations",
-    "total_tokens": "total_tokens",
-    "total_cost_usd": "total_cost_usd",
-    "avg_invocation_seconds": "avg_invocation_seconds",
-    "prs_opened": "prs_opened",
-    "merged_prs": "merged_prs",
-    "agent_loc": "agent_loc",
-}
-
 
 def period_start(period: str | None) -> datetime:
     days = 7 if period == "7d" else 30
@@ -295,8 +282,35 @@ WITH runs AS (
             invocations DESC, name, person_id
     ) AS rank FROM metrics
 ), ordered AS (
-    SELECT *, row_number() OVER (ORDER BY __SORT_EXPRESSION__ __SORT_DIRECTION__, rank) AS position
-    FROM ranked
+    SELECT *, row_number() OVER (ORDER BY
+        CASE WHEN :sort = 'rank' AND :direction = 'asc' THEN rank END ASC,
+        CASE WHEN :sort = 'rank' AND :direction = 'desc' THEN rank END DESC,
+        CASE WHEN :sort = 'user' AND :direction = 'asc' THEN
+            lower(CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
+                THEN name ELSE 'Open SWE user' END) END ASC,
+        CASE WHEN :sort = 'user' AND :direction = 'desc' THEN
+            lower(CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
+                THEN name ELSE 'Open SWE user' END) END DESC,
+        CASE WHEN :sort = 'favorite_model' AND :direction = 'asc' THEN lower(favorite_model) END ASC,
+        CASE WHEN :sort = 'favorite_model' AND :direction = 'desc' THEN lower(favorite_model) END DESC,
+        CASE WHEN :sort = 'invocations' AND :direction = 'asc' THEN invocations END ASC,
+        CASE WHEN :sort = 'invocations' AND :direction = 'desc' THEN invocations END DESC,
+        CASE WHEN :sort = 'total_tokens' AND :direction = 'asc' THEN total_tokens END ASC,
+        CASE WHEN :sort = 'total_tokens' AND :direction = 'desc' THEN total_tokens END DESC,
+        CASE WHEN :sort = 'total_cost_usd' AND :direction = 'asc' THEN total_cost_usd END ASC,
+        CASE WHEN :sort = 'total_cost_usd' AND :direction = 'desc' THEN total_cost_usd END DESC,
+        CASE WHEN :sort = 'avg_invocation_seconds' AND :direction = 'asc'
+            THEN avg_invocation_seconds END ASC,
+        CASE WHEN :sort = 'avg_invocation_seconds' AND :direction = 'desc'
+            THEN avg_invocation_seconds END DESC,
+        CASE WHEN :sort = 'prs_opened' AND :direction = 'asc' THEN prs_opened END ASC,
+        CASE WHEN :sort = 'prs_opened' AND :direction = 'desc' THEN prs_opened END DESC,
+        CASE WHEN :sort = 'merged_prs' AND :direction = 'asc' THEN merged_prs END ASC,
+        CASE WHEN :sort = 'merged_prs' AND :direction = 'desc' THEN merged_prs END DESC,
+        CASE WHEN :sort = 'agent_loc' AND :direction = 'asc' THEN agent_loc END ASC,
+        CASE WHEN :sort = 'agent_loc' AND :direction = 'desc' THEN agent_loc END DESC,
+        rank
+    ) AS position FROM ranked
 ), selected AS (
     SELECT position,
         jsonb_build_object(
@@ -384,9 +398,6 @@ async def usage_leaderboard(
         as_of, offset = _decode_usage_cursor(cursor, workspace, normalized, sort, direction)
     else:
         as_of = datetime.now(UTC)
-    usage_sql = _USAGE_SQL.replace("__SORT_EXPRESSION__", _USAGE_SORT_SQL[sort]).replace(
-        "__SORT_DIRECTION__", direction.upper()
-    )
     generated_at_ms = int(as_of.timestamp() * 1000)
     parameters = {
         "workspace_id": workspace,
@@ -396,11 +407,13 @@ async def usage_leaderboard(
         "current_login": (current_login or "").strip().lower(),
         "current_email": (current_email or "").strip().lower(),
         "admin": admin,
+        "sort": sort,
+        "direction": direction,
     }
     async with connection() as conn:
         await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
         parameters["start"] = await _reporting_start(conn, normalized)
-        result = await conn.execute(text(usage_sql), parameters)
+        result = await conn.execute(text(_USAGE_SQL), parameters)
         usage = dict(result.mappings().one())
         result = await conn.execute(text(_REVIEWER_SQL), parameters)
         reviewer = dict(result.mappings().one())
