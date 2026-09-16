@@ -56,6 +56,7 @@ async def test_slack_processing_error_marks_thread_and_replies_with_error_id(
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_metadata", upsert)
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(slack_failures, "post_slack_thread_reply", post_reply)
+    monkeypatch.setattr(slack_webhook.User, "login_for_slack", AsyncMock(return_value="alice"))
 
     await slack_webhook.process_slack_mention(
         _event_data(),
@@ -478,7 +479,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     store_mapping = AsyncMock()
     monkeypatch.setattr(slack_webhook.common, "authorize_github_thread", AsyncMock(return_value={}))
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: client)
-    monkeypatch.setattr(slack_webhook.common, "refresh_user_mapping_cache", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_webhook.common, "fetch_slack_thread_messages", fetch_messages)
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_names", AsyncMock(return_value={}))
@@ -490,7 +490,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     monkeypatch.setattr(
         slack_webhook, "_format_slack_run_links_section", AsyncMock(return_value="")
     )
-    monkeypatch.setattr(slack_webhook.common, "login_for_slack_id", AsyncMock(return_value="alice"))
+    monkeypatch.setattr(slack_webhook.User, "login_for_slack", AsyncMock(return_value="alice"))
     monkeypatch.setattr(
         slack_webhook.common, "get_valid_access_token", AsyncMock(return_value="tok")
     )
@@ -554,7 +554,6 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
     monkeypatch.setattr(slack_webhook.common, "authorize_github_thread", AsyncMock(return_value={}))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(slack_webhook, "get_langgraph_client", lambda: _FakeClient())
-    monkeypatch.setattr(slack_webhook.common, "refresh_user_mapping_cache", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value=None))
     monkeypatch.setattr(
         slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=[])
@@ -563,7 +562,7 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
     monkeypatch.setattr(
         slack_webhook.common, "resolve_slack_links_in_context", AsyncMock(return_value=("", []))
     )
-    monkeypatch.setattr(slack_webhook.common, "login_for_slack_id", AsyncMock(return_value="alice"))
+    monkeypatch.setattr(slack_webhook.User, "login_for_slack", AsyncMock(return_value="alice"))
     monkeypatch.setattr(
         slack_webhook.common, "get_valid_access_token", AsyncMock(return_value="tok")
     )
@@ -607,13 +606,13 @@ async def test_errored_dm_owner_falls_back_to_email_mapping(
     monkeypatch.setattr(
         slack_webhook.common, "strip_bot_mention", lambda text, *_args, **_kwargs: text
     )
-    monkeypatch.setattr(slack_webhook.common, "login_for_slack_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_webhook.User, "login_for_slack", AsyncMock(return_value=None))
     monkeypatch.setattr(
         slack_webhook.common,
         "get_slack_user_info",
         AsyncMock(return_value={"profile": {"email": "alice@example.com"}}),
     )
-    monkeypatch.setattr(slack_webhook.common, "login_for_email", AsyncMock(return_value="alice"))
+    monkeypatch.setattr(slack_webhook.User, "login_for_email", AsyncMock(return_value="alice"))
 
     request = _event_data().model_copy(update={"channel_context": {"is_im": True}})
     await slack_webhook._mark_slack_thread_errored("t1", request, None)
@@ -625,6 +624,6 @@ async def test_errored_dm_owner_falls_back_to_email_mapping(
     # An unlinked DM sender never reaches thread creation, so the error path
     # must not leave a private thread nobody owns.
     upsert.reset_mock()
-    monkeypatch.setattr(slack_webhook.common, "login_for_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_webhook.User, "login_for_email", AsyncMock(return_value=None))
     await slack_webhook._mark_slack_thread_errored("t1", request, None)
     upsert.assert_not_awaited()

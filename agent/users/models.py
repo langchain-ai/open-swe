@@ -9,7 +9,7 @@ reference ``users.id`` instead of a provider-specific handle.
 """
 
 import logging
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID, uuid7
@@ -58,15 +58,103 @@ class User(Base):
 
     def login_for(self, provider: Provider) -> str:
         """This person's handle on ``provider``, for display; never an identity key."""
-        login = next(
-            (identity.login for identity in self.identities if identity.provider == provider), ""
+        return self._identity_field(provider, "login") or self.display_name or str(self.id)[:8]
+
+    @property
+    def github_login(self) -> str:
+        """The GitHub handle, or ``""`` — unlike :meth:`login_for`, never a stand-in."""
+        return self._identity_field("github", "login")
+
+    @property
+    def slack_user_id(self) -> str:
+        return self._identity_field("slack", "external_id")
+
+    @property
+    def email(self) -> str:
+        """The address to reach this person: GitHub's, else whichever identity has one."""
+        return self._identity_field("github", "email") or next(
+            (identity.email for identity in self.identities if identity.email), ""
         )
-        return login or self.display_name or str(self.id)[:8]
+
+    def _identity_field(
+        self, provider: Provider, field: Literal["login", "email", "external_id"]
+    ) -> str:
+        return next(
+            (
+                getattr(identity, field)
+                for identity in self.identities
+                if identity.provider == provider
+            ),
+            "",
+        )
 
     @classmethod
     async def get(cls, user_id: UUID) -> Self | None:
         async with postgres.session() as session:
             return await cls._load(session, user_id)
+
+    @classmethod
+    async def for_email(cls, email: str) -> Self | None:
+        """The person one of whose identities carries ``email``; most recently seen wins."""
+        async with postgres.session() as session:
+            return await session.scalar(
+                cls._with_identities(select(cls))
+                .join(cls.identities)
+                .where(func.lower(UserIdentity.email) == email.strip().lower())
+                .order_by(UserIdentity.last_seen_at.desc())
+                .limit(1)
+            )
+
+    @classmethod
+    async def login_for_slack(cls, slack_user_id: str | None) -> str | None:
+        """GitHub login of the person behind a Slack member id, if they are known."""
+        if not slack_user_id or not slack_user_id.strip():
+            return None
+        user = await cls.for_identity("slack", slack_user_id.strip())
+        return (user.github_login or None) if user is not None else None
+
+    @classmethod
+    async def login_for_email(cls, email: str | None) -> str | None:
+        """GitHub login of the person reachable at ``email``, if they are known."""
+        if not email or not email.strip():
+            return None
+        user = await cls.for_email(email)
+        return (user.github_login or None) if user is not None else None
+
+    @classmethod
+    async def email_for_login(cls, login: str | None) -> str | None:
+        if not login or not login.strip():
+            return None
+        user = await cls.for_login("github", login.strip())
+        return (user.email or None) if user is not None else None
+
+    @classmethod
+    async def known_logins(cls, logins: Iterable[str]) -> frozenset[str]:
+        """Lowercased GitHub logins among ``logins`` that belong to a person."""
+        wanted = {login.strip().lower() for login in logins if login and login.strip()}
+        if not wanted:
+            return frozenset()
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(func.lower(UserIdentity.login)).where(
+                    UserIdentity.provider == "github",
+                    func.lower(UserIdentity.login).in_(wanted),
+                )
+            )
+            return frozenset(rows.all())
+
+    @classmethod
+    async def page(cls, *, offset: int, limit: int) -> tuple[list[Self], int]:
+        """One page of people, oldest first, with the total count."""
+        async with postgres.session() as session:
+            total = await session.scalar(select(func.count()).select_from(cls)) or 0
+            rows = await session.scalars(
+                cls._with_identities(select(cls))
+                .order_by(cls.created_at, cls.id)
+                .offset(offset)
+                .limit(limit)
+            )
+            return list(rows.all()), total
 
     @classmethod
     async def for_identity(cls, provider: Provider, external_id: str) -> Self | None:

@@ -35,6 +35,7 @@ from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
+from agent.users import User
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import (
@@ -403,7 +404,7 @@ async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
     """Map Slack user ids to the GitHub logins of linked Open SWE accounts."""
     logins: dict[str, str] = {}
     for user_id in {value for value in user_ids if value}:
-        login = await common.login_for_slack_id(user_id)
+        login = await User.login_for_slack(user_id)
         if login:
             logins[user_id] = login
     return logins
@@ -642,13 +643,13 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
 
 async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
     """GitHub login for a Slack user: by Slack id first, then by profile email."""
-    if login := await common.login_for_slack_id(user_id):
+    if login := await User.login_for_slack(user_id):
         return login
     if user_email is None and user_id:
         slack_user = await common.get_slack_user_info(user_id)
         profile = slack_user.get("profile") if isinstance(slack_user, dict) else None
         user_email = profile.get("email") if isinstance(profile, dict) else None
-    return await common.login_for_email(user_email) if user_email else None
+    return await User.login_for_email(user_email) if user_email else None
 
 
 def _slack_thread_title(request_text: str, dm_session: bool, name: str) -> str:
@@ -785,12 +786,6 @@ async def _process_slack_mention_impl(
                     extra={"agent_thread_id": thread_id, "slack_bot_id": allowed_bot.bot_id},
                 )
                 return
-    # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
-    try:
-        await common.refresh_user_mapping_cache()
-    except Exception:  # noqa: BLE001
-        common.logger.debug("Could not refresh user mapping cache for Slack mention", exc_info=True)
-
     user_email = None
     user_name = allowed_bot.name if allowed_bot is not None else ""
     user_timezone = ""

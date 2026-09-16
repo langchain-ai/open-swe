@@ -4,6 +4,7 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
+from collections.abc import Collection, Iterable
 from typing import Any
 
 from agent.baby_sit import handle_ci_webhook
@@ -30,7 +31,15 @@ from agent.thread_ids import (
     reviewer_thread_id,
     thread_id_from_branch,
 )
+from agent.users import User
 from agent.webhooks import common
+
+
+async def _trusted_authors(*logins: str, comments: Iterable[dict[str, Any]] = ()) -> frozenset[str]:
+    """Lowercased logins, among the people in this event, who are known Open SWE users."""
+    return await User.known_logins(
+        [*logins, *(str(comment.get("author") or "") for comment in comments)]
+    )
 
 
 def build_github_issue_prompt(
@@ -44,14 +53,15 @@ def build_github_issue_prompt(
     github_login: str,
     issue_author: str = "",
     issue_url: str = "",
+    trusted: Collection[str],
 ) -> str:
     """Build the user prompt for a GitHub issue-triggered run."""
     triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
     issue_url_line = f"## Issue URL: {issue_url}\n\n" if issue_url else ""
-    comments_text = common.build_github_issue_comments_text(comments)
+    comments_text = common.build_github_issue_comments_text(comments, trusted=trusted)
     sanitized_title = common.sanitize_github_comment_body(title)
     formatted_body = common.format_github_comment_body_for_prompt(
-        issue_author or github_login, body
+        issue_author or github_login, body, trusted=trusted
     )
     return render_prompt(
         "runs/github-issue.md",
@@ -66,15 +76,22 @@ def build_github_issue_prompt(
     )
 
 
-def build_github_issue_followup_prompt(github_login: str, comment_body: str) -> str:
+def build_github_issue_followup_prompt(
+    github_login: str, comment_body: str, *, trusted: Collection[str]
+) -> str:
     """Build the prompt for a follow-up GitHub issue comment."""
-    return f"**{github_login}:**\n{common.format_github_comment_body_for_prompt(github_login, comment_body)}"
+    body = common.format_github_comment_body_for_prompt(github_login, comment_body, trusted=trusted)
+    return f"**{github_login}:**\n{body}"
 
 
-def build_github_issue_update_prompt(github_login: str, title: str, body: str) -> str:
+def build_github_issue_update_prompt(
+    github_login: str, title: str, body: str, *, trusted: Collection[str]
+) -> str:
     """Build the prompt for a follow-up GitHub issue title/body update."""
     sanitized_title = common.sanitize_github_comment_body(title)
-    formatted_body = common.format_github_comment_body_for_prompt(github_login, body)
+    formatted_body = common.format_github_comment_body_for_prompt(
+        github_login, body, trusted=trusted
+    )
     return (
         f"**{github_login}:** updated the GitHub issue title/body.\n\n"
         f"Title: {sanitized_title}\n\n"
@@ -161,6 +178,7 @@ def _github_issue_run_input(
     trigger_login: str,
     trigger_user_id: object,
     issue_data: dict[str, object],
+    trusted: Collection[str],
 ) -> RunInput:
     actor: SystemIdentity = {
         "id": "system:github-webhook",
@@ -192,7 +210,9 @@ def _github_issue_run_input(
         if person["id"] not in introduced:
             messages.append(person_introduction(person))
             introduced.add(person["id"])
-        body = common.format_github_comment_body_for_prompt(author, str(comment.get("body", "")))
+        body = common.format_github_comment_body_for_prompt(
+            author, str(comment.get("body", "")), trusted=trusted
+        )
         messages.append(
             human_input(
                 body,
@@ -871,7 +891,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                 exc_info=True,
             )
 
-    email = await common.email_for_login(github_login) or ""
+    email = await User.email_for_login(github_login) or ""
     if email:
         thread_metadata = await common.authorize_github_thread(thread_id, github_login)
         github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
@@ -957,7 +977,8 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
 
-    prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config)
+    trusted = await _trusted_authors(github_login, comments=comments)
+    prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
     messages = []
     introduced: set[str] = set()
     for item in comments:
@@ -968,7 +989,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             introduced.add(person["id"])
         messages.append(
             human_input(
-                common.format_github_comment_body_for_prompt(author, str(item.get("body", ""))),
+                common.format_github_comment_body_for_prompt(
+                    author, str(item.get("body", "")), trusted=trusted
+                ),
                 {
                     "sender_id": person["id"],
                     "surface": "github",
@@ -1152,7 +1175,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         common.logger.warning("Missing GitHub issue id/number, skipping")
         return
 
-    email = await common.email_for_login(github_login) or ""
+    email = await User.email_for_login(github_login) or ""
     if not email:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
@@ -1199,14 +1222,17 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
                 common.logger.warning("Failed to react to GitHub issue comment %s", comment_id)
 
     comments: list[dict[str, Any]] = []
+    comment_login = str(comment.get("user", {}).get("login") or github_login)
+    trusted = await _trusted_authors(github_login, issue_author, comment_login)
     if existing_thread:
         if event_type == "issue_comment":
             prompt = build_github_issue_followup_prompt(
-                comment.get("user", {}).get("login", github_login) or github_login,
-                comment.get("body", ""),
+                comment_login, comment.get("body", ""), trusted=trusted
             )
         else:
-            prompt = build_github_issue_update_prompt(github_login, title, description)
+            prompt = build_github_issue_update_prompt(
+                github_login, title, description, trusted=trusted
+            )
     else:
         try:
             comments = await common.fetch_issue_comments(
@@ -1228,6 +1254,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             )
             comments.sort(key=lambda item: item.get("created_at", ""))
 
+        trusted = await _trusted_authors(github_login, issue_author, comments=comments)
         prompt = build_github_issue_prompt(
             repo_config,
             issue_number,
@@ -1238,6 +1265,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             github_login=github_login,
             issue_author=issue_author,
             issue_url=issue_url,
+            trusted=trusted,
         )
     workspace = await common.workspace_for_repo_config(repo_config)
     configurable: dict[str, Any] = {
@@ -1287,6 +1315,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         run_input = _github_issue_run_input(
             prompt,
             comments,
+            trusted=trusted,
             issue_author=issue_author,
             description=description,
             trigger_login=github_login,

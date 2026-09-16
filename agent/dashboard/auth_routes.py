@@ -179,11 +179,15 @@ async def auth_logout() -> Response:
 
 @router.get("/me")
 async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
+    # By login rather than the session's user_id claim: sessions minted before
+    # that claim existed still need to see their own row.
+    user = await User.for_login("github", session["sub"])
     return {
         "login": session["sub"],
-        "email": session.get("email"),
+        "email": session.get("email") or (user.email or None if user else None),
         "avatar_url": session.get("avatar_url"),
-        "user_id": session.get("user_id"),
+        "user_id": session.get("user_id") or (str(user.id) if user else None),
+        "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
         "api_base_url": dashboard_api_base_url(),

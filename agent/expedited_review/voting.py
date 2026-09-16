@@ -58,11 +58,22 @@ class VoteOutcome:
     private: bool = True
 
 
-def _reconnect_hint() -> str:
+def _settings_hint(action: str) -> str:
     base = dashboard_base_url()
-    if base:
-        return f"Sign in to the Open SWE dashboard with GitHub first: {base}"
-    return "Sign in to the Open SWE dashboard with GitHub first."
+    return f"{action}: {base}/my-settings" if base else f"{action} in your Open SWE settings."
+
+
+def _slack_link_hint() -> str:
+    """A missing Slack link is fixed by the Slack connect flow, nothing else.
+
+    Signing in with GitHub creates the GitHub identity and no Slack one, so
+    telling someone already signed in to do that again sends them in a circle.
+    """
+    return _settings_hint("Connect Slack under Personal connections")
+
+
+def _github_token_hint() -> str:
+    return _settings_hint("Sign in again with GitHub to refresh Open SWE's access")
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +87,7 @@ async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Vote
     """The authorized voter behind a click, or why they are not one."""
     login = user.login_for("github") if user is not None else ""
     if user is None or not any(identity.provider == "github" for identity in user.identities):
-        return VoteOutcome(f"Your Slack account is not linked to GitHub. {_reconnect_hint()}")
+        return VoteOutcome(f"Your Slack account is not linked to GitHub. {_slack_link_hint()}")
     pr = approval.pull_request
     token = await repo_token(pr.owner, pr.repo)
     if token is None:
@@ -101,7 +112,7 @@ async def _submit_github_approval(approval: ExpeditedApproval, login: str) -> in
     if not user_token:
         return VoteOutcome(
             f"Open SWE has no GitHub token for @{login}, so it cannot submit your review. "
-            f"{_reconnect_hint()}"
+            f"{_github_token_hint()}"
         )
     pr = approval.pull_request
     url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/reviews"

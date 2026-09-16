@@ -10,8 +10,8 @@ owner enabled ever reaches a run with it.
 
 from agent.dashboard.agent_overrides import profile_dm_session_enabled
 from agent.dashboard.profiles import get_profile
-from agent.dashboard.user_mappings import login_for_slack_id
 from agent.slack.client import SlackChannelContext
+from agent.users import User
 
 DM_SESSION_TS = "0"
 
@@ -30,7 +30,7 @@ async def dm_session_enabled(slack_user_id: str) -> bool:
     """Whether this person has turned the one-session DM on."""
     if not slack_user_id:
         return False
-    login = await login_for_slack_id(slack_user_id)
+    login = await User.login_for_slack(slack_user_id)
     if not login:
         return False
     return profile_dm_session_enabled(await get_profile(login))

@@ -78,7 +78,7 @@ async def test_only_verified_initiator_gets_feedback(api, monkeypatch, identity,
         api.metadata["participant_logins"] = {"owner": True}
         if identity == "slack_initiator":
             api.metadata["source_context"] = {"slack_thread": {"triggering_user_id": "U1"}}
-            monkeypatch.setattr(feedback, "login_for_slack_id", AsyncMock(return_value="owner"))
+            monkeypatch.setattr(feedback.User, "login_for_slack", AsyncMock(return_value="owner"))
     visible = await api.client.get("/dashboard/api/threads/t1/feedback")
     submitted = await api.client.post("/dashboard/api/threads/t1/feedback", json=payload)
     assert visible.json() == {

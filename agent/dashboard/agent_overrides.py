@@ -12,33 +12,13 @@ from agent.dashboard.options import (
 )
 from agent.dashboard.profiles import PROFILES_NAMESPACE
 from agent.dashboard.team_settings import get_team_default_model
-from agent.dashboard.user_mappings import cached_login_for_email, login_for_email
 from agent.store import get_value
+from agent.users import User
 
 logger = logging.getLogger(__name__)
 
 
-def resolve_login_from_email(email: str | None) -> str | None:
-    """Reverse-lookup the user-mapping store for the GitHub login of an email.
-
-    Reads the in-process mapping cache (sync). When the cache is cold the
-    lookup misses; the webhook path that triggers a run primes the cache via
-    :func:`agent.dashboard.user_mappings.refresh_cache` beforehand.
-    """
-    return cached_login_for_email(email)
-
-
-async def resolve_login_from_email_async(email: str | None) -> str | None:
-    """Async reverse-lookup that falls through to the Store on a cold cache.
-
-    Use this from webhook/repo-resolution paths that may run on a freshly
-    started worker before the user-mapping cache has been primed, so a mapped
-    user still resolves to their GitHub login (and dashboard ``default_repo``).
-    """
-    return await login_for_email(email if isinstance(email, str) else None)
-
-
-def resolve_github_login(config: dict[str, Any]) -> str | None:
+async def resolve_github_login(config: dict[str, Any]) -> str | None:
     """Best-effort resolution of the triggering user's GitHub login from config."""
     configurable = (config or {}).get("configurable") or {}
 
@@ -48,7 +28,7 @@ def resolve_github_login(config: dict[str, Any]) -> str | None:
 
     slack_thread = configurable.get("slack_thread") or {}
     email = configurable.get("user_email") or slack_thread.get("triggering_user_email")
-    return resolve_login_from_email(email if isinstance(email, str) else None)
+    return await User.login_for_email(email if isinstance(email, str) else None)
 
 
 async def get_profile_default_repo(login: str | None) -> dict[str, str] | None:

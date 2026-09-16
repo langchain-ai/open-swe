@@ -75,7 +75,6 @@ from agent.dashboard.team_settings_cache import (
     cached_team_settings,
     cached_thread_title_model,
 )
-from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
@@ -205,6 +204,7 @@ from agent.tools import (
     update_automation,
     web_search,
 )
+from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
     CollaboratorIdentity,
@@ -525,7 +525,7 @@ async def _workspace_admin(config: RunnableConfig, profile_login: str | None) ->
     login = profile_login or cfg.github_login
     if is_admin(cfg.user_email, login=login):
         return True
-    return is_admin(await email_for_login(login), login=login)
+    return is_admin(await User.email_for_login(login), login=login)
 
 
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -772,9 +772,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.default_repo"):
             prompt_default_repo = await _resolve_prompt_default_repo(cfg)
         triggering_user_identity_task = asyncio.create_task(
-            asyncio.to_thread(
-                resolve_triggering_user_identity, as_json_object(self._config), github_token
-            )
+            resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
         sandbox_task = asyncio.create_task(
             get_or_create_sandbox_backend_proxy(self._thread_id).ready()
@@ -918,7 +916,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         incident_session = await load_incident_session(config)
         cfg.slack_thread = incident_session.slack_thread
         configurable["slack_thread"] = cfg.slack_thread.dump()
-    profile_login = resolve_github_login(as_json_object(config))
+    profile_login = await resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
     if not is_desktop_run(cfg):

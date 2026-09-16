@@ -20,6 +20,7 @@ from agent.input_messages import (
 from agent.prompts import render_prompt
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
+from agent.users import User
 from agent.webhooks import common
 
 
@@ -175,7 +176,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # Resolve the GitHub login from the Linear email via the same user-mapping
     # store Slack uses, so PRs open *as the triggering user* and the thread is
     # tagged for the dashboard.
-    mapped_login = await common.resolve_login_from_email_async(user_email) if user_email else None
+    mapped_login = await User.login_for_email(user_email) if user_email else None
     # The repository's workspace is the one this run lands in, so its team
     # default model and Fable flag are the ones the vision fallback checks.
     workspace = await common.workspace_for_repo_config(repo_config)

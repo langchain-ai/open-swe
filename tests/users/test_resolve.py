@@ -1,18 +1,11 @@
 """PostgreSQL regressions for turning a PersonIdentity into a User."""
 
-from unittest.mock import AsyncMock
-
 import pytest
 
-from agent.users import User, resolve
+from agent.users import User
 from agent.users.resolve import resolve_person
 
 pytestmark = pytest.mark.usefixtures("registry_db")
-
-
-@pytest.fixture(autouse=True)
-def _no_legacy_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(resolve, "login_for_slack_id", AsyncMock(return_value=None))
 
 
 @pytest.fixture(autouse=True)
@@ -41,23 +34,10 @@ async def test_github_numeric_id_then_login_fallback() -> None:
     assert by_field is not None and by_field.id == user.id
 
 
-async def test_legacy_slack_mapping_links_the_slack_identity_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    user = await User.sign_in("github", "1001", login="grace")
-    legacy = AsyncMock(return_value="grace")
-    monkeypatch.setattr(resolve, "login_for_slack_id", legacy)
+async def test_a_slack_account_nobody_linked_resolves_to_nobody() -> None:
+    await User.sign_in("github", "1001", login="grace")
 
-    first = await resolve_person({"id": "slack:U9", "platform": "slack", "handle": "grace.h"})
-    second = await resolve_person({"id": "slack:U9", "platform": "slack"})
-
-    assert first is not None and first.id == user.id
-    assert second is not None and second.id == user.id
-    assert legacy.await_count == 1
-    assert [(i.provider, i.external_id, i.login) for i in second.identities] == [
-        ("github", "1001", "grace"),
-        ("slack", "U9", "grace.h"),
-    ]
+    assert await resolve_person({"id": "slack:U9", "platform": "slack", "handle": "grace"}) is None
 
 
 async def test_unknown_people_are_not_created() -> None:
