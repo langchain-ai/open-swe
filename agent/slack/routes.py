@@ -11,6 +11,7 @@ from langgraph_sdk.client import LangGraphClient
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.client import SlackChannelContext
+from agent.slack.dm import DM_SESSION_TS, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
     SlackRequestTarget,
@@ -425,7 +426,13 @@ async def slack_webhook(
     if in_code_channel:
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
-    is_direct_message = not is_message_update and event.channel_type == "im" and bool(user_id)
+    # A DM is one private session for as long as it exists, so every message in it
+    # routes to the same agent thread rather than opening a Slack thread per request.
+    in_dm = not in_code_channel and (event.channel_type == "im" or is_dm_channel(channel_context))
+    if in_dm:
+        thread_ts = DM_SESSION_TS
+
+    is_direct_message = not is_message_update and in_dm and bool(user_id)
     is_untagged_two_party_reply = False
     if (
         event.type != "app_mention"
@@ -497,7 +504,8 @@ async def slack_webhook(
                         bot_user_id=bot_user_id,
                         message_update=True,
                         code_channel=in_code_channel,
-                        reply_thread_ts=reply_thread_ts if in_code_channel else "",
+                        dm_session=in_dm,
+                        reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
                     ),
                 )
                 return accepted("Slack update queued")
@@ -540,7 +548,8 @@ async def slack_webhook(
                     treat_all_messages_as_mentions=is_direct_message or in_code_channel,
                     untagged_reply=is_untagged_two_party_reply,
                     code_channel=in_code_channel,
-                    reply_thread_ts=reply_thread_ts if in_code_channel else "",
+                    dm_session=in_dm,
+                    reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
                     team_id=team_id,
                     triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                     triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
@@ -662,7 +671,9 @@ async def slack_interactivity(
 
     user_id = interaction.user.id
     action_ts = action.action_ts or interaction.message_ts
-    thread_ts = interaction.thread_ts
+    # A DM's buttons hang off unthreaded messages, so the clicked message's own
+    # timestamp maps to nothing: the whole DM is one session.
+    thread_ts = DM_SESSION_TS if is_dm_channel(channel_context) else interaction.thread_ts
 
     # From here on the interaction is addressed to Open SWE: any failure is reported to the thread.
     target = SlackRequestTarget(channel_id=channel_id, thread_ts=thread_ts or action_ts)

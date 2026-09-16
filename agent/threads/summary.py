@@ -208,6 +208,7 @@ def thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
         or not team_id
         or not slack_thread.channel_id
         or not slack_thread.thread_ts
+        or slack_thread.thread_ts == CODE_CHANNEL_SESSION_TS
     ):
         return None
     return f"slack://channel?{urlencode({'team': team_id, 'id': slack_thread.channel_id, 'message': slack_thread.thread_ts})}"

@@ -30,6 +30,7 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
+from agent.slack.dm import is_dm_channel
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
@@ -49,6 +50,7 @@ RAPID_FOLLOWUP_SECONDS = 60
 _MENTION_PREAMBLE = f"{load_prompt('runs/slack-mentioned.md')}\n\n"
 _UNTAGGED_REPLY_PREAMBLE = f"{load_prompt('runs/slack-untagged-reply.md')}\n\n"
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
+_DM_CONTEXT = load_prompt("runs/slack-dm.md")
 _MESSAGE_UPDATE_PREAMBLE = f"{load_prompt('runs/slack-message-update.md')}\n\n"
 
 
@@ -729,6 +731,7 @@ async def _process_slack_mention_impl(
     treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
     untagged_reply = request.untagged_reply
     code_channel = request.code_channel
+    dm_session = request.dm_session or is_dm_channel(channel_context)
 
     if not channel_id or not thread_ts or not event_ts:
         common.logger.warning(
@@ -1033,7 +1036,7 @@ async def _process_slack_mention_impl(
         slack_thread_context["triggering_bot_id"] = allowed_bot.bot_id
         slack_thread_context["triggering_bot_app_id"] = allowed_bot.app_id
         slack_thread_context["team_id"] = allowed_bot.team_id
-    if code_channel and reply_thread_ts:
+    if (code_channel or dm_session) and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
     if repo is not None and not resolution.explicit:
@@ -1055,6 +1058,7 @@ async def _process_slack_mention_impl(
         f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
         + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
+        + (f"\n\n{_DM_CONTEXT}" if dm_session else "")
     )
 
     configurable: dict[str, Any] = {
@@ -1223,5 +1227,6 @@ async def _process_slack_mention_impl(
             thread_id=thread_id,
             run_id=run_id,
             channel_id=channel_id,
-            thread_ts=thread_ts,
+            # The session timestamp names no Slack thread to hang a status on.
+            thread_ts=(reply_thread_ts or original_message_ts) if dm_session else thread_ts,
         )
