@@ -119,7 +119,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         self._route_model_ids = dict(route_model_ids or {})
         self._fast_alt_probability = fast_alt_probability
         self._routing_mode = routing_mode
-        self._selected_route: Route | None = None
         self._thread_id = thread_id
         # `nostream` keeps the routing decision out of the user-facing message
         # stream; it stays visible in traces, unlike the offloading summarizer.
@@ -141,8 +140,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return "performance"
         if model_route := state.get("model_route"):
             return model_route
-        if self._selected_route is not None:
-            return self._selected_route
         if self._routing_mode == "performant":
             return "performance"
         messages = state.get("messages", [])
@@ -171,7 +168,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             and fast_alt_bucket(self._thread_id) < self._fast_alt_probability
         ):
             route = "fast_alt"
-        self._selected_route = route
         return route
 
     async def abefore_model(
