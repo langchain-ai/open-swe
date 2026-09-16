@@ -19,7 +19,7 @@ def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
     return RunConfig.from_config(config), config if isinstance(config, Mapping) else {}
 
 
-def _run_config(
+async def _run_config(
     cfg: RunConfig, thread_id: str, source_installation_id: int | None
 ) -> dict[str, Any]:
     allowed = (
@@ -39,9 +39,9 @@ def _run_config(
     )
     dumped = cfg.dump()
     result = {key: dumped[key] for key in allowed if dumped.get(key) is not None}
-    source_repo = cfg.target_repo if cfg.github_issue else None
+    source_repo = await cfg.target_repository() if cfg.github_issue else None
     if source_repo is not None:
-        result["source_repo"] = source_repo.model_dump()
+        result["source_repo"] = {"owner": source_repo.owner, "name": source_repo.name}
         if source_installation_id is not None:
             result["source_installation_id"] = source_installation_id
     result["thread_id"] = thread_id
@@ -130,7 +130,7 @@ async def manage_baby_sit(
             "error": "GitHub App installation is unavailable for this repository",
         }
     source_installation_id = installation_id
-    source_repo = cfg.target_repo if cfg.github_issue else None
+    source_repo = await cfg.target_repository() if cfg.github_issue else None
     if source_repo is not None:
         source_installation_id = await get_github_app_installation_id_for_repo(
             source_repo.owner, source_repo.name
@@ -142,7 +142,7 @@ async def manage_baby_sit(
             head_ref=pr_head_ref,
             installation_id=installation_id,
             thread_id=thread_id,
-            run_config=_run_config(cfg, thread_id, source_installation_id),
+            run_config=await _run_config(cfg, thread_id, source_installation_id),
             source_context=_source_context(cfg),
         )
     except Exception as exc:

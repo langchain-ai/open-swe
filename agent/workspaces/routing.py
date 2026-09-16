@@ -24,6 +24,7 @@ from typing import Literal
 
 from agent.config import ENV
 from agent.dashboard.user_preferences import get_user_preferences
+from agent.github.repositories import Repository
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
@@ -49,13 +50,13 @@ async def _slug_exists(slug: str) -> bool:
         raise WorkspaceLookupError("workspace slug lookup failed") from exc
 
 
-async def _repo_owner(owner: str, name: str) -> str | None:
+async def _repo_owner(repository: Repository) -> str | None:
     """The workspace owning this repository; raises when ownership is unreadable.
 
     A repository that no workspace owns but a not-yet-imported Store record
     names is unreadable too: its owner exists, just not in PostgreSQL yet.
     """
-    full_name = f"{owner}/{name}"
+    full_name = repository.full_name
     try:
         found = await WORKSPACES.owner_of_repo(full_name)
     except Exception as exc:
@@ -73,7 +74,7 @@ async def _channel_owner(channel_id: str) -> str | None:
         raise WorkspaceLookupError("workspace Slack channel lookup failed") from exc
 
 
-async def workspace_for_repo(owner: str, name: str) -> str | None:
+async def workspace_for_repo(repository: Repository) -> str | None:
     """Which workspace owns this repository, or ``None`` when none does.
 
     A failed lookup reads as ``None`` as well, logged at error: every caller of
@@ -82,11 +83,11 @@ async def workspace_for_repo(owner: str, name: str) -> str | None:
     is the one place that trade goes the other way.
     """
     try:
-        return await _repo_owner(owner, name)
+        return await _repo_owner(repository)
     except WorkspaceLookupError:
         logger.error(
             "workspace lookup failed for a repository; treating it as unowned",
-            extra={"repository": f"{owner}/{name}"},
+            extra={"repository": repository.full_name},
             exc_info=True,
         )
         return None
@@ -114,7 +115,7 @@ def _unassigned_policy() -> str:
     return value if value in ("default", "ignore") else "default"
 
 
-async def repo_is_routable(owner: str, name: str) -> bool:
+async def repo_is_routable(repository: Repository) -> bool:
     """Whether a GitHub event for this repository should be handled at all.
 
     Raises :class:`WorkspaceLookupError` when ownership cannot be read, and when
@@ -123,7 +124,7 @@ async def repo_is_routable(owner: str, name: str) -> bool:
     import that failed leaves an empty table behind, in which every repository
     reads as unowned, so "no workspaces yet" is not an answer either.
     """
-    if await _repo_owner(owner, name) is not None:
+    if await _repo_owner(repository) is not None:
         return True
     try:
         populated = await WORKSPACES.routing_is_populated()
@@ -137,7 +138,7 @@ async def repo_is_routable(owner: str, name: str) -> bool:
 async def _resolve_from_store(
     *,
     tag: str | None,
-    repos: Sequence[tuple[str, str]],
+    repositories: Sequence[Repository],
     slack_channel_id: str | None,
     login: str | None,
 ) -> WorkspaceResolution | None:
@@ -148,8 +149,8 @@ async def _resolve_from_store(
             tagged = ""
         if tagged and await _slug_exists(tagged):
             return WorkspaceResolution(tagged, "tag")
-    for repo in repos:
-        owner = await _repo_owner(*repo)
+    for repository in repositories:
+        owner = await _repo_owner(repository)
         if owner is not None:
             return WorkspaceResolution(owner, "repo")
     if slack_channel_id:
@@ -167,16 +168,19 @@ async def resolve_workspace(
     *,
     thread_workspace: str | None = None,
     tag: str | None = None,
-    repos: Sequence[tuple[str, str]] = (),
+    repositories: Sequence[Repository] = (),
     slack_channel_id: str | None = None,
     login: str | None = None,
 ) -> WorkspaceResolution:
-    """The workspace a run belongs to; the first of ``repos`` a workspace owns decides."""
+    """The workspace a run belongs to; the first repository a workspace owns decides."""
     if thread_workspace and thread_workspace.strip():
         return WorkspaceResolution(thread_workspace.strip(), "thread")
     try:
         resolved = await _resolve_from_store(
-            tag=tag, repos=repos, slack_channel_id=slack_channel_id, login=login
+            tag=tag,
+            repositories=repositories,
+            slack_channel_id=slack_channel_id,
+            login=login,
         )
     except WorkspaceLookupError:
         # Fail soft here on purpose: this decides where work runs, and a run in

@@ -4,6 +4,8 @@ from typing import Any
 
 import pytest
 
+from tests.support.repositories import FakeRepositories
+
 slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
 
 
@@ -51,7 +53,9 @@ class _FakeClient:
         self.threads = _FakeThreadsClient(captured)
 
 
-async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_slack_start_new_thread_success(
+    monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
+) -> None:
     captured: dict[str, Any] = {"stored_mappings": []}
     new_ts = "1700000000.111111"
 
@@ -199,7 +203,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert captured["binding"]["thread_ts"] == new_ts
     metadata = captured["thread_update"]["metadata"]
     assert metadata["source"] == "slack"
-    assert metadata["repos"] == [{"owner": "langchain-ai", "name": "open-swe"}]
+    assert metadata["repository_ids"] == [str(fake_repositories.add("langchain-ai/open-swe").id)]
     assert metadata["github_login"] == "alice"
     assert metadata["triggering_user_email"] == "alice@example.com"
     assert metadata["source_context"]["slack_thread"]["thread_ts"] == new_ts
@@ -213,7 +217,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert dispatch["thread_id"] == expected_thread_id
     assert dispatch["source"] == "slack"
     assert dispatch["configurable"]["slack_thread"]["thread_ts"] == new_ts
-    assert dispatch["configurable"]["repos"] == [{"owner": "langchain-ai", "name": "open-swe"}]
+    assert dispatch["configurable"]["repository_ids"] == metadata["repository_ids"]
     assert dispatch["configurable"]["github_login"] == "alice"
     assert dispatch["configurable"]["agent_model_id"] == "anthropic:claude-sonnet-4-5"
     assert "Breakout Instructions" in dispatch["content"]
@@ -279,6 +283,7 @@ async def test_slack_start_new_thread_rejects_invalid_repo_override(
 
 
 async def test_slack_start_new_thread_returns_slack_failure_without_dispatch(
+    fake_repositories: FakeRepositories,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, bool] = {"dispatched": False}
@@ -306,6 +311,7 @@ async def test_slack_start_new_thread_returns_slack_failure_without_dispatch(
 
 
 async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
+    fake_repositories: FakeRepositories,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {"dispatched": False, "detail_posts": 0, "sleeps": []}

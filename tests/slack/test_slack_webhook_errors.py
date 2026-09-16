@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.run_config import Repo
+from agent.github.repositories import Repository
 from agent.slack import failures as slack_failures
 from agent.slack import webhook as slack_webhook
 from agent.slack.request import SlackRequest
@@ -59,7 +59,7 @@ async def test_slack_processing_error_marks_thread_and_replies_with_error_id(
 
     await slack_webhook.process_slack_mention(
         _event_data(),
-        webhook_common.SlackRepoResolution((Repo(owner="langchain-ai", name="open-swe"),)),
+        webhook_common.SlackRepoResolution((Repository(full_name="langchain-ai/open-swe"),)),
     )
 
     upsert.assert_awaited_once()
@@ -94,7 +94,7 @@ async def test_slack_processing_error_replies_even_without_an_agent_thread(
 
     await slack_webhook.process_slack_mention(
         _event_data(),
-        webhook_common.SlackRepoResolution((Repo(owner="langchain-ai", name="open-swe"),)),
+        webhook_common.SlackRepoResolution((Repository(full_name="langchain-ai/open-swe"),)),
     )
 
     post_reply.assert_awaited_once()
@@ -146,7 +146,7 @@ async def test_slack_plan_button_failure_notifies_user(
     event_data = SlackRequest(
         thread_id="t1", channel_id="C1", thread_ts="123.45", user_id="U1", user_name="Alice"
     )
-    repos = (Repo(owner="langchain-ai", name="open-swe"),)
+    repos = (Repository(full_name="langchain-ai/open-swe"),)
 
     await slack_webhook.process_slack_plan_approval(event_data, repos)
 
@@ -521,7 +521,7 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
             message_update=True,
         ),
         webhook_common.SlackRepoResolution(
-            (Repo(owner="langchain-ai", name="open-swe"),), explicit=True
+            (Repository(full_name="langchain-ai/open-swe"),), explicit=True
         ),
     )
 
@@ -591,7 +591,7 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
                 thread_id="t1",
             ),
             webhook_common.SlackRepoResolution(
-                (Repo(owner="langchain-ai", name="open-swe"),), explicit=True
+                (Repository(full_name="langchain-ai/open-swe"),), explicit=True
             ),
         )
     dispatch.assert_not_awaited()

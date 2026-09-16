@@ -4,10 +4,12 @@ import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import HTTPException
 
-from agent.thread_repos import thread_repos
+from agent.github.repositories import Repository
+from agent.thread_repos import legacy_repo, thread_repository_ids
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
@@ -100,6 +102,38 @@ def _search_matches(values: Sequence[object], query: str) -> bool:
     return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
 
 
+def _thread_repo_names(
+    metadata: Mapping[str, Any], repositories: Mapping[UUID, Repository]
+) -> list[str]:
+    """``full_name`` for every repository the thread links to, ids first, legacy after."""
+    ids = thread_repository_ids(metadata)
+    if ids:
+        return [row.full_name for id in ids if (row := repositories.get(id)) is not None]
+    legacy = legacy_repo(metadata)
+    return [legacy.full_name] if legacy else []
+
+
+async def _repositories_by_id(threads: Sequence[ThreadLike]) -> dict[UUID, Repository]:
+    """One lookup for every repository id any of ``threads`` links to."""
+    ids: list[UUID] = []
+    for thread in threads:
+        for id in thread_repository_ids(_thread_metadata(thread)):
+            if id not in ids:
+                ids.append(id)
+    return {row.id: row for row in await Repository.get_many(ids)}
+
+
+async def _filter_repository_id(repo: str | None) -> UUID | None:
+    """The row id a ``repo=owner/name`` filter names, resolved once per request."""
+    if not repo or not repo.strip():
+        return None
+    try:
+        row = await Repository.get(repo.strip())
+    except ValueError:
+        return None
+    return row.id if row is not None else None
+
+
 def _metadata_matches_filters(
     metadata: Mapping[str, Any],
     *,
@@ -109,14 +143,21 @@ def _metadata_matches_filters(
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
     repo: str | None = None,
+    repo_id: UUID | None = None,
     ownerless: bool = False,
     admin_threads: bool | None = None,
+    repositories: Mapping[UUID, Repository] | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
-    repos = thread_repos(metadata)
-    if repo and not any(candidate.key == repo.strip().lower() for candidate in repos):
-        return False
-    if ownerless and repos:
+    ids = thread_repository_ids(metadata)
+    legacy = legacy_repo(metadata)
+    if repo:
+        if ids:
+            if repo_id is None or repo_id not in ids:
+                return False
+        elif legacy is None or legacy.key != repo.strip().lower():
+            return False
+    if ownerless and (ids or legacy is not None):
         return False
     if admin_threads is not None and (metadata.get("admin_thread") is True) is not admin_threads:
         return False
@@ -139,8 +180,8 @@ def _metadata_matches_filters(
                 metadata.get("title", "Untitled agent"),
                 *(
                     part
-                    for candidate in repos
-                    for part in (candidate.owner, candidate.name, candidate.full_name)
+                    for full_name in _thread_repo_names(metadata, repositories or {})
+                    for part in (full_name, *full_name.split("/"))
                 ),
                 metadata.get("branch_name"),
                 metadata.get("base_branch"),
@@ -271,6 +312,7 @@ async def _collect_thread_candidates(
     sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
+    repo_id = await _filter_repository_id(repo)
     for search_filter in searches:
         matched_for_search = 0
         offset = 0
@@ -291,6 +333,7 @@ async def _collect_thread_candidates(
             )
             if not batch:
                 break
+            repositories = await _repositories_by_id(batch) if query else {}
             for thread in batch:
                 metadata = _thread_metadata(thread)
                 if thread_source(metadata) == "incidents_agent":
@@ -310,8 +353,10 @@ async def _collect_thread_candidates(
                     scope=scope,
                     automation_id=automation_id,
                     repo=repo,
+                    repo_id=repo_id,
                     ownerless=ownerless,
                     admin_threads=admin_threads,
+                    repositories=repositories,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -413,21 +458,34 @@ async def list_dashboard_thread_projects(
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
     )
+    repositories = await _repositories_by_id(candidates)
     projects: dict[str, dict[str, Any]] = {}
     for thread in candidates:
         updated_at = _thread_updated_ms(thread)
-        for repo in thread_repos(_thread_metadata(thread)):
-            current = projects.get(repo.key)
+        for full_name in _thread_repo_names(_thread_metadata(thread), repositories):
+            current = projects.get(full_name.lower())
             if current is None or updated_at > current["updatedAt"]:
-                projects[repo.key] = {
-                    "repoFullName": repo.full_name,
-                    "name": repo.name,
+                projects[full_name.lower()] = {
+                    "repoFullName": full_name,
+                    "name": full_name.partition("/")[2],
                     "updatedAt": updated_at,
                 }
-    for project in projects.values():
-        owner, _, repo_name = str(project["repoFullName"]).partition("/")
-        project["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
-    return sorted(projects.values(), key=lambda project: project["updatedAt"], reverse=True)
+    known = {row.key: row for row in repositories.values()}
+    resolved: list[dict[str, Any]] = []
+    for key, project in projects.items():
+        repository = known.get(key)
+        if repository is None:
+            try:
+                repository = await Repository.ensure(str(project["repoFullName"]))
+            except ValueError:
+                logger.warning(
+                    "Skipping a thread project with an unusable repository name",
+                    extra={"project_repo": project["repoFullName"]},
+                )
+                continue
+        project["workspace"] = await workspace_for_repo(repository) or DEFAULT_WORKSPACE_SLUG
+        resolved.append(project)
+    return sorted(resolved, key=lambda project: project["updatedAt"], reverse=True)
 
 
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:

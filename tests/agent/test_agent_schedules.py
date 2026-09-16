@@ -114,7 +114,7 @@ class _FakeClient:
 
 
 @pytest.fixture
-def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
+def fake_client(monkeypatch, fake_repositories) -> _FakeClient:  # noqa: ANN001, ARG001
     client = _FakeClient()
     monkeypatch.setattr(schedules, "langgraph_client", lambda: client)
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
@@ -1073,7 +1073,7 @@ async def test_launch_github_issue_automations_skips_malformed_repo_records(
 
 
 async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
-    fake_client, auth, monkeypatch
+    fake_client, auth, monkeypatch, fake_repositories
 ) -> None:  # noqa: ANN001, ARG001
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     record = {
@@ -1114,7 +1114,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert "participant_logins" not in metadata
     assert "triggering_user_email" not in metadata
     assert metadata["admin_thread"] is True
-    assert metadata["repos"] == [{"owner": "langchain-ai", "name": "open-swe"}]
+    assert metadata["repository_ids"] == [str(fake_repositories.add("langchain-ai/open-swe").id)]
     run = fake_client.runs.created[0]
     assert run["thread_id"] == thread_id
     assert run["assistant_id"] == "agent"
@@ -1129,7 +1129,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert "github_login" not in run["config"]["configurable"]
     assert "user_email" not in run["config"]["configurable"]
     assert run["config"]["configurable"]["admin_thread"] is True
-    assert run["config"]["configurable"]["repos"] == [record["repo"]]
+    assert run["config"]["configurable"]["repository_ids"] == metadata["repository_ids"]
 
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_thread_id"] == thread_id

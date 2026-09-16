@@ -19,7 +19,11 @@ from agent.slack.client import (
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
 from agent.slack.events import claim_slack_event
 from agent.source_context import SourceContext
-from agent.thread_repos import REPOS_METADATA_KEY, repos_metadata, thread_repos
+from agent.thread_repos import (
+    REPOSITORY_IDS_METADATA_KEY,
+    repository_ids_metadata,
+    thread_repositories,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +120,7 @@ def _thread_workspace(metadata: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _summary_configurable(
+async def _summary_configurable(
     metadata: Mapping[str, Any], slack_thread: Mapping[str, Any]
 ) -> dict[str, Any]:
     source = metadata.get("source")
@@ -127,9 +131,9 @@ def _summary_configurable(
         "stop_summary": True,
     }
 
-    repos = thread_repos(metadata)
-    if repos:
-        configurable[REPOS_METADATA_KEY] = repos_metadata(repos)
+    repositories = await thread_repositories(metadata)
+    if repositories:
+        configurable[REPOSITORY_IDS_METADATA_KEY] = repository_ids_metadata(repositories)
 
     for metadata_key, config_key in (
         ("github_login", "github_login"),
@@ -200,7 +204,7 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
         },
     )
 
-    configurable = _summary_configurable(metadata, slack_thread)
+    configurable = await _summary_configurable(metadata, slack_thread)
     summary_run = await dispatch_agent_run(
         thread_id,
         _stop_summary_prompt(bool(run_ids)),

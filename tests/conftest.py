@@ -22,6 +22,7 @@ from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES
+from tests.support.repositories import FakeRepositories
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 
@@ -200,6 +201,12 @@ def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
     }
     fake_store.seed(["allowed_slack_bots"], "T123:B123", bot)
     return bot
+
+
+@pytest.fixture
+def fake_repositories(monkeypatch: pytest.MonkeyPatch) -> FakeRepositories:
+    """Route every ``Repository`` lookup and upsert through an in-memory table."""
+    return FakeRepositories().install(monkeypatch)
 
 
 @pytest.fixture(autouse=True)

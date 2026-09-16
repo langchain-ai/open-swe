@@ -1,40 +1,56 @@
-import asyncio
-
 import pytest
 
 from agent import server
-from agent.run_config import Repo, RunConfig
+from agent.github.repositories import Repository
+from agent.run_config import RunConfig
+from tests.support.repositories import FakeRepositories
 
 
-@pytest.mark.parametrize(
-    ("config", "expected"),
-    [
-        (
-            RunConfig.parse({"repo": {"owner": "octo", "name": "repo"}}),
-            [Repo(owner="octo", name="repo")],
-        ),
-        (
-            RunConfig.parse(
-                {"repos": [{"owner": "octo", "name": "one"}, {"owner": "octo", "name": "two"}]}
-            ),
-            [Repo(owner="octo", name="one"), Repo(owner="octo", name="two")],
-        ),
-        (RunConfig(repo_explicitly_none=True), []),
-    ],
-)
-def test_resolve_prompt_repositories_never_loads_team_default(
-    monkeypatch: pytest.MonkeyPatch, config: RunConfig, expected: list[Repo]
+@pytest.mark.asyncio
+async def test_resolve_prompt_repositories_reads_the_legacy_single_repo(
+    monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
 ) -> None:
-    async def fake_get_team_default_repo() -> dict[str, str] | None:
+    async def fake_get_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
         raise AssertionError("team default should not be loaded")
 
     monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
 
-    assert asyncio.run(server._resolve_prompt_repositories(config)) == expected
+    config = RunConfig.parse({"repo": {"owner": "octo", "name": "repo"}})
+
+    assert [r.full_name for r in await server._resolve_prompt_repositories(config)] == ["octo/repo"]
 
 
-def test_resolve_prompt_repositories_falls_back_to_team_default(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.asyncio
+async def test_resolve_prompt_repositories_reads_every_linked_repository(
+    monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
+) -> None:
+    async def fake_get_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
+        raise AssertionError("team default should not be loaded")
+
+    monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
+
+    one = fake_repositories.add("octo/one")
+    two = fake_repositories.add("octo/two")
+    config = RunConfig.parse({"repository_ids": [str(one.id), str(two.id)]})
+
+    assert await server._resolve_prompt_repositories(config) == [one, two]
+
+
+@pytest.mark.asyncio
+async def test_resolve_prompt_repositories_skips_the_team_default_when_none_is_wanted(
+    monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
+) -> None:
+    async def fake_get_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
+        raise AssertionError("team default should not be loaded")
+
+    monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
+
+    assert await server._resolve_prompt_repositories(RunConfig(repo_explicitly_none=True)) == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_prompt_repositories_falls_back_to_team_default(
+    monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
 ) -> None:
     seen: list[str | None] = []
 
@@ -44,7 +60,8 @@ def test_resolve_prompt_repositories_falls_back_to_team_default(
 
     monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
 
-    repos = asyncio.run(server._resolve_prompt_repositories(RunConfig(workspace="oss")))
+    repositories = await server._resolve_prompt_repositories(RunConfig(workspace="oss"))
 
-    assert repos == [Repo(owner="team", name="repo")]
+    assert [repository.full_name for repository in repositories] == ["team/repo"]
     assert seen == ["oss"]
+    assert await Repository.get("team/repo") is not None

@@ -7,6 +7,7 @@ import pytest
 
 from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
+from tests.support.repositories import FakeRepositories
 
 
 def _push_payload(
@@ -169,7 +170,9 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
 
 
 @pytest.mark.asyncio
-async def test_push_event_triggers_re_review_run_when_watching() -> None:
+async def test_push_event_triggers_re_review_run_when_watching(
+    fake_repositories: FakeRepositories,
+) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
     pr = {
         "number": 7,
@@ -350,7 +353,9 @@ async def test_reviewer_token_for_repo_unknown_privacy_uses_full_token() -> None
 
 
 @pytest.mark.asyncio
-async def test_push_event_public_repo_uses_scoped_token() -> None:
+async def test_push_event_public_repo_uses_scoped_token(
+    fake_repositories: FakeRepositories,
+) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha", private=False, repo_id=123)
     pr = {
         "number": 7,
@@ -405,7 +410,9 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> None:
+async def test_push_event_rescopes_token_when_pr_metadata_reveals_public(
+    fake_repositories: FakeRepositories,
+) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
     pr = {
         "number": 7,

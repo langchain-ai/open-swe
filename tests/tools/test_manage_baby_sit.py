@@ -4,12 +4,14 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.baby_sit import BabySitWatch
+from tests.support.repositories import FakeRepositories
 
 manage_tool = importlib.import_module("agent.tools.manage_baby_sit")
 
 
 async def test_manage_baby_sit_starts_cross_repo_watch_from_github_issue(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     configurable = {
         "thread_id": "thread-1",

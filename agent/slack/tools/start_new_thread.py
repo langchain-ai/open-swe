@@ -8,8 +8,9 @@ from fastapi import HTTPException
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
+from agent.github.repositories import Repository
 from agent.prompts import render_prompt
-from agent.run_config import Repo, RunConfig
+from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
@@ -18,7 +19,7 @@ from agent.slack.client import (
     store_slack_run_mapping,
 )
 from agent.source_context import SourceContext
-from agent.thread_repos import REPOS_METADATA_KEY, repos_metadata
+from agent.thread_repos import REPOSITORY_IDS_METADATA_KEY, repository_ids_metadata
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
@@ -74,15 +75,16 @@ def _validate_text(value: str, *, field: str, max_chars: int) -> str | dict[str,
     return text
 
 
-def _resolve_repos(cfg: RunConfig, default_repo: str | None) -> list[Repo] | None:
+async def _resolve_repositories(
+    cfg: RunConfig, default_repo: str | None
+) -> list[Repository] | None:
     """The new thread's repositories; ``None`` when ``default_repo`` is malformed."""
     if default_repo and default_repo.strip():
         candidate = default_repo.strip()
         if not _REPO_RE.fullmatch(candidate):
             return None
-        parsed = Repo.parse_full_name(candidate)
-        return [parsed] if parsed else None
-    return cfg.repositories
+        return [await Repository.ensure(candidate)]
+    return await cfg.load_repositories()
 
 
 def _truncate_for_slack(text: str) -> str:
@@ -96,9 +98,10 @@ def _visible_message(title: str) -> str:
     return f"*Open SWE breakout thread:* {title}"
 
 
-def _thread_details(instructions: str, repos: Sequence[Repo]) -> str:
-    joined = ", ".join(f"`{repo.full_name}`" for repo in repos)
-    repo_line = f"*Repositories:* {joined}\n\n" if repos else ""
+def _thread_details(instructions: str, repositories: Sequence[Repository]) -> str:
+    joined = ", ".join(f"`{repository.full_name}`" for repository in repositories)
+    label = "Repository" if len(repositories) == 1 else "Repositories"
+    repo_line = f"*{label}:* {joined}\n\n" if repositories else ""
     return f"{repo_line}*Instructions for the new thread:*\n{_truncate_for_slack(instructions)}"
 
 
@@ -119,11 +122,14 @@ async def _run_links_section(thread_id: str) -> str:
 async def _run_prompt(
     title: str,
     instructions: str,
-    repos: Sequence[Repo],
+    repositories: Sequence[Repository],
     original_slack_thread: dict[str, Any],
     thread_id: str,
 ) -> str:
-    repo_text = ", ".join(repo.full_name for repo in repos) or "(no repository specified)"
+    repo_text = (
+        ", ".join(repository.full_name for repository in repositories)
+        or "(no repository specified)"
+    )
     channel_id = original_slack_thread.get("channel_id", "")
     thread_ts = original_slack_thread.get("thread_ts", "")
     return render_prompt(
@@ -185,8 +191,8 @@ async def slack_start_new_thread(
     if isinstance(clean_instructions, dict):
         return clean_instructions
 
-    repos = _resolve_repos(cfg, default_repo)
-    if repos is None:
+    repositories = await _resolve_repositories(cfg, default_repo)
+    if repositories is None:
         return {
             "success": False,
             "error": "default_repo must be a simple owner/name repository string",
@@ -194,8 +200,8 @@ async def slack_start_new_thread(
 
     if default_repo and default_repo.strip():
         github_login = cfg.github_login
-        for repo in repos:
-            if not is_repo_allowed(repo.model_dump()):
+        for repo in repositories:
+            if not is_repo_allowed({"owner": repo.owner, "name": repo.name}):
                 return {
                     "success": False,
                     "error": (f"Repository {repo.full_name} is not on the deployment allowlist"),
@@ -242,7 +248,7 @@ async def slack_start_new_thread(
         details_ts, details_error = await post_slack_thread_reply_with_ts(
             clean_channel_id,
             message_ts,
-            _thread_details(clean_instructions, repos),
+            _thread_details(clean_instructions, repositories),
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -280,8 +286,8 @@ async def slack_start_new_thread(
             {"slack_thread": new_slack_thread, "breakout_from": breakout_from}
         ).dump(),
     }
-    if repos:
-        metadata[REPOS_METADATA_KEY] = repos_metadata(repos)
+    if repositories:
+        metadata[REPOSITORY_IDS_METADATA_KEY] = repository_ids_metadata(repositories)
     if cfg.github_login:
         metadata["github_login"] = cfg.github_login
     if cfg.user_email:
@@ -291,8 +297,8 @@ async def slack_start_new_thread(
         "slack_thread": new_slack_thread,
         "source": "slack",
     }
-    if repos:
-        new_configurable[REPOS_METADATA_KEY] = repos_metadata(repos)
+    if repositories:
+        new_configurable[REPOSITORY_IDS_METADATA_KEY] = repository_ids_metadata(repositories)
     for key in ("user_email", "github_login", "agent_model_id", "agent_effort"):
         value = cfg.get(key)
         if value:
@@ -303,7 +309,9 @@ async def slack_start_new_thread(
 
     run = await dispatch_agent_run(
         thread_id,
-        await _run_prompt(clean_title, clean_instructions, repos, current_slack_thread, thread_id),
+        await _run_prompt(
+            clean_title, clean_instructions, repositories, current_slack_thread, thread_id
+        ),
         new_configurable,
         source="slack",
         client=client,

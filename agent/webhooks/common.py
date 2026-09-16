@@ -72,6 +72,7 @@ from agent.github.comments import (
 )
 from agent.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from agent.github.pull_requests import PullRequestEvent
+from agent.github.repositories import Repository
 from agent.github.thread_token import (
     cache_github_token_for_thread,
     invalidate_cached_github_token,
@@ -93,7 +94,6 @@ from agent.review.findings import (
 )
 from agent.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from agent.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
-from agent.run_config import Repo, dedupe_repos
 from agent.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
@@ -141,7 +141,11 @@ from agent.slack.feedback import (
 )
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
-from agent.thread_repos import REPOS_METADATA_KEY, repos_metadata, thread_repos
+from agent.thread_repos import (
+    REPOSITORY_IDS_METADATA_KEY,
+    repository_ids_metadata,
+    thread_repositories,
+)
 from agent.threads.summary import thread_is_private, thread_is_promptable
 from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
@@ -368,10 +372,10 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
 )
 
 
-def _extract_repos_from_thread(thread: ThreadLike) -> list[Repo]:
+async def _extract_repos_from_thread(thread: ThreadLike) -> list[Repository]:
     """Every repository a persisted thread works in."""
     metadata = as_thread_dict(thread).get("metadata")
-    return thread_repos(metadata) if isinstance(metadata, dict) else []
+    return await thread_repositories(metadata) if isinstance(metadata, dict) else []
 
 
 def is_not_found_error(exc: Exception) -> bool:
@@ -516,7 +520,7 @@ async def upsert_agent_thread_metadata(
     thread_id: str,
     *,
     source: str,
-    repos: Sequence[Repo] = (),
+    repositories: Sequence[Repository] = (),
     github_login: str = "",
     user_email: str = "",
     title: str = "",
@@ -553,8 +557,8 @@ async def upsert_agent_thread_metadata(
         "trigger_kind": "user",
         "updated_at_ms": now_ms,
     }
-    if repos:
-        metadata[REPOS_METADATA_KEY] = repos_metadata(repos)
+    if repositories:
+        metadata[REPOSITORY_IDS_METADATA_KEY] = repository_ids_metadata(repositories)
     if title:
         metadata["title"] = title[:80]
     if workspace:
@@ -678,15 +682,13 @@ class SlackRepoResolution:
     channel description named.
     """
 
-    repos: tuple[Repo, ...] = ()
+    repos: tuple[Repository, ...] = ()
     explicit: bool = False
 
     @property
-    def routing_repos(self) -> tuple[tuple[str, str], ...]:
+    def routing_repos(self) -> tuple[Repository, ...]:
         """The repositories allowed to decide the workspace, if any."""
-        if not self.explicit:
-            return ()
-        return tuple((repo.owner, repo.name) for repo in self.repos)
+        return self.repos if self.explicit else ()
 
 
 async def get_slack_repo_config(
@@ -724,7 +726,7 @@ async def get_slack_repo_config(
             langgraph_client, channel_id, thread_ts
         )
         thread = await langgraph_client.threads.get(resolved_thread_id)
-        existing = _extract_repos_from_thread(thread)
+        existing = await _extract_repos_from_thread(thread)
         if existing:
             return SlackRepoResolution(tuple(existing), True)
     except Exception as exc:  # noqa: BLE001
@@ -788,7 +790,7 @@ async def get_slack_repo_config(
 
     if not repo_config:
         return SlackRepoResolution()
-    return SlackRepoResolution((Repo.model_validate(repo_config),), explicit)
+    return SlackRepoResolution(tuple(await Repository.ensure_from_config(repo_config)), explicit)
 
 
 async def thread_exists(thread_id: str) -> bool:
@@ -870,18 +872,16 @@ async def get_thread_workspace(thread_id: str) -> str | None:
     return None
 
 
-async def workspace_for_repos(repos: Sequence[Repo]) -> str:
-    """The workspace owning the first of ``repos`` any workspace owns, else the default.
+async def workspace_for_repos(repositories: Sequence[Repository]) -> str:
+    """The workspace owning the first of ``repositories`` any workspace owns, else the default.
 
     A failed ownership lookup lands on the default too:
     :func:`agent.workspaces.routing.workspace_for_repo` logs it at error and
     answers ``None``, because every caller of this is about to start or label a
     run, and one in ``default`` beats none.
     """
-    for repo in repos:
-        if not repo:
-            continue
-        owner = await workspace_for_repo(repo.owner, repo.name)
+    for repository in repositories:
+        owner = await workspace_for_repo(repository)
         if owner is not None:
             return owner
     return DEFAULT_WORKSPACE_SLUG
@@ -1074,12 +1074,12 @@ async def trigger_or_queue_run(
     # An existing thread keeps the workspace it started in even if its
     # repository has since moved: the settings and MCP connections a
     # conversation began with must not change under it.
-    repos = dedupe_repos([Repo.parse(repo_config)])
-    workspace = await get_thread_workspace(thread_id) or await workspace_for_repos(repos)
+    repositories = await Repository.ensure_from_config(repo_config)
+    workspace = await get_thread_workspace(thread_id) or await workspace_for_repos(repositories)
     await upsert_agent_thread_metadata(
         thread_id,
         source="github",
-        repos=repos,
+        repositories=repositories,
         github_login=github_login,
         title=f"PR #{pr_number}" if pr_number else "",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
@@ -1093,7 +1093,7 @@ async def trigger_or_queue_run(
             "source": "github",
             "github_login": github_login,
             "github_user_id": github_user_id,
-            REPOS_METADATA_KEY: repos_metadata(repos),
+            REPOSITORY_IDS_METADATA_KEY: repository_ids_metadata(repositories),
             "pr_number": pr_number,
             "workspace": workspace,
             "environment": workspace,
@@ -1194,7 +1194,7 @@ async def build_reviewer_configurable(
     slack_thread_ts: str = "",
 ) -> dict[str, Any]:
     """Assemble the runnable-config ``configurable`` dict for a reviewer run."""
-    workspace = await workspace_for_repos(dedupe_repos([Repo.parse(repo_config)]))
+    workspace = await workspace_for_repos(await Repository.ensure_from_config(repo_config))
     configurable: dict[str, Any] = {
         "source": source,
         "github_login": github_login,
@@ -1239,7 +1239,7 @@ async def draft_review_enabled_for_author(
             if isinstance(override, bool):
                 return override
     team = await get_team_settings(
-        await workspace_for_repos(dedupe_repos([Repo.parse(repo_config)]))
+        await workspace_for_repos(await Repository.ensure_from_config(repo_config))
     )
     return bool(team.get("review_draft_prs"))
 

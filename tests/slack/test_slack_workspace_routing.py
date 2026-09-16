@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
-from agent.run_config import Repo
+from agent.github.repositories import Repository
 from agent.slack import webhook as slack_webhooks
 from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
@@ -109,7 +109,9 @@ async def test_a_bound_channel_outranks_a_defaulted_repository(
     # the thread, the message, or the channel description named it.
     await slack_webhooks._process_slack_mention_impl(
         request,
-        webhook_common.SlackRepoResolution((Repo(owner="acme", name="internal"),), explicit=False),
+        webhook_common.SlackRepoResolution(
+            (Repository(full_name="acme/internal"),), explicit=False
+        ),
     )
 
     configurable = captured["run_create"]["kwargs"]["config"]["configurable"]
@@ -217,7 +219,7 @@ async def test_a_named_repository_still_outranks_a_bound_channel(
 
     await slack_webhooks._process_slack_mention_impl(
         request,
-        webhook_common.SlackRepoResolution((Repo(owner="acme", name="internal"),), explicit=True),
+        webhook_common.SlackRepoResolution((Repository(full_name="acme/internal"),), explicit=True),
     )
 
     configurable = captured["run_create"]["kwargs"]["config"]["configurable"]

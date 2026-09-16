@@ -22,6 +22,7 @@ from agent.slack.tools.request_pr_review import request_pr_review as request_pr_
 from agent.thread_ids import github_issue_thread_id
 from agent.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook
+from tests.support.repositories import FakeRepositories
 
 request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
 
@@ -383,7 +384,9 @@ async def test_github_webhook_routes_review_comment_reply_without_tag(
     assert payload["comment"]["in_reply_to_id"] == 111
 
 
-def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -> None:
+def test_process_github_review_finding_reply_uses_rereview_config(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     captured: dict[str, object] = {}
 
     async def fake_get_thread_metadata_safe(_thread_id: str) -> dict[str, object]:
@@ -464,7 +467,9 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     assert config["finding_reply_id"] == "f_1"
 
 
-def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(monkeypatch) -> None:
+def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     captured: dict[str, object] = {}
 
     async def fake_get_thread_metadata_safe(_thread_id: str) -> dict[str, object]:
@@ -973,7 +978,9 @@ def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
     }
 
 
-def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
+def test_process_github_pr_ready_creates_reviewer_run(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     captured: dict[str, object] = {}
 
     async def fake_get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
@@ -1058,7 +1065,9 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
     assert config["review_requested"] is True
 
 
-def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
+def test_trigger_pr_review_from_ref_creates_reviewer_run(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     captured: dict[str, object] = {}
     auto_review_checked = False
 
@@ -1274,7 +1283,9 @@ def test_process_github_pr_comment_without_email_skips(
     assert captured == {}
 
 
-def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch) -> None:
+def test_process_github_issue_uses_resolved_user_token_for_reaction(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     captured: dict[str, object] = {}
 
     async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
@@ -1357,7 +1368,9 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     assert captured["run_created"] is True
 
 
-def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) -> None:
+def test_process_github_issue_existing_thread_uses_followup_prompt(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     captured: dict[str, object] = {}
 
     async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:

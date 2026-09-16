@@ -85,9 +85,9 @@ async def _get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     return channel_id, thread_ts
 
 
-def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
-    repo = cfg.target_repo
-    if repo is None:
+async def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
+    repository = await cfg.target_repository()
+    if repository is None:
         return None
     for number in (
         cfg.github_pr_or_issue.number if cfg.github_pr_or_issue else None,
@@ -95,7 +95,7 @@ def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
         cfg.pr_number,
     ):
         if number is not None:
-            return repo.model_dump(), number
+            return {"owner": repository.owner, "name": repository.name}, number
     return None
 
 
@@ -130,7 +130,7 @@ async def post_sandbox_unreachable_notification(
         await post_linear_notification(cfg.linear_issue.id, message)
         return
 
-    github_target = _get_github_target(cfg)
+    github_target = await _get_github_target(cfg)
     if github_target is not None:
         token = get_github_token(config) or await get_github_app_installation_token()
         if not token:

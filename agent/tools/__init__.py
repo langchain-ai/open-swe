@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
-    "add_repository": ".add_repository",
+    "add_repos": ".add_repos",
     "approve_plan": ".approve_plan",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
@@ -65,7 +65,7 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
-    "add_repository",
+    "add_repos",
     "approve_plan",
     "background_execute",
     "background_task",
@@ -137,7 +137,7 @@ if TYPE_CHECKING:
     from agent.slack.tools.start_new_thread import slack_start_new_thread
     from agent.slack.tools.thread_reply import slack_thread_reply
     from agent.tools.add_finding import add_finding
-    from agent.tools.add_repository import add_repository
+    from agent.tools.add_repos import add_repos
     from agent.tools.approve_plan import approve_plan
     from agent.tools.automations import (
         create_automation,

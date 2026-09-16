@@ -23,6 +23,7 @@ from agent.threads import runs as thread_runs
 from agent.threads import summary as thread_summary
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
+from tests.support.repositories import FakeRepositories
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -250,7 +251,9 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
 
-async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatch) -> None:
+async def test_enrich_run_start_command_creates_and_stamps_new_thread(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
@@ -285,12 +288,12 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert stamped["trigger_kind"] == "user"
     assert stamped["participant_logins"] == {"octocat": True}
     assert stamped["title"] == "Fix the flaky test"
-    assert stamped["repos"] == [{"owner": "octo", "name": "repo"}]
+    assert stamped["repository_ids"] == [str(fake_repositories.add("octo/repo").id)]
 
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["github_login"] == "octocat"
     assert configurable["source"] == "dashboard"
-    assert configurable["repos"] == [{"owner": "octo", "name": "repo"}]
+    assert configurable["repository_ids"] == stamped["repository_ids"]
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
     assert configurable["invocation_id"] == enriched["params"]["metadata"]["invocation_id"]
@@ -589,7 +592,9 @@ async def test_thread_summary_includes_pull_requests_across_repositories() -> No
     assert summary["diffStats"] == {"files": 1, "additions": 4, "deletions": 0}
 
 
-async def test_thread_summary_uses_configured_repos_for_display() -> None:
+async def test_thread_summary_uses_configured_repos_for_display(
+    fake_repositories: FakeRepositories,
+) -> None:
     metadata = {
         "repo": {"owner": "trusted", "name": "default"},
         "working_repo_full_name": "observed/checkout",
@@ -639,10 +644,13 @@ async def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
     assert summary["sandboxId"] is None
 
 
-async def test_terminal_sandbox_requires_existing_sandbox(monkeypatch) -> None:
+async def test_terminal_sandbox_requires_existing_sandbox(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     metadata = {
         "source": "dashboard",
         "sandbox_id": "sandbox-123",
+        "repo_owner": "acme",
         "repo_name": "repo",
     }
 
@@ -790,7 +798,11 @@ async def test_recovery_patch_requires_sandbox(monkeypatch) -> None:
     assert "sandbox" in exc_info.value.detail
 
 
-async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
+async def test_recovery_patch_downloads_generated_patch(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
+    repository = fake_repositories.add("octo/repo")
+
     async def fake_authorized_thread(thread_id: str, login: str, *, email: str | None = None):
         return {
             "thread_id": thread_id,
@@ -798,8 +810,7 @@ async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
                 "source": "dashboard",
                 "github_login": login,
                 "sandbox_id": "sbx",
-                "repo_owner": "octo",
-                "repo_name": "repo",
+                "repository_ids": [str(repository.id)],
                 "base_branch": "main",
             },
         }
@@ -875,7 +886,8 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
 
 def test_recovery_patch_searches_command_cwd_before_workspace_fallback() -> None:
     command = thread_diffs._recovery_patch_command(
-        {"repo_name": "repo", "base_branch": "main"},
+        {"base_branch": "main"},
+        [],
         "tid",
     )
 
@@ -1100,7 +1112,9 @@ async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeyp
     assert last.findtext("content") == "fix the bug"
 
 
-async def test_enrich_run_start_command_allowlists_client_configurable(monkeypatch) -> None:
+async def test_enrich_run_start_command_allowlists_client_configurable(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     updates: list[dict[str, object]] = []
 
     class FakeThreads:
@@ -1175,7 +1189,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         {"owner_login", "owner_type", "visibility", "system_authorization"}
         & enriched["params"]["metadata"].keys()
     )
-    assert configurable["repos"] == [{"owner": "octo", "name": "repo"}]
+    assert configurable["repository_ids"] == [str(fake_repositories.add("octo/repo").id)]
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
     assert updates[-1]["model"] == _VISION_MODEL
@@ -2332,7 +2346,9 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
     assert [item["id"] for item in result["items"]] == ["surfaced"]
 
 
-async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch) -> None:
+async def test_list_dashboard_threads_page_filters_ownerless_threads(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     threads = _make_threads(3, resolved_before=0)
     for thread in threads:
         cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
@@ -2363,8 +2379,46 @@ async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch
     assert [item["id"] for item in result["items"]] == ["t2"]
 
 
+async def test_list_dashboard_threads_page_filters_by_repository_id(
+    monkeypatch,
+    fake_repositories: FakeRepositories,
+) -> None:
+    """The ``repo=owner/name`` filter resolves to a row id and matches on that."""
+    threads = _make_threads(3, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    wanted = fake_repositories.add("langchain-ai/open-swe")
+    other = fake_repositories.add("langchain-ai/langgraph")
+    cast(dict[str, object], threads[0]["metadata"])["repository_ids"] = [
+        str(other.id),
+        str(wanted.id),
+    ]
+    cast(dict[str, object], threads[1]["metadata"])["repository_ids"] = [str(other.id)]
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    patch_thread_module(
+        monkeypatch,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
+    )
+
+    result = await thread_listing.list_dashboard_threads_page(
+        "octocat", email=None, repo="LangChain-AI/Open-SWE"
+    )
+
+    assert [item["id"] for item in result["items"]] == ["t0"]
+
+
 async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata(
     monkeypatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     threads = _make_threads(4, resolved_before=0)
     for thread in threads:
@@ -2416,7 +2470,9 @@ async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata
 
 
 async def test_list_dashboard_thread_projects_discovers_metadata_without_summaries(
-    monkeypatch, fake_store: FakeStore
+    monkeypatch,
+    fake_store: FakeStore,
+    fake_repositories: FakeRepositories,
 ) -> None:
     threads = _make_threads(5, resolved_before=0)
     cast(dict[str, object], threads[0]["metadata"]).update(
@@ -2815,11 +2871,12 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     assert payload["default_agent_subagent_model"] in model_ids
 
 
-async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) -> None:
+async def test_working_tree_diff_reads_live_sandbox_against_head(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     metadata = {
         "sandbox_id": "sandbox-1",
-        "repo_owner": "acme",
-        "repo_name": "repo",
+        "repository_ids": [str(fake_repositories.add("acme/repo").id)],
     }
     live = {
         "status": "ready",
@@ -2853,10 +2910,15 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
     read_diff.assert_awaited_once_with(sandbox, "/work", "HEAD", None, repo_path="/work/repo")
 
 
-async def test_working_tree_diff_merges_every_repository(monkeypatch) -> None:
+async def test_working_tree_diff_merges_every_repository(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     metadata = {
         "sandbox_id": "sandbox-1",
-        "repos": [{"owner": "acme", "name": "one"}, {"owner": "acme", "name": "two"}],
+        "repository_ids": [
+            str(fake_repositories.add("acme/one").id),
+            str(fake_repositories.add("acme/two").id),
+        ],
     }
 
     def diff_for(path: str) -> dict[str, object]:
@@ -2901,10 +2963,11 @@ async def test_working_tree_diff_raises_when_the_sandbox_is_unreachable(monkeypa
     assert exc_info.value.detail == "Could not connect to the workspace."
 
 
-async def test_branch_diff_uses_repository_from_pr_url(monkeypatch) -> None:
+async def test_branch_diff_uses_repository_from_pr_url(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     metadata = {
-        "repo_owner": "langchain-ai",
-        "repo_name": "deepagents",
+        "repository_ids": [str(fake_repositories.add("langchain-ai/deepagents").id)],
         "pr_number": 1925,
         "pr_url": "https://github.com/langchain-ai/open-swe/pull/1925",
     }
@@ -2921,10 +2984,11 @@ async def test_branch_diff_uses_repository_from_pr_url(monkeypatch) -> None:
     assert build_diff.await_args.args[1:] == ("langchain-ai/open-swe", 1925)
 
 
-async def test_branch_diff_without_a_pull_request_compares_against_the_base(monkeypatch) -> None:
+async def test_branch_diff_without_a_pull_request_compares_against_the_base(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     metadata = {
-        "repo_owner": "langchain-ai",
-        "repo_name": "open-swe",
+        "repository_ids": [str(fake_repositories.add("langchain-ai/open-swe").id)],
         "base_branch": "main",
         "branch_name": "open-swe/feature",
     }
@@ -2947,9 +3011,14 @@ async def test_branch_diff_without_a_pull_request_compares_against_the_base(monk
     assert result["baseSha"] == "merge-base"
 
 
-async def test_branch_diff_without_a_pull_request_compares_every_repository(monkeypatch) -> None:
+async def test_branch_diff_without_a_pull_request_compares_every_repository(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     metadata = {
-        "repos": [{"owner": "acme", "name": "one"}, {"owner": "acme", "name": "two"}],
+        "repository_ids": [
+            str(fake_repositories.add("acme/one").id),
+            str(fake_repositories.add("acme/two").id),
+        ],
         "base_branch": "main",
         "branch_name": "open-swe/feature",
     }
@@ -2991,10 +3060,11 @@ async def test_branch_diff_without_a_pull_request_compares_every_repository(monk
     ]
 
 
-async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
+async def test_branch_diff_rejects_an_unsafe_branch_name(
+    monkeypatch, fake_repositories: FakeRepositories
+) -> None:
     metadata = {
-        "repo_owner": "langchain-ai",
-        "repo_name": "open-swe",
+        "repository_ids": [str(fake_repositories.add("langchain-ai/open-swe").id)],
         "base_branch": "main",
         "branch_name": "../../etc/passwd",
     }

@@ -22,10 +22,11 @@ from agent.dashboard.repo_access import (
 from agent.dashboard.team_settings import get_team_fable_enabled
 from agent.dispatch import create_durable_run
 from agent.github.comments import format_github_comment_body_for_prompt
+from agent.github.repositories import Repository
 from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import render_prompt
-from agent.run_config import Repo, RunConfig, dedupe_repos
+from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
@@ -33,7 +34,7 @@ from agent.slack.client import (
 )
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
-from agent.thread_repos import REPOS_METADATA_KEY, repos_metadata
+from agent.thread_repos import REPOSITORY_IDS_METADATA_KEY, repository_ids_metadata
 from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -547,7 +548,7 @@ async def authorized_admin_schedule(cfg: RunConfig) -> dict[str, Any] | None:
     return record if record and _admin_thread_enabled(record) else None
 
 
-def _agent_run_metadata(
+async def _agent_run_metadata(
     record: dict[str, Any],
     thread_id: str,
     slack_thread: dict[str, Any] | None = None,
@@ -577,9 +578,9 @@ def _agent_run_metadata(
         "created_at_ms": created_ms,
         "updated_at_ms": created_ms,
     }
-    repos = dedupe_repos([Repo.parse(record.get("repo"))])
-    if repos:
-        metadata[REPOS_METADATA_KEY] = repos_metadata(repos)
+    repositories = await Repository.ensure_from_config(record.get("repo"))
+    if repositories:
+        metadata[REPOSITORY_IDS_METADATA_KEY] = repository_ids_metadata(repositories)
     if slack_thread:
         metadata["source_context"] = SourceContext.parse({"slack_thread": slack_thread}).dump()
     if admin_thread:
@@ -604,10 +605,10 @@ async def _agent_run_config(
         },
         new_invocation_id(),
     )
-    repos = dedupe_repos([Repo.parse(record.get("repo"))])
-    if repos:
-        configurable[REPOS_METADATA_KEY] = repos_metadata(repos)
-    workspace = await workspace_for_repos(repos)
+    repositories = await Repository.ensure_from_config(record.get("repo"))
+    if repositories:
+        configurable[REPOSITORY_IDS_METADATA_KEY] = repository_ids_metadata(repositories)
+    workspace = await workspace_for_repos(repositories)
     configurable["workspace"] = workspace
     configurable["environment"] = workspace
     if slack_thread:
@@ -696,7 +697,7 @@ async def _launch_agent_schedule_record(
     run_config = await _agent_run_config(
         record, thread_id, slack_thread, test_run=test_run, admin_thread=admin_thread
     )
-    metadata = _agent_run_metadata(
+    metadata = await _agent_run_metadata(
         record,
         thread_id,
         slack_thread,

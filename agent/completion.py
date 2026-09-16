@@ -33,7 +33,7 @@ from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
-from agent.thread_repos import thread_repos
+from agent.thread_repos import thread_repositories
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
@@ -211,15 +211,14 @@ async def _post_failure_reply(
         number = ctx.pr_number
         if number is None and ctx.github_issue is not None:
             number = ctx.github_issue.number
-        repos = thread_repos(metadata)
-        repo = repo_from_github_url(ctx.github_issue.url if ctx.github_issue else None) or (
-            repos[0] if len(repos) == 1 else None
-        )
+        named = repo_from_github_url(ctx.github_issue.url if ctx.github_issue else None)
+        repositories = await thread_repositories(metadata)
+        repo = named or (repositories[0] if len(repositories) == 1 else None)
         if repo and isinstance(number, int):
             token = await get_github_app_installation_token()
             if token:
                 return await post_github_comment(
-                    repo.model_dump(),
+                    {"owner": repo.owner, "name": repo.name},
                     number,
                     _failure_text(status, reason_code=reason_code),
                     token=token,

@@ -14,7 +14,7 @@ from agent.github.thread_token import get_github_token
 from agent.run_config import RunConfig
 from agent.slack.client import fetch_slack_thread_messages
 from agent.source_context import SourceContext
-from agent.thread_repos import thread_repos
+from agent.thread_repos import thread_repositories
 from agent.utils.json_types import as_json_object, thread_metadata
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
@@ -116,18 +116,20 @@ def _context(configurable: dict[str, Any], metadata: dict[str, Any]) -> SourceCo
     return SourceContext.parse(merged)
 
 
-def _issue_repo(configurable: dict[str, Any], metadata: dict[str, Any]) -> dict[str, str] | None:
+async def _issue_repo(
+    configurable: dict[str, Any], metadata: dict[str, Any]
+) -> dict[str, str] | None:
     """The repository holding the GitHub issue or PR this thread follows.
 
     The run config names it when the issue does; otherwise the thread's one
     repository, and nothing when the thread works in several.
     """
     cfg = RunConfig.parse(configurable)
-    repo = cfg.target_repo
-    if repo is None:
-        stored = thread_repos(metadata)
-        repo = stored[0] if len(stored) == 1 else None
-    return repo.model_dump() if repo else None
+    repository = await cfg.target_repository()
+    if repository is None:
+        stored = await thread_repositories(metadata)
+        repository = stored[0] if len(stored) == 1 else None
+    return {"owner": repository.owner, "name": repository.name} if repository else None
 
 
 async def resolve_thread_participant_logins(
@@ -174,7 +176,7 @@ async def resolve_thread_participant_logins(
         issue_number = (
             context.github_issue.number if context.github_issue else None
         ) or context.pr_number
-        repo = _issue_repo(configurable, metadata)
+        repo = await _issue_repo(configurable, metadata)
         token = get_github_token(config)
         if not repo or not issue_number or not token:
             return None, 0, "GitHub thread context is incomplete"

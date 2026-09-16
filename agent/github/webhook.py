@@ -9,6 +9,7 @@ from typing import Any
 from agent.baby_sit import handle_ci_webhook
 from agent.github.comments import GitHubAuthError
 from agent.github.pull_requests import PullRequest
+from agent.github.repositories import Repository
 from agent.input_messages import (
     PersonIdentity,
     RunInput,
@@ -20,7 +21,7 @@ from agent.input_messages import (
 )
 from agent.prompts import load_prompt, render_prompt
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
-from agent.run_config import Repo, dedupe_repos
+from agent.run_config import Repo
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
 from agent.thread_ids import (
@@ -29,7 +30,7 @@ from agent.thread_ids import (
     reviewer_thread_id,
     thread_id_from_branch,
 )
-from agent.thread_repos import REPOS_METADATA_KEY, repos_metadata
+from agent.thread_repos import REPOSITORY_IDS_METADATA_KEY, repository_ids_metadata
 from agent.webhooks import common
 
 
@@ -1234,13 +1235,13 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             issue_author=issue_author,
             issue_url=issue_url,
         )
-    repos = dedupe_repos([Repo.parse(repo_config)])
-    workspace = await common.workspace_for_repos(repos)
+    repositories = await Repository.ensure_from_config(repo_config)
+    workspace = await common.workspace_for_repos(repositories)
     configurable: dict[str, Any] = {
         "source": "github",
         "github_login": github_login,
         "github_user_id": github_user_id,
-        REPOS_METADATA_KEY: repos_metadata(repos),
+        REPOSITORY_IDS_METADATA_KEY: repository_ids_metadata(repositories),
         "github_issue": {
             "id": issue_id,
             "number": issue_number,
@@ -1254,7 +1255,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     await common.upsert_agent_thread_metadata(
         thread_id,
         source="github",
-        repos=repos,
+        repositories=repositories,
         github_login=github_login,
         title=title or (f"Issue #{issue_number}" if issue_number else ""),
         source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),

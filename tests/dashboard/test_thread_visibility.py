@@ -130,6 +130,7 @@ async def test_private_candidates_filtered_before_pagination(private_thread, mon
 
 
 async def test_continue_privately_copies_transcript_and_drops_linkage(private_thread):
+    """The continuation keeps the thread's repository link, by id."""
     thread, client = private_thread
     thread["metadata"] = {
         "source": "slack",
@@ -141,7 +142,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
         "latest_run_status": "success",
         "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
         "participant_logins": {"alice": True, "bob": True},
-        "repos": [{"owner": "acme", "name": "app"}],
+        "repository_ids": ["019710c0-0000-7000-8000-000000000001"],
     }
     client.threads.get_state.return_value = {
         "values": {
@@ -160,7 +161,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert metadata["source"] == metadata["origin"] == "dashboard"
     assert metadata["continued_from_thread_id"] == "private-thread"
     assert metadata["title"] == "Fix the flaky build"
-    assert metadata["repos"] == [{"owner": "acme", "name": "app"}]
+    assert metadata["repository_ids"] == ["019710c0-0000-7000-8000-000000000001"]
     assert metadata["participant_logins"] == {"bob": True}
     assert metadata["graph_id"] == "agent"
     for key in ("source_context", "sandbox_id", "latest_run_id", "latest_run_status"):

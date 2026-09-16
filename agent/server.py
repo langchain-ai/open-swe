@@ -78,6 +78,7 @@ from agent.dashboard.team_settings_cache import (
 from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
+from agent.github.repositories import Repository
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
@@ -129,7 +130,7 @@ from agent.prompt import (
     render_open_swe_shared_base,
 )
 from agent.prompts import apply_tool_descriptions, load_prompt
-from agent.run_config import Repo, RunConfig
+from agent.run_config import RunConfig
 from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -154,7 +155,7 @@ from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESP
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
-    add_repository,
+    add_repos,
     approve_plan,
     background_execute,
     background_task,
@@ -279,9 +280,9 @@ def _tool_loader_timeout_seconds() -> float:
     return timeout
 
 
-async def _resolve_prompt_repositories(cfg: RunConfig) -> list[Repo]:
+async def _resolve_prompt_repositories(cfg: RunConfig) -> list[Repository]:
     """Every repository the prompt should name, falling back to the team default."""
-    repositories = cfg.repositories
+    repositories = await cfg.load_repositories()
     if repositories:
         return repositories
 
@@ -293,25 +294,22 @@ async def _resolve_prompt_repositories(cfg: RunConfig) -> list[Repo]:
     except Exception:
         logger.debug("Failed to load team default repo for prompt", exc_info=True)
         return []
-    repo = Repo.parse(default_repo)
-    return [repo] if repo else []
+    return await Repository.ensure_from_config(default_repo)
 
 
-async def _resolve_repo_custom_instructions(repos: Sequence[Repo]) -> str | None:
+async def _resolve_repo_custom_instructions(repositories: Sequence[Repository]) -> str | None:
     """Per-repo custom agent instructions, one headed section per repository."""
     from agent.dashboard.agent_instructions import get_repo_agent_instructions
 
     sections: list[str] = []
-    for repo in repos:
-        if not repo:
-            continue
+    for repository in repositories:
         try:
-            instructions = await get_repo_agent_instructions(repo.owner, repo.name)
+            instructions = await get_repo_agent_instructions(repository.owner, repository.name)
         except Exception:
             logger.debug("Failed to load repo custom agent instructions", exc_info=True)
             continue
         if instructions and instructions.strip():
-            sections.append(f"#### `{repo.full_name}`\n\n{instructions.strip()}")
+            sections.append(f"#### `{repository.full_name}`\n\n{instructions.strip()}")
     return "\n\n".join(sections) or None
 
 
@@ -352,7 +350,7 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "task",
-        "add_repository",
+        "add_repos",
         "background_execute",
         "background_task",
         "create_sandbox_service_url",
@@ -650,7 +648,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
             "source": self._source,
-            "repos": [repo.model_dump() for repo in cfg.repositories],
+            "repository_ids": list(cfg.repository_ids or []),
             "plan_mode": self._plan_mode,
             "draft_prs": self._draft_prs,
             "model": self._model_id,
@@ -825,7 +823,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         effort=self._effort,
                         source=self._source,
                         repository=(
-                            cfg.repositories[0].full_name if len(cfg.repositories) == 1 else None
+                            prompt_repositories[0].full_name
+                            if len(prompt_repositories) == 1
+                            else None
                         ),
                     )
         except Exception:
@@ -846,7 +846,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 dashboard_base_url=dashboard_base_url(),
                 linear_project_id=self._linear_project_id,
                 linear_issue_number=self._linear_issue_number,
-                repos=prompt_repositories,
+                repositories=prompt_repositories,
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=self._repo_instructions,
@@ -1173,7 +1173,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_baby_sit,
         mark_question_answered,
         notify_automation_channel,
-        add_repository,
+        add_repos,
         open_pull_request,
         *(
             (output_iframe, create_sandbox_file_download_url, create_sandbox_service_url)

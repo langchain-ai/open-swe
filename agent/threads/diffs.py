@@ -13,9 +13,9 @@ import httpx2
 from fastapi import HTTPException
 
 from agent.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
-from agent.run_config import Repo
+from agent.github.repositories import Repository
 from agent.slack.client import parse_github_pr_url
-from agent.thread_repos import thread_repos
+from agent.thread_repos import thread_repositories
 from agent.threads.access import (
     _authorized_thread,
     _github_token_for_login,
@@ -86,9 +86,11 @@ def _download_content(result: Any) -> bytes | None:
     return None
 
 
-def _recovery_patch_command(metadata: dict[str, Any], thread_id: str) -> str:
+def _recovery_patch_command(
+    metadata: Mapping[str, Any], repositories: Sequence[Repository], thread_id: str
+) -> str:
     payload = {
-        "repo_names": [repo.name for repo in thread_repos(metadata)],
+        "repo_names": [repository.name for repository in repositories],
         "base_branch": metadata.get("base_branch")
         if isinstance(metadata.get("base_branch"), str)
         else "main",
@@ -114,11 +116,9 @@ async def get_dashboard_thread_recovery_patch(
         logger.debug("Could not connect to sandbox %s for recovery", sandbox_id, exc_info=True)
         raise HTTPException(502, "could not connect to thread sandbox") from exc
 
+    command = _recovery_patch_command(metadata, await thread_repositories(metadata), thread_id)
     try:
-        result = await sandbox.aexecute(
-            _recovery_patch_command(metadata, thread_id),
-            timeout=_RECOVERY_PATCH_TIMEOUT_SECONDS,
-        )
+        result = await sandbox.aexecute(command, timeout=_RECOVERY_PATCH_TIMEOUT_SECONDS)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Recovery patch generation failed for %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to generate recovery patch") from exc
@@ -209,35 +209,37 @@ async def get_dashboard_thread_working_tree_diff(
         logger.exception("Could not connect to sandbox %s for working tree diff", sandbox_id)
         raise HTTPException(503, "Could not connect to the workspace.") from exc
     work_dir = await resolve_sandbox_work_dir(sandbox)
-    repos = thread_repos(metadata)
-    if not repos:
+    repositories = await thread_repositories(metadata)
+    if not repositories:
         return {**await read_turn_diff(sandbox, work_dir, "HEAD", None), "repos": []}
 
-    prefix_paths = len(repos) > 1
+    prefix_paths = len(repositories) > 1
     files: list[dict[str, Any]] = []
     summary = {"files": 0, "additions": 0, "deletions": 0}
     statuses: list[str] = []
     truncated = False
     per_repo: list[dict[str, Any]] = []
-    for repo in repos:
+    for repository in repositories:
         diff = await read_turn_diff(
             sandbox,
             work_dir,
             "HEAD",
             None,
-            repo_path=posixpath.join(work_dir, repo.name),
+            repo_path=posixpath.join(work_dir, repository.name),
         )
         repo_summary = diff["summary"] if isinstance(diff.get("summary"), Mapping) else {}
         for key in summary:
             value = repo_summary.get(key)
             if isinstance(value, int):
                 summary[key] += value
-        files.extend(_prefixed_files(diff.get("files") or [], repo.name if prefix_paths else None))
+        files.extend(
+            _prefixed_files(diff.get("files") or [], repository.name if prefix_paths else None)
+        )
         statuses.append(str(diff.get("status") or "missing"))
         truncated = truncated or bool(diff.get("truncated"))
         per_repo.append(
             {
-                "repoFullName": repo.full_name,
+                "repoFullName": repository.full_name,
                 "status": diff.get("status"),
                 "truncated": bool(diff.get("truncated")),
                 "summary": dict(repo_summary),
@@ -267,7 +269,7 @@ def _safe_git_ref(value: Any) -> str | None:
 
 
 def _pull_request_repo(
-    metadata: Mapping[str, Any], number: int, repos: Sequence[Repo]
+    metadata: Mapping[str, Any], number: int, repositories: Sequence[Repository]
 ) -> str | None:
     """The repository the thread's pull request lives in."""
     pr_ref = parse_github_pr_url(str(metadata.get("pr_url") or ""))
@@ -281,7 +283,7 @@ def _pull_request_repo(
             full_name = item.get("repo_full_name")
             if isinstance(full_name, str) and full_name:
                 return full_name
-    return repos[0].full_name if len(repos) == 1 else None
+    return repositories[0].full_name if len(repositories) == 1 else None
 
 
 async def get_dashboard_thread_branch_diff(
@@ -295,11 +297,13 @@ async def get_dashboard_thread_branch_diff(
     same three-dot range the PR would eventually show.
     """
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
-    repos = thread_repos(metadata)
+    repositories = await thread_repositories(metadata)
     pr_number = metadata.get("pr_number")
     pull_request: int | None = pr_number if isinstance(pr_number, int) else None
     pr_full_name = (
-        _pull_request_repo(metadata, pull_request, repos) if pull_request is not None else None
+        _pull_request_repo(metadata, pull_request, repositories)
+        if pull_request is not None
+        else None
     )
     if pr_full_name is None:
         pull_request = None
@@ -307,7 +311,7 @@ async def get_dashboard_thread_branch_diff(
     base_ref = _safe_git_ref(metadata.get("base_branch")) or "main"
     head_ref = _safe_git_ref(metadata.get("branch_name"))
     if pull_request is None:
-        if not repos:
+        if not repositories:
             raise HTTPException(404, "thread has no repository")
         if head_ref == base_ref:
             raise HTTPException(404, "thread never branched off its base")
@@ -318,28 +322,31 @@ async def get_dashboard_thread_branch_diff(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    prefix_paths = len(repos) > 1
-    compared: list[tuple[Repo | None, str, dict[str, Any]]] = []
+    prefix_paths = len(repositories) > 1
+    compared: list[tuple[Repository | None, str, dict[str, Any]]] = []
     async with httpx2.AsyncClient(headers=headers, timeout=_PROXY_REQUEST_TIMEOUT) as client:
         if pull_request is not None and pr_full_name is not None:
             compared.append(
                 (None, pr_full_name, await build_pr_diff_files(client, pr_full_name, pull_request))
             )
         elif head_ref is not None:
-            for repo in repos:
+            for repository in repositories:
                 try:
                     diff = await build_compare_diff_files(
-                        client, repo.full_name, base_ref, head_ref
+                        client, repository.full_name, base_ref, head_ref
                     )
                 except HTTPException as exc:
                     if exc.status_code != 404:
                         raise
                     logger.debug(
                         "Branch missing on GitHub for thread repository",
-                        extra={"diff_repo_full_name": repo.full_name, "diff_head_ref": head_ref},
+                        extra={
+                            "diff_repo_full_name": repository.full_name,
+                            "diff_head_ref": head_ref,
+                        },
                     )
                     continue
-                compared.append((repo, repo.full_name, diff))
+                compared.append((repository, repository.full_name, diff))
             if not compared:
                 raise HTTPException(404, "branch not found on GitHub")
         else:
@@ -348,9 +355,9 @@ async def get_dashboard_thread_branch_diff(
     files: list[dict[str, Any]] = []
     truncated = False
     per_repo: list[dict[str, Any]] = []
-    for repo, full_name, diff in compared:
+    for repository, full_name, diff in compared:
         repo_files = _prefixed_files(
-            diff["files"], repo.name if repo is not None and prefix_paths else None
+            diff["files"], repository.name if repository is not None and prefix_paths else None
         )
         files.extend(repo_files)
         truncated = truncated or bool(diff["truncated"])

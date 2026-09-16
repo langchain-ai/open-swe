@@ -13,8 +13,8 @@ from agent.dashboard.agent_instructions import (
     AgentInstructions,
     get_repo_agent_instructions,
 )
+from agent.github.repositories import Repository
 from agent.prompt import construct_system_prompt
-from agent.run_config import Repo
 from tests.conftest import FakeStore
 
 
@@ -115,9 +115,9 @@ def test_resolve_repo_custom_instructions_concatenates_every_repository(
     result = asyncio.run(
         server._resolve_repo_custom_instructions(
             [
-                Repo(owner="acme", name="one"),
-                Repo(owner="acme", name="quiet"),
-                Repo(owner="acme", name="two"),
+                Repository(full_name="acme/one"),
+                Repository(full_name="acme/quiet"),
+                Repository(full_name="acme/two"),
             ]
         )
     )

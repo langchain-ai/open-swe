@@ -22,8 +22,8 @@ trigger; a reviewer run has no ``agent_model_id`` and a Slack run has no
 """
 
 import logging
-from collections.abc import Iterable, Mapping
-from typing import Annotated, Any, Self
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Annotated, Any, Self
 from urllib.parse import urlparse
 
 from langgraph.config import get_config
@@ -32,6 +32,9 @@ from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from agent.invocation import resolve_invocation_id
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
+
+if TYPE_CHECKING:
+    from agent.github.repositories import Repository
 
 logger = logging.getLogger(__name__)
 
@@ -97,25 +100,6 @@ class Repo(BaseModel):
         return hash(self.key)
 
 
-def dedupe_repos(repos: Iterable[Repo | None]) -> list[Repo]:
-    """Complete repositories in first-seen order, one per ``owner/name``."""
-    seen: set[str] = set()
-    result: list[Repo] = []
-    for repo in repos:
-        if repo is None or not repo or repo.key in seen:
-            continue
-        seen.add(repo.key)
-        result.append(repo)
-    return result
-
-
-def parse_repos(raw: Any) -> list[Repo]:
-    """A ``configurable["repos"]``-shaped list as repositories; anything else is empty."""
-    if not isinstance(raw, list):
-        return []
-    return dedupe_repos(Repo.parse(item) for item in raw)
-
-
 def repo_from_github_url(raw: Any) -> Repo | None:
     """The repository a ``https://github.com/owner/name/...`` URL points at."""
     if not isinstance(raw, str) or not raw.strip():
@@ -166,10 +150,10 @@ class RunConfig(BaseModel):
     github_user_id: str | None = None
     user_email: str | None = None
 
-    # Repositories. ``repos`` is every repository an agent thread works in;
-    # ``repo`` is the one repository of a PR-scoped run (reviewer, analyzer,
-    # review chat) and the shape agent threads were written with before ``repos``.
-    repos: list[Repo] | None = None
+    # Repositories. ``repository_ids`` links an agent thread to its ``repository``
+    # rows; ``repo`` is the one repository of a PR-scoped run (reviewer, analyzer,
+    # review chat) and the shape agent threads were written with before ids.
+    repository_ids: list[str] | None = None
     repo: Repo | None = None
     repo_private: bool | None = None
     repo_explicitly_none: bool | None = None
@@ -322,20 +306,21 @@ class RunConfig(BaseModel):
     def repo_full_name(self) -> str:
         return self.repo.full_name if self.repo else ""
 
-    @property
-    def repositories(self) -> list[Repo]:
-        """Every repository the run targets, in the order they were added.
+    async def load_repositories(self) -> list[Repository]:
+        """Every repository the run works in, in the order they were added.
 
-        ``repos`` when set; otherwise the legacy single ``repo``. Prefer
-        iterating this over reading ``repo`` in agent-thread code.
+        ``repository_ids`` when set; otherwise the legacy single ``repo``,
+        registered as a row on first sight.
         """
-        listed = dedupe_repos(self.repos or [])
-        if listed:
-            return listed
-        return [self.repo] if self.repo else []
+        from agent.github.repositories import Repository
+        from agent.thread_repos import parse_repository_ids
 
-    @property
-    def target_repo(self) -> Repo | None:
+        ids = parse_repository_ids(self.repository_ids)
+        if ids:
+            return await Repository.get_many(ids)
+        return [await Repository.ensure(self.repo.full_name)] if self.repo else []
+
+    async def target_repository(self) -> Repository | None:
         """The one repository this run must act on, or ``None`` when that is ambiguous.
 
         A GitHub PR or issue names its own repository, which may differ from the
@@ -343,18 +328,20 @@ class RunConfig(BaseModel):
         repository means that one, and a run that works in several means none:
         picking any of them would be a guess.
         """
+        from agent.github.repositories import Repository
+
         target = self.github_pr_or_issue
         if target is not None and target.repo:
-            return target.repo
+            return await Repository.ensure(target.repo.full_name)
         issue = self.github_issue
         if issue is not None:
             named = Repo.parse((issue.model_extra or {}).get("repo")) or repo_from_github_url(
                 issue.url
             )
             if named:
-                return named
-        repos = self.repositories
-        return repos[0] if len(repos) == 1 else None
+                return await Repository.ensure(named.full_name)
+        repositories = await self.load_repositories()
+        return repositories[0] if len(repositories) == 1 else None
 
     @property
     def is_eval(self) -> bool:

@@ -5,6 +5,7 @@ import pytest
 
 from agent.slack import stop as slack_stop
 from agent.slack.stop import process_slack_stop_reaction
+from tests.support.repositories import FakeRepositories
 
 
 class FakeStore:
@@ -149,6 +150,7 @@ def _patch_handler(
 
 async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_agent_summary(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     client = FakeClient()
     thread_id = _add_thread(client)
@@ -186,6 +188,7 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
 
 async def test_stop_reaction_on_root_dispatches_no_active_run_summary(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     client = FakeClient()
     thread_id = _add_thread(client)
@@ -198,7 +201,9 @@ async def test_stop_reaction_on_root_dispatches_no_active_run_summary(
     assert dispatched[0]["thread_id"] == thread_id
 
 
-async def test_stop_reaction_from_non_owner_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stop_reaction_from_non_owner_is_allowed(
+    monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
+) -> None:
     client = FakeClient()
     _add_thread(client)
     _map_reply(client, "2.000")
@@ -341,13 +346,13 @@ async def test_failed_queue_cleanup_does_not_dispatch_summary(
     assert client.threads.updates == []
 
 
-def test_summary_configurable_carries_new_workspace_key() -> None:
-    configurable = slack_stop._summary_configurable({"workspace": "oss"}, {})
+async def test_summary_configurable_carries_new_workspace_key() -> None:
+    configurable = await slack_stop._summary_configurable({"workspace": "oss"}, {})
     assert configurable["workspace"] == "oss"
     assert configurable["environment"] == "oss"
 
 
-def test_summary_configurable_falls_back_to_legacy_environment_key() -> None:
-    configurable = slack_stop._summary_configurable({"environment": "old"}, {})
+async def test_summary_configurable_falls_back_to_legacy_environment_key() -> None:
+    configurable = await slack_stop._summary_configurable({"environment": "old"}, {})
     assert configurable["workspace"] == "old"
     assert configurable["environment"] == "old"

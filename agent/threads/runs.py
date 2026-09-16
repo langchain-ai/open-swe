@@ -24,6 +24,7 @@ from agent.dashboard.options import (
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
 from agent.dashboard.user_preferences import get_user_preferences
+from agent.github.repositories import Repository
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -31,7 +32,6 @@ from agent.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from agent.invocation import new_invocation_id, with_invocation_id
-from agent.run_config import Repo, dedupe_repos
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -39,9 +39,9 @@ from agent.slack.client import (
 from agent.source_context import SourceContext
 from agent.thread_repos import (
     REPO_EXPLICITLY_NONE_METADATA_KEY,
-    REPOS_METADATA_KEY,
-    repos_metadata,
-    thread_repos,
+    REPOSITORY_IDS_METADATA_KEY,
+    repository_ids_metadata,
+    thread_repositories,
 )
 from agent.threads.access import (
     _ensure_dashboard_github_token,
@@ -193,7 +193,7 @@ def _user_message_content(
 
 
 async def _resolve_requested_workspace(
-    requested: object, repos: Sequence[Repo], *, login: str | None
+    requested: object, repositories: Sequence[Repository], *, login: str | None
 ) -> str:
     """The workspace a new dashboard thread lands in.
 
@@ -202,19 +202,23 @@ async def _resolve_requested_workspace(
     signed-in user's default, else the instance default.
     """
     tag = requested if isinstance(requested, str) and requested.strip() else None
-    return (
-        await resolve_workspace(
-            tag=tag, repos=[(repo.owner, repo.name) for repo in repos], login=login
-        )
-    ).slug
+    return (await resolve_workspace(tag=tag, repositories=repositories, login=login)).slug
 
 
-def _resolve_repos(repo: object, repos: object) -> list[Repo]:
+async def _resolve_repositories(repo: object, repos: object) -> list[Repository]:
     """The repositories a create request names, through either field."""
     listed = repos if isinstance(repos, list) else []
-    return dedupe_repos(
-        [Repo.parse_full_name(repo), *(Repo.parse_full_name(item) for item in listed)]
-    )
+    resolved: list[Repository] = []
+    for value in (repo, *listed):
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            row = await Repository.ensure(value)
+        except ValueError as exc:
+            raise HTTPException(400, f"invalid repository: {value}") from exc
+        if all(row.id != existing.id for existing in resolved):
+            resolved.append(row)
+    return resolved
 
 
 async def _create_dashboard_thread_record(
@@ -222,7 +226,7 @@ async def _create_dashboard_thread_record(
     *,
     login: str,
     email: str | None = None,
-    repos: Sequence[Repo],
+    repositories: Sequence[Repository],
     repo_explicitly_none: bool = False,
     prompt: str,
     images: list[DashboardImageBody] | None = None,
@@ -282,8 +286,8 @@ async def _create_dashboard_thread_record(
         metadata["workspace"] = workspace
     if not title:
         metadata["title_seed"] = initial_title
-    if repos:
-        metadata[REPOS_METADATA_KEY] = repos_metadata(repos)
+    if repositories:
+        metadata[REPOSITORY_IDS_METADATA_KEY] = repository_ids_metadata(repositories)
     elif repo_explicitly_none:
         metadata[REPO_EXPLICITLY_NONE_METADATA_KEY] = True
 
@@ -313,9 +317,9 @@ async def _build_dashboard_configurable(
         "github_login": login,
         "user_email": await resolve_run_email(login, profile),
     }
-    repos = thread_repos(metadata)
-    if repos:
-        configurable[REPOS_METADATA_KEY] = repos_metadata(repos)
+    repositories = await thread_repositories(metadata)
+    if repositories:
+        configurable[REPOSITORY_IDS_METADATA_KEY] = repository_ids_metadata(repositories)
     elif metadata.get(REPO_EXPLICITLY_NONE_METADATA_KEY) is True:
         configurable[REPO_EXPLICITLY_NONE_METADATA_KEY] = True
     for key, value in SourceContext.from_metadata(metadata).dump().items():
@@ -503,14 +507,14 @@ async def _enrich_run_start_command(
         )
         if visibility not in ("public", "private"):
             raise HTTPException(422, "visibility must be public or private")
-        repos = _resolve_repos(
-            client_configurable.get("repo"), client_configurable.get(REPOS_METADATA_KEY)
+        repositories = await _resolve_repositories(
+            client_configurable.get("repo"), client_configurable.get("repos")
         )
         thread = await _create_dashboard_thread_record(
             thread_id,
             login=login,
             email=email,
-            repos=repos,
+            repositories=repositories,
             repo_explicitly_none=client_configurable.get(REPO_EXPLICITLY_NONE_METADATA_KEY) is True,
             visibility=visibility,
             prompt=_command_prompt_text(content),
@@ -521,7 +525,7 @@ async def _enrich_run_start_command(
             model_selection=model_selection or "auto",
             workspace=await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),
-                repos,
+                repositories,
                 login=login,
             ),
         )

@@ -11,7 +11,7 @@ import type { AppCommand } from "@/lib/appCommands"
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   fetchNextPage: vi.fn(),
-  cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
+  cloudThread: { id: "cloud-1", title: "Cloud result", repos: [] } as AgentThread,
   localThread: {
     id: "local-1",
     title: "Local result",

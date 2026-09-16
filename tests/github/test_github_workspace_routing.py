@@ -7,10 +7,12 @@ import pytest
 
 from agent.github import routes as github_routes
 from agent.github import webhook as github_webhooks
+from agent.github.repositories import Repository
 from agent.webhooks import common as webhook_common
 from agent.workspaces.routing import WorkspaceLookupError
 from agent.workspaces.store import WORKSPACES, WORKSPACES_NAMESPACE, import_store_records
 from tests.conftest import FakeStore, post_signed_github_webhook
+from tests.support.repositories import FakeRepositories
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-workspace-routing"
 
@@ -100,11 +102,12 @@ async def test_repository_of_a_stranded_store_record_asks_github_to_retry(
 
 async def test_unreadable_workspace_list_asks_github_to_retry(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     """A delivery we cannot route is retryable, so it must not be answered 200."""
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
-    async def unreadable(_owner: str, _name: str) -> bool:
+    async def unreadable(_repository: Repository) -> bool:
         raise WorkspaceLookupError("workspace listing failed")
 
     async def fail_if_called(*args: object, **kwargs: object) -> None:

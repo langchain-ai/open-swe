@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
+from agent.github.repositories import Repository
 from agent.schedules import store as schedules
 from agent.webhooks import common
 from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
@@ -62,9 +63,7 @@ async def github_webhook(
     if webhook_repo_config["owner"] and webhook_repo_config["name"]:
         repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
         try:
-            routable = await repo_is_routable(
-                webhook_repo_config["owner"], webhook_repo_config["name"]
-            )
+            routable = await repo_is_routable(await Repository.ensure(repository))
         except WorkspaceLookupError:
             # Ownership is unknown, so dropping the delivery may drop real work.
             # GitHub retries a 5xx and nothing else, so answer 503 and let it.
