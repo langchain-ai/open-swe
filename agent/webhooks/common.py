@@ -538,6 +538,7 @@ async def upsert_agent_thread_metadata(
     source_context: SourceContext | None = None,
     workspace: str | None = None,
     slack_participant_user_ids: Collection[str] = (),
+    injected_dynamic_context_hashes: Collection[str] = (),
     visibility: str = "public",
     owner_login: str = "",
     owner_type: str = "user",
@@ -622,6 +623,8 @@ async def upsert_agent_thread_metadata(
         metadata[PARTICIPANT_EMAILS_KEY] = merge_participants(
             existing_meta.get(PARTICIPANT_EMAILS_KEY), user_email
         )
+    if injected_dynamic_context_hashes:
+        metadata["injected_dynamic_context_hashes"] = sorted(injected_dynamic_context_hashes)
     # The context that opened the thread identifies it; later messages arrive
     # through the same surface and must not repoint it.
     if not existing_context.is_empty:

@@ -19,12 +19,17 @@ from agent.input_messages import (
     MessageKind,
     PersonIdentity,
     RunInput,
+    RunMessage,
     SystemIdentity,
     channel_introduction,
+    dynamic_context_hashes_from_messages,
+    filter_new_dynamic_contexts,
     human_input,
+    injected_dynamic_context_hashes_from_metadata,
     person_introduction,
     system_input,
     system_introduction,
+    visible_dynamic_context_hashes,
 )
 from agent.prompts import load_prompt
 from agent.run_config import Repo
@@ -476,10 +481,22 @@ def _slack_context_input(
     request_blocks: list[dict[str, Any]],
     operational_context: str,
     trigger_bot: AllowedSlackBot | None = None,
+    injected_dynamic_context_hashes: set[str] | None = None,
 ) -> RunInput:
     channel_entity_id = f"slack:{channel_id}"
-    run_messages = [channel_introduction({"id": channel_entity_id, "platform": "slack"})]
-    introduced: set[str] = {channel_entity_id}
+    injected = (
+        injected_dynamic_context_hashes if injected_dynamic_context_hashes is not None else set()
+    )
+    run_messages: list[RunMessage] = []
+    introduced: set[str] = set()
+
+    def append_introduction(message: RunMessage) -> None:
+        filtered, newly_injected = filter_new_dynamic_contexts([message], injected)
+        run_messages.extend(filtered)
+        injected.update(newly_injected)
+
+    append_introduction(channel_introduction({"id": channel_entity_id, "platform": "slack"}))
+    introduced.add(channel_entity_id)
     for message in messages:
         if str(message.get("ts", "")) == str(event_ts):
             continue
@@ -487,7 +504,7 @@ def _slack_context_input(
             message, user_names_by_id, logins_by_user_id, bot_user_id
         )
         if sender_id not in introduced:
-            run_messages.append(
+            append_introduction(
                 person_introduction(cast(PersonIdentity, identity))
                 if kind == "human"
                 else system_introduction(cast(SystemIdentity, identity))
@@ -506,7 +523,7 @@ def _slack_context_input(
             if kind == "human"
             else system_input(text, message_context)
         )
-    run_messages.append(
+    append_introduction(
         system_introduction(
             {"id": "system:slack-context", "display_name": "Slack context", "platform": "slack"}
         )
@@ -551,9 +568,11 @@ def _slack_context_input(
             bot_user_id,
         )
         if trigger_sender_id not in introduced:
-            run_messages.append(system_introduction(cast(SystemIdentity, bot_identity)))
+            append_introduction(system_introduction(cast(SystemIdentity, bot_identity)))
+            introduced.add(trigger_sender_id)
     elif trigger_person["id"] not in introduced:
-        run_messages.append(person_introduction(trigger_person))
+        append_introduction(person_introduction(trigger_person))
+        introduced.add(trigger_person["id"])
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
@@ -1083,6 +1102,23 @@ async def _process_slack_mention_impl(
 
     is_first_mention = not await common.thread_exists(thread_id)
     langgraph_client = get_langgraph_client()
+    injected = injected_dynamic_context_hashes_from_metadata(thread_metadata)
+    if not is_first_mention:
+        try:
+            prior_state = await langgraph_client.threads.get_state(thread_id)
+            values = prior_state.get("values") if isinstance(prior_state, dict) else None
+            if isinstance(values, dict):
+                messages = values.get("messages")
+                state_hashes = dynamic_context_hashes_from_messages(messages)
+                visible_hashes = visible_dynamic_context_hashes(values)
+                injected.difference_update(state_hashes - visible_hashes)
+                injected.update(visible_hashes)
+        except Exception:  # noqa: BLE001
+            common.logger.debug(
+                "Could not read Slack thread history for dynamic context deduplication",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
@@ -1103,6 +1139,7 @@ async def _process_slack_mention_impl(
         visibility=visibility,
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",
+        injected_dynamic_context_hashes=injected,
     )
     if (visibility == "private" or allowed_bot is not None) and not persisted:
         # Dispatch would create the thread itself, with no metadata and so public.
@@ -1147,6 +1184,22 @@ async def _process_slack_mention_impl(
         request_blocks=content_blocks,
         operational_context=operational_context,
         trigger_bot=allowed_bot,
+        injected_dynamic_context_hashes=injected,
+    )
+    await common.upsert_agent_thread_metadata(
+        thread_id,
+        source="slack",
+        repo_config=repo_dict,
+        github_login=mapped_login or "",
+        user_email=user_email or "",
+        title=clean_text if is_first_mention else "",
+        source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
+        workspace=thread_workspace,
+        slack_participant_user_ids=[*logins_by_user_id] if not is_first_mention else [],
+        visibility=visibility,
+        owner_login=mapped_login or "",
+        owner_type="system" if allowed_bot else "user",
+        injected_dynamic_context_hashes=injected,
     )
     if code_channel:
         await common.set_session_status(channel_id, "processing")

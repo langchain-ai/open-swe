@@ -5,6 +5,7 @@ from xml.etree import ElementTree
 
 import pytest
 
+from agent.input_messages import dynamic_context_hash
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
@@ -1030,6 +1031,7 @@ def _setup_slack_mention_fakes(
 
         async def update(self, *, thread_id: str, metadata: dict) -> None:
             captured["metadata_update"] = {"thread_id": thread_id, "metadata": metadata}
+            captured.setdefault("metadata_updates", []).append(metadata)
 
     class _FakeLangGraphClientForProcess:
         runs = _FakeRunsClient()
@@ -1400,7 +1402,8 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     metadata_update = captured["metadata_update"]
     assert isinstance(metadata_update, dict)
     assert metadata_update["thread_id"] == expected_thread_id
-    assert "injected_dynamic_context_hashes" not in metadata_update["metadata"]
+    metadata_updates = captured["metadata_updates"]
+    assert any("injected_dynamic_context_hashes" in update for update in metadata_updates)
     assert "trace_reply" not in captured
 
     run_create = captured["run_create"]
@@ -2248,6 +2251,50 @@ def test_slack_trigger_falls_back_past_open_swes_own_message() -> None:
 
     assert not any('id="slack:UBOT"' in text for text in contents)
     assert not any('sender="slack:UBOT"' in text for text in contents)
+
+
+def test_slack_context_input_skips_injected_dynamic_contexts() -> None:
+    existing = slack_webhooks._slack_context_input(
+        [],
+        {"U123": "Alice"},
+        {},
+        channel_id="C123",
+        bot_user_id="UBOT",
+        event_ts="9.0",
+        trigger_user_id="U123",
+        request_text="do the thing",
+        request_blocks=[{"type": "text", "text": "do the thing"}],
+        operational_context="## Open SWE Links",
+    )
+    existing_hashes = {
+        context_hash
+        for message in existing["messages"]
+        if isinstance(content := message["content"], str)
+        and (context_hash := dynamic_context_hash(content)) is not None
+    }
+    injected = {next(iter(existing_hashes))}
+
+    follow_up = slack_webhooks._slack_context_input(
+        [],
+        {"U123": "Alice"},
+        {},
+        channel_id="C123",
+        bot_user_id="UBOT",
+        event_ts="9.0",
+        trigger_user_id="U123",
+        request_text="do the thing",
+        request_blocks=[{"type": "text", "text": "do the thing"}],
+        operational_context="## Open SWE Links",
+        injected_dynamic_context_hashes=injected,
+    )
+
+    follow_up_hashes = {
+        context_hash
+        for message in follow_up["messages"]
+        if isinstance(content := message["content"], str)
+        and (context_hash := dynamic_context_hash(content)) is not None
+    }
+    assert len(follow_up_hashes) < len(existing_hashes)
 
 
 def test_process_slack_mention_queues_a_message_edit_instead_of_running(
