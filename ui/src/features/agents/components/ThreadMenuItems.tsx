@@ -3,7 +3,6 @@ import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
   CopyIcon,
-  ChatTeardropTextIcon,
   PushPinIcon,
   PushPinSlashIcon,
   TrashIcon,
@@ -25,7 +24,6 @@ export function ThreadMenuItems({
   isDeleting,
   onTogglePin,
   onToggleArchived,
-  onFeedback,
   onDelete,
 }: {
   thread: AgentThread | null
@@ -35,7 +33,6 @@ export function ThreadMenuItems({
   isDeleting: boolean
   onTogglePin: () => void
   onToggleArchived: () => void
-  onFeedback?: () => void
   onDelete: () => void
 }) {
   return (
@@ -105,12 +102,6 @@ export function ThreadMenuItems({
         >
           <CopyIcon className="size-3.5" />
           Copy thread ID
-        </Menu.Item>
-      )}
-      {onFeedback && (
-        <Menu.Item onClick={onFeedback} className={menuItemClassName}>
-          <ChatTeardropTextIcon className="size-3.5" />
-          Give feedback
         </Menu.Item>
       )}
       <Menu.Item onClick={onToggleArchived} className={menuItemClassName}>

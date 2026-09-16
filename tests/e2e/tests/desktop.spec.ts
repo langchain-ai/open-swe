@@ -181,6 +181,15 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
     await expect(page).toHaveURL(/open-swe:\/\/app\/agents\/local\//);
     await expect(page.getByText(/Done! I added/)).toBeVisible();
     await expect(
+      page.getByRole("form", { name: "Thread feedback" }),
+    ).toBeVisible();
+    const feedbackScreenshot = testInfo.outputPath("desktop-feedback.png");
+    await page.screenshot({ path: feedbackScreenshot, fullPage: true });
+    await testInfo.attach("desktop-feedback", {
+      path: feedbackScreenshot,
+      contentType: "image/png",
+    });
+    await expect(
       sidebar.getByRole("link", {
         name: /E2E_DESKTOP_LOCAL please add a greet\(\) helper and open a PR/,
       }),
@@ -225,18 +234,6 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
     await expect(
       page.getByRole("menuitem", { name: "Copy thread ID" }),
     ).toBeVisible();
-    await page.getByRole("menuitem", { name: "Give feedback" }).click();
-    await expect(
-      page.getByRole("dialog", { name: "Give feedback" }),
-    ).toBeVisible();
-    const feedbackScreenshot = testInfo.outputPath("desktop-feedback.png");
-    await page.screenshot({ path: feedbackScreenshot, fullPage: true });
-    await testInfo.attach("desktop-feedback", {
-      path: feedbackScreenshot,
-      contentType: "image/png",
-    });
-    await page.getByRole("button", { name: "Cancel" }).click();
-    await page.getByRole("button", { name: "Thread actions" }).click();
     const menuScreenshot = testInfo.outputPath("desktop-open-trace.png");
     await page.screenshot({ path: menuScreenshot, fullPage: true });
     await testInfo.attach("desktop-open-trace", {

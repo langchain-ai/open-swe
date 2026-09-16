@@ -29,7 +29,6 @@ import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
-import { DesktopThreadFeedbackDialog } from "@/features/agents/components/DesktopThreadFeedbackDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
 import {
@@ -198,7 +197,6 @@ export function SidebarThreadRow({
   const markLocalViewed = useMarkLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [deletingLocal, setDeletingLocal] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
@@ -438,24 +436,12 @@ export function SidebarThreadRow({
                 isDeleting={isDeleting}
                 onTogglePin={onTogglePin}
                 onToggleArchived={onToggleArchived}
-                onFeedback={
-                  item.location === "local"
-                    ? () => setFeedbackOpen(true)
-                    : undefined
-                }
                 onDelete={() => setDeleteOpen(true)}
               />
             </ContextMenu.Popup>
           </ContextMenu.Positioner>
         </ContextMenu.Portal>
       </ContextMenu.Root>
-      {item.location === "local" && (
-        <DesktopThreadFeedbackDialog
-          open={feedbackOpen}
-          onOpenChange={setFeedbackOpen}
-          threadId={item.id}
-        />
-      )}
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={(open) => {
