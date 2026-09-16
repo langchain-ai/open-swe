@@ -9,6 +9,7 @@ from agent.dashboard.options_routes import options
 from agent.dashboard.workspace_settings import (
     INSTANCE_SETTINGS_NAMESPACE,
     WorkspaceSettingsUpdate,
+    delete_workspace_settings,
     get_instance_settings,
     get_workspace_settings,
     upsert_instance_settings,
@@ -45,6 +46,11 @@ async def test_records_written_beside_the_instance_one_still_apply(fake_store: F
     )
     assert (await get_workspace_settings("oss"))["org_guidelines"] == "be public"
 
+    # Deleting the workspace forgets that record too, so a namesake starts clean.
+    await delete_workspace_settings("oss")
+    assert (await get_workspace_settings("oss"))["org_guidelines"] == "internal only"
+
+    fake_store.seed(INSTANCE_SETTINGS_NAMESPACE, "oss", {"org_guidelines": "be public"})
     # Saving the workspace moves it to its own record, so the old one cannot resurface.
     await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate())
     assert (await get_workspace_settings("oss"))["org_guidelines"] == "internal only"

@@ -519,7 +519,10 @@ async def upsert_workspace_overrides(
 
 
 async def delete_workspace_settings(slug: str) -> None:
+    """Forget the workspace's overrides, wherever they were written."""
     await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
+    if slug != DEFAULT_WORKSPACE_SLUG:
+        await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
 
 
 async def get_workspace_default_repo(workspace: str | None = None) -> dict[str, str] | None:
