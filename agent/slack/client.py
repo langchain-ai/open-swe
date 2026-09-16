@@ -474,17 +474,14 @@ SLACK_COST_PENDING_LABEL = "calculating cost"
 
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     if usage is None:
-        return SLACK_COST_PENDING_LABEL
+        return ""
     labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
     model_text = " + ".join(labels[:3])
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
     parts = [model_text] if model_text else []
-    parts.append(
-        format_slack_session_cost(usage.session_cost_usd)
-        if usage.session_cost_usd is not None
-        else SLACK_COST_PENDING_LABEL
-    )
+    if usage.session_cost_usd is not None:
+        parts.append(format_slack_session_cost(usage.session_cost_usd))
     return " • ".join(parts)
 
 
@@ -535,7 +532,11 @@ def with_slack_session_cost(
             value_text = value.get("text")
             if not isinstance(value_text, str):
                 continue
-            if "main-agent tokens" in value_text or SLACK_COST_PENDING_LABEL in value_text:
+            if (
+                block.get("block_id") == "open_swe_usage_footer"
+                or "main-agent tokens" in value_text
+                or SLACK_COST_PENDING_LABEL in value_text
+            ):
                 candidates.append(value)
             elif SLACK_WEB_LINK_FOOTER_LABEL in value_text:
                 fallback_candidates.append(value)
@@ -630,6 +631,7 @@ def _with_slack_web_link_context_block(
             _block_contains_text(block, usage_text) for block in updated_blocks
         ):
             return updated_blocks
+        context_block["block_id"] = "open_swe_usage_footer"
         context_block["elements"][0]["text"] = usage_text
     updated_blocks.append(context_block)
     return updated_blocks
