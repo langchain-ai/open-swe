@@ -116,11 +116,26 @@ function mount() {
     </QueryClientProvider>
   )
 }
+const section = () =>
+  screen.getByRole("region", { name: "My open pull requests" })
+const cards = () =>
+  screen.queryAllByLabelText(/^Select PR #/).map((box) => box.closest("li")!)
+const statusNames = [
+  "Loading…",
+  "Could not load status",
+  "Draft",
+  "Conflicted",
+  "Failing",
+  "Pending",
+  "Status unavailable",
+  "Changes Requested",
+  "Approved",
+  "Reviewable",
+] as const
+const statuses = (card: HTMLElement) =>
+  statusNames.filter((status) => within(card).queryAllByText(status).length > 0)
 const titles = () =>
-  screen
-    .getAllByRole("row")
-    .slice(1)
-    .map((row) => within(row).getByText(/^Change/).textContent)
+  cards().map((card) => within(card).getByText(/^Change/).textContent)
 const bulk = "Bulk pull request actions"
 const selectAll = async () => {
   fireEvent.click(screen.getByLabelText("Select all PRs on this page"))
@@ -181,9 +196,9 @@ describe("My PRs", () => {
         })
     )
     mount()
-    const row = (await screen.findByText("Change 1")).closest("tr")!
-    fireEvent.click(within(row).getByRole("button", { name: "Agent" }))
-    const opening = await within(row).findByRole("button", {
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    fireEvent.click(within(card).getByRole("button", { name: "Agent" }))
+    const opening = await within(card).findByRole("button", {
       name: "Opening thread…",
     })
     expect((opening as HTMLButtonElement).disabled).toBe(true)
@@ -207,15 +222,15 @@ describe("My PRs", () => {
       new Error("Thread backend unavailable")
     )
     mount()
-    const row = (await screen.findByText("Change 1")).closest("tr")!
-    fireEvent.click(within(row).getByRole("button", { name: "Agent" }))
-    expect(await within(row).findByRole("alert")).toHaveProperty(
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    fireEvent.click(within(card).getByRole("button", { name: "Agent" }))
+    expect(await within(card).findByRole("alert")).toHaveProperty(
       "textContent",
       "Thread backend unavailable"
     )
     expect(
       (
-        within(row).getByRole("button", {
+        within(card).getByRole("button", {
           name: "Agent",
         }) as HTMLButtonElement
       ).disabled
@@ -288,19 +303,16 @@ describe("My PRs", () => {
   it("keeps titles and numbers plain and provides explicit destination links", async () => {
     mount()
     const title = await screen.findByText("Change 1")
-    const row = title.closest("tr")!
+    const card = title.closest("li")!
     expect(title.closest("a")).toBeNull()
-    expect(
-      screen.getByRole("columnheader", { name: "Repository" })
-    ).toBeTruthy()
-    expect(within(row).getAllByRole("cell")[2]?.textContent).toBe("acme/app")
+    expect(within(card).getByText("acme/app")).toBeTruthy()
     expect(screen.queryByText("feature/example")).toBeNull()
-    expect(within(row).getByText("#1").closest("a")).toBeNull()
+    expect(within(card).getByText("#1").closest("a")).toBeNull()
     expect(
-      within(row).getByRole("link", { name: "GitHub" }).getAttribute("href")
+      within(card).getByRole("link", { name: "GitHub" }).getAttribute("href")
     ).toBe("https://github.com/acme/app/pull/1")
     expect(
-      within(row).getByRole("link", { name: "Reviewer" }).getAttribute("href")
+      within(card).getByRole("link", { name: "Reviewer" }).getAttribute("href")
     ).toBe("/agents/reviews/acme/app/1")
   })
   it("shows pending checks as Pending, preserving draft and conflict priority", async () => {
@@ -315,15 +327,12 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 4")
-    expect(
-      screen
-        .getAllByRole("row")
-        .slice(1)
-        .map(
-          (row) =>
-            within(row).getAllByRole("cell")[5]?.firstElementChild?.textContent
-        )
-    ).toEqual(["Pending", "Pending", "Draft", "Conflicted"])
+    expect(cards().map(statuses)).toEqual([
+      ["Pending"],
+      ["Pending"],
+      ["Draft"],
+      ["Conflicted"],
+    ])
     fireEvent.click(screen.getByLabelText("Filter by status"))
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: "Pending" })
@@ -341,32 +350,35 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 3")
-    const rows = screen.getAllByRole("row").slice(1)
-    for (const row of rows) expect(within(row).getByText("Draft")).toBeTruthy()
-    expect(within(rows[0]!).getByText("Conflicted")).toBeTruthy()
-    expect(within(rows[1]!).getByText("Failing")).toBeTruthy()
-    expect(within(rows[2]!).queryByText("Conflicted")).toBeNull()
-    expect(within(rows[0]!).getByRole("button", { name: "Fix" })).toBeTruthy()
-    expect(within(rows[1]!).getByRole("button", { name: "Fix" })).toBeTruthy()
-    expect(within(rows[2]!).queryByRole("button", { name: "Fix" })).toBeNull()
+    const shown = cards()
+    for (const card of shown)
+      expect(within(card).getByText("Draft")).toBeTruthy()
+    expect(within(shown[0]!).getByText("Conflicted")).toBeTruthy()
+    expect(within(shown[1]!).getByText("Failing")).toBeTruthy()
+    expect(within(shown[2]!).queryByText("Conflicted")).toBeNull()
+    expect(within(shown[0]!).getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(within(shown[1]!).getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(within(shown[2]!).queryByRole("button", { name: "Fix" })).toBeNull()
   })
 
-  it("hides the review issues column and banner when the review backend is unavailable", async () => {
+  it("hides the review node and banner when the review backend is unavailable", async () => {
     vi.mocked(api.reviewSummaries).mockRejectedValue(
       new Error("Review records require the backend")
     )
     mount()
     await screen.findByText("Change 1")
     await waitFor(() =>
-      expect(
-        screen.queryByRole("columnheader", { name: "Review issues" })
-      ).toBeNull()
+      expect(screen.queryByText("Loading review…")).toBeNull()
     )
     expect(screen.queryByText(/Review records require/)).toBeNull()
-    expect(screen.getAllByRole("columnheader")).toHaveLength(8)
-    expect(
-      within(screen.getAllByRole("row")[1]!).getAllByRole("cell")
-    ).toHaveLength(8)
+    expect(cards()).toHaveLength(2)
+    for (const card of cards()) {
+      expect(within(card).queryByText("Review unavailable")).toBeNull()
+      expect(within(card).queryByText("Not reviewed")).toBeNull()
+      expect(
+        within(card).queryByRole("link", { name: /Open review/ })
+      ).toBeNull()
+    }
   })
   it("offers only global date sorting and passes it to the server", async () => {
     mount()
@@ -411,14 +423,14 @@ describe("My PRs", () => {
     mount()
     await screen.findByText("Change 10")
     expect(screen.queryByText("Change 11")).toBeNull()
-    expect(screen.getAllByRole("row")).toHaveLength(11)
+    expect(cards()).toHaveLength(10)
     await waitFor(() =>
       expect(api.myPullRequestDetails).toHaveBeenCalledTimes(10)
     )
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     await screen.findByText("Change 11")
     expect(screen.queryByText("Change 1")).toBeNull()
-    expect(screen.getAllByRole("row")).toHaveLength(3)
+    expect(cards()).toHaveLength(2)
     await waitFor(() =>
       expect(api.myPullRequestDetails).toHaveBeenCalledTimes(12)
     )
@@ -475,7 +487,7 @@ describe("My PRs", () => {
       "textContent",
       expect.stringContaining("Filter by repository")
     )
-    expect(screen.queryByRole("table")).toBeNull()
+    expect(within(section()).queryAllByRole("listitem")).toHaveLength(0)
     expect(await repoOptions()).toEqual(["acme/app", "acme/other"])
     searchRepos("other")
     expect(
@@ -497,11 +509,11 @@ describe("My PRs", () => {
       ],
     })
     mount()
-    const row = (await screen.findByText("Change 1")).closest("tr")!
-    expect(within(row).getByText("Approved")).toBeTruthy()
-    expect(within(row).queryByText("Status unavailable")).toBeNull()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    expect(within(card).getByText("Approved")).toBeTruthy()
+    expect(within(card).queryByText("Status unavailable")).toBeNull()
     // Merging needs the decision GitHub has not made yet.
-    expect(within(row).queryByRole("button", { name: "Merge" })).toBeNull()
+    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
     fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
     await screen.findByRole("group", { name: bulk })
     expect(bulkButton("Merge").disabled).toBe(true)
@@ -520,11 +532,11 @@ describe("My PRs", () => {
       ],
     })
     mount()
-    const row = (await screen.findByText("Change 1")).closest("tr")!
-    expect(within(row).getByText("Failing")).toBeTruthy()
-    expect(within(row).getByText("Browser E2E")).toBeTruthy()
-    expect(within(row).getByRole("button", { name: "Fix" })).toBeTruthy()
-    expect(within(row).getByRole("button", { name: "Merge" })).toBeTruthy()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    expect(within(card).getByText("Failing")).toBeTruthy()
+    expect(within(card).getByText("Browser E2E")).toBeTruthy()
+    expect(within(card).getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
     await selectAll()
     expect(bulkButton("Merge").disabled).toBe(false)
     expect(bulkButton("Fix").disabled).toBe(false)
@@ -545,12 +557,12 @@ describe("My PRs", () => {
       ],
     })
     mount()
-    const cell = async (title: string) =>
-      within((await screen.findByText(title)).closest("tr")!)
-    expect((await cell("Change 1")).getByText("Conflicted")).toBeTruthy()
-    expect((await cell("Change 2")).getByText("Failing")).toBeTruthy()
+    const card = async (title: string) =>
+      within((await screen.findByText(title)).closest("li")!)
+    expect((await card("Change 1")).getByText("Conflicted")).toBeTruthy()
+    expect((await card("Change 2")).getByText("Failing")).toBeTruthy()
     for (const title of ["Change 1", "Change 2", "Change 3"]) {
-      expect((await cell(title)).getByText("Draft")).toBeTruthy()
+      expect((await card(title)).getByText("Draft")).toBeTruthy()
     }
     // Filtering by Conflicted has to reach the conflicted draft.
     fireEvent.click(screen.getByLabelText("Filter by status"))
@@ -572,9 +584,9 @@ describe("My PRs", () => {
       ],
     })
     mount()
-    const row = (await screen.findByText("Change 1")).closest("tr")!
-    expect(within(row).getByText("Approved")).toBeTruthy()
-    expect(within(row).queryByRole("button", { name: "Merge" })).toBeNull()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    expect(within(card).getByText("Approved")).toBeTruthy()
+    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
     fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
     await screen.findByRole("group", { name: bulk })
     expect(bulkButton("Merge").disabled).toBe(true)
@@ -736,9 +748,10 @@ describe("My PRs", () => {
     const more = screen.getByText("+2 more").closest("details")!
     expect(more.open).toBe(false)
     expect(within(more).getByText("four")).toBeTruthy()
+    expect(screen.queryByText("Lines added")).toBeNull()
     expect(
-      screen.queryByRole("columnheader", { name: "Lines added" })
-    ).toBeNull()
+      screen.getByLabelText("1 lines added, 100 lines deleted")
+    ).toBeTruthy()
   })
 
   it("restores linked bug and flag counts with review progress", async () => {
@@ -784,21 +797,13 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 6")
-    expect(
-      screen
-        .getAllByRole("row")
-        .slice(1)
-        .map(
-          (row) =>
-            within(row).getAllByRole("cell")[5]?.firstElementChild?.textContent
-        )
-    ).toEqual([
-      "Draft·Conflicted·Failing",
-      "Conflicted",
-      "Failing",
-      "Changes Requested",
-      "Approved",
-      "Reviewable",
+    expect(cards().map(statuses)).toEqual([
+      ["Draft", "Conflicted", "Failing"],
+      ["Conflicted"],
+      ["Failing"],
+      ["Changes Requested"],
+      ["Approved"],
+      ["Reviewable"],
     ])
   })
 
@@ -828,7 +833,7 @@ describe("My PRs", () => {
     fireEvent.click(queued)
     expect(api.fixPullRequest).toHaveBeenCalledTimes(1)
     expect(navigate).not.toHaveBeenCalled()
-    expect(screen.getByRole("table")).toBeTruthy()
+    expect(cards()).toHaveLength(2)
   })
 
   it("counts row and page selections together", async () => {

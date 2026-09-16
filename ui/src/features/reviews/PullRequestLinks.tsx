@@ -20,7 +20,7 @@ export function PullRequestLinks({
     retry: false,
   })
   return (
-    <div className="mt-1 text-xs text-muted-foreground">
+    <div className="text-xs text-muted-foreground">
       Open:{" "}
       <button
         type="button"

@@ -33,7 +33,7 @@ const failing: SeedPullRequestOptions = {
 };
 
 function row(page: Page, pr: SeededPullRequest) {
-  return page.getByRole("row").filter({ has: selectBox(page, pr) });
+  return page.getByRole("listitem").filter({ has: selectBox(page, pr) });
 }
 
 function selectBox(page: Page, pr: SeededPullRequest) {

@@ -8,7 +8,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { BugBeetleIcon, FlagIcon } from "@phosphor-icons/react"
-import { useEffect, useState } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import {
@@ -172,11 +172,30 @@ function overallStatus(pr: OpenPullRequest) {
   return "Reviewable"
 }
 
-const alarmingStatuses: readonly string[] = [
-  "Conflicted",
-  "Failing",
-  "Changes Requested",
-]
+const statusTones: Record<string, string> = {
+  Conflicted: "border-destructive/30 bg-destructive/10 text-destructive",
+  Failing: "border-destructive/30 bg-destructive/10 text-destructive",
+  "Changes Requested":
+    "border-destructive/30 bg-destructive/10 text-destructive",
+  Approved:
+    "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  Pending:
+    "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  Reviewable: "border-sky-600/30 bg-sky-500/10 text-sky-700 dark:text-sky-400",
+}
+
+function StatusPill({ status }: { status: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
+        statusTones[status] ?? "border-border bg-muted text-muted-foreground"
+      )}
+    >
+      {status}
+    </span>
+  )
+}
 
 // A draft still has to show a conflict or a failing check: they are what the
 // author has to act on, and they outlive the draft flag.
@@ -220,7 +239,7 @@ function MergePullRequest({
     retry: false,
   })
   return (
-    <div className="mt-2 space-y-1">
+    <div className="flex flex-wrap items-center gap-2">
       <select
         className={control}
         aria-label={`Merge method for PR #${pr.number}`}
@@ -283,7 +302,7 @@ function FixPullRequest({ pr, login }: { pr: OpenPullRequest; login: string }) {
       }),
   })
   return (
-    <div className="mt-2">
+    <div>
       <Button
         size="sm"
         variant="outline"
@@ -682,6 +701,131 @@ function Diffstat({ pr }: { pr: OpenPullRequest }) {
   )
 }
 
+function PullRequestCard({
+  pr,
+  login,
+  selected,
+  onSelect,
+  review,
+  onMerged,
+}: {
+  pr: OpenPullRequest
+  login: string
+  selected: boolean
+  onSelect: (include: boolean) => void
+  review: ReactNode
+  onMerged: () => void
+}) {
+  return (
+    <li
+      className={cn(
+        "rounded-lg border bg-card p-4",
+        selected ? "border-primary bg-primary/5" : "border-border"
+      )}
+    >
+      <div className="flex gap-3">
+        <input
+          type="checkbox"
+          className="mt-0.5 shrink-0 self-start"
+          aria-label={`Select PR #${pr.number} in ${pr.repo}`}
+          checked={selected}
+          onChange={(event) => onSelect(event.target.checked)}
+        />
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
+              <span>
+                {pr.repo}{" "}
+                <span className="font-mono tabular-nums">#{pr.number}</span>
+              </span>
+              {statusLabels(pr).map((status) => (
+                <StatusPill key={status} status={status} />
+              ))}
+            </div>
+            <h3 className="mt-1 text-sm font-medium break-words">{pr.title}</h3>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+            <Diffstat pr={pr} />
+            {review}
+            <span>
+              Updated{" "}
+              <time
+                dateTime={pr.updatedAt ?? undefined}
+                title={pr.updatedAt ?? undefined}
+              >
+                {dateLabel(pr.updatedAt)}
+              </time>
+            </span>
+            <span>
+              Opened{" "}
+              <time
+                dateTime={pr.createdAt ?? undefined}
+                title={pr.createdAt ?? undefined}
+              >
+                {dateLabel(pr.createdAt)}
+              </time>
+            </span>
+            {!pr.statusAvailable && !pr.detailsLoading && (
+              <span className="text-amber-700 dark:text-amber-400">
+                Live PR status unavailable
+              </span>
+            )}
+          </div>
+          {(pr.failingChecks.length > 0 || pr.pendingChecks.length > 0) && (
+            <div className="space-y-1 text-xs">
+              {pr.failingChecks.length > 0 && (
+                <p className="text-destructive">
+                  {pr.failingChecks.slice(0, 3).map((name, index) => (
+                    <span key={`${name}-${index}`}>
+                      {index > 0 && <span aria-hidden="true"> · </span>}
+                      {name}
+                    </span>
+                  ))}
+                </p>
+              )}
+              {pr.failingChecks.length > 3 && (
+                <details className="text-destructive">
+                  <summary className="cursor-pointer">
+                    +{pr.failingChecks.length - 3} more
+                  </summary>
+                  <ul className="mt-1 space-y-1">
+                    {pr.failingChecks.slice(3).map((name, index) => (
+                      <li key={`${name}-${index}`}>{name}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {pr.pendingChecks.length > 0 && (
+                <details className="text-muted-foreground">
+                  <summary className="cursor-pointer">
+                    {pr.pendingChecks.length} pending
+                  </summary>
+                  <ul className="mt-1">
+                    {pr.pendingChecks.map((name, index) => (
+                      <li key={`${name}-${index}`}>{name}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {isFixable(pr) && <FixPullRequest pr={pr} login={login} />}
+            {isMergeable(pr) && (
+              <MergePullRequest pr={pr} onMerged={onMerged} />
+            )}
+            <PullRequestLinks
+              repo={pr.repo}
+              number={pr.number}
+              title={pr.title}
+            />
+          </div>
+        </div>
+      </div>
+    </li>
+  )
+}
+
 export function MyPullRequests({
   login,
   filters,
@@ -819,7 +963,10 @@ export function MyPullRequests({
   ].sort()
 
   return (
-    <section className="mt-5 space-y-4" aria-label="My open pull requests">
+    <section
+      className="mt-5 max-w-4xl space-y-4"
+      aria-label="My open pull requests"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
         <span aria-live="polite">
           {refreshing
@@ -920,261 +1067,103 @@ export function MyPullRequests({
                 }
               />
             )}
-            <div className="overflow-x-auto rounded-lg border border-border bg-card">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-border bg-muted/30 text-muted-foreground">
-                  <tr>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      <input
-                        type="checkbox"
-                        aria-label="Select all PRs on this page"
-                        checked={
-                          visible.length > 0 &&
-                          selectedOnPage === visible.length
-                        }
-                        ref={(node) => {
-                          if (node)
-                            node.indeterminate =
-                              selectedOnPage > 0 &&
-                              selectedOnPage < visible.length
-                        }}
-                        onChange={(event) =>
-                          toggleSelection(
-                            visible.map(pullRequestKey),
-                            event.target.checked
-                          )
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  aria-label="Select all PRs on this page"
+                  checked={
+                    visible.length > 0 && selectedOnPage === visible.length
+                  }
+                  ref={(node) => {
+                    if (node)
+                      node.indeterminate =
+                        selectedOnPage > 0 && selectedOnPage < visible.length
+                  }}
+                  onChange={(event) =>
+                    toggleSelection(
+                      visible.map(pullRequestKey),
+                      event.target.checked
+                    )
+                  }
+                />
+                Select all on this page
+              </label>
+              <span className="ml-auto flex items-center gap-1">
+                Sort
+                {(
+                  [
+                    ["Last updated", "updatedAt"],
+                    ["Created", "createdAt"],
+                  ] as const
+                ).map(([label, key]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={sort === key}
+                    onClick={() => toggleSort(key)}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md border px-2 py-1",
+                      sort === key
+                        ? "border-border bg-muted text-foreground"
+                        : "border-transparent hover:text-foreground"
+                    )}
+                  >
+                    {label}
+                    <span aria-hidden="true">
+                      {sort === key ? (direction === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </button>
+                ))}
+              </span>
+            </div>
+            <ul className="space-y-3">
+              {visible.map((pr) => (
+                <PullRequestCard
+                  key={`${pr.repo}#${pr.number}`}
+                  pr={pr}
+                  login={login}
+                  selected={selection.has(pullRequestKey(pr))}
+                  onSelect={(include) =>
+                    toggleSelection([pullRequestKey(pr)], include)
+                  }
+                  review={
+                    reviews.isError ? null : reviews.data?.[
+                        `${pr.repo}#${pr.number}`.toLowerCase()
+                      ] ? (
+                      <ReviewIndicators
+                        review={
+                          reviews.data[`${pr.repo}#${pr.number}`.toLowerCase()]!
                         }
                       />
-                    </th>
-                    {(
-                      [
-                        ["PR", null],
-                        ["Repository", null],
-                        ["Pull request", null],
-                        ["Diffstat", null],
-                        ["Status", null],
-                        ["Review issues", null],
-                        ["Last updated", "updatedAt"],
-                        ["Created", "createdAt"],
-                      ] as const
+                    ) : reviews.isPending ? (
+                      <span>Loading review…</span>
+                    ) : !Object.hasOwn(
+                        reviews.data ?? {},
+                        `${pr.repo}#${pr.number}`.toLowerCase()
+                      ) ? (
+                      <span>Review unavailable</span>
+                    ) : (
+                      <span>Not reviewed</span>
                     )
-                      .filter(
-                        ([label]) =>
-                          label !== "Review issues" || !reviews.isError
-                      )
-                      .map(([label, key]) => (
-                        <th
-                          key={label}
-                          scope="col"
-                          aria-sort={
-                            key
-                              ? sort === key
-                                ? direction === "asc"
-                                  ? "ascending"
-                                  : "descending"
-                                : "none"
-                              : undefined
-                          }
-                          className="px-4 py-3 font-medium whitespace-nowrap"
-                        >
-                          {key ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleSort(key)}
-                              className="inline-flex items-center gap-1 hover:text-foreground"
-                            >
-                              {label}
-                              <span aria-hidden="true">
-                                {sort === key
-                                  ? direction === "asc"
-                                    ? "↑"
-                                    : "↓"
-                                  : "↕"}
-                              </span>
-                            </button>
-                          ) : (
-                            label
-                          )}
-                        </th>
-                      ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {visible.map((pr) => (
-                    <tr
-                      key={`${pr.repo}#${pr.number}`}
-                      className="align-top hover:bg-muted/20"
-                    >
-                      <td className="px-4 py-4">
-                        <input
-                          type="checkbox"
-                          aria-label={`Select PR #${pr.number} in ${pr.repo}`}
-                          checked={selection.has(pullRequestKey(pr))}
-                          onChange={(event) =>
-                            toggleSelection(
-                              [pullRequestKey(pr)],
-                              event.target.checked
-                            )
-                          }
-                        />
-                      </td>
-                      <td className="px-4 py-4 font-mono tabular-nums">
-                        #{pr.number}
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <span className="text-muted-foreground">{pr.repo}</span>
-                      </td>
-                      <td className="max-w-md min-w-64 px-4 py-4">
-                        <span className="font-medium">{pr.title}</span>
-                        <PullRequestLinks
-                          repo={pr.repo}
-                          number={pr.number}
-                          title={pr.title}
-                        />
-                        {!pr.statusAvailable && !pr.detailsLoading && (
-                          <p className="mt-1 text-amber-700 dark:text-amber-400">
-                            Live PR status unavailable
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-4">
-                        <Diffstat pr={pr} />
-                      </td>
-                      <td className="min-w-44 px-4 py-4">
-                        <span className="flex flex-wrap items-center gap-x-1 font-medium">
-                          {statusLabels(pr).map((status, index) => (
-                            <span
-                              key={status}
-                              className={cn(
-                                alarmingStatuses.includes(status) &&
-                                  "text-destructive",
-                                status === "Approved" &&
-                                  "text-emerald-600 dark:text-emerald-400"
-                              )}
-                            >
-                              {index > 0 && (
-                                <span
-                                  aria-hidden="true"
-                                  className="mr-1 text-muted-foreground"
-                                >
-                                  ·
-                                </span>
-                              )}
-                              {status}
-                            </span>
-                          ))}
-                        </span>
-                        {pr.failingChecks.length > 0 && (
-                          <ul className="mt-1 space-y-1 text-destructive">
-                            {pr.failingChecks.slice(0, 3).map((name, index) => (
-                              <li key={`${name}-${index}`}>{name}</li>
-                            ))}
-                          </ul>
-                        )}
-                        {pr.failingChecks.length > 3 && (
-                          <details className="mt-1 text-destructive">
-                            <summary className="cursor-pointer">
-                              +{pr.failingChecks.length - 3} more
-                            </summary>
-                            <ul className="mt-1 space-y-1">
-                              {pr.failingChecks.slice(3).map((name, index) => (
-                                <li key={`${name}-${index}`}>{name}</li>
-                              ))}
-                            </ul>
-                          </details>
-                        )}
-                        {pr.pendingChecks.length > 0 && (
-                          <details className="mt-1 text-muted-foreground">
-                            <summary className="cursor-pointer">
-                              {pr.pendingChecks.length} pending
-                            </summary>
-                            <ul className="mt-1">
-                              {pr.pendingChecks.map((name, index) => (
-                                <li key={`${name}-${index}`}>{name}</li>
-                              ))}
-                            </ul>
-                          </details>
-                        )}
-                        {(pr.mergeable === false ||
-                          pr.mergeState === "dirty" ||
-                          pr.ci === "failing") && (
-                          <FixPullRequest pr={pr} login={login} />
-                        )}
-                        {isMergeable(pr) && (
-                          <MergePullRequest
-                            pr={pr}
-                            onMerged={() => {
-                              forgetPullRequest(queryClient, login, pr)
-                              if (visible.length === 1 && page > 0)
-                                onFiltersChange(
-                                  { page: page - 1 || undefined },
-                                  true
-                                )
-                            }}
-                          />
-                        )}
-                      </td>
-                      {!reviews.isError && (
-                        <td className="min-w-36 px-4 py-4 text-muted-foreground">
-                          {reviews.error ? (
-                            "Unavailable"
-                          ) : reviews.data?.[
-                              `${pr.repo}#${pr.number}`.toLowerCase()
-                            ] ? (
-                            <ReviewIndicators
-                              review={
-                                reviews.data[
-                                  `${pr.repo}#${pr.number}`.toLowerCase()
-                                ]!
-                              }
-                            />
-                          ) : reviews.isPending ? (
-                            "Loading review…"
-                          ) : !Object.hasOwn(
-                              reviews.data ?? {},
-                              `${pr.repo}#${pr.number}`.toLowerCase()
-                            ) ? (
-                            "Unavailable"
-                          ) : (
-                            "Not reviewed"
-                          )}
-                        </td>
-                      )}
-                      <td className="px-4 py-4 whitespace-nowrap text-muted-foreground">
-                        <time
-                          dateTime={pr.updatedAt ?? undefined}
-                          title={pr.updatedAt ?? undefined}
-                        >
-                          {dateLabel(pr.updatedAt)}
-                        </time>
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-muted-foreground">
-                        <time
-                          dateTime={pr.createdAt ?? undefined}
-                          title={pr.createdAt ?? undefined}
-                        >
-                          {dateLabel(pr.createdAt)}
-                        </time>
-                      </td>
-                    </tr>
-                  ))}
-                  {visible.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={reviews.isError ? 8 : 9}
-                        className="px-4 py-12 text-center text-muted-foreground"
-                      >
-                        {detailsLoading || query.isFetchingNextPage
-                          ? "Loading matching PRs…"
-                          : all.length
-                            ? "No PRs match these filters."
-                            : "No open PRs found."}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  }
+                  onMerged={() => {
+                    forgetPullRequest(queryClient, login, pr)
+                    if (visible.length === 1 && page > 0)
+                      onFiltersChange({ page: page - 1 || undefined }, true)
+                  }}
+                />
+              ))}
+              {visible.length === 0 && (
+                <li className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
+                  {detailsLoading || query.isFetchingNextPage
+                    ? "Loading matching PRs…"
+                    : all.length
+                      ? "No PRs match these filters."
+                      : "No open PRs found."}
+                </li>
+              )}
+            </ul>
             <div className="flex items-center gap-3 text-xs">
               <Button
                 size="sm"
