@@ -6,11 +6,11 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.run_config import Repo
 from agent.slack import ask as slack_ask
 from agent.slack import routes as slack_routes
 from agent.slack.tools import thread_reply as slack_thread_reply
 from agent.threads.listing import _metadata_matches_filters
+from tests.support.repositories import FakeRepositories
 
 
 def _command_request(text: str, command: str = "/oswe") -> Request:
@@ -161,16 +161,15 @@ async def test_a_command_joins_work_already_running(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("linked_asker")
-async def test_named_repository_picks_the_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_named_repository_picks_the_workspace(
+    monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
+) -> None:
     resolve_workspace = AsyncMock(return_value=SimpleNamespace(slug="payments"))
+    api = fake_repositories.add("acme/api")
     monkeypatch.setattr(
         slack_ask.common,
         "get_slack_repo_config",
-        AsyncMock(
-            return_value=slack_ask.common.SlackRepoResolution(
-                repo=Repo(owner="acme", name="api"), explicit=True
-            )
-        ),
+        AsyncMock(return_value=slack_ask.common.SlackRepoResolution(repos=(api,), explicit=True)),
     )
     monkeypatch.setattr(slack_ask, "resolve_workspace", resolve_workspace)
     monkeypatch.setattr(
@@ -183,7 +182,7 @@ async def test_named_repository_picks_the_workspace(monkeypatch: pytest.MonkeyPa
         slack_ask.SlackAskRequest(channel_id="C1", user_id="U1", question="why?", thread_id="t-2")
     )
 
-    assert resolve_workspace.await_args.kwargs["repo"] == ("acme", "api")
+    assert resolve_workspace.await_args.kwargs["repositories"] == (api,)
     assert dispatch.await_args.args[2]["workspace"] == "payments"
 
 

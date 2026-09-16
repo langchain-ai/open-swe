@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.utils import thread_participants as participants
+from tests.support.repositories import FakeRepositories
 
 
 class _Threads:
@@ -79,7 +80,9 @@ async def test_resolves_linear_participants_from_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolves_github_participants_from_issue_context() -> None:
+async def test_resolves_github_participants_from_issue_context(
+    fake_repositories: FakeRepositories,
+) -> None:
     metadata = {
         "source": "github",
         "participant_logins": ["owner"],

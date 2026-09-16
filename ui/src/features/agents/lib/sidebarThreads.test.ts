@@ -16,8 +16,7 @@ function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
   return {
     id: "same-id",
     title: "Cloud thread",
-    repo: "open-swe",
-    repoFullName: "langchain-ai/open-swe",
+    repos: ["langchain-ai/open-swe"],
     branch: "main",
     model: "gpt-5",
     status: "idle",
@@ -60,13 +59,13 @@ describe("sidebar thread adapters", () => {
 
     expect(cloud).toMatchObject({
       key: "cloud:same-id",
-      projectKey: "project:langchain-ai/open-swe",
-      projectLabel: "open-swe",
+      projectKeys: ["project:langchain-ai/open-swe"],
+      projectLabels: ["open-swe"],
     })
     expect(local).toMatchObject({
       key: "local:same-id",
-      projectKey: "project:/users/example/open-swe",
-      projectLabel: "open-swe",
+      projectKeys: ["project:/users/example/open-swe"],
+      projectLabels: ["open-swe"],
     })
   })
 
@@ -103,13 +102,13 @@ describe("sidebar thread adapters", () => {
 
   it("keeps same-named repositories from different owners apart", () => {
     const acme = cloudSidebarThread(
-      cloudThread({ id: "a", repo: "api", repoFullName: "acme/api" })
+      cloudThread({ id: "a", repos: ["acme/api"] })
     )
     const other = cloudSidebarThread(
-      cloudThread({ id: "b", repo: "api", repoFullName: "other/api" })
+      cloudThread({ id: "b", repos: ["other/api"] })
     )
 
-    expect(acme.projectKey).not.toBe(other.projectKey)
+    expect(acme.projectKeys).not.toEqual(other.projectKeys)
     expect(sidebarProjectOptions([acme, other], [])).toHaveLength(2)
     // The label is ambiguous, so a local "api" must not be folded into either.
     const local = localSidebarThread(
@@ -123,8 +122,8 @@ describe("sidebar thread adapters", () => {
       undefined
     )
     const aliases = cloudProjectKeysByLabel([acme, other])
-    expect(applyProjectKeyAliases([local], aliases)[0]?.projectKey).toBe(
-      local.projectKey
+    expect(applyProjectKeyAliases([local], aliases)[0]?.projectKeys).toEqual(
+      local.projectKeys
     )
   })
 })
@@ -156,24 +155,21 @@ describe("groupSidebarThreadsByProject", () => {
     const alphaOld = cloudSidebarThread(
       cloudThread({
         id: "alpha-old",
-        repo: "alpha",
-        repoFullName: "acme/alpha",
+        repos: ["acme/alpha"],
         updatedAt: 5,
       })
     )
     const alphaNew = cloudSidebarThread(
       cloudThread({
         id: "alpha-new",
-        repo: "alpha",
-        repoFullName: "acme/alpha",
+        repos: ["acme/alpha"],
         updatedAt: 40,
       })
     )
     const beta = cloudSidebarThread(
       cloudThread({
         id: "beta",
-        repo: "beta",
-        repoFullName: "acme/beta",
+        repos: ["acme/beta"],
         updatedAt: 50,
       })
     )
@@ -195,12 +191,32 @@ describe("groupSidebarThreadsByProject", () => {
     expect(grouped.recents).toEqual([])
   })
 
-  it("sends threads with no known project to Recents", () => {
-    const orphan = cloudSidebarThread(
-      cloudThread({ id: "orphan", repo: "", repoFullName: "" })
+  it("lists a multi-repo thread under every project it targets", () => {
+    const shared = cloudSidebarThread(
+      cloudThread({ id: "shared", repos: ["acme/alpha", "acme/beta"] })
     )
+
+    const grouped = groupSidebarThreadsByProject(
+      [shared],
+      sidebarProjectOptions([shared], [])
+    )
+
+    expect(
+      grouped.projects.map((group) => [
+        group.label,
+        group.threads.map((thread) => thread.id),
+      ])
+    ).toEqual([
+      ["alpha", ["shared"]],
+      ["beta", ["shared"]],
+    ])
+    expect(grouped.recents).toEqual([])
+  })
+
+  it("sends threads with no known project to Recents", () => {
+    const orphan = cloudSidebarThread(cloudThread({ id: "orphan", repos: [] }))
     const known = cloudSidebarThread(
-      cloudThread({ id: "known", repo: "alpha", repoFullName: "acme/alpha" })
+      cloudThread({ id: "known", repos: ["acme/alpha"] })
     )
 
     const grouped = groupSidebarThreadsByProject(

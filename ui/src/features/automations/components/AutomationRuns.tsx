@@ -154,7 +154,7 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
               Posted to Slack
             </span>
           )}
-          {run.repoFullName && <span>{run.repoFullName}</span>}
+          {run.repos.length > 0 && <span>{run.repos.join(", ")}</span>}
           <span>{formatRelativeTime(run.updatedAt)}</span>
         </div>
       </div>

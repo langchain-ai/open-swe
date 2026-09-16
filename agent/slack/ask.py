@@ -21,6 +21,7 @@ from agent.slack.client import (
 )
 from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
+from agent.thread_repos import REPOSITORY_IDS_METADATA_KEY, repository_ids_metadata
 from agent.utils.thread_ops import get_thread_active_status, queue_message_for_thread
 from agent.webhooks import common
 from agent.workspaces.routing import resolve_workspace
@@ -120,15 +121,18 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
     )
     workspace = (
         await resolve_workspace(
-            repo=resolution.routing_repo,
+            repositories=resolution.routing_repos,
             slack_channel_id=request.channel_id,
             login=login,
         )
     ).slug
-    resolved_repo = resolution.repo
-    if resolved_repo is not None and not resolution.explicit:
-        resolved_repo = await workspace_scoped_default_repo(resolved_repo, workspace)
-    repo = resolved_repo.model_dump() if resolved_repo else None
+    repositories = list(resolution.repos)
+    if repositories and not resolution.explicit:
+        scoped = [
+            await workspace_scoped_default_repo(repository, workspace)
+            for repository in repositories
+        ]
+        repositories = [repository for repository in scoped if repository is not None]
     slack_thread = SlackThreadRef(
         channel_id=request.channel_id,
         triggering_user_id=request.user_id,
@@ -143,7 +147,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
     persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
-        repo_config=repo,
+        repositories=repositories,
         github_login=login,
         user_email=user_email,
         title=request.question,
@@ -158,7 +162,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         return
 
     configurable: dict[str, Any] = {
-        "repo": repo,
+        REPOSITORY_IDS_METADATA_KEY: repository_ids_metadata(repositories),
         "slack_thread": slack_thread.dump(),
         "source": "slack",
         "slack_ask": True,

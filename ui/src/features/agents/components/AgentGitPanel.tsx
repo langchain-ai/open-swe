@@ -55,8 +55,7 @@ export function AgentGitPanel({
   const terminalAvailable = Boolean(thread.sandboxId)
 
   // Served from GitHub, so it needs a repository — with or without a PR.
-  const branchScopeAvailable =
-    Boolean(thread.repoFullName) && Boolean(thread.branch)
+  const branchScopeAvailable = thread.repos.length > 0 && Boolean(thread.branch)
   const selectScope = useDiffPanelStore((state) => state.selectScope)
   const scope = useDiffPanelStore((state) =>
     selectThreadDiffScope(

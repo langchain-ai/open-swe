@@ -15,6 +15,11 @@ from agent.github.pull_request_checks import PullRequestState, get_pull_request_
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
 from agent.slack.client import parse_github_pr_url
+from agent.thread_repos import (
+    REPO_EXPLICITLY_NONE_METADATA_KEY,
+    REPOSITORY_IDS_METADATA_KEY,
+    thread_repositories,
+)
 from agent.threads.access import (
     _authorized_thread,
     _github_token_for_login,
@@ -101,8 +106,9 @@ async def get_dashboard_terminal_sandbox(
         or sandbox_id == _SANDBOX_CREATING_SENTINEL
     ):
         raise HTTPException(404, "thread sandbox is not ready")
-    repo_name = metadata.get("repo_name")
-    if not isinstance(repo_name, str) or posixpath.basename(repo_name) != repo_name:
+    repositories = await thread_repositories(metadata)
+    repo_name = repositories[0].name if len(repositories) == 1 else None
+    if repo_name is not None and posixpath.basename(repo_name) != repo_name:
         repo_name = None
     return sandbox_id, repo_name
 
@@ -471,9 +477,8 @@ _CONTINUED_METADATA_KEYS = (
     "resolved_model",
     "resolved_effort",
     "plan_mode",
-    "repo_owner",
-    "repo_name",
-    "repo_explicitly_none",
+    REPOSITORY_IDS_METADATA_KEY,
+    REPO_EXPLICITLY_NONE_METADATA_KEY,
     THREAD_SETTINGS_KEY,
 )
 

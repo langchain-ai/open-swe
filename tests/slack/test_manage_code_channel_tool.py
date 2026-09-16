@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent import run_config
+from tests.support.repositories import FakeRepositories
+
 manage_tool = import_module("agent.slack.tools.manage_code_channel")
 
 
@@ -207,3 +210,61 @@ async def test_one_stale_id_does_not_cost_the_others_their_invite(
 
     assert result["invited"] == ["U1"]
     assert result["warnings"] == ["Could not invite U2 (user_not_found)"]
+
+
+async def _promote_through_tool(
+    monkeypatch: pytest.MonkeyPatch, repository_ids: list[str]
+) -> dict[str, Any]:
+    """Promote via the tool entrypoint so it reads the run's own repositories."""
+    client = SimpleNamespace(
+        threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {}}), update=AsyncMock())
+    )
+    monkeypatch.setattr(manage_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        manage_tool,
+        "get_active_slack_thread",
+        AsyncMock(return_value={"channel_id": "C-origin", "thread_ts": "1.000"}),
+    )
+    monkeypatch.setattr(
+        run_config,
+        "get_config",
+        lambda: {"configurable": {"thread_id": "thread-1", "repository_ids": repository_ids}},
+    )
+    return await manage_tool.manage_code_channel("create", title="Fix flaky tests")
+
+
+def _repo_labels(set_context_bar: AsyncMock) -> list[str]:
+    if not set_context_bar.await_args_list:
+        return []
+    items: list[dict[str, Any]] = set_context_bar.await_args_list[-1].args[1]
+    return [item["label"] for item in items if item["key"] == "repo"]
+
+
+async def test_promotion_shows_the_one_repository_the_thread_works_in(
+    promotion: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
+) -> None:
+    result = await _promote_through_tool(
+        monkeypatch, [str(fake_repositories.add("fakeorg/demo").id)]
+    )
+
+    assert result["success"] is True
+    assert _repo_labels(promotion["set_context_bar"]) == ["fakeorg/demo"]
+
+
+async def test_promotion_names_no_repository_when_the_thread_works_in_several(
+    promotion: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
+) -> None:
+    result = await _promote_through_tool(
+        monkeypatch,
+        [
+            str(fake_repositories.add("fakeorg/demo").id),
+            str(fake_repositories.add("fakeorg/other").id),
+        ],
+    )
+
+    assert result["success"] is True
+    assert _repo_labels(promotion["set_context_bar"]) == []

@@ -1,4 +1,5 @@
 from agent.run_config import Repo, RunConfig
+from tests.support.repositories import FakeRepositories
 
 
 def test_parse_reads_declared_and_extra_keys():
@@ -76,6 +77,46 @@ def test_repo_full_name_needs_both_halves():
     assert bool(Repo(owner="a", name="b"))
     assert Repo.parse(None) is None
     assert Repo.parse("a/b") is None
+
+
+async def test_target_repository_is_none_when_several_repositories_are_in_play(
+    fake_repositories: FakeRepositories,
+) -> None:
+    rows = [fake_repositories.add("a/b"), fake_repositories.add("a/c")]
+    cfg = RunConfig.parse({"repository_ids": [str(row.id) for row in rows]})
+    assert await cfg.target_repository() is None
+    assert await cfg.load_repositories() == rows
+
+
+async def test_target_repository_prefers_the_named_github_target(
+    fake_repositories: FakeRepositories,
+) -> None:
+    ids = [str(fake_repositories.add("a/b").id), str(fake_repositories.add("a/c").id)]
+    cfg = RunConfig.parse(
+        {
+            "repository_ids": ids,
+            "github_pr_or_issue": {"number": 4, "repo": {"owner": "other", "name": "fork"}},
+        }
+    )
+    named = await cfg.target_repository()
+    assert named is not None and named.full_name == "other/fork"
+
+    from_url = RunConfig.parse(
+        {
+            "repository_ids": ids,
+            "github_issue": {"number": 4, "url": "https://github.com/other/fork/issues/4"},
+        }
+    )
+    resolved = await from_url.target_repository()
+    assert resolved is not None and resolved.full_name == "other/fork"
+
+
+async def test_target_repository_falls_back_to_the_only_repository(
+    fake_repositories: FakeRepositories,
+) -> None:
+    only = await RunConfig.parse({"repo": {"owner": "a", "name": "b"}}).target_repository()
+    assert only is not None and only.full_name == "a/b"
+    assert await RunConfig.parse({}).target_repository() is None
 
 
 def test_is_eval_covers_both_flags():

@@ -10,6 +10,7 @@ from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
+from tests.support.repositories import FakeRepositories
 
 
 def _pr_payload(
@@ -55,7 +56,9 @@ def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: MagicMock
 
 
 @pytest.mark.asyncio
-async def test_pr_ready_non_draft_triggers_run(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_pr_ready_non_draft_triggers_run(
+    monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
+) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
@@ -74,6 +77,7 @@ async def test_pr_ready_non_draft_triggers_run(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.asyncio
 async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
@@ -102,6 +106,7 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
 @pytest.mark.asyncio
 async def test_pr_ready_private_repo_uses_full_reviewer_token(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
@@ -127,7 +132,9 @@ async def test_pr_ready_private_repo_uses_full_reviewer_token(
 
 
 @pytest.mark.asyncio
-async def test_pr_ready_for_review_triggers_run(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_pr_ready_for_review_triggers_run(
+    monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
+) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
@@ -181,6 +188,7 @@ async def test_pr_ready_for_review_skips_when_head_already_reviewed(
 @pytest.mark.asyncio
 async def test_pr_ready_for_review_uses_re_review_after_previous_review(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
@@ -245,6 +253,7 @@ async def test_pr_ready_draft_user_override_off_wins_over_team_on(
 @pytest.mark.asyncio
 async def test_pr_ready_draft_user_override_on_wins_over_team_off(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
@@ -268,6 +277,7 @@ async def test_pr_ready_draft_user_override_on_wins_over_team_off(
 @pytest.mark.asyncio
 async def test_pr_ready_draft_user_default_falls_back_to_team_on(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
@@ -290,6 +300,7 @@ async def test_pr_ready_draft_user_default_falls_back_to_team_on(
 @pytest.mark.asyncio
 async def test_pr_ready_draft_no_profile_falls_back_to_team_off(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
@@ -310,6 +321,7 @@ async def test_pr_ready_draft_no_profile_falls_back_to_team_off(
 @pytest.mark.asyncio
 async def test_pr_ready_draft_no_profile_falls_back_to_team_on(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
@@ -397,6 +409,7 @@ async def test_converted_to_draft_keeps_watch_when_author_drafts_on(
 @pytest.mark.asyncio
 async def test_converted_to_draft_keeps_watch_when_team_default_drafts_on(
     monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
 ) -> None:
     fake_set = AsyncMock()
     with (

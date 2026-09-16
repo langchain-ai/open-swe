@@ -270,6 +270,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
 
     passthrough_keys = (
         "repo",
+        "repository_ids",
         "source",
         "slack_thread",
         "linear_issue",

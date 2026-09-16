@@ -113,12 +113,13 @@ async def manage_code_channel(
             }
         if is_code_channel_session(thread_ts):
             return {"success": False, "error": "This session is already a code channel"}
+        target = await cfg.target_repository()
         return await _create(
             client,
             thread_id,
             active,
             await _code_channel_title(client, thread_id, title),
-            cfg.repo.model_dump() if cfg.repo else None,
+            {"owner": target.owner, "name": target.name} if target else None,
             invite=invite or [],
             team_id=team_id,
             is_private=is_private,

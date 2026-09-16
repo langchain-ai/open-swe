@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.webhooks import common as webhook_common
+from tests.support.repositories import FakeRepositories
 
 
 @pytest.mark.parametrize(
@@ -13,13 +14,14 @@ from agent.webhooks import common as webhook_common
     ids=["saved workspace wins", "new thread follows the repository"],
 )
 async def test_trigger_or_queue_run_prefers_the_threads_saved_workspace(
-    monkeypatch: pytest.MonkeyPatch, saved: str | None, expected: str
+    monkeypatch: pytest.MonkeyPatch,
+    fake_repositories: FakeRepositories,
+    saved: str | None,
+    expected: str,
 ) -> None:
     monkeypatch.setattr(webhook_common, "authorize_github_thread", AsyncMock())
     monkeypatch.setattr(webhook_common, "get_thread_workspace", AsyncMock(return_value=saved))
-    monkeypatch.setattr(
-        webhook_common, "workspace_for_repo_config", AsyncMock(return_value="moved-to")
-    )
+    monkeypatch.setattr(webhook_common, "workspace_for_repos", AsyncMock(return_value="moved-to"))
     upsert = AsyncMock()
     dispatch = AsyncMock()
     monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", upsert)

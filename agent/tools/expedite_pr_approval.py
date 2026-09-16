@@ -102,7 +102,7 @@ async def expedite_pr_approval(
         diff_fingerprint=verdict.fingerprint,
         slack_channel_id=channel_id,
         slack_thread_ts=thread_ts,
-        run_config=dispatch_run_config(cfg, thread_id, None),
+        run_config=await dispatch_run_config(cfg, thread_id, None),
     )
     status = await evaluate_approval(str(approval.id))
     return {

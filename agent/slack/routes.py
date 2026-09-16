@@ -851,14 +851,14 @@ async def slack_interactivity(
                 background_tasks.add_task(
                     _update_selected_option_message, interaction, action, "Approve plan"
                 )
-                repo = (
+                repositories = (
                     await common.get_slack_repo_config(
                         channel_id,
                         thread_ts,
                         slack_user_id=user_id,
                         channel_context=channel_context,
                     )
-                ).repo
+                ).repos
                 background_tasks.add_task(
                     service.process_slack_plan_approval,
                     SlackRequest(
@@ -874,7 +874,7 @@ async def slack_interactivity(
                         dm_session=in_dm,
                         reply_thread_ts=reply_thread_ts,
                     ),
-                    repo,
+                    repositories,
                 )
                 return accepted("Plan approval queued")
 

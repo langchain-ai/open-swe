@@ -792,6 +792,7 @@ export interface CreateAgentThreadVariables {
   prompt: string
   images?: Array<ImageChunk>
   repo?: string | null
+  repos?: Array<string>
   repo_explicitly_none?: boolean
   model_id?: string | null
   effort?: string | null
@@ -811,7 +812,6 @@ export function optimisticThread(
 ): AgentThread {
   const now = Date.now()
   const text = vars.prompt.trim()
-  const repoFullName = vars.repo ?? ""
   const chunks: Array<Chunk> = [
     ...(vars.images ?? []),
     ...(text ? [{ kind: "text", text } satisfies Chunk] : []),
@@ -826,8 +826,7 @@ export function optimisticThread(
     id: threadId,
     visibility: vars.visibility ?? "public",
     title: text.slice(0, 80) || "New agent",
-    repo: repoFullName.split("/")[1] ?? "",
-    repoFullName,
+    repos: vars.repos ?? (vars.repo ? [vars.repo] : []),
     branch: "main",
     model: vars.model_id ?? "Default",
     effort: vars.effort ?? null,

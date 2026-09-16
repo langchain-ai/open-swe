@@ -26,8 +26,7 @@ class FakeNotification {
 const thread: AgentThread = {
   id: "thread-123",
   title: "Fix notifications",
-  repo: "open-swe",
-  repoFullName: "langchain-ai/open-swe",
+  repos: ["langchain-ai/open-swe"],
   branch: "main",
   model: "test-model",
   status: "finished",

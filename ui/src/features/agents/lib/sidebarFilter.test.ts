@@ -12,8 +12,7 @@ function makeThread(overrides: Partial<AgentThread> = {}): AgentThread {
   return {
     id: Math.random().toString(36).slice(2),
     title: "Thread",
-    repo: "repo",
-    repoFullName: "acme/repo",
+    repos: ["acme/repo"],
     branch: "main",
     model: "gpt-5",
     source: "dashboard",

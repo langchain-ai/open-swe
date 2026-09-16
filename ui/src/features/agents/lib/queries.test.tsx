@@ -316,7 +316,7 @@ describe("sidebar queries", () => {
           items: [
             {
               id: `${requestParams.repo}-${offset}`,
-              repoFullName: requestParams.repo,
+              repos: requestParams.repo ? [requestParams.repo] : [],
             } as AgentThread,
           ],
           limit: requestParams.limit ?? SIDEBAR_PAGE_SIZE,

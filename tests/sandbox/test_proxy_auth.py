@@ -18,6 +18,7 @@ from agent.sandboxes.providers.langsmith import (
 )
 from agent.sandboxes.state import SandboxBackendProxy
 from agent.workspaces.store import Workspace
+from tests.support.repositories import FakeRepositories
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -588,7 +589,9 @@ class TestRefreshProxyOnSandboxReuse:
         )
 
     @pytest.mark.asyncio
-    async def test_refreshes_proxy_for_cached_langsmith_sandbox(self, monkeypatch) -> None:
+    async def test_refreshes_proxy_for_cached_langsmith_sandbox(
+        self, monkeypatch, fake_repositories: FakeRepositories
+    ) -> None:
         """Cached sandboxes should get a fresh proxy token before git operations."""
         monkeypatch.setattr(
             langgraph_sdk,
@@ -673,7 +676,7 @@ class TestRefreshProxyOnSandboxReuse:
 
     @pytest.mark.asyncio
     async def test_refreshes_proxy_when_reconnecting_to_existing_langsmith_sandbox(
-        self, monkeypatch
+        self, monkeypatch, fake_repositories: FakeRepositories
     ) -> None:
         """Reconnected sandboxes should also get a fresh proxy token."""
         monkeypatch.setattr(

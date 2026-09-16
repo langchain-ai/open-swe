@@ -5,15 +5,18 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlencode
+from uuid import UUID  # noqa: TC003
 
 from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.github.repositories import Repository
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
 from agent.source_context import SourceContext
+from agent.thread_repos import thread_repository_names
 from agent.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -38,18 +41,6 @@ _ThreadSortBy = Literal["created_at", "updated_at"]
 
 def _now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
-
-
-def _parse_repo(full_name: str | None) -> dict[str, str] | None:
-    if not isinstance(full_name, str):
-        return None
-    parts = full_name.strip().split("/", 1)
-    if len(parts) != 2:
-        return None
-    owner, name = parts[0].strip(), parts[1].strip()
-    if not owner or not name:
-        return None
-    return {"owner": owner, "name": name}
 
 
 def _thread_is_busy(thread: ThreadLike) -> bool:
@@ -138,27 +129,6 @@ def _assert_thread_postable(
         email, login=login
     ):
         raise HTTPException(403, "only admins can send messages in this thread")
-
-
-def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
-    owner = metadata.get("repo_owner")
-    name = metadata.get("repo_name")
-    if isinstance(owner, str) and isinstance(name, str) and owner and name:
-        return owner, name, f"{owner}/{name}"
-    repo = metadata.get("repo")
-    if isinstance(repo, dict):
-        o = repo.get("owner")
-        n = repo.get("name")
-        if isinstance(o, str) and isinstance(n, str) and o and n:
-            return o, n, f"{o}/{n}"
-    return "", "", ""
-
-
-def repo_config_from_metadata(metadata: Mapping[str, Any]) -> dict[str, str]:
-    owner, name, _ = _metadata_repo(metadata)
-    if owner and name:
-        return {"owner": owner, "name": name}
-    return {}
 
 
 def _run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
@@ -333,9 +303,10 @@ async def _thread_summary(
     *,
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
+    repositories: Mapping[UUID, Repository] | None = None,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
-    owner, name, full_name = _metadata_repo(metadata)
+    repo_names = await thread_repository_names(metadata, repositories)
     created_at = metadata.get("created_at_ms")
     if not isinstance(created_at, (int, float)):
         created_at = _thread_timestamp_ms(thread, "created_at")
@@ -374,8 +345,7 @@ async def _thread_summary(
     summary: dict[str, Any] = {
         "id": thread_id,
         "title": title,
-        "repo": name,
-        "repoFullName": full_name,
+        "repos": repo_names,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
@@ -434,10 +404,10 @@ async def _thread_summary(
     if not pull_requests and isinstance(pr_number, int) and isinstance(pr_url, str):
         pr_ref = parse_github_pr_url(pr_url)
         legacy_repo = (
-            full_name
-            if full_name.count("/") == 1
-            else f"{pr_ref.owner}/{pr_ref.repo}"
+            f"{pr_ref.owner}/{pr_ref.repo}"
             if pr_ref
+            else repo_names[0]
+            if len(repo_names) == 1
             else "unknown/unknown"
         )
         legacy_record = {

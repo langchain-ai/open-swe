@@ -689,8 +689,8 @@ async def test_one_unimportable_record_does_not_stop_the_others(
     assert sorted(fake_store.values(WORKSPACES_NAMESPACE)) == ["taken"]
     assert WORKSPACES.import_completed is False
     # Its repository already has an owner, so that owner still wins.
-    assert await workspace_for_repo("acme", "api") == "core"
-    assert await repo_is_routable("acme", "api") is True
+    assert await workspace_for_repo(Repository(full_name="acme/api")) == "core"
+    assert await repo_is_routable(Repository(full_name="acme/api")) is True
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -712,15 +712,15 @@ async def test_repositories_of_an_unreadable_record_fail_closed_until_it_imports
     # GitHub deliveries for the stranded repository are retried, not routed to
     # ``default`` or dropped; everything else routes as usual.
     with pytest.raises(WorkspaceLookupError):
-        await repo_is_routable("acme", "legacy")
-    assert await workspace_for_repo("acme", "legacy") is None
-    assert await repo_is_routable("acme", "oss") is True
-    assert await repo_is_routable("acme", "unrelated") is True
+        await repo_is_routable(Repository(full_name="acme/legacy"))
+    assert await workspace_for_repo(Repository(full_name="acme/legacy")) is None
+    assert await repo_is_routable(Repository(full_name="acme/oss")) is True
+    assert await repo_is_routable(Repository(full_name="acme/unrelated")) is True
 
     fake_store.seed(WORKSPACES_NAMESPACE, "legacy", {**broken, "snapshot_status": "none"})
     assert await import_store_records() == 1
     assert WORKSPACES.import_completed is True
-    assert await workspace_for_repo("acme", "legacy") == "legacy"
+    assert await workspace_for_repo(Repository(full_name="acme/legacy")) == "legacy"
 
 
 @pytest.mark.usefixtures("registry_db")

@@ -145,17 +145,15 @@ export function groupThreadsForView(
       (thread) => thread.pr?.state ?? "none"
     )
   }
-  const labels = new Set(
-    threads.map((thread) => thread.repoFullName || "No repository")
-  )
+  const labels = new Set(threads.map(repositoryGroupLabel))
   const definitions = [...labels]
     .sort((left, right) => left.localeCompare(right))
     .map((label) => ({ key: label, label }))
-  return buildGroups(
-    definitions,
-    threads,
-    (thread) => thread.repoFullName || "No repository"
-  )
+  return buildGroups(definitions, threads, repositoryGroupLabel)
+}
+
+function repositoryGroupLabel(thread: AgentThread): string {
+  return thread.repos.join(", ") || "No repository"
 }
 
 export function parseColumnOrder(value?: string): Array<string> {

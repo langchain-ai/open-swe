@@ -4,9 +4,12 @@ import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import HTTPException
 
+from agent.github.repositories import Repository
+from agent.thread_repos import legacy_repo, repository_names, thread_repository_ids
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
@@ -14,7 +17,6 @@ from agent.threads.summary import (
     _assert_thread_readable,
     _is_automation_thread,
     _is_thread_resolved,
-    _metadata_repo,
     _metadata_string,
     _refresh_latest_run_metadata,
     _thread_id,
@@ -101,6 +103,27 @@ def _search_matches(values: Sequence[object], query: str) -> bool:
     return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
 
 
+async def _repositories_by_id(threads: Sequence[ThreadLike]) -> dict[UUID, Repository]:
+    """One lookup for every repository id any of ``threads`` links to."""
+    ids: list[UUID] = []
+    for thread in threads:
+        for id in thread_repository_ids(_thread_metadata(thread)):
+            if id not in ids:
+                ids.append(id)
+    return {row.id: row for row in await Repository.get_many(ids)}
+
+
+async def _filter_repository_id(repo: str | None) -> UUID | None:
+    """The row id a ``repo=owner/name`` filter names, resolved once per request."""
+    if not repo or not repo.strip():
+        return None
+    try:
+        row = await Repository.get(repo.strip())
+    except ValueError:
+        return None
+    return row.id if row is not None else None
+
+
 def _metadata_matches_filters(
     metadata: Mapping[str, Any],
     *,
@@ -110,16 +133,23 @@ def _metadata_matches_filters(
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
     repo: str | None = None,
+    repo_id: UUID | None = None,
     ownerless: bool = False,
     admin_threads: bool | None = None,
+    repositories: Mapping[UUID, Repository] | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
     if thread_is_unlisted(metadata):
         return False
-    thread_repo = _metadata_repo(metadata)[2]
-    if repo and thread_repo.lower() != repo.lower():
-        return False
-    if ownerless and thread_repo:
+    ids = thread_repository_ids(metadata)
+    legacy = legacy_repo(metadata)
+    if repo:
+        if ids:
+            if repo_id is None or repo_id not in ids:
+                return False
+        elif legacy is None or legacy.key != repo.strip().lower():
+            return False
+    if ownerless and (ids or legacy is not None):
         return False
     if admin_threads is not None and (metadata.get("admin_thread") is True) is not admin_threads:
         return False
@@ -140,7 +170,11 @@ def _metadata_matches_filters(
         if not _search_matches(
             [
                 metadata.get("title", "Untitled agent"),
-                *_metadata_repo(metadata),
+                *(
+                    part
+                    for full_name in repository_names(metadata, repositories or {})
+                    for part in (full_name, *full_name.split("/"))
+                ),
                 metadata.get("branch_name"),
                 metadata.get("base_branch"),
                 metadata.get("pr_url"),
@@ -179,11 +213,11 @@ def _summary_matches_filters(
         pull_requests = summary.get("pullRequests")
         pull_requests = pull_requests if isinstance(pull_requests, list) else []
         pr = summary.get("pr")
+        summary_repos = summary.get("repos")
         if not _search_matches(
             [
                 summary.get("title"),
-                summary.get("repo"),
-                summary.get("repoFullName"),
+                *(summary_repos if isinstance(summary_repos, list) else ()),
                 summary.get("branch"),
                 *(pr.values() if isinstance(pr, dict) else ()),
                 *(
@@ -215,6 +249,7 @@ async def _summarize_thread(
     thread: ThreadLike,
     *,
     refresh_active_run: bool = True,
+    repositories: Mapping[UUID, Repository] | None = None,
 ) -> dict[str, Any]:
     latest_run_status = latest_run_id = None
     if refresh_active_run and _should_refresh_latest_run(thread):
@@ -225,6 +260,7 @@ async def _summarize_thread(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
+        repositories=repositories,
     )
 
 
@@ -233,6 +269,9 @@ async def _summarize_threads(
     threads: list[ThreadLike],
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
+    # One repository lookup for the whole page; rendering a thread must not
+    # cost a query of its own.
+    repositories = await _repositories_by_id(threads)
 
     async def summarize(thread: ThreadLike) -> dict[str, Any]:
         if not _should_refresh_latest_run(thread):
@@ -240,11 +279,13 @@ async def _summarize_threads(
                 client,
                 thread,
                 refresh_active_run=False,
+                repositories=repositories,
             )
         async with semaphore:
             return await _summarize_thread(
                 client,
                 thread,
+                repositories=repositories,
             )
 
     return list(await asyncio.gather(*(summarize(thread) for thread in threads)))
@@ -270,6 +311,7 @@ async def _collect_thread_candidates(
     sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
+    repo_id = await _filter_repository_id(repo)
     for search_filter in searches:
         matched_for_search = 0
         offset = 0
@@ -290,6 +332,7 @@ async def _collect_thread_candidates(
             )
             if not batch:
                 break
+            repositories = await _repositories_by_id(batch) if query else {}
             for thread in batch:
                 metadata = _thread_metadata(thread)
                 if thread_source(metadata) == "incidents_agent":
@@ -309,8 +352,10 @@ async def _collect_thread_candidates(
                     scope=scope,
                     automation_id=automation_id,
                     repo=repo,
+                    repo_id=repo_id,
                     ownerless=ownerless,
                     admin_threads=admin_threads,
+                    repositories=repositories,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -371,7 +416,7 @@ async def _pinned_thread_summaries(
     login: str,
     email: str | None,
 ) -> list[dict[str, Any]]:
-    async def load(thread_id: str) -> dict[str, Any] | None:
+    async def load(thread_id: str) -> ThreadLike | None:
         try:
             thread = await client.threads.get(thread_id)
         except Exception:  # noqa: BLE001
@@ -381,12 +426,18 @@ async def _pinned_thread_summaries(
             _thread_metadata(thread), login, email
         ):
             return None
-        return await _summarize_thread(client, thread)
+        return thread
 
-    summaries = await asyncio.gather(
+    loaded = await asyncio.gather(
         *(load(thread_id) for thread_id in await list_thread_pin_ids(login))
     )
-    return [summary for summary in summaries if summary is not None]
+    threads = [thread for thread in loaded if thread is not None]
+    repositories = await _repositories_by_id(threads)
+    return list(
+        await asyncio.gather(
+            *(_summarize_thread(client, thread, repositories=repositories) for thread in threads)
+        )
+    )
 
 
 async def list_dashboard_pinned_threads(
@@ -413,24 +464,34 @@ async def list_dashboard_thread_projects(
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
     )
+    repositories = await _repositories_by_id(candidates)
     projects: dict[str, dict[str, Any]] = {}
     for thread in candidates:
-        _, name, full_name = _metadata_repo(_thread_metadata(thread))
-        if not full_name:
-            continue
-        key = full_name.lower()
         updated_at = _thread_updated_ms(thread)
-        current = projects.get(key)
-        if current is None or updated_at > current["updatedAt"]:
-            projects[key] = {
-                "repoFullName": full_name,
-                "name": name,
-                "updatedAt": updated_at,
-            }
-    for project in projects.values():
-        owner, _, repo_name = str(project["repoFullName"]).partition("/")
-        project["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
-    return sorted(projects.values(), key=lambda project: project["updatedAt"], reverse=True)
+        for full_name in repository_names(_thread_metadata(thread), repositories):
+            current = projects.get(full_name.lower())
+            if current is None or updated_at > current["updatedAt"]:
+                projects[full_name.lower()] = {
+                    "repoFullName": full_name,
+                    "name": full_name.partition("/")[2],
+                    "updatedAt": updated_at,
+                }
+    known = {row.key: row for row in repositories.values()}
+    resolved: list[dict[str, Any]] = []
+    for key, project in projects.items():
+        repository = known.get(key)
+        if repository is None:
+            try:
+                repository = await Repository.ensure(str(project["repoFullName"]))
+            except ValueError:
+                logger.warning(
+                    "Skipping a thread project with an unusable repository name",
+                    extra={"project_repo": project["repoFullName"]},
+                )
+                continue
+        project["workspace"] = await workspace_for_repo(repository) or DEFAULT_WORKSPACE_SLUG
+        resolved.append(project)
+    return sorted(resolved, key=lambda project: project["updatedAt"], reverse=True)
 
 
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:

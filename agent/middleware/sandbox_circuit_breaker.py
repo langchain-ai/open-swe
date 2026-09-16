@@ -85,23 +85,17 @@ async def _get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     return channel_id, thread_ts
 
 
-def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
-    if not cfg.repo:
+async def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
+    repository = await cfg.target_repository()
+    if repository is None:
         return None
-    repo = {"owner": cfg.repo.owner, "name": cfg.repo.name}
-
-    target = cfg.github_pr_or_issue
-    if target is not None:
-        if target.repo and target.repo.owner and target.repo.name:
-            repo = {"owner": target.repo.owner, "name": target.repo.name}
-        if target.number is not None:
-            return repo, target.number
-
-    if cfg.github_issue is not None and cfg.github_issue.number is not None:
-        return repo, cfg.github_issue.number
-
-    if cfg.pr_number is not None:
-        return repo, cfg.pr_number
+    for number in (
+        cfg.github_pr_or_issue.number if cfg.github_pr_or_issue else None,
+        cfg.github_issue.number if cfg.github_issue else None,
+        cfg.pr_number,
+    ):
+        if number is not None:
+            return {"owner": repository.owner, "name": repository.name}, number
     return None
 
 
@@ -136,7 +130,7 @@ async def post_sandbox_unreachable_notification(
         await post_linear_notification(cfg.linear_issue.id, message)
         return
 
-    github_target = _get_github_target(cfg)
+    github_target = await _get_github_target(cfg)
     if github_target is not None:
         token = get_github_token(config) or await get_github_app_installation_token()
         if not token:

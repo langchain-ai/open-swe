@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from agent.linear import webhook as linear_webhook
+from tests.support.repositories import FakeRepositories
 
 
 def _full_issue(*, user_email: str | None = "zhen@example.com", user_name: str = "Zhen") -> dict:
@@ -45,7 +46,7 @@ def _run_process(
         thread_id,
         *,
         source,
-        repo_config=None,
+        repositories=(),
         github_login="",
         user_email="",
         title="",
@@ -92,7 +93,9 @@ def _run_process(
     )
 
 
-def test_linear_configurable_carries_github_login(fake_store: Any) -> None:
+def test_linear_configurable_carries_github_login(
+    fake_store: Any, fake_repositories: FakeRepositories
+) -> None:
     configurable, _upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -104,7 +107,9 @@ def test_linear_configurable_carries_github_login(fake_store: Any) -> None:
     assert configurable["user_email"] == "zhen@example.com"
 
 
-def test_linear_upsert_tags_thread_with_login(fake_store: Any) -> None:
+def test_linear_upsert_tags_thread_with_login(
+    fake_store: Any, fake_repositories: FakeRepositories
+) -> None:
     _configurable, upsert, _email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -114,7 +119,9 @@ def test_linear_upsert_tags_thread_with_login(fake_store: Any) -> None:
     assert upsert["user_email"] == "zhen@example.com"
 
 
-def test_linear_omits_login_when_unmapped(fake_store: Any) -> None:
+def test_linear_omits_login_when_unmapped(
+    fake_store: Any, fake_repositories: FakeRepositories
+) -> None:
     configurable, upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="nobody@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -125,7 +132,9 @@ def test_linear_omits_login_when_unmapped(fake_store: Any) -> None:
     assert upsert["github_login"] == ""
 
 
-def test_linear_description_images_stay_with_issue_without_comments(fake_store: Any) -> None:
+def test_linear_description_images_stay_with_issue_without_comments(
+    fake_store: Any, fake_repositories: FakeRepositories
+) -> None:
     issue = _full_issue()
     issue["description"] = "See ![issue](https://example.com/issue.png)"
     _configurable, _upsert, _email, content = _run_process(
@@ -139,7 +148,9 @@ def test_linear_description_images_stay_with_issue_without_comments(fake_store: 
     assert messages[1]["content"][1]["image_url"]["url"] == "https://example.com/issue.png"
 
 
-def test_linear_comment_images_stay_with_their_comments(fake_store: Any) -> None:
+def test_linear_comment_images_stay_with_their_comments(
+    fake_store: Any, fake_repositories: FakeRepositories
+) -> None:
     issue = _full_issue()
     issue["comments"]["nodes"] = [
         {
