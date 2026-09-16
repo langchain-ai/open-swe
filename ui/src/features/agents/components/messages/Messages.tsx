@@ -169,7 +169,12 @@ export const Messages = memo(function MessagesComponent({
                 pollWhileActive={pollWorkflowApprovalsWhileActive}
               />
             )}
-            {threadId && <MediaApprovalCard threadId={threadId} />}
+            {threadId && (
+              <MediaApprovalCard
+                threadId={threadId}
+                pollWhileActive={pollWorkflowApprovalsWhileActive}
+              />
+            )}
             <QueuedMessages queuedMessages={queuedMessages} />
             {footer}
             <ThinkingSpinner

@@ -55,7 +55,6 @@ SUPPORTED_CONTENT_TYPES: dict[str, str] = {
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
-    ".svg": "image/svg+xml",
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",
     ".webm": "video/webm",
@@ -86,6 +85,7 @@ def valid_repo_part(value: str) -> bool:
 
 def media_request_fingerprint(
     *,
+    thread_id: str,
     owner: str,
     repo: str,
     repo_id: int,
@@ -98,6 +98,7 @@ def media_request_fingerprint(
     """Content-addressed identity for one exact upload to one exact PR."""
     canonical = "\n".join(
         [
+            thread_id,
             owner.lower(),
             repo.lower(),
             str(repo_id),
@@ -144,11 +145,12 @@ async def create_media_request(
 ) -> tuple[dict[str, Any], bool]:
     """Insert the immutable pending request; returns (record, created).
 
-    The fingerprint primary key makes identical re-requests idempotent: a
-    duplicate returns the existing record without touching its state.
+    The fingerprint primary key makes identical active re-requests idempotent.
+    Requests that failed only because they expired are renewed in place.
     """
     digest = hashlib.sha256(media).hexdigest()
     fingerprint = media_request_fingerprint(
+        thread_id=thread_id,
         owner=owner,
         repo=repo,
         repo_id=repo_id,
@@ -173,13 +175,34 @@ async def create_media_request(
                     :digest, :media_base64, :requested_by, clock_timestamp(),
                     :expires_at_epoch
                 )
-                ON CONFLICT (fingerprint) DO NOTHING
+                ON CONFLICT (fingerprint) DO UPDATE SET
+                      status = :status,
+                      pull_title = EXCLUDED.pull_title,
+                      media_base64 = EXCLUDED.media_base64,
+                      requested_by = EXCLUDED.requested_by,
+                      requested_at = clock_timestamp(),
+                      expires_at_epoch = EXCLUDED.expires_at_epoch,
+                      decided_by = NULL,
+                      decided_at = NULL,
+                      asset_url = NULL,
+                      error = NULL
+                  WHERE (
+                      pr_media_request.status = :failed
+                      AND pr_media_request.error IN (
+                          'approval expired before a decision',
+                          'approval expired before execution'
+                      )
+                  ) OR (
+                      pr_media_request.status = :status
+                      AND pr_media_request.expires_at_epoch <= EXTRACT(EPOCH FROM clock_timestamp())
+                  )
                 """
                 ),
                 {
                     "fingerprint": fingerprint,
                     "thread_id": thread_id,
                     "status": MEDIA_REQUEST_PENDING,
+                    "failed": MEDIA_REQUEST_FAILED,
                     "owner": owner,
                     "repo": repo,
                     "repo_id": repo_id,

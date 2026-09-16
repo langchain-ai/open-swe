@@ -43,6 +43,7 @@ async def _create_pending(
 
 def test_fingerprint_is_content_addressed() -> None:
     kwargs: dict[str, Any] = {
+        "thread_id": THREAD,
         "owner": "Octo",
         "repo": "Repo",
         "repo_id": 42,
@@ -57,6 +58,9 @@ def test_fingerprint_is_content_addressed() -> None:
     )
     assert pr_media.media_request_fingerprint(**kwargs) != pr_media.media_request_fingerprint(
         **{**kwargs, "digest": hashlib.sha256(b"abcd").hexdigest()}
+    )
+    assert pr_media.media_request_fingerprint(**kwargs) != pr_media.media_request_fingerprint(
+        **{**kwargs, "thread_id": "other-thread"}
     )
 
 
@@ -101,6 +105,44 @@ async def test_create_is_idempotent_and_public_shape_hides_payload(media_db) -> 
     listed = await pr_media.list_media_requests(THREAD)
     assert [r["fingerprint"] for r in listed] == [record["fingerprint"]]
     assert await pr_media.get_media_request("other-thread", record["fingerprint"]) is None
+
+
+async def test_expired_request_is_renewed(media_db) -> None:
+    from sqlalchemy import text
+
+    from agent.database import postgres
+
+    record = await _create_pending()
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("UPDATE pr_media_request SET expires_at_epoch = 1 WHERE fingerprint = :fp"),
+            {"fp": record["fingerprint"]},
+        )
+
+    renewed, created = await pr_media.create_media_request(
+        THREAD,
+        owner="octo",
+        repo="repo",
+        repo_id=42,
+        pull_number=7,
+        pull_title="New title",
+        file_name="shot.png",
+        content_type="image/png",
+        media=MEDIA,
+        requested_by="bob",
+    )
+
+    assert created
+    assert renewed["status"] == pr_media.MEDIA_REQUEST_PENDING
+    assert renewed["expires_at_epoch"] > 1
+    assert renewed["requested_by"] == "bob"
+
+
+async def test_identical_request_is_scoped_to_thread(media_db) -> None:
+    first = await _create_pending()
+    second = await _create_pending(thread_id="other-thread")
+
+    assert first["fingerprint"] != second["fingerprint"]
 
 
 async def test_concurrent_claim_has_exactly_one_winner(media_db) -> None:

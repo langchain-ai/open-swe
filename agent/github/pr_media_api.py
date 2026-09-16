@@ -137,8 +137,8 @@ async def preview_media_request(
     if record is None:
         raise HTTPException(404, "media request not found")
     content_type = str(record.get("content_type") or "")
-    if not content_type.startswith("image/"):
-        raise HTTPException(415, "only image media can be previewed inline")
+    if not content_type.startswith("image/") or content_type == "image/svg+xml":
+        raise HTTPException(415, "only raster image media can be previewed inline")
     encoded = record.get("media_base64")
     if not isinstance(encoded, str) or not encoded:
         raise HTTPException(404, "media request has no payload")

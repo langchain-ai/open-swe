@@ -748,9 +748,9 @@ async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONRespons
             body=body.get("body", ""),
             draft=bool(body.get("draft", True)),
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("fake pull creation failed")
-        return JSONResponse({"message": str(exc)}, status_code=500)
+        return JSONResponse({"message": "pull creation failed"}, status_code=500)
     return JSONResponse(_gh_pr_json(pr), status_code=201)
 
 
