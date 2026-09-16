@@ -31,7 +31,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from agent.dashboard.workspace_settings_cache import cached_gateway_enabled
+from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token
 from agent.middleware import (
     BasePrepareRunMiddleware,
@@ -147,7 +147,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     backend = CompositeBackend(default=default_backend, routes={SKILLS_ROUTE: StateBackend()})
 
     model_id = DEFAULT_LLM_MODEL_ID
-    use_gateway = await cached_gateway_enabled(cfg.workspace_slug)
+    use_gateway = (await cached_workspace_settings(cfg.workspace_slug)).effective_gateway_enabled
     model_kwargs = provider_model_kwargs(
         model_id,
         None,

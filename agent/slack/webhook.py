@@ -634,7 +634,7 @@ async def _workspace_scoped_default_repo(candidate: Repo, workspace: str | None)
     owner = await workspace_for_repo(candidate.owner, candidate.name)
     if owner is None or owner == workspace:
         return candidate
-    scoped = await common.get_workspace_default_repo(workspace)
+    scoped = (await common.get_workspace_settings(workspace)).default_repo
     if not scoped:
         return None
     fallback = Repo.model_validate(scoped)

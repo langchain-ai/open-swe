@@ -9,7 +9,7 @@ that honour them. Per-repo style prompts live in :mod:`agent.review.styles`.
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
 
 from fastapi import APIRouter, HTTPException
@@ -421,10 +421,10 @@ def _set_fields(record: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _finish(merged: dict[str, Any]) -> dict[str, Any]:
+def _finish(merged: dict[str, Any]) -> WorkspaceSettings:
     for stale_field in _STALE_FIELDS:
         merged.pop(stale_field, None)
-    return normalize_workspace_settings_for_response(merged)
+    return WorkspaceSettings(normalize_workspace_settings_for_response(merged))
 
 
 async def _instance_record() -> dict[str, Any]:
@@ -440,7 +440,7 @@ async def _workspace_record(slug: str) -> dict[str, Any]:
     return _set_fields(record)
 
 
-async def get_instance_settings() -> dict[str, Any]:
+async def get_instance_settings() -> WorkspaceSettings:
     """The instance record merged over the hardcoded defaults.
 
     Every workspace inherits these; see :func:`get_workspace_settings` for what a
@@ -451,11 +451,11 @@ async def get_instance_settings() -> dict[str, Any]:
         instance = await _instance_record()
     except Exception:
         logger.warning("instance settings lookup failed; using defaults", exc_info=True)
-        return defaults
+        return WorkspaceSettings(defaults)
     return _finish({**defaults, **instance})
 
 
-async def get_workspace_settings(workspace: str | None = None) -> dict[str, Any]:
+async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
     """The settings a run in ``workspace`` sees.
 
     Tiered: the hardcoded defaults, then the instance record, then the
@@ -473,7 +473,7 @@ async def get_workspace_settings(workspace: str | None = None) -> dict[str, Any]
         overrides = await _workspace_record(slug)
     except Exception:
         logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
-        return defaults
+        return WorkspaceSettings(defaults)
     return _finish({**defaults, **instance, **overrides})
 
 
@@ -487,7 +487,7 @@ class WorkspaceSettingsView(TypedDict):
 async def workspace_settings_view(slug: str) -> WorkspaceSettingsView:
     overrides = await _workspace_record(slug)
     overrides.pop("updated_at", None)
-    return {"effective": await get_workspace_settings(slug), "overrides": overrides}
+    return {"effective": dict(await get_workspace_settings(slug)), "overrides": overrides}
 
 
 def _record_values(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
@@ -512,7 +512,7 @@ async def upsert_workspace_overrides(
     """
     fable_enabled = update.fable_enabled
     if fable_enabled is None:
-        fable_enabled = bool((await get_instance_settings())["fable_enabled"])
+        fable_enabled = (await get_instance_settings()).fable_enabled
     update.apply_fable_policy(fable_enabled=fable_enabled)
     value = {k: v for k, v in _record_values(update).items() if v is not None}
     await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
@@ -526,141 +526,6 @@ async def delete_workspace_settings(slug: str) -> None:
     await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
-
-
-async def get_workspace_default_repo(workspace: str | None = None) -> dict[str, str] | None:
-    settings = await get_workspace_settings(workspace)
-    return _parse_repo(settings.get("default_repo"))
-
-
-async def get_workspace_default_model(
-    role: Literal["agent", "reviewer", "chat"],
-    workspace: str | None = None,
-) -> tuple[str, str]:
-    """Return the default ``(model_id, reasoning_effort)`` for ``role`` in ``workspace``.
-
-    Always returns a valid pair, resolved in order: the admin-configured pair if
-    still supported; otherwise the newest supported model for the same provider
-    (so a stale Anthropic/OpenAI selection stays on its provider rather than
-    jumping cross-provider); otherwise the hardcoded global default from
-    :func:`agent.dashboard.options.default_model_pair`.
-
-    ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
-    admin setting is unset/invalid it inherits the **agent** default.
-    """
-    settings = await get_workspace_settings(workspace)
-    if role == "chat":
-        model = settings.get("default_chat_model")
-        effort = settings.get("default_chat_reasoning_effort")
-        if (
-            isinstance(model, str)
-            and isinstance(effort, str)
-            and model in SUPPORTED_MODEL_IDS
-            and model_supports_effort(model, effort)
-        ):
-            return _resolve_default_pair(model, effort)
-        # Inherit the Agent default when no chat-specific model is configured.
-        model = settings.get("default_agent_model")
-        effort = settings.get("default_agent_reasoning_effort")
-    elif role == "agent":
-        model = settings.get("default_agent_model")
-        effort = settings.get("default_agent_reasoning_effort")
-    else:
-        model = settings.get("default_reviewer_model")
-        effort = settings.get("default_reviewer_reasoning_effort")
-    return _resolve_default_pair(model, effort)
-
-
-async def get_workspace_default_model_pair(
-    role: Literal["agent", "reviewer"],
-    workspace: str | None = None,
-) -> tuple[tuple[str, str], tuple[str, str]]:
-    """Return default ``(main, subagent)`` model pairs for ``role`` from one store read."""
-    settings = await get_workspace_settings(workspace)
-    if role == "agent":
-        main = _resolve_default_pair(
-            settings.get("default_agent_model"),
-            settings.get("default_agent_reasoning_effort"),
-        )
-        subagent = _resolve_default_pair(
-            settings.get("default_agent_subagent_model"),
-            settings.get("default_agent_subagent_reasoning_effort"),
-        )
-    else:
-        main = _resolve_default_pair(
-            settings.get("default_reviewer_model"),
-            settings.get("default_reviewer_reasoning_effort"),
-        )
-        subagent = _resolve_default_pair(
-            settings.get("default_reviewer_subagent_model"),
-            settings.get("default_reviewer_subagent_reasoning_effort"),
-        )
-    return main, subagent
-
-
-async def get_workspace_agent_routing_models(
-    workspace: str | None = None,
-) -> dict[str, tuple[str, str]]:
-    settings = await get_workspace_settings(workspace)
-    tiers = ("fast", "fast_alt", "balanced", "performance")
-    models = {
-        tier: _resolve_default_pair(
-            settings.get(f"default_agent_routing_{tier}_model"),
-            settings.get(f"default_agent_routing_{tier}_reasoning_effort"),
-        )
-        for tier in tiers
-    }
-    fast_alt_probability = settings.get("default_agent_routing_fast_alt_probability")
-    # An explicit 0 probability is a valid "experiment off" configuration; only
-    # drop the alt model when no probability (or an unparseable one) was stored
-    # or the alt model was explicitly cleared.
-    if (
-        isinstance(fast_alt_probability, bool)
-        or not isinstance(fast_alt_probability, int | float)
-        or not 0.0 <= float(fast_alt_probability) <= 1.0
-        or float(fast_alt_probability) == 0.0
-    ):
-        models.pop("fast_alt", None)
-    return models
-
-
-def get_workspace_fast_alt_probability(settings: Mapping[str, Any]) -> float:
-    """The stored fast-route split, defaulting to the 50/50 experiment value.
-
-    An explicit ``0`` disables the experiment (no fast turns go to the alt
-    model); a missing or invalid value restores the default 50/50 split.
-    """
-    value = settings.get("default_agent_routing_fast_alt_probability")
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return 0.5
-    probability = float(value)
-    return probability if 0.0 <= probability <= 1.0 else 0.5
-
-
-async def get_workspace_default_grouping_model(workspace: str | None = None) -> tuple[str, str]:
-    """Return the default ``(model_id, reasoning_effort)`` for the
-    review diff-grouping pass.
-
-    When no grouping-specific model is configured (or it's no longer
-    supported), inherit the **reviewer subagent** default — the grouping
-    pass is a cheap, fast companion to the reviewer, so it should track that
-    cheaper tier rather than the primary reviewer model.
-    """
-    settings = await get_workspace_settings(workspace)
-    model = settings.get("default_grouping_model")
-    effort = settings.get("default_grouping_reasoning_effort")
-    if (
-        isinstance(model, str)
-        and isinstance(effort, str)
-        and model in SUPPORTED_MODEL_IDS
-        and model not in NON_DEFAULT_MODEL_IDS
-        and model_supports_effort(model, effort)
-    ):
-        return _resolve_default_pair(model, effort)
-    return _resolve_default_pair(
-        settings.get("default_reviewer_subagent_model"),
-        settings.get("default_reviewer_subagent_reasoning_effort"),
-    )
 
 
 def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) -> tuple[str, str]:
@@ -685,81 +550,6 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
     return ANTHROPIC_THREAD_TITLE_MODEL, ANTHROPIC_THREAD_TITLE_REASONING_EFFORT
 
 
-async def get_workspace_default_thread_title_model(workspace: str | None = None) -> tuple[str, str]:
-    settings = await get_workspace_settings(workspace)
-    model = settings.get("default_thread_title_model")
-    effort = settings.get("default_thread_title_reasoning_effort")
-    if (
-        isinstance(model, str)
-        and isinstance(effort, str)
-        and model in SUPPORTED_MODEL_IDS
-        and model not in NON_DEFAULT_MODEL_IDS
-        and model_supports_effort(model, effort)
-    ):
-        pair = _resolve_default_pair(model, effort)
-    else:
-        pair = DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
-    return _gate_openai_title_model(
-        pair, gateway_enabled=resolve_gateway_enabled(settings.get("gateway_enabled"))
-    )
-
-
-async def get_workspace_review_trace_links_enabled(workspace: str | None = None) -> bool:
-    """Return whether GitHub review bodies should include a LangSmith trace link."""
-    settings = await get_workspace_settings(workspace)
-    return bool(settings.get("review_trace_links", True))
-
-
-async def get_workspace_model_routing_enabled(workspace: str | None = None) -> bool:
-    """Return whether adaptive model routing is enabled for the workspace."""
-    settings = await get_workspace_settings(workspace)
-    value = settings.get("model_routing_enabled")
-    return value if isinstance(value, bool) else False
-
-
-async def get_workspace_gateway_enabled(workspace: str | None = None) -> bool | None:
-    """Return the stored LLM Gateway toggle (``None`` means inherit the env default)."""
-    settings = await get_workspace_settings(workspace)
-    value = settings.get("gateway_enabled")
-    return value if isinstance(value, bool) else None
-
-
-async def get_workspace_fable_enabled(workspace: str | None = None) -> bool:
-    """Return whether Fable models are enabled for the workspace."""
-    settings = await get_workspace_settings(workspace)
-    value = settings.get("fable_enabled")
-    return bool(value) if isinstance(value, bool) else False
-
-
-async def get_effective_gateway_enabled(workspace: str | None = None) -> bool:
-    """Resolve whether LLM Gateway routing is on: the workspace's setting, else the env default."""
-    return resolve_gateway_enabled(await get_workspace_gateway_enabled(workspace))
-
-
-async def get_org_review_guidelines(workspace: str | None = None) -> str | None:
-    """Return the reviewer guidelines the workspace resolves to, if any."""
-    settings = await get_workspace_settings(workspace)
-    value = settings.get("org_guidelines")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
-async def get_workspace_default_subagent_model(
-    role: Literal["agent", "reviewer"],
-    workspace: str | None = None,
-) -> tuple[str, str]:
-    """Return the default subagent ``(model_id, reasoning_effort)`` for ``role`` in ``workspace``."""
-    settings = await get_workspace_settings(workspace)
-    if role == "agent":
-        model = settings.get("default_agent_subagent_model")
-        effort = settings.get("default_agent_subagent_reasoning_effort")
-    else:
-        model = settings.get("default_reviewer_subagent_model")
-        effort = settings.get("default_reviewer_subagent_reasoning_effort")
-    return _resolve_default_pair(model, effort)
-
-
 def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
     """Supported pair if valid, else same-provider fallback, else global default."""
     if (
@@ -774,6 +564,191 @@ def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
     if provider_pair is not None:
         return provider_pair
     return default_model_pair()
+
+
+class WorkspaceSettings(Mapping[str, Any]):
+    """The settings a run in one workspace sees, and the choices derived from them.
+
+    A read-only mapping of the effective fields (hardcoded defaults, then the
+    instance record, then the workspace's overrides) plus the one place the
+    derivation rules live: which model a role runs, whether a toggle is on, and
+    so on. Built by :func:`get_workspace_settings`.
+    """
+
+    def __init__(self, values: Mapping[str, Any]) -> None:
+        self._values = dict(values)
+
+    def __getitem__(self, key: str) -> Any:
+        return self._values[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def __repr__(self) -> str:
+        return f"WorkspaceSettings({self._values!r})"
+
+    @property
+    def default_repo(self) -> dict[str, str] | None:
+        return _parse_repo(self.get("default_repo"))
+
+    def default_model(self, role: Literal["agent", "reviewer", "chat"]) -> tuple[str, str]:
+        """The default ``(model_id, reasoning_effort)`` for ``role``.
+
+        Always a valid pair, resolved in order: the configured pair if still
+        supported; otherwise the newest supported model for the same provider
+        (so a stale Anthropic/OpenAI selection stays on its provider rather
+        than jumping cross-provider); otherwise the hardcoded global default
+        from :func:`agent.dashboard.options.default_model_pair`.
+
+        ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
+        setting is unset/invalid it inherits the **agent** default.
+        """
+        if role == "chat":
+            model = self.get("default_chat_model")
+            effort = self.get("default_chat_reasoning_effort")
+            if (
+                isinstance(model, str)
+                and isinstance(effort, str)
+                and model in SUPPORTED_MODEL_IDS
+                and model_supports_effort(model, effort)
+            ):
+                return _resolve_default_pair(model, effort)
+            # Inherit the Agent default when no chat-specific model is configured.
+            model = self.get("default_agent_model")
+            effort = self.get("default_agent_reasoning_effort")
+        elif role == "agent":
+            model = self.get("default_agent_model")
+            effort = self.get("default_agent_reasoning_effort")
+        else:
+            model = self.get("default_reviewer_model")
+            effort = self.get("default_reviewer_reasoning_effort")
+        return _resolve_default_pair(model, effort)
+
+    def default_subagent_model(self, role: Literal["agent", "reviewer"]) -> tuple[str, str]:
+        """The default subagent ``(model_id, reasoning_effort)`` for ``role``."""
+        if role == "agent":
+            model = self.get("default_agent_subagent_model")
+            effort = self.get("default_agent_subagent_reasoning_effort")
+        else:
+            model = self.get("default_reviewer_subagent_model")
+            effort = self.get("default_reviewer_subagent_reasoning_effort")
+        return _resolve_default_pair(model, effort)
+
+    def default_model_pair(
+        self, role: Literal["agent", "reviewer"]
+    ) -> tuple[tuple[str, str], tuple[str, str]]:
+        """The default ``(main, subagent)`` model pairs for ``role``."""
+        return self.default_model(role), self.default_subagent_model(role)
+
+    @property
+    def agent_routing_models(self) -> dict[str, tuple[str, str]]:
+        tiers = ("fast", "fast_alt", "balanced", "performance")
+        models = {
+            tier: _resolve_default_pair(
+                self.get(f"default_agent_routing_{tier}_model"),
+                self.get(f"default_agent_routing_{tier}_reasoning_effort"),
+            )
+            for tier in tiers
+        }
+        fast_alt_probability = self.get("default_agent_routing_fast_alt_probability")
+        # An explicit 0 probability is a valid "experiment off" configuration; only
+        # drop the alt model when no probability (or an unparseable one) was stored
+        # or the alt model was explicitly cleared.
+        if (
+            isinstance(fast_alt_probability, bool)
+            or not isinstance(fast_alt_probability, int | float)
+            or not 0.0 <= float(fast_alt_probability) <= 1.0
+            or float(fast_alt_probability) == 0.0
+        ):
+            models.pop("fast_alt", None)
+        return models
+
+    @property
+    def fast_alt_probability(self) -> float:
+        """The stored fast-route split, defaulting to the 50/50 experiment value.
+
+        An explicit ``0`` disables the experiment (no fast turns go to the alt
+        model); a missing or invalid value restores the default 50/50 split.
+        """
+        value = self.get("default_agent_routing_fast_alt_probability")
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return 0.5
+        probability = float(value)
+        return probability if 0.0 <= probability <= 1.0 else 0.5
+
+    @property
+    def default_grouping_model(self) -> tuple[str, str]:
+        """The default ``(model_id, reasoning_effort)`` for the review diff-grouping pass.
+
+        When no grouping-specific model is configured (or it's no longer
+        supported), inherit the **reviewer subagent** default: the grouping
+        pass is a cheap, fast companion to the reviewer, so it should track that
+        cheaper tier rather than the primary reviewer model.
+        """
+        model = self.get("default_grouping_model")
+        effort = self.get("default_grouping_reasoning_effort")
+        if (
+            isinstance(model, str)
+            and isinstance(effort, str)
+            and model in SUPPORTED_MODEL_IDS
+            and model not in NON_DEFAULT_MODEL_IDS
+            and model_supports_effort(model, effort)
+        ):
+            return _resolve_default_pair(model, effort)
+        return self.default_subagent_model("reviewer")
+
+    @property
+    def default_thread_title_model(self) -> tuple[str, str]:
+        model = self.get("default_thread_title_model")
+        effort = self.get("default_thread_title_reasoning_effort")
+        if (
+            isinstance(model, str)
+            and isinstance(effort, str)
+            and model in SUPPORTED_MODEL_IDS
+            and model not in NON_DEFAULT_MODEL_IDS
+            and model_supports_effort(model, effort)
+        ):
+            pair = _resolve_default_pair(model, effort)
+        else:
+            pair = DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
+        return _gate_openai_title_model(pair, gateway_enabled=self.effective_gateway_enabled)
+
+    @property
+    def review_trace_links_enabled(self) -> bool:
+        """Whether GitHub review bodies should include a LangSmith trace link."""
+        return bool(self.get("review_trace_links", True))
+
+    @property
+    def model_routing_enabled(self) -> bool:
+        value = self.get("model_routing_enabled")
+        return value if isinstance(value, bool) else False
+
+    @property
+    def gateway_enabled(self) -> bool | None:
+        """The stored LLM Gateway toggle (``None`` means inherit the env default)."""
+        value = self.get("gateway_enabled")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def effective_gateway_enabled(self) -> bool:
+        """Whether LLM Gateway routing is on: the stored toggle, else the env default."""
+        return resolve_gateway_enabled(self.gateway_enabled)
+
+    @property
+    def fable_enabled(self) -> bool:
+        value = self.get("fable_enabled")
+        return bool(value) if isinstance(value, bool) else False
+
+    @property
+    def org_review_guidelines(self) -> str | None:
+        """The reviewer guidelines supplement, if any."""
+        value = self.get("org_guidelines")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
 
 
 router = APIRouter(tags=["settings"])
@@ -798,7 +773,7 @@ async def _existing_workspace(raw: str) -> str:
 @router.get("/team-settings", include_in_schema=False)
 async def api_get_instance_settings(_session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
     """The instance record: what every workspace inherits."""
-    return await get_instance_settings()
+    return dict(await get_instance_settings())
 
 
 @router.put("/settings")

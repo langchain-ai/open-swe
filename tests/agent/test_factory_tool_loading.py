@@ -11,12 +11,20 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.middleware.plan_mode import PlanModeMiddleware
 from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.server import get_agent
 
 _START_TIMEOUT_SECONDS = 2.0
+
+_MODEL_DEFAULTS = {
+    "default_agent_model": "openai:gpt-5.6-sol",
+    "default_agent_reasoning_effort": "medium",
+    "default_agent_subagent_model": "openai:gpt-5.6-sol",
+    "default_agent_subagent_reasoning_effort": "low",
+}
 
 
 class _DummyAgent:
@@ -94,9 +102,9 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
             return_value="/workspace",
         ),
         patch(
-            "agent.server.cached_workspace_default_model_pair",
+            "agent.server.cached_workspace_settings",
             new_callable=AsyncMock,
-            return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
+            return_value=WorkspaceSettings(_MODEL_DEFAULTS),
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server.load_thread_settings", new_callable=AsyncMock, return_value={}),

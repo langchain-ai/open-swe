@@ -1,5 +1,4 @@
 import runpy
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -20,8 +19,8 @@ from agent.dashboard.options import (
 )
 from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
 from agent.dashboard.workspace_settings import (
+    WorkspaceSettings,
     WorkspaceSettingsUpdate,
-    get_workspace_default_model,
     normalize_workspace_settings_for_response,
 )
 
@@ -124,12 +123,7 @@ async def test_team_default_stale_anthropic_stays_on_provider() -> None:
         "default_agent_model": STALE_ANTHROPIC,
         "default_agent_reasoning_effort": "xhigh",
     }
-    with patch(
-        "agent.dashboard.workspace_settings.get_workspace_settings",
-        new_callable=AsyncMock,
-        return_value=settings,
-    ):
-        assert await get_workspace_default_model("agent") == (SUPPORTED_ANTHROPIC, "xhigh")
+    assert WorkspaceSettings(settings).default_model("agent") == (SUPPORTED_ANTHROPIC, "xhigh")
 
 
 @pytest.mark.asyncio
@@ -138,12 +132,7 @@ async def test_team_default_unknown_provider_falls_back_to_global() -> None:
         "default_reviewer_model": "mystery:model",
         "default_reviewer_reasoning_effort": "high",
     }
-    with patch(
-        "agent.dashboard.workspace_settings.get_workspace_settings",
-        new_callable=AsyncMock,
-        return_value=settings,
-    ):
-        assert await get_workspace_default_model("reviewer") == default_model_pair()
+    assert WorkspaceSettings(settings).default_model("reviewer") == default_model_pair()
 
 
 def test_profile_stale_anthropic_upgrades_to_supported() -> None:

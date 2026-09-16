@@ -18,10 +18,18 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.run_config import RunConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 from agent.server import DesktopAgentState, _registered_tool_name, get_agent, workspace_slug
+
+_MODEL_DEFAULTS = {
+    "default_agent_model": "openai:gpt-5.6-sol",
+    "default_agent_reasoning_effort": "medium",
+    "default_agent_subagent_model": "openai:gpt-5.6-sol",
+    "default_agent_subagent_reasoning_effort": "low",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -126,18 +134,19 @@ async def _capture_create_deep_agent_kwargs(
             return_value="/workspace",
         ),
         patch(
-            "agent.server.cached_workspace_default_model_pair",
+            "agent.server.cached_workspace_settings",
             new_callable=AsyncMock,
-            return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
-        ),
-        patch(
-            "agent.server.cached_agent_routing_models",
-            new_callable=AsyncMock,
-            return_value={
-                "fast": ("google_genai:gemini-3.8-flash", "low"),
-                "balanced": ("openai:gpt-5.6-sol", "medium"),
-                "performance": ("anthropic:claude-opus-5", "high"),
-            },
+            return_value=WorkspaceSettings(
+                {
+                    **_MODEL_DEFAULTS,
+                    "default_agent_routing_fast_model": "google_genai:gemini-3.8-flash",
+                    "default_agent_routing_fast_reasoning_effort": "low",
+                    "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
+                    "default_agent_routing_balanced_reasoning_effort": "medium",
+                    "default_agent_routing_performance_model": "anthropic:claude-opus-5",
+                    "default_agent_routing_performance_reasoning_effort": "high",
+                }
+            ),
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
         patch(
@@ -190,27 +199,28 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         await release.wait()
         return MagicMock()
 
-    async def load_defaults(*args: object) -> tuple[tuple[str, str], tuple[str, str]]:
+    async def load_defaults(*args: object) -> WorkspaceSettings:
         del args
         await started.wait()
-        return (("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low"))
+        return WorkspaceSettings(
+            {
+                **_MODEL_DEFAULTS,
+                "default_agent_routing_fast_model": "openai:gpt-5.6-sol",
+                "default_agent_routing_fast_reasoning_effort": "low",
+                "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
+                "default_agent_routing_balanced_reasoning_effort": "medium",
+                "default_agent_routing_performance_model": "openai:gpt-5.6-sol",
+                "default_agent_routing_performance_reasoning_effort": "high",
+                "gateway_enabled": False,
+                "fable_enabled": True,
+            }
+        )
 
     SANDBOX_BACKENDS.pop("thread-ctx", None)
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
-        patch("agent.server.cached_workspace_default_model_pair", side_effect=load_defaults),
-        patch(
-            "agent.server.cached_agent_routing_models",
-            new_callable=AsyncMock,
-            return_value={
-                "fast": ("openai:gpt-5.6-sol", "low"),
-                "balanced": ("openai:gpt-5.6-sol", "medium"),
-                "performance": ("openai:gpt-5.6-sol", "high"),
-            },
-        ),
-        patch("agent.server.cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
+        patch("agent.server.cached_workspace_settings", side_effect=load_defaults),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
-        patch("agent.server.cached_fable_enabled", new_callable=AsyncMock, return_value=True),
         patch("agent.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),

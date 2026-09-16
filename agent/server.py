@@ -63,19 +63,8 @@ from agent.dashboard.options import (
     model_supports_effort,
 )
 from agent.dashboard.user_mappings import email_for_login
-from agent.dashboard.workspace_settings import (
-    get_workspace_default_repo,
-    get_workspace_fast_alt_probability,
-)
-from agent.dashboard.workspace_settings_cache import (
-    cached_agent_routing_models,
-    cached_fable_enabled,
-    cached_gateway_enabled,
-    cached_model_routing_enabled,
-    cached_thread_title_model,
-    cached_workspace_default_model_pair,
-    cached_workspace_settings,
-)
+from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
+from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
@@ -287,7 +276,7 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
         return None
 
     try:
-        return await get_workspace_default_repo(workspace_slug(cfg))
+        return (await get_workspace_settings(workspace_slug(cfg))).default_repo
     except Exception:
         logger.debug("Failed to load the workspace default repo for prompt", exc_info=True)
         return None
@@ -918,46 +907,39 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
+    settings: WorkspaceSettings | None = None
     if local_run:
         from agent.dashboard.options import default_model_pair
 
-        team_defaults = (default_model_pair(), default_model_pair())
+        model_defaults = (default_model_pair(), default_model_pair())
         routing_defaults = {
             "fast": default_model_pair(),
             "balanced": default_model_pair(),
             "performance": default_model_pair(),
         }
         fast_alt_probability = 0.0
-        title_defaults = team_defaults[0]
+        title_defaults = model_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
         fable_enabled = False
     else:
         async with aphase(thread_id, "factory.settings_defaults"):
-            (
-                team_defaults,
-                routing_defaults,
-                title_defaults,
-                use_gateway,
-                profile,
-                fable_enabled,
-            ) = await asyncio.gather(
-                cached_workspace_default_model_pair("agent", settings_workspace),
-                cached_agent_routing_models(settings_workspace),
-                cached_thread_title_model(settings_workspace),
-                cached_gateway_enabled(settings_workspace),
+            settings, profile = await asyncio.gather(
+                cached_workspace_settings(settings_workspace),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
-                cached_fable_enabled(settings_workspace),
             )
-            fast_alt_probability = get_workspace_fast_alt_probability(
-                await cached_workspace_settings(settings_workspace)
-            )
+            model_defaults = settings.default_model_pair("agent")
+            routing_defaults = settings.agent_routing_models
+            title_defaults = settings.default_thread_title_model
+            use_gateway = settings.effective_gateway_enabled
+            fable_enabled = settings.fable_enabled
+            fast_alt_probability = settings.fast_alt_probability
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
-    (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
+    (model_id, profile_effort), (subagent_model_id, subagent_effort) = model_defaults
     title_model_id, title_effort = title_defaults
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
@@ -990,9 +972,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # User preference overrides the workspace's toggle; None inherits it.
     adaptive_model_routing = profile_model_routing_enabled(profile)
     if adaptive_model_routing is None:
-        adaptive_model_routing = (
-            False if local_run else await cached_model_routing_enabled(settings_workspace)
-        )
+        adaptive_model_routing = settings.model_routing_enabled if settings else False
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model

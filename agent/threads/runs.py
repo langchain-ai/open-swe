@@ -24,8 +24,7 @@ from agent.dashboard.options import (
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.dashboard.workspace_settings import (
-    get_workspace_default_model,
-    get_workspace_fable_enabled,
+    get_workspace_settings,
 )
 from agent.input_messages import (
     PersonIdentity,
@@ -116,7 +115,8 @@ async def _resolve_agent_model_choice(
     effort: str | None,
     workspace: str | None,
 ) -> tuple[str, str]:
-    resolved_model, resolved_effort = await get_workspace_default_model("agent", workspace)
+    settings = await get_workspace_settings(workspace)
+    resolved_model, resolved_effort = settings.default_model("agent")
     if model_id not in DEPRECATED_MODEL_IDS:
         profile_model, profile_effort = normalize_profile_overrides(profile)
         if profile_model and profile_effort:
@@ -127,7 +127,7 @@ async def _resolve_agent_model_choice(
     resolved_model, resolved_effort = gate_fable_model(
         resolved_model,
         resolved_effort,
-        fable_enabled=await get_workspace_fable_enabled(workspace),
+        fable_enabled=settings.fable_enabled,
     )
     if not isinstance(resolved_effort, str):
         raise ValueError("workspace default model must include a reasoning effort")

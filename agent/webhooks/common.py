@@ -42,10 +42,7 @@ from agent.dashboard.user_mappings import (
 from agent.dashboard.user_mappings import (
     refresh_cache as refresh_user_mapping_cache,  # noqa: F401
 )
-from agent.dashboard.workspace_settings import (
-    get_workspace_default_repo,
-    get_workspace_settings,
-)
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dispatch import dispatch_agent_run
 from agent.github.app import (
     get_github_app_installation_token,  # noqa: F401
@@ -255,7 +252,7 @@ __all__ = [
     "get_slack_repo_config",
     "get_slack_user_info",
     "get_slack_user_names",
-    "get_workspace_default_repo",
+    "get_workspace_settings",
     "get_valid_access_token",
     "has_access_token_record",
     "is_bot_token_only_mode",
@@ -796,9 +793,9 @@ async def get_slack_repo_config(
     if not repo_config:
         # A channel bound to a workspace takes the default repository that
         # workspace resolves to: its own override, else the instance record's.
-        repo_config = await get_workspace_default_repo(
-            await workspace_for_slack_channel(channel_id)
-        )
+        repo_config = (
+            await get_workspace_settings(await workspace_for_slack_channel(channel_id))
+        ).default_repo
 
     if not repo_config and default_owner and default_name:
         repo_config = {"owner": default_owner, "name": default_name}

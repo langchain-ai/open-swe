@@ -144,10 +144,12 @@ async def test_cached_reads_do_not_leak_across_workspaces(fake_store: FakeStore)
         "oss", WorkspaceSettingsUpdate(org_guidelines="be public", fable_enabled=False)
     )
 
-    assert await workspace_settings_cache.cached_org_review_guidelines("default") == "internal only"
-    assert await workspace_settings_cache.cached_org_review_guidelines("oss") == "be public"
-    assert await workspace_settings_cache.cached_fable_enabled("default") is True
-    assert await workspace_settings_cache.cached_fable_enabled("oss") is False
+    default_settings = await workspace_settings_cache.cached_workspace_settings("default")
+    oss_settings = await workspace_settings_cache.cached_workspace_settings("oss")
+    assert default_settings.org_review_guidelines == "internal only"
+    assert oss_settings.org_review_guidelines == "be public"
+    assert default_settings.fable_enabled is True
+    assert oss_settings.fable_enabled is False
     assert (await workspace_settings_cache.cached_workspace_settings("oss"))[
         "org_guidelines"
     ] == "be public"

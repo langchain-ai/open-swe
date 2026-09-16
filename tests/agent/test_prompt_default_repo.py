@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from agent import server
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.run_config import RunConfig
 
 
@@ -19,10 +20,10 @@ from agent.run_config import RunConfig
 def test_resolve_prompt_default_repo_never_loads_team_default(
     monkeypatch: pytest.MonkeyPatch, config: RunConfig, expected: dict[str, str] | None
 ) -> None:
-    async def fake_get_workspace_default_repo() -> dict[str, str] | None:
-        raise AssertionError("workspace default should not be loaded")
+    async def fake_get_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
+        raise AssertionError("workspace settings should not be loaded")
 
-    monkeypatch.setattr(server, "get_workspace_default_repo", fake_get_workspace_default_repo)
+    monkeypatch.setattr(server, "get_workspace_settings", fake_get_workspace_settings)
 
     assert asyncio.run(server._resolve_prompt_default_repo(config)) == expected
 
@@ -32,13 +33,11 @@ def test_resolve_prompt_default_repo_falls_back_to_team_default(
 ) -> None:
     seen: list[str | None] = []
 
-    async def fake_get_workspace_default_repo(
-        workspace: str | None = None,
-    ) -> dict[str, str] | None:
+    async def fake_get_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
         seen.append(workspace)
-        return {"owner": "team", "name": "repo"}
+        return WorkspaceSettings({"default_repo": "team/repo"})
 
-    monkeypatch.setattr(server, "get_workspace_default_repo", fake_get_workspace_default_repo)
+    monkeypatch.setattr(server, "get_workspace_settings", fake_get_workspace_settings)
 
     repo = asyncio.run(server._resolve_prompt_default_repo(RunConfig(workspace="oss")))
 

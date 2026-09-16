@@ -10,11 +10,7 @@ from agent.dashboard.options import (
     gate_fable_model,
     models_with_profile_context_windows,
 )
-from agent.dashboard.workspace_settings import (
-    get_workspace_default_model,
-    get_workspace_default_subagent_model,
-    get_workspace_fable_enabled,
-)
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, slugify
 
 router = APIRouter(tags=["options"])
@@ -32,9 +28,10 @@ async def options(workspace: str = DEFAULT_WORKSPACE_SLUG) -> dict[str, Any]:
         workspace = slugify(workspace)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    agent_model, agent_effort = await get_workspace_default_model("agent", workspace)
-    subagent_model, subagent_effort = await get_workspace_default_subagent_model("agent", workspace)
-    fable_enabled = await get_workspace_fable_enabled(workspace)
+    settings = await get_workspace_settings(workspace)
+    agent_model, agent_effort = settings.default_model("agent")
+    subagent_model, subagent_effort = settings.default_subagent_model("agent")
+    fable_enabled = settings.fable_enabled
     # Never advertise a default that isn't in the selectable list: when Fable is
     # off, gate a stale Fable default down to its non-Fable fallback so the Cloud
     # Agents page (and the PUT /profile it drives) don't choke on it.
