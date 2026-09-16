@@ -1099,6 +1099,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     source = cfg.source or "dashboard"
     configurable["source"] = source
+    configurable["resolved_agent_model_id"] = model_id
     user_email = cfg.user_email or ""
 
     # Plan mode is entered only when the model decides to (the `enter_plan_mode`
