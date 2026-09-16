@@ -17,7 +17,7 @@ from agent.prompts import load_prompt, render_prompt
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "fast_alt", "balanced", "performance"]
-RoutingMode = Literal["auto", "performant"]
+RoutingMode = Literal["auto", "performance"]
 
 # A/B experiment: "fast" sends a share of fast-routed turns to a second model
 # (``fast_alt``) so the two can be compared under real traffic. The share is
@@ -125,7 +125,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return "performance"
         if model_route := state.get("model_route"):
             return model_route
-        if self._routing_mode == "performant":
+        if self._routing_mode == "performance":
             return "performance"
         messages = state.get("messages", [])
         approved_plan = next(

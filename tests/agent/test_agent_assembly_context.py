@@ -298,7 +298,7 @@ async def test_model_routing_control_uses_performance_model() -> None:
     ]
     assert "ModelSelectionMiddleware" in middleware_names
     assert "model_routing_mode" not in config["configurable"]
-    assert config["metadata"]["model_routing_mode"] == "performant"
+    assert config["metadata"]["model_routing_mode"] == "performance"
     assert config["metadata"]["model_routing_applied"] is True
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
