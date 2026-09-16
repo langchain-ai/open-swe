@@ -668,6 +668,26 @@ async def post_slack_thread_reply_with_ts(
     )
 
 
+async def post_slack_ephemeral_reply(
+    channel_id: str,
+    user_id: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
+    agent_thread_id: str | None = None,
+) -> bool:
+    """Answer one person in a channel, carrying the same web link a thread reply would."""
+    dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
+    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    return await post_slack_ephemeral_message(
+        channel_id,
+        user_id,
+        append_slack_web_link_footer(text, dashboard_url, usage),
+        blocks=blocks,
+    )
+
+
 async def post_slack_top_level_message_with_ts(
     channel_id: str,
     text: str,
