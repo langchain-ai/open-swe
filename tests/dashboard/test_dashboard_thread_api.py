@@ -1,9 +1,10 @@
 import base64
 import json
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from xml.etree import ElementTree
 
 import pytest
@@ -1578,6 +1579,31 @@ async def test_run_cancel_rejects_unsurfaced_thread(monkeypatch) -> None:
     with pytest.raises(HTTPException) as exc_info:
         await thread_proxy.proxy_dashboard_thread_run_cancel("tid", "run-1", "teammate")
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.parametrize("failure", [None, ConnectionError("upstream disconnected")])
+async def test_thread_stream_disconnect_is_not_clean_eof(
+    monkeypatch: pytest.MonkeyPatch, failure: ConnectionError | None
+) -> None:
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b": heartbeat\n\n"
+        if failure:
+            raise failure
+
+    response = MagicMock()
+    response.aiter_bytes.side_effect = chunks
+    client = MagicMock()
+    client.stream.return_value.__aenter__ = AsyncMock(return_value=response)
+    factory = MagicMock()
+    factory.return_value.__aenter__ = AsyncMock(return_value=client)
+    monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", factory)
+    monkeypatch.setattr(thread_proxy, "langgraph_url", lambda: "http://langgraph")
+    monkeypatch.setattr(thread_proxy, "langgraph_proxy_headers", lambda **kwargs: {})
+
+    stream = thread_proxy.stream_thread_events("tid", b"{}", "application/json")
+    assert await anext(stream) == b": heartbeat\n\n"
+    with pytest.raises(ConnectionError):
+        await anext(stream)
 
 
 async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:

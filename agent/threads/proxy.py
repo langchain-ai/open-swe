@@ -86,18 +86,15 @@ async def stream_thread_events(
     try:
         async with httpx2.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
             async with client.stream("POST", url, content=body, headers=headers) as response:
-                if response.status_code >= 400:
-                    error_body = await response.aread()
-                    payload = {
-                        "status": response.status_code,
-                        "detail": error_body.decode(errors="replace") or response.reason_phrase,
-                    }
-                    yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
-                    return
+                response.raise_for_status()
                 async for chunk in response.aiter_bytes():
                     yield chunk
+                raise ConnectionError("LangGraph thread event stream ended unexpectedly")
     except Exception:
-        logger.warning("LangGraph stream/events proxy closed for %s", thread_id, exc_info=True)
+        logger.warning(
+            "LangGraph stream/events proxy closed", extra={"thread_id": thread_id}, exc_info=True
+        )
+        raise
 
 
 async def _observe_dashboard_run_ttft(
