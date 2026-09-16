@@ -42,14 +42,6 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   all: "All time",
 }
 
-<<<<<<< HEAD
-function safeModelLabel(model: string): string {
-  const sanitized = model.replace(/[^A-Za-z0-9._:/+-]/g, "-")
-  const lastPathComponent = sanitized.split("/").at(-1) ?? ""
-  return lastPathComponent.slice(0, 48).replace(/^-+|-+$/g, "")
-}
-=======
->>>>>>> 82527a895 (fix(usage): shorten displayed model labels)
 
 function UsagePage() {
   const session = useSession()
@@ -452,15 +444,7 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
               <td className="px-4 py-3">
                 <div className="font-medium">
                   {cohort.model_id
-<<<<<<< HEAD
-<<<<<<< HEAD
-                    ? safeModelLabel(cohort.model_id)
-=======
                     ? safeModelLabel(cohort.model_id) || "Unavailable"
->>>>>>> 291305cde (fix(usage): shorten displayed model labels)
-=======
-                    ? safeModelLabel(cohort.model_id) || "Unavailable"
->>>>>>> 82527a895 (fix(usage): shorten displayed model labels)
                     : "Unavailable"}
                 </div>
                 <div className="text-muted-foreground">
@@ -556,15 +540,7 @@ function UsageTable({
                 />
               </td>
               <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
-<<<<<<< HEAD
-<<<<<<< HEAD
-                {safeModelLabel(row.favorite_model)}
-=======
                 {safeModelLabel(row.favorite_model) || "Unavailable"}
->>>>>>> 291305cde (fix(usage): shorten displayed model labels)
-=======
-                {safeModelLabel(row.favorite_model) || "Unavailable"}
->>>>>>> 82527a895 (fix(usage): shorten displayed model labels)
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.invocations)}
