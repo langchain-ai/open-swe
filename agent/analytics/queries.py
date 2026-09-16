@@ -3,12 +3,12 @@
 import base64
 import binascii
 import json
-from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.config import ENV
@@ -30,11 +30,15 @@ async def _reporting_start(conn: AsyncConnection, period: str | None) -> datetim
     return max(period_start(period), cutover)
 
 
-def _pr_outcome_counts(row: Mapping[str, object]) -> dict[str, int | float | None]:
-    merged = int(row["merged"] or 0)
-    closed = int(row["closed"] or 0)
-    pending = int(row["mature_pending"] or 0)
-    waiting = int(row["waiting"] or 0)
+def _integer(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _pr_outcome_counts(row: RowMapping) -> dict[str, int | float | None]:
+    merged = _integer(row["merged"])
+    closed = _integer(row["closed"])
+    pending = _integer(row["mature_pending"])
+    waiting = _integer(row["waiting"])
     decided = merged + closed
     mature = decided + pending
     return {
@@ -42,7 +46,7 @@ def _pr_outcome_counts(row: Mapping[str, object]) -> dict[str, int | float | Non
         "closed_without_merge": closed,
         "mature_pending": pending,
         "waiting": waiting,
-        "cohort_size": int(row["cohort_size"]),
+        "cohort_size": _integer(row["cohort_size"]),
         "decided_denominator": decided,
         "decided_merge_rate": merged / decided if decided else None,
         "mature_denominator": mature,
@@ -107,7 +111,7 @@ async def pr_merge_rate_by_model(
         )
         grouped: dict[tuple[object, object], dict[str, Any]] = {}
         for row in result.mappings():
-            key = (row["provider_model_id"], row["model_attribution_quality"])
+            key = (row["originating_model_id"], row["model_attribution_quality"])
             cohort = grouped.setdefault(
                 key,
                 {
@@ -144,7 +148,7 @@ async def pr_merge_rate_by_model(
                     "mature_cohort_merge_share": cohort["merged"] / mature if mature else None,
                 }
             )
-        cohorts.sort(key=lambda cohort: (-cohort["cohort_size"], str(cohort["model_id"])))
+        cohorts.sort(key=lambda cohort: (-_integer(cohort["cohort_size"]), str(cohort["model_id"])))
         metadata = await reporting_metadata(conn)
         if cohorts:
             status = "ready"

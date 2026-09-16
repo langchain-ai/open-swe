@@ -88,6 +88,33 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     assert datetime.fromisoformat(report["last_processed_at"]) == processed_at
 
 
+async def test_merge_rates_keep_models_without_directory_entries_separate(reporting_db):
+    from agent.analytics import ingestion
+
+    workspace = database.workspace_id()
+    for model_id in (uuid4(), uuid4()):
+        await ingestion.ingest(
+            make_event(
+                workspace_id=workspace,
+                event_name=EventName.PR_OPENED,
+                producer="test",
+                producer_event_id=str(uuid4()),
+                occurred_at=datetime.now(UTC) - timedelta(days=1),
+                environment="test",
+                payload=PROpenedPayload(
+                    opening_run_id=uuid4(),
+                    originating_model_id=model_id,
+                    model_attribution_quality="configured",
+                ),
+                pr_id=uuid4(),
+                repository_id=uuid4(),
+            )
+        )
+    report = await queries.pr_merge_rate_by_model(period="all", admin=True)
+    assert len(report["cohorts"]) == 2
+    assert all(cohort["cohort_size"] == 1 for cohort in report["cohorts"])
+
+
 async def test_merge_rates_group_efforts_under_model_privacy_cohorts(reporting_db):
     from agent.analytics import ingestion
     from agent.analytics.events import RunStartedPayload
