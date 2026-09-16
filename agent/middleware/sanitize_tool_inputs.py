@@ -6,13 +6,14 @@ validation.  The LLM occasionally generates strings like ``'1, 80'`` or
 sequence so the call succeeds instead of burning an LLM turn on a retry.
 """
 
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
-from langchain.agents.middleware.types import AgentState
-from langchain_core.messages import ToolCall, ToolMessage
+from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from langchain_core.messages import AIMessage, ToolCall, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
@@ -63,6 +64,36 @@ class SanitizeToolInputsMiddleware(OpenSWEMiddleware):
 
     state_schema = AgentState
 
+    @staticmethod
+    def _deduplicate_response(response: ModelResponse) -> ModelResponse:
+        for index, message in enumerate(response.result):
+            if not isinstance(message, AIMessage) or len(message.tool_calls) < 2:
+                continue
+            seen: set[tuple[object, str]] = set()
+            retained: list[ToolCall] = []
+            for tool_call in message.tool_calls:
+                key = (
+                    tool_call.get("name"),
+                    json.dumps(
+                        tool_call.get("args"),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                retained.append(tool_call)
+            if len(retained) != len(message.tool_calls):
+                response.result[index] = message.model_copy(update={"tool_calls": retained})
+                logger.warning(
+                    "Removed duplicate tool calls from model response",
+                    extra={"removed_count": len(message.tool_calls) - len(retained)},
+                )
+        return response
+
     def _sanitize_request(self, request: ToolCallRequest) -> ToolCallRequest:
         tool_call = request.tool_call
         if not isinstance(tool_call, dict) or tool_call.get("name") != "read_file":
@@ -82,3 +113,10 @@ class SanitizeToolInputsMiddleware(OpenSWEMiddleware):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         return await handler(self._sanitize_request(request))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        return self._deduplicate_response(await handler(request))

@@ -92,6 +92,15 @@ async def feedback_event_is_ready(thread_id: str, event_id: str) -> bool:
     )
 
 
+async def answer_marked_for_run(thread_id: str, run_id: str) -> bool:
+    """Return whether this thread already records an answer for the run."""
+    record = await feedback_store().get(thread_id)
+    return bool(
+        record
+        and (record.answer_run_id == run_id or record.event_id == f"answer:{run_id}")
+    )
+
+
 async def _enqueue_feedback(payload: dict[str, Any], delay_seconds: int = 300) -> None:
     await langgraph_client().runs.create(
         None,
