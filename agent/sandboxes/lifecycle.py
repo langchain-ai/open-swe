@@ -391,8 +391,9 @@ async def ensure_sandbox_for_thread(
     whose author email can't be resolved to a GitHub account.
     """
     async with aphase(thread_id, "sandbox.thread_metadata"):
-        sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-        sandbox_metadata = await get_sandbox_metadata(thread_id) if sandbox_id is not None else {}
+        sandbox_metadata = await get_sandbox_metadata(thread_id)
+    raw_sandbox_id = sandbox_metadata.get("sandbox_id")
+    sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
     metadata_proxy_config = sandbox_metadata.get(_SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
         metadata_proxy_config

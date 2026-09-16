@@ -25,9 +25,9 @@ async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value=None,
+            return_value={},
         ),
         patch(
             "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
@@ -69,9 +69,9 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value="sandbox-existing",
+            return_value={"sandbox_id": "sandbox-existing"},
         ),
         patch(
             "agent.sandboxes.lifecycle.create_sandbox",
@@ -117,9 +117,9 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value="sandbox-existing",
+            return_value={"sandbox_id": "sandbox-existing"},
         ),
         patch(
             "agent.sandboxes.lifecycle.create_sandbox",
@@ -168,9 +168,9 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value="sandbox-new",
+            return_value={"sandbox_id": "sandbox-new"},
         ),
         patch(
             "agent.sandboxes.lifecycle.create_sandbox",
@@ -207,7 +207,7 @@ async def test_ensure_sandbox_does_not_replace_sandbox_when_metadata_lookup_fail
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             side_effect=RuntimeError("langgraph api unavailable"),
         ),
