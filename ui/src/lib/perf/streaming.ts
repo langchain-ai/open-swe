@@ -1,11 +1,19 @@
 /**
  * The `agent_run` span: one run as the browser experiences it.
  *
- *   submit ─▶ accepted ─▶ stream_open ─▶ first_event ─▶ first_token ─▶ end
+ *   submit ─▶ accepted ─▶ stream_open ─▶ first_event ─▶ generation_start
+ *          ─▶ first_text ─▶ end
  *
- * `first_token` is the client-side time to first assistant text, the
- * counterpart of the backend's `open_swe_dashboard_thread_ttft` histogram. The
- * span also counts protocol events and text deltas, samples the lag between the
+ * `generation_start` is the first assistant message the model opens, so it is
+ * the time until the run visibly produces something — thinking or a tool call
+ * included. `first_text` is the later time to the first streamed assistant
+ * text, the counterpart of the backend's `open_swe_dashboard_thread_ttft`
+ * histogram; a run whose opening move is a tool call reaches it only after that
+ * round trip, so the two are far apart and only `generation_start` answers "has
+ * the agent started". A run joined mid-stream may have missed the message and
+ * then carries no `generation_start`.
+ *
+ * The span also counts protocol events and text deltas, samples the lag between the
  * server's event timestamp and receipt (clock skew included, so read it as a
  * trend rather than an absolute), and, in development builds, accumulates React
  * commit time for the transcript while the run streams.
@@ -140,13 +148,20 @@ export class RunTracker {
       state.lagSamples += 1
     }
 
-    if (method !== "messages" || data["event"] !== "content-block-delta") return
+    if (method !== "messages") return
+
+    if (data["event"] === "message-start") {
+      if (data["role"] === "ai") state.span.mark("generation_start")
+      return
+    }
+
+    if (data["event"] !== "content-block-delta") return
     const delta = data["delta"]
     if (!isRecord(delta) || delta["type"] !== "text-delta") return
     const text = delta["text"]
     if (typeof text !== "string" || !text) return
     state.textDeltas += 1
-    state.span.mark("first_token")
+    state.span.mark("first_text")
   }
 
   transcriptBuilt(durationMs: number): void {

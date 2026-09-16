@@ -227,10 +227,51 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("configurable_update", "profile", "thread_settings", "expected"),
+    [
+        ({}, None, None, "openai:gpt-5.6-sol"),
+        (
+            {"agent_model_id": "anthropic:claude-opus-5", "agent_effort": "high"},
+            None,
+            None,
+            "anthropic:claude-opus-5",
+        ),
+        (
+            {},
+            {"default_model": "google_genai:gemini-3.8-flash", "reasoning_effort": "low"},
+            None,
+            "google_genai:gemini-3.8-flash",
+        ),
+        (
+            {},
+            None,
+            {"model_id": "anthropic:claude-opus-5", "effort": "high"},
+            "anthropic:claude-opus-5",
+        ),
+    ],
+)
+async def test_resolved_configured_model_is_available_to_tools(
+    configurable_update: dict[str, object],
+    profile: dict[str, object] | None,
+    thread_settings: dict[str, object] | None,
+    expected: str,
+) -> None:
+    config = _base_config()
+    config["configurable"].update(configurable_update)
+    await _capture_create_deep_agent_kwargs(
+        config, profile=profile, thread_settings=thread_settings
+    )
+
+    assert config["configurable"]["resolved_agent_model_id"] == expected
+
+
+@pytest.mark.asyncio
 async def test_model_routing_is_applied_when_enabled() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
 
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
@@ -249,6 +290,7 @@ async def test_model_routing_is_disabled_by_default() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config)
 
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
@@ -440,15 +482,16 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_includes_sandbox_reset_only_in_admin_threads(
+async def test_agent_includes_admin_tools_only_in_private_dashboard_admin_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.tools import sandbox_reset
+    from agent.tools import read_only_sql, sandbox_reset
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert sandbox_reset not in tools
+    assert read_only_sql not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
     config = _base_config()
@@ -459,6 +502,17 @@ async def test_agent_includes_sandbox_reset_only_in_admin_threads(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert sandbox_reset in tools
+    assert read_only_sql in tools
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert read_only_sql not in general_purpose["tools"]
+
+    configurable["source"] = "schedule"
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert read_only_sql not in tools
 
 
 @pytest.mark.asyncio

@@ -461,6 +461,163 @@ async def test_late_run_start_restores_attribution(analytics_db, effective_first
         assert row["technical_status"] == "completed"
 
 
+@pytest.mark.parametrize("delivery", ["pr_first", "run_first", "concurrent"])
+async def test_pr_uses_opening_runs_configured_model_in_either_delivery_order(
+    analytics_db, delivery
+):
+    workspace, transaction = analytics_db
+    pr_id, run_id, configured_model, routed_model = uuid4(), uuid4(), uuid4(), uuid4()
+    started = event(
+        workspace,
+        EventName.RUN_STARTED,
+        RunStartedPayload(
+            configured_model_id=configured_model,
+            effective_model_id=routed_model,
+            model_attribution_quality="effective",
+        ),
+        run_id=run_id,
+    )
+    opened = event(
+        workspace,
+        EventName.PR_OPENED,
+        PROpenedPayload(opening_run_id=run_id, model_attribution_quality="unavailable"),
+        pr_id=pr_id,
+        repository_id=uuid4(),
+    )
+    if delivery == "concurrent":
+        await asyncio.gather(ingestion.ingest(started), ingestion.ingest(opened))
+    else:
+        for item in (started, opened) if delivery == "run_first" else (opened, started):
+            await ingestion.ingest(item)
+    for item in (started, opened):
+        assert not await ingestion.ingest(item)
+
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
+        assert row["originating_model_id"] == configured_model
+        assert row["model_attribution_quality"] == "configured"
+
+
+async def test_pr_attribution_repair_is_conservative_and_idempotent(analytics_db):
+    workspace, transaction = analytics_db
+    configured_model, existing_model = uuid4(), uuid4()
+    recoverable_run, later_run, ambiguous_run = uuid4(), uuid4(), uuid4()
+    recoverable_pr, attributed_pr, missing_pr, ambiguous_pr = (uuid4() for _ in range(4))
+    for run_id, model_id in (
+        (recoverable_run, configured_model),
+        (later_run, existing_model),
+        (ambiguous_run, None),
+    ):
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_STARTED,
+                RunStartedPayload(
+                    configured_model_id=model_id,
+                    model_attribution_quality="configured" if model_id else "unavailable",
+                ),
+                run_id=run_id,
+            )
+        )
+    for pr_id, opening_run_id, model_id, quality in (
+        (recoverable_pr, recoverable_run, None, "unavailable"),
+        (attributed_pr, recoverable_run, existing_model, "configured"),
+        (missing_pr, None, None, "unavailable"),
+        (ambiguous_pr, ambiguous_run, None, "unavailable"),
+    ):
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.PR_OPENED,
+                PROpenedPayload(
+                    opening_run_id=opening_run_id,
+                    originating_model_id=model_id,
+                    model_attribution_quality=quality,
+                ),
+                pr_id=pr_id,
+                repository_id=uuid4(),
+            )
+        )
+    async with transaction() as conn:
+        await ingestion._repair_pr_attribution(conn, workspace_id=workspace)
+        await ingestion._repair_pr_attribution(conn, workspace_id=workspace)
+        await conn.execute(
+            text(
+                "INSERT INTO pr_run_link_projection "
+                "(workspace_id, pr_id, run_id, link_role, linked_at) "
+                "VALUES (:workspace, :pr, :run, 'follow_up', :linked_at)"
+            ),
+            {"workspace": workspace, "pr": missing_pr, "run": later_run, "linked_at": DAY},
+        )
+    async with transaction() as conn:
+        rows = {
+            row["pr_id"]: row
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT pr_id, originating_model_id, model_attribution_quality "
+                        "FROM pr_projection"
+                    )
+                )
+            ).mappings()
+        }
+        assert rows[recoverable_pr]["originating_model_id"] == configured_model
+        assert rows[attributed_pr]["originating_model_id"] == existing_model
+        assert rows[missing_pr]["originating_model_id"] is None
+        assert rows[ambiguous_pr]["originating_model_id"] is None
+
+
+async def test_pr_attribution_migration_repairs_only_trustworthy_opening_run(analytics_db):
+    workspace, transaction = analytics_db
+    configured_model, existing_model = uuid4(), uuid4()
+    run_id, recoverable_pr, attributed_pr, missing_pr = uuid4(), uuid4(), uuid4(), uuid4()
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO run_projection "
+                "(workspace_id, run_id, configured_model_id, model_attribution_quality) "
+                "VALUES (:workspace, :run, :model, 'configured')"
+            ),
+            {"workspace": workspace, "run": run_id, "model": configured_model},
+        )
+        for pr_id, opening_run_id, model_id, quality in (
+            (recoverable_pr, run_id, None, "unavailable"),
+            (attributed_pr, run_id, existing_model, "configured"),
+            (missing_pr, None, None, "unavailable"),
+        ):
+            await conn.execute(
+                text(
+                    "INSERT INTO pr_projection "
+                    "(workspace_id, pr_id, repository_id, opening_run_id, "
+                    "originating_model_id, model_attribution_quality, opened_at, current_state) "
+                    "VALUES (:workspace, :pr, :repository, :run, :model, :quality, :opened, 'open')"
+                ),
+                {
+                    "workspace": workspace,
+                    "pr": pr_id,
+                    "repository": uuid4(),
+                    "run": opening_run_id,
+                    "model": model_id,
+                    "quality": quality,
+                    "opened": DAY,
+                },
+            )
+        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0015")
+        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0015")
+    async with transaction() as conn:
+        rows = {
+            row["pr_id"]: row["originating_model_id"]
+            for row in (
+                await conn.execute(text("SELECT pr_id, originating_model_id FROM pr_projection"))
+            ).mappings()
+        }
+        assert rows == {
+            recoverable_pr: configured_model,
+            attributed_pr: existing_model,
+            missing_pr: None,
+        }
+
+
 @pytest.mark.parametrize(
     "amount",
     [None, 0],
