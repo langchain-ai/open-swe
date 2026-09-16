@@ -227,7 +227,69 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("configurable_update", "profile", "thread_settings", "expected"),
+    [
+        ({}, None, None, "openai:gpt-5.6-sol"),
+        (
+            {"agent_model_id": "anthropic:claude-opus-5", "agent_effort": "high"},
+            None,
+            None,
+            "anthropic:claude-opus-5",
+        ),
+        (
+            {},
+            {"default_model": "google_genai:gemini-3.8-flash", "reasoning_effort": "low"},
+            None,
+            "google_genai:gemini-3.8-flash",
+        ),
+        (
+            {},
+            None,
+            {"model_id": "anthropic:claude-opus-5", "effort": "high"},
+            "anthropic:claude-opus-5",
+        ),
+    ],
+)
+async def test_resolved_configured_model_is_available_to_tools(
+    configurable_update: dict[str, object],
+    profile: dict[str, object] | None,
+    thread_settings: dict[str, object] | None,
+    expected: str,
+) -> None:
+    config = _base_config()
+    config["configurable"].update(configurable_update)
+    await _capture_create_deep_agent_kwargs(
+        config, profile=profile, thread_settings=thread_settings
+    )
+
+    assert config["configurable"]["resolved_agent_model_id"] == expected
+
+
+@pytest.mark.asyncio
 async def test_model_routing_is_applied_when_enabled() -> None:
+    config = _base_config()
+    config["configurable"]["thread_id"] = "thread-1"
+    agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
+
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" in middleware_names
+    assert "model_routing_mode" not in config["configurable"]
+    assert config["metadata"]["model_routing_mode"] == "auto"
+    assert config["metadata"]["model_routing_applied"] is True
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert [model for model, _ in calls[1:4]] == [
+        "google_genai:gemini-3.8-flash",
+        "openai:gpt-5.6-sol",
+        "anthropic:claude-opus-5",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_control_uses_performance_model() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
 
@@ -235,6 +297,8 @@ async def test_model_routing_is_applied_when_enabled() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" in middleware_names
+    assert "model_routing_mode" not in config["configurable"]
+    assert config["metadata"]["model_routing_mode"] == "performance"
     assert config["metadata"]["model_routing_applied"] is True
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
@@ -249,11 +313,13 @@ async def test_model_routing_is_disabled_by_default() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config)
 
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
     assert config["metadata"]["model_routing_applied"] is False
+    assert "model_routing_mode" not in config["metadata"]
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls] == [
         "openai:gpt-5.6-sol",
@@ -282,6 +348,7 @@ async def test_model_routing_preference_is_snapshotted_for_existing_thread() -> 
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
     assert config["metadata"]["model_routing_applied"] is False
+    assert "model_routing_mode" not in config["metadata"]
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,8 @@ process), so it runs before the first run regardless of import order. Idempotent
 
 import logging
 import os
+import re
+from urllib.parse import urlparse
 
 import e2e_env  # noqa: F401  (sets env before any agent import)
 
@@ -37,7 +39,7 @@ def apply() -> None:
     # actual module object by name instead.
     opr = importlib.import_module("agent.tools.open_pull_request")
 
-    from e2e_env import FAKE_GITHUB_API, FAKE_SLACK_API
+    from e2e_env import BASE_URL, FAKE_GITHUB_API, FAKE_SLACK_API
 
     # The LLM is the only agent-internal piece we fake, and only by default.
     # Set E2E_REAL_LLM=1 to drive the harness (mock Slack/GitHub, real agent)
@@ -53,18 +55,80 @@ def apply() -> None:
 
         server.make_model = _fake_make_model
 
-    async def _dummy_install_token_with_expiry() -> tuple[str, str | None]:
+    # Callers pass installation ids, repository scopes and permission maps; the
+    # fake GitHub does not care, so accept whatever the real signatures take.
+    async def _dummy_install_token_with_expiry(**_kwargs: object) -> tuple[str, str | None]:
         return "dummy-installation-token", None
 
-    async def _dummy_install_token() -> str:
+    async def _dummy_install_token(**_kwargs: object) -> str:
         return "dummy-installation-token"
 
+    async def _dummy_install_id(owner: str, repo: str) -> int:  # noqa: ARG001
+        return 42
+
     auth.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry
+    auth.get_github_app_installation_token = _dummy_install_token
+    auth.get_github_app_installation_id_for_repo = _dummy_install_id
     opr.__dict__["get_github_app_installation_token"] = _dummy_install_token
+
+    # The App-token boundary again, for the modules that bound these names at
+    # import time. Resolving an installation would reach api.github.com, and
+    # without it a durable watch has no token and silently does nothing.
+    from agent import baby_sit
+    from agent.expedited_review import voting, watch
+
+    # Same shadowing caveat as ``opr`` above: the tools package re-exports the
+    # functions, so reach the modules by name.
+    manage_baby_sit = importlib.import_module("agent.tools.manage_baby_sit")
+    expedite_tool = importlib.import_module("agent.tools.expedite_pr_approval")
+    thread_tools = importlib.import_module("agent.tools.threads")
+
+    for module in (watch, voting, manage_baby_sit, baby_sit):
+        for name, stub in (
+            ("get_github_app_installation_id_for_repo", _dummy_install_id),
+            ("get_github_app_installation_token", _dummy_install_token),
+        ):
+            if hasattr(module, name):
+                module.__dict__[name] = stub
 
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_http.SLACK_API_BASE_URL = FAKE_SLACK_API
+
+    # A PR URL identifies the repository a tool is allowed to act on, so the real
+    # parser only accepts github.com. The fake GitHub serves its pull requests
+    # from the harness origin instead, so teach the parser that one extra shape
+    # rather than weakening the host check that production relies on.
+    from agent.slack import client as slack_client
+    from agent.slack.client import GitHubPrRef
+    from agent.slack.tools import request_pr_review
+
+    _real_parse = slack_client.parse_github_pr_url
+    _mock_pr_path = re.compile(r"^/mock/github/([^/]+)/([^/]+)/pull/(\d+)/?$")
+
+    def _parse_pr_url(url: str) -> GitHubPrRef | None:
+        parsed = _real_parse(url)
+        if parsed is not None:
+            return parsed
+        cleaned = url.strip().strip("<>").split("|", 1)[0]
+        target = urlparse(cleaned)
+        if f"{target.scheme}://{target.netloc}" != BASE_URL:
+            return None
+        match = _mock_pr_path.match(target.path)
+        if match is None:
+            return None
+        owner, repo, number = match.group(1), match.group(2), int(match.group(3))
+        return GitHubPrRef(
+            owner=owner,
+            repo=repo,
+            number=number,
+            url=f"{BASE_URL}/mock/github/{owner}/{repo}/pull/{number}",
+        )
+
+    slack_client.parse_github_pr_url = _parse_pr_url
+    for module in (manage_baby_sit, expedite_tool, thread_tools, opr, request_pr_review):
+        if "parse_github_pr_url" in module.__dict__:
+            module.__dict__["parse_github_pr_url"] = _parse_pr_url
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.
@@ -77,14 +141,28 @@ def apply() -> None:
     from agent.github import pull_request_context, pull_request_status
     from agent.threads import access as thread_access
 
-    async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
-        return "dummy-user-oauth-token"
+    async def _dummy_user_token(login: str, **_kwargs: object) -> str:
+        # Carries the login so the fake GitHub can attribute a write (a submitted
+        # review) to the person whose token made it, as the real API does.
+        return f"dummy-user-oauth-token:{login}" if login else "dummy-user-oauth-token"
 
+    # Every module that bound the name at import time needs its own rebind, or
+    # it keeps calling the real store and reports "no GitHub token for @user".
+    from agent.dashboard import repo_access
+    from agent.github import repos as github_repos
+    from agent.review import routes as review_routes
     from agent.webhooks import common as webhook_common
 
-    profiles.get_valid_access_token = _dummy_user_token
-    thread_access.get_valid_access_token = _dummy_user_token
-    webhook_common.get_valid_access_token = _dummy_user_token
+    for module in (
+        profiles,
+        thread_access,
+        webhook_common,
+        voting,
+        repo_access,
+        github_repos,
+        review_routes,
+    ):
+        module.__dict__["get_valid_access_token"] = _dummy_user_token
 
     # PR media: bot workspace lookups go to fake GitHub; the approver's OAuth
     # token is a user-class token (gho_) so the upload passes the credential
@@ -101,6 +179,18 @@ def apply() -> None:
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
+
+    # Every other module that captured the REST base at import time: PR and
+    # check reads (``ci``), the check-run writes, and the expedited-review
+    # eligibility, readiness and voting calls.
+    from agent.expedited_review import eligibility, readiness
+    from agent.github import checks as github_checks
+    from agent.github import ci as github_ci
+
+    github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
+    github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
+    for module in (eligibility, readiness, voting):
+        module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox
     # provider, so there is nothing to capture from — record the request in the

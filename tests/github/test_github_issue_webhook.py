@@ -887,6 +887,7 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["message"] == "Slack mention queued"
     assert captured["repo_config"] == {"owner": "langchain-ai", "name": "open-swe"}
+    # Nobody turned the one-session DM on, so the message opens its own thread.
     assert captured["repo_config_request"] == {
         "channel_id": "D123",
         "thread_ts": "1700000000.000200",
@@ -895,6 +896,8 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     event_data = captured["event_data"]
     assert isinstance(event_data, SlackRequest)
     assert event_data.text == "please check my branch"
+    assert event_data.thread_ts == "1700000000.000200"
+    assert event_data.dm_session is False
     assert event_data.treat_all_messages_as_mentions is True
 
 

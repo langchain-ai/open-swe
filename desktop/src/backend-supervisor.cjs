@@ -221,6 +221,10 @@ class BackendSupervisor {
                 this.options.stateDir,
                 "artifacts",
               ),
+              OPEN_SWE_LOCAL_CHECKPOINT_DB: path.join(
+                this.options.stateDir,
+                "checkpoints.sqlite",
+              ),
             }
           : {}),
         PYTHONUNBUFFERED: "1",

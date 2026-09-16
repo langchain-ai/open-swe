@@ -133,6 +133,7 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
+  dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
@@ -148,6 +149,7 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
+  dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
@@ -180,6 +182,8 @@ export interface TeamSettings {
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   fable_enabled?: boolean
+  /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
+  expedited_review_enabled?: boolean
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -187,9 +191,6 @@ export interface TeamSettings {
   default_agent_subagent_reasoning_effort?: string | null
   default_agent_routing_fast_model?: string | null
   default_agent_routing_fast_reasoning_effort?: string | null
-  default_agent_routing_fast_alt_model?: string | null
-  default_agent_routing_fast_alt_reasoning_effort?: string | null
-  default_agent_routing_fast_alt_probability?: number | null
   default_agent_routing_balanced_model?: string | null
   default_agent_routing_balanced_reasoning_effort?: string | null
   default_agent_routing_performance_model?: string | null
@@ -922,7 +923,7 @@ export const api = {
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
   usageLeaderboard: (
-    period: UsageLeaderboardPeriod = "30d",
+    period: UsageLeaderboardPeriod = "7d",
     limit = 10,
     cursor?: string
   ) =>
@@ -938,7 +939,7 @@ export const api = {
       })),
     })),
   prMergeRateByModel: (
-    period: UsageLeaderboardPeriod = "30d",
+    period: UsageLeaderboardPeriod = "7d",
     maturityDays?: number
   ) =>
     request<PRMergeRatePayload>(

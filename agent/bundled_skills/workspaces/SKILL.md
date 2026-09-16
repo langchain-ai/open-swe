@@ -1,6 +1,6 @@
 ---
 name: workspaces
-description: How an Open SWE workspace's sandbox image works and how to change it — create one, edit or fork an existing one, start from scratch, what setup_script and update_script are for, why a nightly refresh failed, where the build logs are, and how to read a rebuild in progress. Read this whenever someone asks about workspaces, workspaces, snapshots, sandbox images, or a refresh, whether or not this is an admin thread.
+description: How an Open SWE workspace's sandbox image works and how to change it — create one, edit or fork an existing one, start from scratch, what setup_script and update_script are for, why a nightly refresh failed, where the build logs are, and how to read a rebuild in progress. Read this whenever someone asks about workspaces, snapshots, sandbox images, or a refresh, whether or not this is an admin thread.
 ---
 
 # Workspaces

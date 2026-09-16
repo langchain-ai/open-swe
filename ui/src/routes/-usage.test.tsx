@@ -134,6 +134,68 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   client.clear()
 })
 
+it("shows plain-language PR outcomes while keeping cohort details available", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    status: "ready",
+    cohorts: [
+      {
+        model_id: "example-model",
+        model_attribution_quality: "configured",
+        merged: 3,
+        closed_without_merge: 1,
+        mature_pending: 1,
+        waiting: 2,
+        cohort_size: 7,
+        decided_denominator: 4,
+        decided_merge_rate: 0.75,
+        mature_denominator: 5,
+        mature_cohort_merge_share: 0.6,
+      },
+    ],
+  })
+  const client = mountReport()
+  const row = (await screen.findByText("example-model")).closest("tr")!
+  expect(
+    within(row)
+      .getAllByRole("cell")
+      .map((cell) => cell.textContent)
+  ).toEqual(["example-modelconfigured attribution", "7", "3", "1", "3", "60%"])
+
+  const table = row.closest("table")!
+  expect(
+    within(table)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent)
+  ).toEqual([
+    "Opening model",
+    "PRs opened",
+    "Merged",
+    "Closed without merge",
+    "Open",
+    "Merge rate",
+  ])
+
+  const mergeRate = within(table).getByText("Merge rate")
+  act(() => mergeRate.focus())
+  expect(
+    await screen.findByText(
+      /Includes PRs old enough to have a meaningful outcome/
+    )
+  ).toBeTruthy()
+
+  fireEvent.click(screen.getByText("How this is calculated"))
+  expect(
+    screen.getByText("Open", { selector: "strong" }).closest("p")?.textContent
+  ).toContain("includes every PR that is still open")
+  expect(
+    screen.getByText(/resolved merge rate answers/, { selector: "p" })
+  ).toBeTruthy()
+  expect(screen.getByText(/Merge rate = merged/)).toBeTruthy()
+  expect(screen.getByText(/Resolved merge rate = merged/)).toBeTruthy()
+  client.clear()
+})
+
 it("offers recovery from unavailability without claiming an empty or suppressed report", async () => {
   const query = vi
     .spyOn(api, "prMergeRateByModel")
@@ -332,6 +394,63 @@ it("hides a GitHub login when it duplicates the user name", async () => {
   })
   const client = mountReport()
   expect(await screen.findAllByText("reader")).toHaveLength(1)
+  client.clear()
+})
+
+it("shows the GitHub username and marks the current user", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    current_user_rank: 1,
+    rows: [
+      {
+        ...costRow,
+        user: {
+          name: "Mason Daugherty",
+          github_login: "mdrxy",
+          email: "mason@example.com",
+        },
+      },
+    ],
+  })
+  const client = mountReport()
+  const row = (await screen.findByText("Mason Daugherty")).closest("tr")!
+  expect(within(row).getByText("mdrxy")).toBeTruthy()
+  expect(within(row).getByText("You")).toBeTruthy()
+  expect(within(row).queryByText("mason@example.com")).toBeNull()
+  client.clear()
+})
+
+it("links the user name and avatar to their GitHub profile only when a login exists", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 2,
+    rows: [
+      { ...costRow, rank: 1 },
+      {
+        ...costRow,
+        rank: 2,
+        user: {
+          name: "Anonymous Reader",
+          github_login: null,
+          email: "r@example.com",
+        },
+      },
+    ],
+  })
+  const client = mountReport()
+  const linked = await screen.findByRole("link", { name: "Cost Reader" })
+  expect(linked.getAttribute("href")).toBe("https://github.com/reader")
+  expect(linked.getAttribute("target")).toBe("_blank")
+  expect(linked.getAttribute("rel")).toBe("noreferrer")
+  expect(screen.queryByRole("link", { name: "Anonymous Reader" })).toBeNull()
+  const avatarLink = screen.getByText("CR").closest("a")
+  expect(avatarLink?.getAttribute("href")).toBe("https://github.com/reader")
+  expect(avatarLink?.getAttribute("target")).toBe("_blank")
+  expect(avatarLink?.getAttribute("rel")).toBe("noreferrer")
+  expect(screen.getByText("AR").closest("a")).toBeNull()
   client.clear()
 })
 

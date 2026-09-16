@@ -11,6 +11,7 @@ import type {
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -43,13 +44,13 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
 function UsagePage() {
   const session = useSession()
   const period =
-    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "30d"
+    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
   const navigate = Route.useNavigate()
   const activePeriod: UsageLeaderboardPeriod = ["7d", "30d", "all"].includes(
     period
   )
     ? period
-    : "30d"
+    : "7d"
 
   if (session.isLoading) {
     return (
@@ -203,6 +204,7 @@ function UsageAnalyticsPeriod({
           </div>
         ) : (
           <UsageTable
+            currentUserRank={leaderboard.data.current_user_rank}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
             page={leaderboardPage}
@@ -362,33 +364,37 @@ function PRMergeRateSection({
       {data ? (
         <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
           <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
-            How these numbers work
+            How this is calculated
           </summary>
           <div className="mt-3 space-y-3">
+            <p>
+              <strong>Open</strong> includes every PR that is still open. We
+              separate these into newer PRs that are still gathering data and
+              PRs that are at least {data.maturity_days} days old but still do
+              not have a final outcome.
+            </p>
+            <p>
+              <strong>Merge rate</strong> includes only PRs old enough to have a
+              meaningful outcome. It counts merged, closed without merge, and
+              still-open PRs that are at least {data.maturity_days} days old.
+              Newer open PRs are excluded so they do not lower the rate before
+              they have had enough time to merge.
+            </p>
+            <p>
+              The resolved merge rate answers a different question: of PRs that
+              have already closed, how many merged? It excludes all open PRs and
+              is available from the underlying analytics, but is not shown as
+              the primary result here.
+            </p>
             <ul className="list-disc space-y-1 pl-4">
               <li>
-                <strong>Waiting:</strong> still open and less than{" "}
-                {data.maturity_days} days old. These PRs are excluded from both
-                rates.
+                Merge rate = merged ÷ (merged + closed without merge + open at
+                least {data.maturity_days} days).
               </li>
               <li>
-                <strong>Mature pending:</strong> still open and at least{" "}
-                {data.maturity_days} days old. They have no final outcome yet.
-              </li>
-              <li>
-                <strong>Decided rate:</strong> the percentage of merged or
-                closed PRs that were merged. Open PRs are excluded.
-              </li>
-              <li>
-                <strong>Mature share:</strong> the percentage merged among
-                merged, closed, and mature pending PRs.
+                Resolved merge rate = merged ÷ (merged + closed without merge).
               </li>
             </ul>
-            <p>
-              For example, 3 merged PRs, 1 closed without merging, and 1 mature
-              pending PR give a decided rate of 75% (3 of 4) and a mature share
-              of 60% (3 of 5). Waiting PRs do not change either rate.
-            </p>
             <p>
               PRs are grouped by the model configured for the run that opened
               them. Other models may contribute through routing, fallback,
@@ -423,15 +429,24 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
       <table className="w-full min-w-[760px] text-xs">
         <thead className="border-b border-border text-muted-foreground">
           <tr>
-            <th className="px-4 py-3 text-left font-normal">
-              Opening configured model
-            </th>
+            <th className="px-4 py-3 text-left font-normal">Opening model</th>
+            <th className="px-2 py-3 text-right font-normal">PRs opened</th>
             <th className="px-2 py-3 text-right font-normal">Merged</th>
-            <th className="px-2 py-3 text-right font-normal">Closed</th>
-            <th className="px-2 py-3 text-right font-normal">Mature pending</th>
-            <th className="px-2 py-3 text-right font-normal">Waiting</th>
-            <th className="px-2 py-3 text-right font-normal">Decided rate</th>
-            <th className="px-4 py-3 text-right font-normal">Mature share</th>
+            <th className="px-2 py-3 text-right font-normal">
+              Closed without merge
+            </th>
+            <th className="px-2 py-3 text-right font-normal">Open</th>
+            <th className="px-4 py-3 text-right font-medium text-foreground">
+              <Tooltip>
+                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                  Merge rate
+                </TooltipTrigger>
+                <TooltipPopup className="max-w-xs">
+                  Includes PRs old enough to have a meaningful outcome; newer
+                  open PRs are still gathering data.
+                </TooltipPopup>
+              </Tooltip>
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -446,23 +461,18 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
                 </div>
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.cohort_size}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
                 {cohort.merged}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {cohort.closed_without_merge}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.mature_pending}
+                {cohort.mature_pending + cohort.waiting}
               </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.waiting}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.decided_merge_rate == null
-                  ? "—"
-                  : formatPercent(cohort.decided_merge_rate)}
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
+              <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
                 {cohort.mature_cohort_merge_share == null
                   ? "—"
                   : formatPercent(cohort.mature_cohort_merge_share)}
@@ -486,6 +496,7 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
 }
 
 function UsageTable({
+  currentUserRank,
   rows,
   totalMembers,
   page,
@@ -493,6 +504,7 @@ function UsageTable({
   onPageChange,
   onPageSizeChange,
 }: {
+  currentUserRank: number | null
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
   page: number
@@ -526,7 +538,10 @@ function UsageTable({
             >
               <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
               <td className="px-2 py-3">
-                <UserCell row={row} />
+                <UserCell
+                  row={row}
+                  isCurrentUser={row.rank === currentUserRank}
+                />
               </td>
               <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
                 {row.favorite_model}
@@ -583,6 +598,8 @@ function TablePagination({
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
+  if (total <= 10) return null
+
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const start = total ? (page - 1) * pageSize + 1 : 0
   const end = Math.min(page * pageSize, total)
@@ -732,22 +749,63 @@ function CounterList({
   )
 }
 
-function UserCell({ row }: { row: UsageLeaderboardRow }) {
+function UserCell({
+  row,
+  isCurrentUser,
+}: {
+  row: UsageLeaderboardRow
+  isCurrentUser: boolean
+}) {
   const initials = initialsFor(row.user.name)
-  const detail = row.user.email ?? row.user.github_login ?? "unknown"
+  const detail = row.user.github_login
+  const profileUrl = githubProfileUrl(row.user.github_login)
+  const name = profileUrl ? (
+    <a
+      href={profileUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="truncate font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    >
+      {row.user.name}
+    </a>
+  ) : (
+    <span className="truncate font-medium text-foreground">
+      {row.user.name}
+    </span>
+  )
+  const avatar = (
+    <Avatar>
+      {row.user.avatar_url && (
+        <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
+      )}
+      <AvatarFallback>{initials}</AvatarFallback>
+    </Avatar>
+  )
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      <Avatar>
-        {row.user.avatar_url && (
-          <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
-        )}
-        <AvatarFallback>{initials}</AvatarFallback>
-      </Avatar>
+      {profileUrl ? (
+        <a
+          href={profileUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-hidden="true"
+          tabIndex={-1}
+        >
+          {avatar}
+        </a>
+      ) : (
+        avatar
+      )}
       <div className="flex min-w-0 flex-col">
-        <span className="truncate font-medium text-foreground">
-          {row.user.name}
-        </span>
-        {detail !== row.user.name ? (
+        <div className="flex min-w-0 items-center gap-1.5">
+          {name}
+          {isCurrentUser ? (
+            <Badge variant="secondary" aria-label="You">
+              You
+            </Badge>
+          ) : null}
+        </div>
+        {detail && detail !== row.user.name ? (
           <span className="truncate text-xs text-muted-foreground">
             {detail}
           </span>
@@ -755,6 +813,11 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
       </div>
     </div>
   )
+}
+
+function githubProfileUrl(login: string | null): string | null {
+  if (!login) return null
+  return `https://github.com/${encodeURIComponent(login)}`
 }
 
 function initialsFor(name: string): string {
