@@ -134,6 +134,55 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   client.clear()
 })
 
+it("shortens model paths across usage tables", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    status: "ready",
+    cohorts: [
+      {
+        model_id: "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        model_attribution_quality: "configured",
+        merged: 1,
+        closed_without_merge: 0,
+        mature_pending: 0,
+        waiting: 0,
+        cohort_size: 1,
+        decided_denominator: 1,
+        decided_merge_rate: 1,
+        mature_denominator: 1,
+        mature_cohort_merge_share: 1,
+      },
+    ],
+  })
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      {
+        rank: 1,
+        user: { name: "Model Reader", github_login: "reader", email: null },
+        favorite_model: "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        invocations: 1,
+        prs_opened: 1,
+        merged_prs: 1,
+        agent_loc: 1,
+        additions: 1,
+        deletions: 0,
+        total_tokens: 1,
+        total_cost_usd: 0,
+        invocations_without_cost: 0,
+        invocations_with_partial_cost: 0,
+        avg_invocation_seconds: 1,
+      },
+    ],
+  })
+
+  const client = mountReport()
+  expect(await screen.findAllByText("glm-5p3-flash")).toHaveLength(2)
+  expect(screen.queryByText(/accounts\/fireworks\/models/)).toBeNull()
+  client.clear()
+})
+
 it("offers recovery from unavailability without claiming an empty or suppressed report", async () => {
   const query = vi
     .spyOn(api, "prMergeRateByModel")

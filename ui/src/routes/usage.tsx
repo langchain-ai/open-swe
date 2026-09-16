@@ -35,6 +35,17 @@ export const Route = createFileRoute("/usage")({
 
 const PAGE_SIZES = [10, 25, 50, 100] as const
 
+function safeModelLabel(model: string) {
+  const sanitized = model.replace(/[^A-Za-z0-9._:/+-]/g, "-")
+  return (
+    sanitized
+      .split("/")
+      .at(-1)
+      ?.slice(0, 48)
+      .replace(/^-+|-+$/g, "") ?? ""
+  )
+}
+
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "7d": "Last 7 days",
   "30d": "Last 30 days",
@@ -441,7 +452,9 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
             <tr key={`${cohort.model_id}-${cohort.model_attribution_quality}`}>
               <td className="px-4 py-3">
                 <div className="font-medium">
-                  {cohort.model_id ?? "Unavailable"}
+                  {cohort.model_id
+                    ? safeModelLabel(cohort.model_id)
+                    : "Unavailable"}
                 </div>
                 <div className="text-muted-foreground">
                   {cohort.model_attribution_quality} attribution
@@ -536,7 +549,7 @@ function UsageTable({
                 />
               </td>
               <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
-                {row.favorite_model}
+                {safeModelLabel(row.favorite_model)}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.invocations)}
