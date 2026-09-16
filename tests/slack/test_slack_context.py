@@ -562,7 +562,9 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
         )
     )
 
-    expected_footer = "<https://app.example.com/agents/mapped-thread|Open in Web>"
+    expected_footer = (
+        "<https://app.example.com/agents/mapped-thread|Open in Web> • calculating cost"
+    )
     assert captured["text"] == f"Done {expected_footer}"
     assert captured["blocks"] == [
         {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
@@ -610,7 +612,9 @@ def test_post_slack_thread_reply_keeps_long_messages_text_only(
     )
 
     expected_thread_id = "mapped-thread"
-    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
+    expected_footer = (
+        f"<https://app.example.com/agents/{expected_thread_id}|Open in Web> • calculating cost"
+    )
     assert captured["text"] == f"{long_text} {expected_footer}"
     assert captured["blocks"] is None
 
@@ -650,7 +654,9 @@ def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
     )
 
     expected_thread_id = "mapped-thread"
-    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
+    expected_footer = (
+        f"<https://app.example.com/agents/{expected_thread_id}|Open in Web> • calculating cost"
+    )
     assert captured["text"] == f"Pick one {expected_footer}"
     posted_blocks = captured["blocks"]
     assert isinstance(posted_blocks, list)
@@ -698,17 +704,21 @@ def test_post_slack_thread_reply_keeps_usage_with_existing_web_link(
     assert str(posted_blocks).count(str(dashboard_url)) == 1
     assert posted_blocks[-1] == {
         "type": "context",
-        "elements": [{"type": "mrkdwn", "text": "model-a • 110 main-agent tokens"}],
+        "elements": [{"type": "mrkdwn", "text": "model-a • calculating cost"}],
     }
 
 
-def test_format_slack_web_link_footer_includes_run_usage() -> None:
+def test_format_slack_web_link_footer_includes_pending_cost() -> None:
     usage = RunUsageSummary(models=("model-a", "model-b"), total_tokens=12_345)
 
     footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
+    footer_without_usage = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1")
 
     assert footer == (
-        "<https://app.example/agents/t1|Open in Web> • model-a + model-b • 12.3K main-agent tokens"
+        "<https://app.example/agents/t1|Open in Web> • model-a + model-b • calculating cost"
+    )
+    assert footer_without_usage == (
+        "<https://app.example/agents/t1|Open in Web> • calculating cost"
     )
 
 
@@ -728,7 +738,7 @@ def test_format_slack_run_usage_shortens_model_paths() -> None:
 
     footer = slack_utils.format_slack_run_usage(usage)
 
-    assert footer == "glm-5p3-flash + openai:gpt-5.6-sol • 12.3K main-agent tokens"
+    assert footer == "glm-5p3-flash + openai:gpt-5.6-sol • calculating cost"
 
 
 def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
@@ -760,6 +770,30 @@ def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
     assert updated_blocks[1] == blocks[1]
     assert updated_blocks[2]["elements"][0]["text"].endswith("model-a • $0.42")
     assert "main-agent tokens" not in updated_blocks[2]["elements"][0]["text"]
+
+
+def test_with_slack_session_cost_replaces_usage_only_pending_footer() -> None:
+    text = "Done <https://app.example/agents/t1|Open in Web> • calculating cost"
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Done <https://app.example/agents/t1|Open in Web>",
+            },
+        },
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": "model-a • calculating cost"}],
+        },
+    ]
+
+    updated_text, updated_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
+
+    assert updated_text.endswith("Open in Web> • $0.42")
+    assert updated_blocks is not None
+    assert updated_blocks[0] == blocks[0]
+    assert updated_blocks[1]["elements"][0]["text"] == "model-a • $0.42"
 
 
 def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> None:
