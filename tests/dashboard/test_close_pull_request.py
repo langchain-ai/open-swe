@@ -32,7 +32,8 @@ async def test_close_requires_github_confirmation(monkeypatch, status, state):
     monkeypatch.setattr(closes, "github_client", _client("user-token"))
     monkeypatch.setattr(closes, "github_request", request)
     if status == 200 and state == "closed":
-        assert await closes.close_pull_request("acme", "app", 7, "user-token") == {"closed": True}
+        result = await closes.close_pull_request("acme", "app", 7, "user-token")
+        assert result == closes.ClosePullRequestResult(closed=True)
     else:
         with pytest.raises(HTTPException, match="Not permitted"):
             await closes.close_pull_request("acme", "app", 7, "user-token")

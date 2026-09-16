@@ -66,10 +66,26 @@ async def test_review_summaries_preserve_counts_and_distinguish_missing(monkeypa
     client, captured = _fake_client([[thread], []])
     monkeypatch.setattr(review_api, "langgraph_client", lambda: client)
     result = await review_api.get_review_summaries([("acme", "app", 1), ("acme", "app", 2)])
-    assert result["acme/app#1"]["counts"]["bugs"] == 1
-    assert result["acme/app#1"]["counts"]["flags"] == 1
+    summary = result["acme/app#1"]
+    assert summary is not None
+    assert summary.counts.bugs == 1
+    assert summary.counts.flags == 1
     assert result["acme/app#2"] is None
     assert captured["calls"][0]["metadata"]["pr"] == {"owner": "acme", "name": "app", "number": 1}
+
+
+async def test_review_summary_json_keys_match_the_dashboard_client(monkeypatch):
+    thread = _thread("acme", "app", 1, "octocat")
+    client, _ = _fake_client([[thread]])
+    monkeypatch.setattr(review_api, "langgraph_client", lambda: client)
+
+    result = await review_api.get_review_summaries([("acme", "app", 1)])
+    summary = result["acme/app#1"]
+    assert summary is not None
+
+    assert summary.model_dump(by_alias=True, mode="json") == review_api._thread_review_summary(
+        thread
+    )
 
 
 @pytest.mark.asyncio

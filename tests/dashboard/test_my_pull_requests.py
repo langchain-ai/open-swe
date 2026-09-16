@@ -48,8 +48,44 @@ async def test_lightweight_list_uses_server_sort_and_does_not_wait_for_details(m
     details.assert_not_awaited()
     assert search.await_args.kwargs["params"]["sort"] == "created"
     assert search.await_args.kwargs["params"]["order"] == "asc"
-    assert result["pullRequests"][0]["title"] == "PR 1"
-    assert result["pullRequests"][0]["detailsLoading"] is True
+    assert result.pull_requests[0].title == "PR 1"
+    assert result.pull_requests[0].details_loading is True
+
+
+async def test_payload_json_keys_stay_camel_case_for_the_dashboard_client():
+    pull = await prs.load_open_pull_request(
+        object(), {"repo_full_name": "acme/app", "number": 1}, details=False
+    )
+    assert pull is not None
+    assert set(pull.model_dump(by_alias=True, mode="json")) == {
+        "repo",
+        "number",
+        "title",
+        "draft",
+        "additions",
+        "deletions",
+        "mergeable",
+        "mergeState",
+        "headSha",
+        "headRef",
+        "reviewDecision",
+        "statusAvailable",
+        "createdAt",
+        "updatedAt",
+        "ci",
+        "failingChecks",
+        "pendingChecks",
+        "detailsLoading",
+    }
+    payload = prs.OpenPullRequests(
+        pull_requests=[pull], next_page=2, incomplete=False, updated_at="2026-01-01T00:00:00Z"
+    )
+    assert set(payload.model_dump(by_alias=True, mode="json")) == {
+        "pullRequests",
+        "nextPage",
+        "incomplete",
+        "updatedAt",
+    }
 
 
 async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypatch):
@@ -116,16 +152,16 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypa
     monkeypatch.setattr(prs, "github_request", request)
     result = await prs.list_open_pull_requests("octocat", "user-token", "acme/app")
     assert queries == ["is:pr is:open author:octocat repo:acme/app"]
-    assert [pr["number"] for pr in result["pullRequests"]] == [1, 3, 4]
-    live, unavailable, no_checks = result["pullRequests"]
-    assert live["ci"] == "failing"
-    assert live["failingChecks"] == ["legacy-ci"]
-    assert live["pendingChecks"] == ["unit"]
-    assert live["mergeable"] is True and live["mergeState"] == "blocked"
-    assert (live["additions"], live["deletions"]) == (1, 4)
-    assert live["updatedAt"] == "2026-09-12T00:00:00Z"
-    assert unavailable["statusAvailable"] is False and unavailable["ci"] == "unknown"
-    assert no_checks["ci"] == "none"
+    assert [pr.number for pr in result.pull_requests] == [1, 3, 4]
+    live, unavailable, no_checks = result.pull_requests
+    assert live.ci == "failing"
+    assert live.failing_checks == ["legacy-ci"]
+    assert live.pending_checks == ["unit"]
+    assert live.mergeable is True and live.merge_state == "blocked"
+    assert (live.additions, live.deletions) == (1, 4)
+    assert live.updated_at == "2026-09-12T00:00:00Z"
+    assert unavailable.status_available is False and unavailable.ci == "unknown"
+    assert no_checks.ci == "none"
 
 
 @pytest.mark.parametrize("repo", ["acme/app is:closed", "acme/../secrets", "acme/.."])
@@ -149,13 +185,13 @@ async def test_search_pages_through_results(monkeypatch):
     monkeypatch.setattr(prs, "github_request", search)
     result = await prs.list_open_pull_requests("octocat", "user-token")
     assert search.await_args.kwargs["params"]["page"] == "1"
-    assert result["nextPage"] == 2 and result["incomplete"] is False
+    assert result.next_page == 2 and result.incomplete is False
     result = await prs.list_open_pull_requests("octocat", "user-token", page=3)
     assert search.await_args.kwargs["params"]["page"] == "3"
-    assert result["nextPage"] is None
+    assert result.next_page is None
     search.return_value = response({"items": [], "total_count": 5000})
     result = await prs.list_open_pull_requests("octocat", "user-token", page=10)
-    assert result["nextPage"] is None
+    assert result.next_page is None
     with pytest.raises(HTTPException) as error:
         await prs.list_open_pull_requests("octocat", "user-token", page=11)
     assert error.value.status_code == 422
@@ -184,8 +220,8 @@ async def test_a_timed_out_search_returns_no_pull_requests(monkeypatch):
         ),
     )
     result = await prs.list_open_pull_requests("octocat", "user-token", lightweight=True)
-    assert result["pullRequests"] == []
-    assert result["incomplete"] is True and result["nextPage"] is None
+    assert result.pull_requests == []
+    assert result.incomplete is True and result.next_page is None
 
 
 async def test_pending_mergeability_is_awaited_rather_than_reported_unknown(monkeypatch):
@@ -205,7 +241,8 @@ async def test_pending_mergeability_is_awaited_rather_than_reported_unknown(monk
     monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
     result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
     assert fetches.await_count == 3
-    assert result["mergeable"] is True and result["mergeState"] == "clean"
+    assert result is not None
+    assert result.mergeable is True and result.merge_state == "clean"
 
 
 async def test_mergeability_is_not_awaited_forever(monkeypatch):
@@ -217,12 +254,17 @@ async def test_mergeability_is_not_awaited_forever(monkeypatch):
     monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="none"))
     result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
     assert fetches.await_count == prs._MERGEABILITY_ATTEMPTS
-    assert result["statusAvailable"] is True and result["mergeable"] is None
+    assert result is not None
+    assert result.status_available is True and result.mergeable is None
 
 
 async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypatch):
     token = AsyncMock(return_value="user-token")
-    listing = AsyncMock(return_value={"pullRequests": []})
+    listing = AsyncMock(
+        return_value=prs.OpenPullRequests(
+            pull_requests=[], next_page=None, incomplete=False, updated_at="2026-01-01T00:00:00Z"
+        )
+    )
     monkeypatch.setattr(pr_routes, "get_valid_access_token", token)
     monkeypatch.setattr(pr_routes, "list_open_pull_requests", listing)
     await pr_routes.api_list_my_pull_requests(repo="acme/app", session={"sub": "octocat"})
@@ -295,12 +337,15 @@ async def test_review_indicators_require_repo_access_before_reading(monkeypatch)
         AsyncMock(return_value=frozenset({"acme/allowed"})),
     )
     payload = review_routes.ReviewSummariesRequest(
-        pullRequests=[{"repo": "acme/private", "number": 1}]
+        pull_requests=[{"repo": "acme/private", "number": 1}]
     )
     assert await review_routes.api_get_review_summaries(payload, session={"sub": "octocat"}) == {}
     lookup.assert_not_awaited()
     payload = review_routes.ReviewSummariesRequest(
-        pullRequests=[{"repo": "acme/allowed", "number": 1}, {"repo": "acme/private", "number": 2}]
+        pull_requests=[
+            {"repo": "acme/allowed", "number": 1},
+            {"repo": "acme/private", "number": 2},
+        ]
     )
     await review_routes.api_get_review_summaries(payload, session={"sub": "octocat"})
     lookup.assert_awaited_once_with([("acme", "allowed", 1)])

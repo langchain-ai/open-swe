@@ -45,9 +45,9 @@ async def test_merge_methods_reflect_repository_flags(monkeypatch, flags, expect
     )
     monkeypatch.setattr(merges, "github_client", _client("user-token"))
     monkeypatch.setattr(merges, "github_request", request)
-    assert await merges.repository_merge_methods("acme", "app", "user-token") == {
-        "mergeMethods": expected
-    }
+    result = await merges.repository_merge_methods("acme", "app", "user-token")
+    assert result.merge_methods == expected
+    assert result.model_dump(by_alias=True, mode="json") == {"mergeMethods": expected}
     assert request.await_args.args[1:] == ("GET", "https://api.github.com/repos/acme/app")
 
 

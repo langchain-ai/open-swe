@@ -27,9 +27,8 @@ async def test_merge_requires_github_confirmation(monkeypatch, status, merged):
     monkeypatch.setattr(merges, "github_request", request)
     body = merges.MergePullRequestRequest(sha="a" * 40, merge_method="squash")
     if status == 200 and merged:
-        assert await merges.merge_pull_request("acme", "app", 1, body, "user-token") == {
-            "merged": True
-        }
+        result = await merges.merge_pull_request("acme", "app", 1, body, "user-token")
+        assert result == merges.MergePullRequestResult(merged=True)
     else:
         with pytest.raises(HTTPException, match="Head changed"):
             await merges.merge_pull_request("acme", "app", 1, body, "user-token")

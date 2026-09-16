@@ -4,10 +4,12 @@ import asyncio
 import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import httpx2
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 from agent.github.http import (
     GITHUB_API_BASE,
@@ -52,6 +54,58 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
   }
 }
 """
+
+
+CheckState = Literal["passing", "failing", "pending", "unknown", "none"]
+ReviewDecision = Literal["approved", "changes_requested", "none"]
+
+
+class OpenPullRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    repo: str
+    number: int
+    title: str
+    created_at: str | None = None
+    updated_at: str | None = None
+    draft: bool | None = None
+    details_loading: bool = False
+    additions: int | None = None
+    deletions: int | None = None
+    mergeable: bool | None = None
+    merge_state: str = "unknown"
+    head_sha: str | None = None
+    head_ref: str | None = None
+    status_available: bool = False
+    ci: CheckState = "unknown"
+    review_decision: ReviewDecision | None = None
+    failing_checks: list[str] = Field(default_factory=list)
+    pending_checks: list[str] = Field(default_factory=list)
+
+
+class OpenPullRequests(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    pull_requests: list[OpenPullRequest]
+    next_page: int | None
+    incomplete: bool
+    updated_at: str
+
+
+def _as_str(value: object, default: str) -> str:
+    return value if isinstance(value, str) else default
+
+
+def _as_optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _as_optional_bool(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _as_optional_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def pull_request_identity(record: object) -> tuple[str, str, int] | None:
@@ -388,7 +442,7 @@ async def get_pull_request_statuses(records: Sequence[object], token: str) -> li
 
 async def _fetch_review_decision(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> str | None:
+) -> ReviewDecision | None:
     latest: dict[str, tuple[int, str]] = {}
     page = 1
     try:
@@ -436,7 +490,7 @@ async def list_open_pull_requests(
     sort: str = "updated",
     direction: str = "desc",
     page: int = 1,
-) -> dict[str, Any]:
+) -> OpenPullRequests:
     """Read the caller's open PRs and current-head checks using their own token."""
     if not _OWNER_PATTERN.fullmatch(login):
         raise HTTPException(422, "invalid GitHub login")
@@ -476,15 +530,15 @@ async def list_open_pull_requests(
         # A timed-out search answers with an arbitrary subset of the matches, so
         # any list built from it would silently hide most of a user's PRs.
         if payload.get("incomplete_results") is True:
-            return {
-                "pullRequests": [],
-                "nextPage": None,
-                "incomplete": True,
-                "updatedAt": datetime.now(UTC).isoformat(),
-            }
+            return OpenPullRequests(
+                pull_requests=[],
+                next_page=None,
+                incomplete=True,
+                updated_at=datetime.now(UTC).isoformat(),
+            )
         semaphore = asyncio.Semaphore(4)
 
-        async def load(item: object) -> dict[str, Any] | None:
+        async def load(item: object) -> OpenPullRequest | None:
             async with semaphore:
                 return await load_open_pull_request(client, item, details=not lightweight)
 
@@ -493,17 +547,17 @@ async def list_open_pull_requests(
     has_more = (
         isinstance(total, int) and page * _SEARCH_PAGE_SIZE < total and page < _SEARCH_MAX_PAGES
     )
-    return {
-        "pullRequests": [item for item in items if item is not None],
-        "nextPage": page + 1 if has_more else None,
-        "incomplete": payload.get("incomplete_results") is True,
-        "updatedAt": datetime.now(UTC).isoformat(),
-    }
+    return OpenPullRequests(
+        pull_requests=[item for item in items if item is not None],
+        next_page=page + 1 if has_more else None,
+        incomplete=payload.get("incomplete_results") is True,
+        updated_at=datetime.now(UTC).isoformat(),
+    )
 
 
 async def load_open_pull_request(
     client: httpx2.AsyncClient, item: object, details: bool = True
-) -> dict[str, Any] | None:
+) -> OpenPullRequest | None:
     if not isinstance(item, dict):
         return None
     repository_url = item.get("repository_url")
@@ -522,75 +576,64 @@ async def load_open_pull_request(
     pull = await _fetch_mergeable_pull_request(client, owner, name, number) if details else None
     if pull is not None and _live_state(pull) != "open":
         return None
-    result: dict[str, Any] = {
-        "repo": full_name,
-        "number": number,
-        "title": item.get("title", ""),
-        "createdAt": item.get("created_at"),
-        "updatedAt": item.get("updated_at"),
-        "draft": item.get("draft"),
-        "detailsLoading": not details,
-        "additions": None,
-        "deletions": None,
-        "mergeable": None,
-        "mergeState": "unknown",
-        "headSha": None,
-        "headRef": None,
-        "statusAvailable": pull is not None,
-        "ci": "unknown",
-        "reviewDecision": None,
-        "failingChecks": [],
-        "pendingChecks": [],
-    }
+    source: Mapping[str, Any] = pull if pull is not None else item
+    result = OpenPullRequest(
+        repo=full_name,
+        number=number,
+        title=_as_str(source.get("title"), ""),
+        created_at=_as_optional_str(source.get("created_at")),
+        updated_at=_as_optional_str(source.get("updated_at")),
+        draft=_as_optional_bool(source.get("draft")),
+        details_loading=not details,
+        additions=_as_optional_int(source.get("additions")),
+        deletions=_as_optional_int(source.get("deletions")),
+        mergeable=_as_optional_bool(source.get("mergeable")),
+        merge_state=_as_str(source.get("mergeable_state"), "unknown"),
+        status_available=pull is not None,
+    )
     if pull is None:
         return result
-    result.update(
-        title=pull.get("title", ""),
-        createdAt=pull.get("created_at"),
-        updatedAt=pull.get("updated_at"),
-        draft=pull.get("draft"),
-        additions=pull.get("additions"),
-        deletions=pull.get("deletions"),
-        mergeable=pull.get("mergeable"),
-        mergeState=pull.get("mergeable_state", "unknown"),
-    )
     head = pull.get("head")
-    result["headRef"] = head.get("ref") if isinstance(head, dict) else None
-    sha = head.get("sha") if isinstance(head, dict) else None
-    if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
+    if not isinstance(head, Mapping):
         return result
-    result["headSha"] = sha
+    result.head_ref = _as_optional_str(head.get("ref"))
+    sha = _as_optional_str(head.get("sha"))
+    if sha is None or not _SHA_PATTERN.fullmatch(sha):
+        return result
+    result.head_sha = sha
     runs, statuses, decision = await asyncio.gather(
         _fetch_check_runs(client, owner, name, sha),
         _fetch_commit_statuses(client, owner, name, sha),
         _fetch_review_decision(client, owner, name, number),
     )
-    result["reviewDecision"] = decision
+    result.review_decision = decision
     if runs is None or statuses is None:
         return result
     failed, _, _ = _normalize_checks(runs, statuses)
-    failures = [check["name"] for check in failed]
+    failures = [_as_str(check["name"], "Unnamed check") for check in failed]
     failures.extend(
-        run.get("name", "Unnamed check")
+        _as_str(run.get("name"), "Unnamed check")
         for run in runs
         if run.get("status") == "completed" and run.get("conclusion") in {"cancelled", "stale"}
     )
     pending = [
-        run.get("name", "Unnamed check") for run in runs if run.get("status") != "completed"
+        _as_str(run.get("name"), "Unnamed check")
+        for run in runs
+        if run.get("status") != "completed"
     ] + [
-        status.get("context", "Unnamed status")
+        _as_str(status.get("context"), "Unnamed status")
         for status in statuses
         if status.get("state") == "pending"
     ]
-    result.update(
-        failingChecks=failures,
-        pendingChecks=pending,
-        ci="failing"
+    result.failing_checks = failures
+    result.pending_checks = pending
+    result.ci = (
+        "failing"
         if failures
         else "pending"
         if pending
         else "passing"
         if runs or statuses
-        else "none",
+        else "none"
     )
     return result

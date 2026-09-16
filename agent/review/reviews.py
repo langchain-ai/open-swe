@@ -17,6 +17,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx2
 from fastapi import HTTPException, Response
+from pydantic import BaseModel, ValidationError
 
 from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
@@ -218,6 +219,34 @@ def _finding_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
+class ReviewCounts(BaseModel):
+    open: int
+    resolved: int
+    dismissed: int
+    bugs: int
+    flags: int
+
+
+class ReviewSummary(BaseModel):
+    """A reviewer thread's durable state, as the dashboard reads it."""
+
+    thread_id: str
+    owner: str
+    repo: str
+    full_name: str
+    number: int
+    title: str
+    url: str
+    head_ref: str
+    base_ref: str
+    author: str
+    head_sha: str
+    watch: bool
+    status: Literal["running", "error", "idle"]
+    counts: ReviewCounts
+    updated_at: str | None = None
+
+
 def _run_status(thread: ThreadLike, metadata: dict[str, Any]) -> str:
     if thread.get("status") == "busy":
         return "running"
@@ -319,12 +348,14 @@ async def list_reviews(
     return page, len(summaries) > offset + limit
 
 
-async def get_review_summaries(identities: list[tuple[str, str, int]]) -> dict[str, Any]:
+async def get_review_summaries(
+    identities: list[tuple[str, str, int]],
+) -> dict[str, ReviewSummary | None]:
     """Read review indicators for already-authorized pull requests."""
     client = langgraph_client()
     semaphore = asyncio.Semaphore(4)
 
-    async def read(owner: str, repo: str, number: int) -> tuple[str, Any]:
+    async def read(owner: str, repo: str, number: int) -> tuple[str, ReviewSummary | None]:
         async with semaphore:
             threads = await client.threads.search(
                 metadata={
@@ -335,10 +366,24 @@ async def get_review_summaries(identities: list[tuple[str, str, int]]) -> dict[s
                 sort_by="updated_at",
                 sort_order="desc",
             )
-            summary = _thread_review_summary(threads[0]) if threads else None
-            return f"{owner}/{repo}#{number}".lower(), summary
+            raw = _thread_review_summary(threads[0]) if threads else None
+            return f"{owner}/{repo}#{number}".lower(), _as_review_summary(raw)
 
     return dict(await asyncio.gather(*(read(*identity) for identity in identities)))
+
+
+def _as_review_summary(raw: dict[str, Any] | None) -> ReviewSummary | None:
+    if raw is None:
+        return None
+    try:
+        return ReviewSummary.model_validate(raw)
+    except ValidationError:
+        logger.warning(
+            "Reviewer thread metadata does not describe a review summary",
+            extra={"review_thread_id": raw.get("thread_id")},
+            exc_info=True,
+        )
+        return None
 
 
 def _user_ref(value: Any) -> dict[str, Any] | None:

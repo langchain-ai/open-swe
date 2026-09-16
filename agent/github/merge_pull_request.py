@@ -4,7 +4,8 @@ from typing import Literal
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_request_status import pull_request_identity
@@ -23,9 +24,19 @@ class MergePullRequestRequest(BaseModel):
     merge_method: MergeMethod
 
 
+class MergePullRequestResult(BaseModel):
+    merged: bool
+
+
+class RepositoryMergeMethods(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    merge_methods: list[MergeMethod]
+
+
 async def merge_pull_request(
     owner: str, repo: str, number: int, body: MergePullRequestRequest, token: str
-) -> dict[str, bool]:
+) -> MergePullRequestResult:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     try:
@@ -57,10 +68,10 @@ async def merge_pull_request(
             response.status_code if 400 <= response.status_code < 500 else 502,
             message if isinstance(message, str) else "GitHub did not confirm the merge.",
         )
-    return {"merged": True}
+    return MergePullRequestResult(merged=True)
 
 
-async def repository_merge_methods(owner: str, repo: str, token: str) -> dict[str, list[str]]:
+async def repository_merge_methods(owner: str, repo: str, token: str) -> RepositoryMergeMethods:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": 1}) is None:
         raise HTTPException(422, "invalid repository")
     try:
@@ -73,9 +84,10 @@ async def repository_merge_methods(owner: str, repo: str, token: str) -> dict[st
         raise HTTPException(502, "Could not load merge settings from GitHub") from exc
     if not response.is_success or not isinstance(payload, dict):
         raise HTTPException(502, "Could not load merge settings from GitHub")
-    methods: list[MergeMethod] = [
-        method
-        for method, flag in _MERGE_METHOD_FLAGS
-        if not isinstance(payload.get(flag), bool) or payload[flag]
-    ]
-    return {"mergeMethods": list(methods)}
+    return RepositoryMergeMethods(
+        merge_methods=[
+            method
+            for method, flag in _MERGE_METHOD_FLAGS
+            if not isinstance(payload.get(flag), bool) or payload[flag]
+        ]
+    )

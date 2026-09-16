@@ -2,12 +2,19 @@
 
 import httpx2
 from fastapi import HTTPException
+from pydantic import BaseModel
 
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_request_status import pull_request_identity
 
 
-async def close_pull_request(owner: str, repo: str, number: int, token: str) -> dict[str, bool]:
+class ClosePullRequestResult(BaseModel):
+    closed: bool
+
+
+async def close_pull_request(
+    owner: str, repo: str, number: int, token: str
+) -> ClosePullRequestResult:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     try:
@@ -35,4 +42,4 @@ async def close_pull_request(owner: str, repo: str, number: int, token: str) -> 
             response.status_code if 400 <= response.status_code < 500 else 502,
             message if isinstance(message, str) else "GitHub did not confirm the close.",
         )
-    return {"closed": True}
+    return ClosePullRequestResult(closed=True)
