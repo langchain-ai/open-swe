@@ -654,6 +654,11 @@ class TestRefreshProxyOnSandboxReuse:
                 {"thread-123": SandboxBackendProxy(mock_sandbox, thread_id="thread-123")},
                 clear=True,
             ),
+            patch.dict(
+                "agent.sandboxes.lifecycle.SANDBOX_CONNECTIONS",
+                {"sandbox-cached": mock_sandbox},
+                clear=True,
+            ),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from agent.server import get_agent
