@@ -13,6 +13,7 @@ import {
   GitMerge as GitMergeIcon,
 } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
+import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import type {
   AgentPullRequest,
@@ -54,7 +55,6 @@ import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
-import { cn } from "@/lib/utils"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
 import {
   runTranscriptBuilt,
@@ -96,7 +96,7 @@ function CodeChannelLink({ url }: { url?: string | null }) {
       className="mb-2 flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
       <IoLogoSlack className="size-3.5" />
-      Open code channel
+      Open in Slack
       <ArrowUpRight className="size-3" />
     </a>
   )
@@ -253,24 +253,25 @@ export function AgentThreadView({
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
   // Show a loading state during that one-time fetch instead of the empty state.
   const isHydrating = stream.isThreadLoading && !hasMessages
+  const hydrationTimedOut = useLoadTimedOut(isHydrating)
   // A failed hydrate is indistinguishable from an empty thread in the snapshot,
   // so say so rather than claiming the thread has no messages. `stream.error`
   // also carries run failures, hence the dedicated hydration signal.
-  const [hydrateRejected, setHydrateRejected] = useState(false)
+  const [hydrateError, setHydrateError] = useState<unknown>(null)
   useEffect(() => {
     let active = true
     // oxlint-disable-next-line react/set-state-in-effect
-    setHydrateRejected(false)
-    stream.hydrationPromise.catch(() => {
+    setHydrateError(null)
+    stream.hydrationPromise.catch((error: unknown) => {
       if (!active) return
-      setHydrateRejected(true)
+      setHydrateError(error)
       threadHydrationFailed(thread.id)
     })
     return () => {
       active = false
     }
   }, [stream.hydrationPromise, thread.id])
-  const hydrationFailed = !isHydrating && !hasMessages && hydrateRejected
+  const hydrationFailed = !hasMessages && hydrateError !== null
 
   useEffect(() => {
     if (!stream.isThreadLoading) threadHydrated(thread.id)
@@ -295,10 +296,7 @@ export function AgentThreadView({
   return (
     <div className="flex min-w-0 flex-1">
       <div
-        className={cn(
-          "flex min-w-0 flex-1 flex-col",
-          thread.adminThread && "bg-destructive/4"
-        )}
+        className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
@@ -351,7 +349,17 @@ export function AgentThreadView({
           </div>
         )}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {isHydrating ? (
+          {hydrationFailed || hydrationTimedOut ? (
+            <LoadError
+              title="Unable to load messages"
+              context={`Thread: ${thread.id}`}
+              error={
+                hydrateError !== null
+                  ? hydrateError
+                  : "Message loading took longer than 30 seconds."
+              }
+            />
+          ) : isHydrating ? (
             <div className="flex flex-1 items-center justify-center px-6">
               <img
                 src={`${import.meta.env.BASE_URL}logo-mark.png`}
@@ -381,21 +389,9 @@ export function AgentThreadView({
                   }
                   emptyState={
                     <div className="flex min-h-60 items-center justify-center">
-                      {hydrationFailed ? (
-                        <Alert variant="error" className="max-w-3xl">
-                          <CircleAlertIcon />
-                          <AlertDescription>
-                            <span>
-                              This thread&apos;s messages could not be loaded.
-                              Reload to try again.
-                            </span>
-                          </AlertDescription>
-                        </Alert>
-                      ) : (
-                        <p className="text-xs text-muted-foreground/70">
-                          This thread has no messages yet.
-                        </p>
-                      )}
+                      <p className="text-xs text-muted-foreground/70">
+                        This thread has no messages yet.
+                      </p>
                     </div>
                   }
                   onOpenFile={handleOpenFile}

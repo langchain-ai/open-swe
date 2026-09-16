@@ -5,6 +5,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
   app,
+  autoUpdater: nativeAutoUpdater,
   BrowserWindow,
   clipboard,
   ipcMain,
@@ -161,6 +162,23 @@ function checkForUpdatesInBackground() {
   );
 }
 
+let updateInstallTimer: ReturnType<typeof setTimeout> | undefined;
+
+function failDesktopUpdate(error: unknown) {
+  console.warn("Desktop update failed", error);
+  const installing = updateState.status === "installing";
+  clearTimeout(updateInstallTimer);
+  setUpdateState("idle");
+  if (!installing) return;
+  quitting = false;
+  dialog.showErrorBox(
+    "Could not install the update",
+    "The update did not complete. Quit and reopen Open SWE before continuing. " +
+      "If updating still fails, install the latest release from https://github.com/langchain-ai/open-swe/releases/latest.\n\n" +
+      String(error),
+  );
+}
+
 function configureAutoUpdater() {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = true;
@@ -169,13 +187,16 @@ function configureAutoUpdater() {
   autoUpdater.on("update-available", (info) =>
     setUpdateState("downloading", info.version),
   );
-  autoUpdater.on("update-downloaded", (info) =>
-    setUpdateState("ready", info.version),
-  );
-  autoUpdater.on("error", (error) => {
-    console.warn("Desktop update failed", error);
-    if (updateState.status === "downloading") setUpdateState("idle");
-  });
+  if (process.platform === "darwin") {
+    nativeAutoUpdater.on("update-downloaded", () =>
+      setUpdateState("ready", updateState.version),
+    );
+  } else {
+    autoUpdater.on("update-downloaded", (info) =>
+      setUpdateState("ready", info.version),
+    );
+  }
+  autoUpdater.on("error", failDesktopUpdate);
   checkForUpdatesInBackground();
   const timer = setInterval(checkForUpdatesInBackground, 4 * 60 * 60 * 1000);
   timer.unref();
@@ -467,18 +488,26 @@ function configureDesktopIpc() {
     const version = updateState.version;
     setUpdateState("installing", version);
     quitting = true;
+    updateInstallTimer = setTimeout(
+      () =>
+        failDesktopUpdate(
+          new Error("Installation timed out after 60 seconds."),
+        ),
+      60_000,
+    );
+    updateInstallTimer.unref();
     try {
       await Promise.all([
         closeAllTerminals(),
         backendSupervisor?.close(),
         openAiOAuth?.close(),
       ]);
+      if (!quitting) return false;
       autoUpdater.quitAndInstall(false, true);
       return true;
     } catch (error) {
-      quitting = false;
-      setUpdateState("ready", version);
-      throw error;
+      failDesktopUpdate(error);
+      return false;
     }
   });
 
@@ -1652,6 +1681,13 @@ if (!hasSingleInstanceLock) {
     configureDesktopIpc();
     createMenu();
     createWindow();
+    // Otherwise the first local thread opened after launch waits behind the
+    // backend's boot, showing a blank page for seconds.
+    if (localThreadStore.list().length) {
+      backendSupervisor.start().catch((error) => {
+        console.warn("Could not start the local backend ahead of use", error);
+      });
+    }
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,

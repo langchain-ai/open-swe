@@ -7,6 +7,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 from typing import Any
 
 from agent.baby_sit import handle_ci_webhook
+from agent.expedited_review.watch import handle_github_event as handle_expedited_review_event
 from agent.github.comments import GitHubAuthError
 from agent.github.pull_requests import PullRequest
 from agent.input_messages import (
@@ -301,7 +302,7 @@ async def trigger_pr_review_from_ref(
     )
 
     prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
-    configurable = common.build_reviewer_configurable(
+    configurable = await common.build_reviewer_configurable(
         source=source,
         github_login=github_login,
         github_user_id=github_user_id,
@@ -437,7 +438,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         )
     else:
         prompt = build_github_pr_review_prompt(repo_config, pr_number, pr_url, base_sha, head_sha)
-    configurable = common.build_reviewer_configurable(
+    configurable = await common.build_reviewer_configurable(
         source=source,
         github_login=github_login,
         github_user_id=github_user_id,
@@ -481,7 +482,12 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     if is_draft:
         author = pull_request.get("user") or {}
         author_login = author.get("login", "") if isinstance(author, dict) else ""
-        if not await common.draft_review_enabled_for_author(author_login):
+        repository = payload.get("repository", {})
+        draft_repo_config = {
+            "owner": (repository.get("owner") or {}).get("login", ""),
+            "name": repository.get("name", ""),
+        }
+        if not await common.draft_review_enabled_for_author(author_login, draft_repo_config):
             common.logger.info(
                 "Skipping auto-review of draft PR by %s: review_draft_prs is disabled",
                 author_login or "<unknown>",
@@ -528,7 +534,7 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
     if action == "converted_to_draft":
         author = pull_request.get("user") or {}
         author_login = author.get("login", "") if isinstance(author, dict) else ""
-        if await common.draft_review_enabled_for_author(author_login):
+        if await common.draft_review_enabled_for_author(author_login, repo_config):
             common.logger.info(
                 "PR %s/%s#%s converted to draft but author %s has draft reviews enabled; keeping watch",
                 repo_config.get("owner"),
@@ -747,7 +753,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         f"{head_sha}. Reconcile existing findings against the new diff, add any "
         f"net-new findings, and call `publish_review` once you're done."
     )
-    configurable = common.build_reviewer_configurable(
+    configurable = await common.build_reviewer_configurable(
         source="github_push",
         github_login=payload.get("sender", {}).get("login", "") or "",
         github_user_id=payload.get("sender", {}).get("id"),
@@ -787,6 +793,11 @@ async def process_github_ci_event(
 ) -> None:
     """Evaluate active baby-sit watches for a signed GitHub CI event."""
     await handle_ci_webhook(payload, event_type, delivery_id=delivery_id)
+
+
+async def process_expedited_review_event(payload: dict[str, Any], event_type: str) -> None:
+    """Re-evaluate expedited approvals a signed GitHub event may have unblocked or voided."""
+    await handle_expedited_review_event(payload, event_type)
 
 
 async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:
@@ -1061,7 +1072,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     head_sha = pull_request.get("head", {}).get("sha", "")
     pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")
     branch_name = pull_request.get("head", {}).get("ref", "")
-    configurable = common.build_reviewer_configurable(
+    configurable = await common.build_reviewer_configurable(
         source="github_review_comment",
         github_login=reply_author,
         github_user_id=sender.get("id") if isinstance(sender, dict) else None,
@@ -1228,6 +1239,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             issue_author=issue_author,
             issue_url=issue_url,
         )
+    workspace = await common.workspace_for_repo_config(repo_config)
     configurable: dict[str, Any] = {
         "source": "github",
         "github_login": github_login,
@@ -1239,6 +1251,8 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             "title": title,
             "url": issue_url,
         },
+        "workspace": workspace,
+        "environment": workspace,
     }
 
     await common.upsert_agent_thread_metadata(
@@ -1248,6 +1262,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         github_login=github_login,
         title=title or (f"Issue #{issue_number}" if issue_number else ""),
         source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
+        workspace=workspace,
     )
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)

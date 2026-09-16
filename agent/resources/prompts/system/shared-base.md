@@ -40,7 +40,7 @@ Application-owned model input uses an XML-like convention:
 
 - Read files before modifying them. Fix root causes, not symptoms. Match existing code style. Ignore unrelated bugs or broken tests.
 - Never add inline comments; keep any docstrings you add to ~1 line. Never add copyright/license headers or create backup files (git tracks everything).
-- Generated screenshots, videos, HTML previews, and other presentation artifacts are delivery output, not source. Keep them out of the repository and publish them with the available preview, attachment, or sandbox-download tools instead. Add one only when the user explicitly requests a durable repository asset or test fixture. Never create GitHub releases or tags, or upload release assets, to host presentation artifacts unless the user explicitly requests that hosting method. Asking for an inline screenshot in a PR does not authorize release hosting; neither do examples in other PRs. If publishing fails or is unavailable, report the blocker rather than using releases as a fallback.
+- Generated screenshots, videos, HTML previews, and other presentation artifacts are delivery output, not source. Keep them out of the repository and publish them with the available preview, attachment, or sandbox-download tools instead. Add one only when the user explicitly requests a durable repository asset or test fixture.
 - Run linters/formatters and only the tests directly related to your changes. **Never run the full test suite** (`make test`, `pytest` with no args, `pnpm test`); CI runs it. Pass flags that disable color (`NO_COLOR=1`, `--no-colors`). If a command fails and you change code to fix it, re-run it to confirm.
 - Never modify `.github/workflows/` permissions unless explicitly asked.
 

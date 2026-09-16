@@ -15,12 +15,14 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
   const html = query.data?.html.trim() ?? ""
   const markdown = query.data?.markdown.trim() ?? ""
   if (!html && !markdown) return null
+  const isArtifact = query.data?.status === "shared"
+  const label = isArtifact ? "artifact" : "plan"
 
   return (
     <button
       type="button"
       data-testid="inline-plan-artifact"
-      aria-label="Open plan in the conversation"
+      aria-label={`Open ${label} in the conversation`}
       onClick={() =>
         void navigate({
           to: "/agents/$threadId/plan",
@@ -32,7 +34,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
       {html ? (
         <PlanArtifactFrame
           html={html}
-          title="Plan preview"
+          title={`${isArtifact ? "Artifact" : "Plan"} preview`}
           className="pointer-events-none h-[250px]"
         />
       ) : (
@@ -45,7 +47,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
         className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end bg-linear-to-b from-transparent via-background/75 to-background p-3"
       >
         <span className="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background shadow-sm">
-          Open plan
+          Open {label}
           <ArrowUpRight className="size-3.5" />
         </span>
       </span>

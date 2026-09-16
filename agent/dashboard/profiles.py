@@ -57,6 +57,7 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     model_routing_enabled: bool | None = None
+    dm_session_enabled: bool = False
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
@@ -176,6 +177,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.model_routing_enabled
             if "model_routing_enabled" in update.model_fields_set
             else existing.get("model_routing_enabled")
+        ),
+        "dm_session_enabled": (
+            update.dm_session_enabled
+            if "dm_session_enabled" in update.model_fields_set
+            else existing.get("dm_session_enabled", False)
         ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)

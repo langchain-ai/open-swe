@@ -379,30 +379,45 @@ ENV.var(
 )
 ENV.var("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "Client-side grace past a command's own timeout.")
 ENV.var("SANDBOX_CREATE_EXTRA_JSON", "JSON object merged into the sandbox create body.")
-ENV.var("ENVIRONMENT_SNAPSHOT_PREFIX", "Prefix for environment snapshot names.", default="openswe")
+ENV.var(
+    "WORKSPACE_SNAPSHOT_PREFIX",
+    "Prefix for workspace snapshot names.",
+    default="openswe",
+    aliases=("ENVIRONMENT_SNAPSHOT_PREFIX",),
+)
+ENV.var(
+    "OPEN_SWE_UNASSIGNED_REPO_WORKSPACE",
+    "Where GitHub events for a repository no workspace owns go: 'default' routes them to the "
+    "default workspace, 'ignore' drops them.",
+    default="default",
+)
 ENV.var(
     "OPENSWE_SCRIPT_ROOT",
-    "Where an environment's setup/update scripts and their logs live inside a sandbox. "
+    "Where a workspace's setup/update scripts and their logs live inside a sandbox. "
     "The default assumes a sandbox where the agent is root; the local provider runs on a "
     "developer's own machine, whose filesystem root is not writable.",
     default="/open-swe/environment",
 )
 ENV.var(
-    "ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",
-    "Deadline for an environment's setup script on a builder sandbox.",
+    "WORKSPACE_REFRESH_TIMEOUT_SECONDS",
+    "Deadline for a workspace's setup script on a builder sandbox.",
+    aliases=("ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",),
 )
 ENV.var(
-    "ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",
-    "Deadline for an environment's update script on a builder sandbox.",
+    "WORKSPACE_UPDATE_TIMEOUT_SECONDS",
+    "Deadline for a workspace's update script on a builder sandbox.",
+    aliases=("ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",),
 )
 ENV.var(
-    "ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",
+    "WORKSPACE_SANDBOX_UPDATE_TIMEOUT_SECONDS",
     "Deadline for the update script when it runs in a run's own sandbox, before the first "
     "model call. Tighter than the builder's on purpose.",
+    aliases=("ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",),
 )
 ENV.var(
-    "ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",
-    "Deadline for capturing a builder sandbox as an environment's snapshot.",
+    "WORKSPACE_CAPTURE_TIMEOUT_SECONDS",
+    "Deadline for capturing a builder sandbox as a workspace's snapshot.",
+    aliases=("ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",),
 )
 ENV.var("LOCAL_SANDBOX_ROOT_DIR", "Root directory for the local sandbox provider.")
 ENV.var(

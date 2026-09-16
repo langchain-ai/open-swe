@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -549,17 +549,27 @@ async def test_merged_pr_records_thread_feedback() -> None:
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
 
-    create_feedback.assert_awaited_once_with(
-        "t1",
-        "github_pr_merged:https://github.com/lc/repo/pull/7",
-        score=1.0,
-        comment="Agent-authored pull request merged: https://github.com/lc/repo/pull/7",
-        source_info={
-            "source": "github_pr_merged",
-            "thread_id": "t1",
-            "pr_url": "https://github.com/lc/repo/pull/7",
-        },
-    )
+    source_info = {
+        "source": "github_pr_merged",
+        "thread_id": "t1",
+        "pr_url": "https://github.com/lc/repo/pull/7",
+    }
+    assert create_feedback.await_args_list == [
+        call(
+            "t1",
+            "github_pr_merged:https://github.com/lc/repo/pull/7",
+            score=1.0,
+            comment="Agent-authored pull request merged: https://github.com/lc/repo/pull/7",
+            source_info=source_info,
+        ),
+        call(
+            "t1",
+            "pr_merged",
+            score=1.0,
+            comment="https://github.com/lc/repo/pull/7",
+            source_info=source_info,
+        ),
+    ]
 
 
 @pytest.mark.asyncio

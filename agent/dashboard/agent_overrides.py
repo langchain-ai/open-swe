@@ -92,6 +92,12 @@ def profile_draft_prs(profile: dict[str, Any] | None) -> bool:
     return value if isinstance(value, bool) else True
 
 
+def profile_dm_session_enabled(profile: dict[str, Any] | None) -> bool:
+    """Whether this person's Open SWE DM is one continuous session. Defaults to False."""
+    value = profile.get("dm_session_enabled") if isinstance(profile, dict) else None
+    return value is True
+
+
 def profile_model_routing_enabled(profile: dict[str, Any] | None) -> bool | None:
     """The user's adaptive model routing preference, or ``None`` to inherit the org default."""
     value = profile.get("model_routing_enabled") if isinstance(profile, dict) else None
@@ -148,12 +154,17 @@ def normalize_profile_subagent_overrides(
 async def resolve_agent_model_id(
     github_login: str | None,
     per_thread_model_id: str | None = None,
+    workspace: str | None = None,
 ) -> str:
     """Resolve the agent model ID using the same precedence as ``get_agent``.
 
     Order: per-thread override → profile override → team default.
+
+    ``workspace`` is the workspace the run will land in, whose team default
+    applies; omitting it reads ``default``'s, which is only right for a run
+    that lands there.
     """
-    model_id, _effort = await get_team_default_model("agent")
+    model_id, _effort = await get_team_default_model("agent", workspace)
     if github_login:
         profile = await load_profile(github_login)
         if profile:

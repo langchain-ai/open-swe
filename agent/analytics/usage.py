@@ -245,21 +245,23 @@ async def record_agent_pr_usage(
     model_id: str | None = None,
     source: str | None = None,
     repository_private: bool | None = None,
+    record_opening: bool = True,
 ) -> None:
     if not owner or not repo or not pr_number:
         return
     now = datetime.now(UTC)
     person = await directory.resolve_person(github_login=github_login, email=user_email)
-    await emitter.pr_opened(
-        owner=owner,
-        repo=repo,
-        number=pr_number,
-        run_key=invocation_id,
-        model=model_id,
-        source=source,
-        repository_private=repository_private,
-        occurred_at=_timestamp(created_at) or now,
-    )
+    if record_opening:
+        await emitter.pr_opened(
+            owner=owner,
+            repo=repo,
+            number=pr_number,
+            run_key=invocation_id,
+            model=model_id,
+            source=source,
+            repository_private=repository_private,
+            occurred_at=_timestamp(created_at) or now,
+        )
     await emitter.pr_observed(
         owner=owner,
         repo=repo,

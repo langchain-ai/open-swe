@@ -24,7 +24,6 @@ from agent.dashboard.options import (
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.team_settings import get_team_default_model, get_team_fable_enabled
 from agent.dashboard.user_preferences import get_user_preferences
-from agent.environments.store import ENVIRONMENTS, slugify
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -43,7 +42,7 @@ from agent.threads.access import (
     resolve_run_email,
 )
 from agent.threads.summary import (
-    _DASHBOARD_SOURCE,
+    DASHBOARD_SOURCE,
     _is_thread_resolved,
     _metadata_model_id,
     _now_ms,
@@ -60,6 +59,7 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from agent.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +111,9 @@ async def _resolve_agent_model_choice(
     profile: dict[str, Any],
     model_id: str | None,
     effort: str | None,
+    workspace: str | None,
 ) -> tuple[str, str]:
-    resolved_model, resolved_effort = await get_team_default_model("agent")
+    resolved_model, resolved_effort = await get_team_default_model("agent", workspace)
     if model_id not in DEPRECATED_MODEL_IDS:
         profile_model, profile_effort = normalize_profile_overrides(profile)
         if profile_model and profile_effort:
@@ -121,7 +122,9 @@ async def _resolve_agent_model_choice(
         if chosen_model and chosen_effort:
             resolved_model, resolved_effort = chosen_model, chosen_effort
     resolved_model, resolved_effort = gate_fable_model(
-        resolved_model, resolved_effort, fable_enabled=await get_team_fable_enabled()
+        resolved_model,
+        resolved_effort,
+        fable_enabled=await get_team_fable_enabled(workspace),
     )
     if not isinstance(resolved_effort, str):
         raise ValueError("team default model must include a reasoning effort")
@@ -184,19 +187,22 @@ def _user_message_content(
     ]
 
 
-async def _resolve_requested_environment(requested: Any) -> str | None:
-    """Normalize a requested environment slug, dropping one that does not exist.
+async def _resolve_requested_workspace(
+    requested: object, repo_config: dict[str, str] | None, *, login: str | None
+) -> str:
+    """The workspace a new dashboard thread lands in.
 
-    The picker only offers configured environments, so a miss means a stale client
-    — the thread falls back to the default rather than booting from nothing.
+    An explicit pick from the composer wins when it names a real workspace;
+    otherwise the repository's owner, then the signed-in user's default,
+    else the instance default.
     """
-    if not isinstance(requested, str) or not requested.strip():
-        return None
-    try:
-        slug = slugify(requested)
-    except ValueError:
-        return None
-    return slug if await ENVIRONMENTS.get(slug) is not None else None
+    tag = requested if isinstance(requested, str) and requested.strip() else None
+    repo = (
+        (repo_config["owner"], repo_config["name"])
+        if repo_config and repo_config.get("owner") and repo_config.get("name")
+        else None
+    )
+    return (await resolve_workspace(tag=tag, repo=repo, login=login)).slug
 
 
 def _resolve_repo_config(repo: str | None) -> dict[str, str]:
@@ -219,13 +225,15 @@ async def _create_dashboard_thread_record(
     plan_mode: bool = False,
     model_selection: str = "auto",
     visibility: Literal["public", "private"] = "public",
-    environment: str | None = None,
+    workspace: str | None = None,
 ) -> dict[str, Any]:
     """Create a dashboard thread with immutable ownership and visibility."""
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
-    resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
+    resolved_model, resolved_effort = await _resolve_agent_model_choice(
+        profile, model_id, effort, workspace
+    )
     resolved_model, resolved_effort = _with_vision_fallback(
         resolved_model,
         resolved_effort,
@@ -241,8 +249,8 @@ async def _create_dashboard_thread_record(
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
     initial_title = title or prompt[:80] or "New agent"
     metadata: dict[str, Any] = {
-        "source": _DASHBOARD_SOURCE,
-        "origin": _DASHBOARD_SOURCE,
+        "source": DASHBOARD_SOURCE,
+        "origin": DASHBOARD_SOURCE,
         "owner_type": "user",
         "owner_login": login.strip(),
         "visibility": visibility,
@@ -264,8 +272,8 @@ async def _create_dashboard_thread_record(
     }
     if visibility == "private" and is_admin(email, login=login):
         metadata["admin_thread"] = True
-    if environment:
-        metadata["environment"] = environment
+    if workspace:
+        metadata["workspace"] = workspace
     if not title:
         metadata["title_seed"] = initial_title
     if has_repo:
@@ -313,15 +321,18 @@ async def _build_dashboard_configurable(
     if model_selection in {"auto", "explicit"}:
         configurable["model_selection"] = model_selection
     # The agent re-checks the requesting user against CONFIGURED_ADMINS before it
-    # hands out the environment tools, so this only marks intent.
+    # hands out the workspace tools, so this only marks intent.
     if metadata.get("admin_thread") is True:
         configurable["admin_thread"] = True
     continued_from = metadata.get("continued_from_thread_id")
     if isinstance(continued_from, str) and continued_from:
         configurable["continued_from_thread_id"] = continued_from
-    environment = metadata.get("environment")
-    if isinstance(environment, str) and environment:
-        configurable["environment"] = environment
+    workspace = metadata.get("workspace") or metadata.get("environment")
+    if isinstance(workspace, str) and workspace:
+        # ``environment`` is kept for one release so older graph code paths
+        # that still read it from the run config keep working.
+        configurable["workspace"] = workspace
+        configurable["environment"] = workspace
     if overrides:
         for key, value in overrides.items():
             if value is not None:
@@ -487,11 +498,12 @@ async def _enrich_run_start_command(
         )
         if visibility not in ("public", "private"):
             raise HTTPException(422, "visibility must be public or private")
+        repo_config = _parse_repo(client_configurable.get("repo")) or {}
         thread = await _create_dashboard_thread_record(
             thread_id,
             login=login,
             email=email,
-            repo_config=_parse_repo(client_configurable.get("repo")) or {},
+            repo_config=repo_config,
             repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
             visibility=visibility,
             prompt=_command_prompt_text(content),
@@ -500,8 +512,10 @@ async def _enrich_run_start_command(
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
             model_selection=model_selection or "auto",
-            environment=await _resolve_requested_environment(
-                client_configurable.get("environment")
+            workspace=await _resolve_requested_workspace(
+                client_configurable.get("workspace") or client_configurable.get("environment"),
+                repo_config,
+                login=login,
             ),
         )
         metadata = thread_metadata(thread)
@@ -593,7 +607,9 @@ async def _enrich_run_start_command(
     if isinstance(run_input, dict):
         run_input["messages"] = structured
     metadata_update: dict[str, Any] = {
-        "source": _DASHBOARD_SOURCE,
+        "source": DASHBOARD_SOURCE,
+        # Continuing on the web promotes a `/oswe` question thread for good.
+        "unlisted": False,
         "plan_mode": plan_mode_requested,
         "model_selection": model_selection,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
