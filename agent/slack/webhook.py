@@ -30,7 +30,7 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
-from agent.slack.dm import is_dm_channel
+from agent.slack.dm import dm_thread_title, is_dm_channel
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
@@ -651,6 +651,11 @@ async def _slack_login(user_id: str, user_email: str | None = None) -> str | Non
     return await common.login_for_email(user_email) if user_email else None
 
 
+def _slack_thread_title(request_text: str, dm_session: bool, name: str) -> str:
+    """A DM thread is named for the person, not for whatever they asked first."""
+    return dm_thread_title(name) if dm_session else request_text
+
+
 def _slack_thread_visibility(channel_context: dict[str, Any] | None) -> str:
     """Bot DMs are private to the person; anything in a channel is collaborative."""
     if isinstance(channel_context, dict) and channel_context.get("is_im") is True:
@@ -664,6 +669,7 @@ async def _mark_slack_thread_errored(
     try:
         owner_login = await _slack_login(request.user_id)
         visibility = _slack_thread_visibility(request.channel_context)
+        dm_session = request.dm_session or is_dm_channel(request.channel_context)
         # An unlinked sender is turned away at the account gate; a private thread
         # nobody owns would be unreachable, so persist nothing for them.
         if not request.triggering_bot_id and (visibility == "public" or owner_login):
@@ -677,7 +683,8 @@ async def _mark_slack_thread_errored(
                 thread_id,
                 source="slack",
                 repo_config=repo.model_dump() if repo else None,
-                title=clean_text,
+                title=_slack_thread_title(clean_text, dm_session, request.user_name),
+                static_title=dm_session,
                 source_context=SourceContext(
                     slack_thread=SlackThreadRef(
                         channel_id=request.channel_id,
@@ -1097,7 +1104,12 @@ async def _process_slack_mention_impl(
         repo_config=repo_dict,
         github_login=mapped_login or "",
         user_email=user_email or "",
-        title=clean_text if is_first_mention else "",
+        # A DM offers its title on every message: the upsert keeps the first one
+        # written, so a name Slack could not resolve earlier still lands later.
+        title=_slack_thread_title(clean_text, dm_session, user_name)
+        if (is_first_mention or dm_session)
+        else "",
+        static_title=dm_session,
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         workspace=thread_workspace,
         # Everyone who has spoken in the Slack thread keeps their Open SWE

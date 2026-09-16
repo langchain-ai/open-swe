@@ -672,11 +672,17 @@ async def slack_interactivity(
     user_id = interaction.user.id
     action_ts = action.action_ts or interaction.message_ts
     # A DM's buttons hang off unthreaded messages, so the clicked message's own
-    # timestamp maps to nothing: the whole DM is one session.
-    thread_ts = DM_SESSION_TS if is_dm_channel(channel_context) else interaction.thread_ts
+    # timestamp maps to nothing: the whole DM is one session. A button clicked
+    # inside a Slack thread still has to be answered in that thread.
+    in_dm = is_dm_channel(channel_context)
+    thread_ts = DM_SESSION_TS if in_dm else interaction.thread_ts
+    reply_thread_ts = (
+        (interaction.message.thread_ts or interaction.container.thread_ts) if in_dm else ""
+    )
+    reply_ts = reply_thread_ts or thread_ts
 
     # From here on the interaction is addressed to Open SWE: any failure is reported to the thread.
-    target = SlackRequestTarget(channel_id=channel_id, thread_ts=thread_ts or action_ts)
+    target = SlackRequestTarget(channel_id=channel_id, thread_ts=reply_ts or action_ts)
 
     async def dispatch() -> WebhookResponse:
         if button.type == "workflow_push_approval":
@@ -697,7 +703,7 @@ async def slack_interactivity(
             if record is None:
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
-                    thread_ts=thread_ts,
+                    thread_ts=reply_ts,
                     text="I couldn't find that workflow approval request. Trigger the push again to create a fresh approval.",
                     agent_thread_id=thread_id,
                 )
@@ -711,7 +717,7 @@ async def slack_interactivity(
             if not approved:
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
-                    thread_ts=thread_ts,
+                    thread_ts=reply_ts,
                     text=f"Workflow push rejected for fingerprint `{button.fingerprint}`. No workflow files will be pushed.",
                     agent_thread_id=thread_id,
                 )
@@ -719,7 +725,7 @@ async def slack_interactivity(
 
             await common.post_slack_thread_reply(
                 channel_id=channel_id,
-                thread_ts=thread_ts,
+                thread_ts=reply_ts,
                 text=f"Workflow push approved for fingerprint `{button.fingerprint}`. Open SWE will retry the blocked push.",
                 agent_thread_id=thread_id,
             )
@@ -744,6 +750,8 @@ async def slack_interactivity(
                     ),
                     bot_user_id=common.SLACK_BOT_USER_ID,
                     thread_id=thread_id,
+                    dm_session=in_dm,
+                    reply_thread_ts=reply_thread_ts,
                 ),
                 repo,
             )
@@ -765,7 +773,7 @@ async def slack_interactivity(
                 )
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
-                    thread_ts=thread_ts,
+                    thread_ts=reply_ts,
                     text="Plan cancelled. No changes will be made.",
                     agent_thread_id=thread_id,
                 )
@@ -796,6 +804,8 @@ async def slack_interactivity(
                         user_name=user_name,
                         text="approve",
                         bot_user_id=common.SLACK_BOT_USER_ID,
+                        dm_session=in_dm,
+                        reply_thread_ts=reply_thread_ts,
                     ),
                     repo,
                 )
@@ -841,6 +851,8 @@ async def slack_interactivity(
                 text=response,
                 bot_user_id=common.SLACK_BOT_USER_ID,
                 thread_id=thread_id,
+                dm_session=in_dm,
+                reply_thread_ts=reply_thread_ts,
             ),
             repo,
         )
