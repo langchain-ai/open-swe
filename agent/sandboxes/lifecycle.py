@@ -1,7 +1,7 @@
 """Get-or-create lifecycle for the sandbox bound to a thread.
 
 Creation, reconnection, proxy-credential refresh, git identity, and the
-reset/recreate rebinds. The registry itself lives in ``state``.
+recreate rebind. The registry itself lives in ``state``.
 """
 
 import asyncio
@@ -9,7 +9,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
@@ -17,11 +17,7 @@ from langgraph_sdk import get_client
 from agent.config import ENV
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
-from agent.sandboxes.providers.langsmith import (
-    configure_github_proxy,
-    create_langsmith_sandbox_from_params,
-    get_sandbox_proxy_config,
-)
+from agent.sandboxes.providers.langsmith import configure_github_proxy, get_sandbox_proxy_config
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
@@ -468,61 +464,20 @@ async def ensure_sandbox_for_thread(
     return set_sandbox_backend(thread_id, sandbox_backend)
 
 
-async def reset_sandbox_for_thread(
-    thread_id: str,
-    create_params: dict[str, Any],
-) -> tuple[str, str]:
-    """Bind a thread to a fresh sandbox created from raw provider options."""
-    if ENV.SANDBOX_TYPE.get() != "langsmith":
-        raise ValueError("sandbox_reset is only supported by the LangSmith sandbox provider")
-
-    cached = SANDBOX_BACKENDS.get(thread_id)
-    metadata_sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-    old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
-    if not old_sandbox_id:
-        raise ValueError(f"Thread {thread_id} has no sandbox to reset")
-
-    new_sandbox = await create_langsmith_sandbox_from_params(create_params)
-    if new_sandbox.id == old_sandbox_id:
-        raise RuntimeError("Sandbox provider did not create a distinct sandbox")
-
-    proxy_config = get_sandbox_proxy_config(create_params)
-    token, expires_at, permissions = await _resolve_proxy_token(None)
-    if not token:
-        raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
-    await _configure_proxy(
-        new_sandbox.id,
-        token,
-        proxy_config,
-    )
-    await configure_git_identity(new_sandbox)
-    sandbox_metadata: dict[str, Any] = {
-        "sandbox_id": new_sandbox.id,
-        _SANDBOX_PROXY_CONFIG_METADATA_KEY: proxy_config,
-    }
-    await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
-    set_sandbox_backend(thread_id, new_sandbox)
-    record_proxy_token_expiry(
-        thread_id,
-        expires_at,
-        permissions=permissions,
-        base_proxy_config=proxy_config,
-    )
-    logger.info(
-        "Reset thread %s from sandbox %s to sandbox %s",
-        thread_id,
-        old_sandbox_id,
-        new_sandbox.id,
-    )
-    return old_sandbox_id, new_sandbox.id
+SandboxSource = Literal["workspace", "base"]
 
 
 async def recreate_sandbox_for_thread(
     thread_id: str,
     *,
     workspace_slug: str | None = None,
+    source: SandboxSource = "workspace",
 ) -> tuple[str, str]:
-    """Bind a thread to a fresh sandbox while preserving its previous sandbox."""
+    """Bind a thread to a fresh sandbox while preserving its previous sandbox.
+
+    ``workspace`` boots the thread's workspace snapshot; ``base`` boots the base
+    snapshot with deployment defaults, as a thread with no workspace would.
+    """
     cached = SANDBOX_BACKENDS.get(thread_id)
     metadata_sandbox_id = await get_sandbox_id_from_metadata(thread_id)
     old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
@@ -531,7 +486,7 @@ async def recreate_sandbox_for_thread(
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
-        workspace_slug=workspace_slug,
+        workspace_slug=None if source == "base" else workspace_slug,
     )
     if new_sandbox.id == old_sandbox_id:
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")

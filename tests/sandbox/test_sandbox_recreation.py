@@ -57,6 +57,35 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
 
 
 @pytest.mark.asyncio
+async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
+    thread_id = "thread-recreate-base"
+    SANDBOX_BACKENDS.clear()
+    set_sandbox_backend(thread_id, MagicMock(id="sandbox-old"))
+
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            new_callable=AsyncMock,
+            return_value="sandbox-old",
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            new_callable=AsyncMock,
+            return_value=MagicMock(id="sandbox-new"),
+        ) as create,
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
+    ):
+        result = await recreate_sandbox_for_thread(
+            thread_id, workspace_slug="langchainplus", source="base"
+        )
+
+    assert result == ("sandbox-old", "sandbox-new")
+    create.assert_awaited_once_with(thread_id=thread_id, workspace_slug=None)
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
 async def test_recreate_sandbox_keeps_old_binding_when_metadata_update_fails() -> None:
     thread_id = "thread-recreate-failure"
     SANDBOX_BACKENDS.clear()

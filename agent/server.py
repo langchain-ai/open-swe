@@ -187,7 +187,6 @@ from agent.tools import (
     refresh_workspace_start,
     report_platform_issue,
     request_pr_review,
-    sandbox_reset,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -366,7 +365,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "manage_thread",
         "open_pull_request",
         "recreate_sandbox",
-        "sandbox_reset",
         "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
@@ -497,7 +495,6 @@ _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
 
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
-    sandbox_reset,
     list_automations,
     create_automation,
     update_automation,

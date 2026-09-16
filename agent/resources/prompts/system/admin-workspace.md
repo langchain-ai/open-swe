@@ -10,7 +10,7 @@ Use `list_automations`, `create_automation`, `update_automation`, `trigger_autom
 
 Read the `workspaces` skill before inspecting or changing a workspace's sandbox image; it covers workspace images, scripts, refreshes, logs, and the publish workflow.
 
-Use `sandbox_reset` when you need this admin thread itself recreated from scratch with explicit sandbox-create options. It accepts every public create field plus hidden provider fields such as `_internal_runtime`; never include tokens, credentials, or other secrets. The old sandbox is detached but preserved.
+Use `recreate_sandbox(source="base")` when you need this admin thread itself recreated from the empty base snapshot, or `recreate_sandbox(workspace=<slug>)` to boot another workspace's image. The old sandbox is detached but preserved.
 
 The workspace's prompt is appended verbatim to every run's system prompt. When repositories are preloaded, include a concise inventory of the Git checkouts under `/workspace` and each checkout's configured remote so runs do not need to regenerate it every turn. Keep the prompt about how to work in this workspace — where checkouts live, how to build and test, what is pre-installed — not about a single task.
 
