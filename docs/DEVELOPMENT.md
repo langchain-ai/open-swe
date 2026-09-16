@@ -186,6 +186,20 @@ The dev server then attaches that session to everything it proxies, and presents
 
 `pnpm run build`, `pnpm run typecheck`, and `pnpm run test` run across the workspace through Turborepo (`pnpm --filter open-swe-dashboard run <script>` scopes one); `pnpm run lint` (oxlint) and `pnpm run format` / `pnpm run format:check` (oxfmt) run once from the root over every JS and TS file.
 
+## Test a PR in preview (LangChain maintainers)
+
+The shared [preview environment](https://dev.open-swe.langchain.dev/agents) combines `main`, `preview-manual`, and open organization-member PRs labeled `preview`; it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
+
+1. Add the **`preview`** label to your PR.
+2. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour. Labeling alone does not deploy.
+3. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**. A successful run may still omit a PR.
+4. Wait for the dashboard rollout, then confirm in LangSmith Deployments that the preview backend revision matches the published `preview` commit and deployed successfully.
+5. Open [preview](https://dev.open-swe.langchain.dev/agents) and test with non-production tasks and repositories. For local UI iteration against that backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
+
+Conflicting PRs are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch. Resolve the conflict before reapplying the label. Use **force** only to rebuild an unchanged preview tree.
+
+To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every seven days, a scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
+
 ## Desktop app (experimental)
 
 The Electron app in `desktop/` includes the compiled dashboard UI. Run it next to the backend:
