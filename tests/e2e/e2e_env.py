@@ -59,6 +59,10 @@ _DEFAULTS = {
     # Path the scripted agent clones from (a local bare repo = "fake GitHub").
     "E2E_REMOTE": str(BARE_REMOTE),
     "E2E_SECOND_REMOTE": str(SECOND_BARE_REMOTE),
+    # Pull requests, repositories and users live in PostgreSQL, and the server
+    # refuses to start without it. CI provides a service on this URI; locally
+    # any PostgreSQL on 5432 works. Export POSTGRES_URI to point elsewhere.
+    "POSTGRES_URI": "postgresql://postgres:postgres@localhost:5432/postgres",
     # Webhook signing + bot identity.
     "GITHUB_WEBHOOK_SECRET": "test-github-secret",
     "SLACK_SIGNING_SECRET": "test-slack-secret",
@@ -91,9 +95,23 @@ _DEFAULTS = {
 # a dashboard login with a matching email, so the Slack thread's owner (resolved
 # by email) is the same person when they sign in. The first (Alice) is the
 # default Slack sender, hence the default thread owner.
+# ``github_id`` is the immutable numeric id GitHub keys an account on, which is
+# what a ``user_identity`` row stores; the login is only a display handle.
 TEST_USERS = [
-    {"name": "Alice", "slack_id": "U_ALICE", "login": "alice", "email": "alice@example.com"},
-    {"name": "Bob", "slack_id": "U_BOB", "login": "bob", "email": "bob@example.com"},
+    {
+        "name": "Alice",
+        "slack_id": "U_ALICE",
+        "login": "alice",
+        "email": "alice@example.com",
+        "github_id": "1001",
+    },
+    {
+        "name": "Bob",
+        "slack_id": "U_BOB",
+        "login": "bob",
+        "email": "bob@example.com",
+        "github_id": "1002",
+    },
 ]
 
 # Alice is the workspace admin (so admin threads + the workspaces dashboard are

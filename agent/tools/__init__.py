@@ -14,6 +14,7 @@ _TOOL_MODULES = {
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
     "enter_plan_mode": ".enter_plan_mode",
+    "expedite_pr_approval": ".expedite_pr_approval",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
@@ -76,6 +77,7 @@ __all__ = [
     "delete_automation",
     "delete_workspace",
     "enter_plan_mode",
+    "expedite_pr_approval",
     "fetch_review_diff",
     "fetch_url",
     "get_thread",
@@ -153,6 +155,7 @@ if TYPE_CHECKING:
     from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from agent.tools.create_sandbox_service_url import create_sandbox_service_url
     from agent.tools.enter_plan_mode import enter_plan_mode
+    from agent.tools.expedite_pr_approval import expedite_pr_approval
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url
     from agent.tools.http_request import http_request

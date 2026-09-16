@@ -30,6 +30,7 @@ import {
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
 import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
+import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { useRepos } from "@/lib/profile"
@@ -78,6 +79,8 @@ function AdminPage() {
       <LLMGatewaySection />
 
       <FableSection />
+
+      <ExpeditedReviewSection />
 
       <TriggerReviewSection />
 
