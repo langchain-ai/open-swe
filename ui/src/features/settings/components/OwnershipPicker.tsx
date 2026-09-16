@@ -5,12 +5,12 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
-  Popover,
-  PopoverDescription,
-  PopoverPopup,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover"
+  Dialog,
+  DialogDescription,
+  DialogPopup,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 
@@ -227,8 +227,11 @@ export function OwnershipPicker({
 
   const empty = inThis.length + available.length + owned.length === 0
 
+  // A centered dialog rather than an anchored popover: the panel is tall
+  // enough that a popover flips up or down with the trigger's position, and
+  // the two pickers in one form would open in opposite directions.
   return (
-    <Popover
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         if (next) {
@@ -241,20 +244,17 @@ export function OwnershipPicker({
         setOpen(next)
       }}
     >
-      <PopoverTrigger
+      <DialogTrigger
         render={<Button size="sm" variant="outline" disabled={disabled} />}
       >
         {triggerLabel}
-      </PopoverTrigger>
-      <PopoverPopup
-        align="start"
-        className="w-[520px] max-w-[calc(100vw-2rem)] p-0"
-      >
-        <PopoverTitle className="px-3 pt-3">{title}</PopoverTitle>
+      </DialogTrigger>
+      <DialogPopup className="w-[520px]">
+        <DialogTitle className="px-3 pt-3">{title}</DialogTitle>
         {description && (
-          <PopoverDescription className="px-3 pt-1">
+          <DialogDescription className="px-3 pt-1">
             {description}
-          </PopoverDescription>
+          </DialogDescription>
         )}
         <div className="flex items-center gap-3 px-3 pt-3 pb-2">
           <div className="relative min-w-0 flex-1">
@@ -279,7 +279,7 @@ export function OwnershipPicker({
             </label>
           )}
         </div>
-        <div className="max-h-80 overflow-y-auto border-t border-border pb-2">
+        <div className="min-h-0 flex-1 overflow-y-auto border-t border-border pb-2">
           {notice && (
             <p className="flex items-center gap-1 px-3 pt-3 text-xs text-muted-foreground">
               <WarningIcon size={12} /> {notice}
@@ -355,7 +355,7 @@ export function OwnershipPicker({
             </Button>
           </div>
         </div>
-      </PopoverPopup>
-    </Popover>
+      </DialogPopup>
+    </Dialog>
   )
 }
