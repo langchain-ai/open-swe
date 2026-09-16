@@ -671,24 +671,25 @@ test.describe("threads workspace", () => {
     });
     await page.keyboard.press("Escape");
 
-    await noProject.hover();
-    await sidebar.getByRole("button", { name: "Pin No project" }).click();
+    const pinNoProject = sidebar.getByRole("button", {
+      name: "Pin No project",
+      includeHidden: true,
+    });
+    await pinNoProject.locator("..").hover();
+    await pinNoProject.click();
     await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
     await expect(
       sidebar.getByRole("button", { name: "No project", exact: true }),
     ).toBeVisible();
 
     await page.reload();
-    const pinnedNoProject = sidebar.getByRole("button", {
-      name: "No project",
-      exact: true,
-    });
-    await expect(pinnedNoProject).toBeVisible();
-    await pinnedNoProject.hover();
-    await expect(
-      sidebar.getByRole("button", { name: "Unpin No project" }),
-    ).toBeVisible();
     await expect(sidebar).toContainText(TITLES.noProject);
+    const unpinNoProject = sidebar.getByRole("button", {
+      name: "Unpin No project",
+      includeHidden: true,
+    });
+    await unpinNoProject.locator("..").hover();
+    await expect(unpinNoProject).toBeVisible();
 
     const screenshotPath = testInfo.outputPath("pinned-no-project.png");
     await sidebar.screenshot({ path: screenshotPath });
