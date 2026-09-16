@@ -72,7 +72,7 @@ test.describe("Slack Code Channels", () => {
     });
     await page.goto(`/agents/${initialResult.thread_id}`);
     const codeChannelLink = page.getByRole("link", {
-      name: "Open code channel",
+      name: "Open in Slack",
     });
     await expect(codeChannelLink).toBeVisible();
     await expect(codeChannelLink).toHaveAttribute(

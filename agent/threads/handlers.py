@@ -29,8 +29,8 @@ from agent.threads.runs import (
     _user_message_content,
 )
 from agent.threads.summary import (
-    _DASHBOARD_SOURCE,
     _SANDBOX_CREATING_SENTINEL,
+    DASHBOARD_SOURCE,
     _assert_thread_postable,
     _assert_thread_promptable,
     _assert_thread_readable,
@@ -125,7 +125,7 @@ async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[s
     queued: list[dict[str, Any]] = []
     for entry in messages:
         content = entry.get("content") if isinstance(entry, Mapping) else None
-        if not isinstance(content, Mapping) or content.get("source") != _DASHBOARD_SOURCE:
+        if not isinstance(content, Mapping) or content.get("source") != DASHBOARD_SOURCE:
             continue
         queued_id = content.get("queue_id")
         text = content.get("text")
@@ -243,7 +243,9 @@ async def send_dashboard_message(
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     handoff_metadata = dict(metadata)
     metadata_update: dict[str, Any] = {
-        "source": _DASHBOARD_SOURCE,
+        "source": DASHBOARD_SOURCE,
+        # Continuing on the web promotes a `/oswe` question thread for good.
+        "unlisted": False,
         "updated_at_ms": now_ms,
         "feedback_last_activity_at_ms": now_ms,
         "plan_mode": body.plan_mode,
@@ -287,7 +289,7 @@ async def send_dashboard_message(
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     queue_payload: dict[str, Any] = {
         "text": prompt,
-        "source": _DASHBOARD_SOURCE,
+        "source": DASHBOARD_SOURCE,
         "surface": "web",
         "queue_id": (
             str(body.client_message_id) if body.client_message_id else f"queued-{uuid.uuid4()}"
@@ -375,7 +377,7 @@ async def cancel_dashboard_thread(
                 thread_id,
                 None,
                 configurable,
-                source=_DASHBOARD_SOURCE,
+                source=DASHBOARD_SOURCE,
                 input={"messages": []},
                 client=client,
             )
@@ -469,12 +471,20 @@ _CONTINUED_METADATA_KEYS = (
     "resolved_model",
     "resolved_effort",
     "plan_mode",
-    "environment",
     "repo_owner",
     "repo_name",
     "repo_explicitly_none",
     THREAD_SETTINGS_KEY,
 )
+
+
+def _continued_workspace(metadata: Mapping[str, Any]) -> str | None:
+    """The workspace to carry into a private continuation; ``environment`` is the pre-workspace key."""
+    for key in ("workspace", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 async def continue_thread_privately(
@@ -507,10 +517,13 @@ async def continue_thread_privately(
     new_metadata: dict[str, Any] = {
         key: metadata[key] for key in _CONTINUED_METADATA_KEYS if metadata.get(key) is not None
     }
+    workspace = _continued_workspace(metadata)
+    if workspace is not None:
+        new_metadata["workspace"] = workspace
     new_metadata.update(
         {
-            "source": _DASHBOARD_SOURCE,
-            "origin": _DASHBOARD_SOURCE,
+            "source": DASHBOARD_SOURCE,
+            "origin": DASHBOARD_SOURCE,
             "owner_type": "user",
             "owner_login": login.strip(),
             "visibility": "private",

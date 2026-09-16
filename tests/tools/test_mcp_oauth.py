@@ -63,6 +63,7 @@ def oauth_remote(monkeypatch):
 
 async def oauth_record(method="client_secret_post"):
     return await settings.prepare_workspace_mcp(
+        "default",
         "linear",
         MCPConnectionUpdate.model_validate(
             {
@@ -80,7 +81,7 @@ async def oauth_record(method="client_secret_post"):
     )
 
 
-def client_for(record, namespace=("workspace_mcps",)):
+def client_for(record, namespace=("workspace_mcps", "default")):
     connection = runtime._connection(record, namespace)
     factory = connection["httpx_client_factory"]
     assert factory is not None
@@ -229,12 +230,14 @@ async def test_oauth_works_through_real_mcp_discovery_and_execution(fake_store, 
 
     oauth_remote["reply"] = reply
     record = await oauth_record()
-    definitions = await runtime.discover_tools(record, ("workspace_mcps",))
+    definitions = await runtime.discover_tools(record, ("workspace_mcps", "default"))
     assert [tool.name for tool in definitions] == ["search"]
     fake_store.seed(
-        ["workspace_mcps"], record.name, {**record.model_dump(), "allowed_tools": ["search"]}
+        ["workspace_mcps", "default"],
+        record.name,
+        {**record.model_dump(), "allowed_tools": ["search"]},
     )
-    tools = await loader.load_workspace_mcp_tools()
+    tools = await loader.load_workspace_mcp_tools("default")
     result = await tools[0].ainvoke({})
     assert result[0]["text"] == "found"
     assert len(oauth_remote["tokens"]) == 1

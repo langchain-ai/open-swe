@@ -10,7 +10,6 @@ import { useState } from "react"
 
 import type {
   AnalyticsMetadata,
-  ModelOption,
   PRMergeRateCohort,
   ReviewerStatsPayload,
   UsageLeaderboardPeriod,
@@ -18,6 +17,7 @@ import type {
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -29,8 +29,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
-import { useOptions } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { safeModelLabel } from "@/lib/modelLabel"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/usage")({
@@ -50,7 +50,6 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
 
 function UsagePage() {
   const session = useSession()
-  const options = useOptions()
   const period =
     (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
   const navigate = Route.useNavigate()
@@ -75,7 +74,6 @@ function UsagePage() {
         period={activePeriod}
         login={session.data.login}
         isAdmin={session.data.is_admin}
-        models={options.data?.models ?? []}
         onPeriodChange={(value) =>
           navigate({ to: "/usage", search: { period: value } })
         }
@@ -88,13 +86,11 @@ export function UsageAnalytics({
   period: activePeriod,
   login,
   isAdmin,
-  models = [],
   onPeriodChange,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
-  models?: Array<ModelOption>
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
@@ -105,7 +101,6 @@ export function UsageAnalytics({
       period={activePeriod}
       login={login}
       isAdmin={isAdmin}
-      models={models}
       pageSize={leaderboardPageSize}
       onPageSizeChange={setLeaderboardPageSize}
       onPeriodChange={onPeriodChange}
@@ -117,7 +112,6 @@ function UsageAnalyticsPeriod({
   period: activePeriod,
   login,
   isAdmin,
-  models,
   pageSize: leaderboardPageSize,
   onPageSizeChange: setLeaderboardPageSize,
   onPeriodChange,
@@ -125,7 +119,6 @@ function UsageAnalyticsPeriod({
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
-  models: Array<ModelOption>
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
@@ -163,7 +156,7 @@ function UsageAnalyticsPeriod({
 
   return (
     <>
-      <PRMergeRateSection report={report} models={models} />
+      <PRMergeRateSection report={report} />
 
       <SettingsSection
         title="Agent leaderboard"
@@ -217,7 +210,7 @@ function UsageAnalyticsPeriod({
           </div>
         ) : (
           <UsageTable
-            models={models}
+            currentUserRank={leaderboard.data.current_user_rank}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
             page={leaderboardPage}
@@ -369,10 +362,8 @@ function usePRMergeRateReport(
 
 function PRMergeRateSection({
   report,
-  models,
 }: {
   report: ReturnType<typeof usePRMergeRateReport>
-  models: Array<ModelOption>
 }) {
   const data = report.isError ? undefined : report.data
   const emptyMessage =
@@ -412,11 +403,7 @@ function PRMergeRateSection({
           </button>
         </div>
       ) : data?.status === "ready" ? (
-        <PRMergeRateTable
-          key={data.period}
-          cohorts={data.cohorts}
-          models={models}
-        />
+        <PRMergeRateTable key={data.period} cohorts={data.cohorts} />
       ) : (
         <p
           className="p-6 text-center text-xs text-muted-foreground"
@@ -428,33 +415,28 @@ function PRMergeRateSection({
       {data ? (
         <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
           <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
-            How these numbers work
+            How this is calculated
           </summary>
           <div className="mt-3 space-y-3">
+            <p>
+              <strong>Open</strong> includes every PR that is still open. We
+              separate these into newer PRs that are still gathering data and
+              PRs that are at least {data.maturity_days} days old but still do
+              not have a final outcome.
+            </p>
+            <p>
+              <strong>Merge rate</strong> includes only PRs old enough to have a
+              meaningful outcome. It counts merged, closed without merge, and
+              still-open PRs that are at least {data.maturity_days} days old.
+              Newer open PRs are excluded so they do not lower the rate before
+              they have had enough time to merge.
+            </p>
             <ul className="list-disc space-y-1 pl-4">
               <li>
-                <strong>Waiting:</strong> still open and less than{" "}
-                {data.maturity_days} days old. These PRs are excluded from both
-                rates.
-              </li>
-              <li>
-                <strong>Mature pending:</strong> still open and at least{" "}
-                {data.maturity_days} days old. They have no final outcome yet.
-              </li>
-              <li>
-                <strong>Decided rate:</strong> the percentage of merged or
-                closed PRs that were merged. Open PRs are excluded.
-              </li>
-              <li>
-                <strong>Mature share:</strong> the percentage merged among
-                merged, closed, and mature pending PRs.
+                Merge rate = merged ÷ (merged + closed without merge + open at
+                least {data.maturity_days} days).
               </li>
             </ul>
-            <p>
-              For example, 3 merged PRs, 1 closed without merging, and 1 mature
-              pending PR give a decided rate of 75% (3 of 4) and a mature share
-              of 60% (3 of 5). Waiting PRs do not change either rate.
-            </p>
             <p>
               PRs are grouped by the model configured for the run that opened
               them. Other models may contribute through routing, fallback,
@@ -474,13 +456,7 @@ function PRMergeRateSection({
   )
 }
 
-function PRMergeRateTable({
-  cohorts,
-  models,
-}: {
-  cohorts: PRMergeRateCohort[]
-  models: Array<ModelOption>
-}) {
+function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const pageCount = Math.max(1, Math.ceil(cohorts.length / pageSize))
@@ -495,15 +471,24 @@ function PRMergeRateTable({
       <table className="w-full min-w-[760px] text-xs">
         <thead className="border-b border-border text-muted-foreground">
           <tr>
-            <th className="px-4 py-3 text-left font-normal">
-              Opening configured model
-            </th>
+            <th className="px-4 py-3 text-left font-normal">Opening model</th>
+            <th className="px-2 py-3 text-right font-normal">PRs opened</th>
             <th className="px-2 py-3 text-right font-normal">Merged</th>
-            <th className="px-2 py-3 text-right font-normal">Closed</th>
-            <th className="px-2 py-3 text-right font-normal">Mature pending</th>
-            <th className="px-2 py-3 text-right font-normal">Waiting</th>
-            <th className="px-2 py-3 text-right font-normal">Decided rate</th>
-            <th className="px-4 py-3 text-right font-normal">Mature share</th>
+            <th className="px-2 py-3 text-right font-normal">
+              Closed without merge
+            </th>
+            <th className="px-2 py-3 text-right font-normal">Open</th>
+            <th className="px-4 py-3 text-right font-medium text-foreground">
+              <Tooltip>
+                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                  Merge rate
+                </TooltipTrigger>
+                <TooltipPopup className="max-w-xs">
+                  Includes PRs old enough to have a meaningful outcome; newer
+                  open PRs are still gathering data.
+                </TooltipPopup>
+              </Tooltip>
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -511,11 +496,16 @@ function PRMergeRateTable({
             <tr key={`${cohort.model_id}-${cohort.model_attribution_quality}`}>
               <td className="px-4 py-3">
                 <div className="font-medium">
-                  {formatModelName(models, cohort.model_id)}
+                  {cohort.model_id
+                    ? safeModelLabel(cohort.model_id) || "Unavailable"
+                    : "Unavailable"}
                 </div>
                 <div className="text-muted-foreground">
                   {cohort.model_attribution_quality} attribution
                 </div>
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {cohort.cohort_size}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {cohort.merged}
@@ -524,17 +514,9 @@ function PRMergeRateTable({
                 {cohort.closed_without_merge}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.mature_pending}
+                {cohort.mature_pending + cohort.waiting}
               </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.waiting}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.decided_merge_rate == null
-                  ? "—"
-                  : formatPercent(cohort.decided_merge_rate)}
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
+              <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
                 {cohort.mature_cohort_merge_share == null
                   ? "—"
                   : formatPercent(cohort.mature_cohort_merge_share)}
@@ -558,7 +540,7 @@ function PRMergeRateTable({
 }
 
 function UsageTable({
-  models,
+  currentUserRank,
   rows,
   totalMembers,
   page,
@@ -566,7 +548,7 @@ function UsageTable({
   onPageChange,
   onPageSizeChange,
 }: {
-  models: Array<ModelOption>
+  currentUserRank: number | null
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
   page: number
@@ -600,10 +582,13 @@ function UsageTable({
             >
               <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
               <td className="px-2 py-3">
-                <UserCell row={row} />
+                <UserCell
+                  row={row}
+                  isCurrentUser={row.rank === currentUserRank}
+                />
               </td>
               <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
-                {formatModelName(models, row.favorite_model)}
+                {safeModelLabel(row.favorite_model) || "Unavailable"}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.invocations)}
@@ -808,9 +793,15 @@ function CounterList({
   )
 }
 
-function UserCell({ row }: { row: UsageLeaderboardRow }) {
+function UserCell({
+  row,
+  isCurrentUser,
+}: {
+  row: UsageLeaderboardRow
+  isCurrentUser: boolean
+}) {
   const initials = initialsFor(row.user.name)
-  const detail = row.user.email ?? row.user.github_login ?? "unknown"
+  const detail = row.user.github_login
   const profileUrl = githubProfileUrl(row.user.github_login)
   const name = profileUrl ? (
     <a
@@ -826,17 +817,39 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
       {row.user.name}
     </span>
   )
+  const avatar = (
+    <Avatar>
+      {row.user.avatar_url && (
+        <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
+      )}
+      <AvatarFallback>{initials}</AvatarFallback>
+    </Avatar>
+  )
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      <Avatar>
-        {row.user.avatar_url && (
-          <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
-        )}
-        <AvatarFallback>{initials}</AvatarFallback>
-      </Avatar>
+      {profileUrl ? (
+        <a
+          href={profileUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-hidden="true"
+          tabIndex={-1}
+        >
+          {avatar}
+        </a>
+      ) : (
+        avatar
+      )}
       <div className="flex min-w-0 flex-col">
-        {name}
-        {detail !== row.user.name ? (
+        <div className="flex min-w-0 items-center gap-1.5">
+          {name}
+          {isCurrentUser ? (
+            <Badge variant="secondary" aria-label="You">
+              You
+            </Badge>
+          ) : null}
+        </div>
+        {detail && detail !== row.user.name ? (
           <span className="truncate text-xs text-muted-foreground">
             {detail}
           </span>
@@ -849,22 +862,6 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
 function githubProfileUrl(login: string | null): string | null {
   if (!login) return null
   return `https://github.com/${encodeURIComponent(login)}`
-}
-
-function formatModelName(
-  models: Array<ModelOption>,
-  modelId: string | null
-): string {
-  if (!modelId) return "Unavailable"
-  return (
-    models.find((model) => model.id === modelId)?.label ??
-    stripProvider(modelId)
-  )
-}
-
-function stripProvider(modelId: string): string {
-  const separator = modelId.indexOf(":")
-  return separator >= 0 ? modelId.slice(separator + 1) : modelId
 }
 
 function initialsFor(name: string): string {
