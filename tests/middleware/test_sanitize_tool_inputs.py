@@ -5,7 +5,16 @@ integer field in read_file (e.g. offset='1, 80'), causing a Pydantic
 ValidationError and an unnecessary retry.
 """
 
-from agent.middleware.sanitize_tool_inputs import _coerce_int, _sanitize_read_file_args
+from unittest.mock import AsyncMock
+
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.messages import AIMessage
+
+from agent.middleware.sanitize_tool_inputs import (
+    SanitizeToolInputsMiddleware,
+    _coerce_int,
+    _sanitize_read_file_args,
+)
 
 
 class TestCoerceInt:
@@ -72,3 +81,43 @@ class TestSanitizeReadFileArgs:
         args = {"file_path": "foo.ts", "offset": "1, 80"}
         _ = _sanitize_read_file_args(args)
         assert args["offset"] == "1, 80"
+
+
+async def test_deduplicates_canonical_equivalent_calls_within_one_response() -> None:
+    response = ModelResponse(
+        result=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "mark_question_answered", "args": {}, "id": "call_1"},
+                    {"name": "mark_question_answered", "args": {}, "id": "call_2"},
+                    {"name": "execute", "args": {"b": 2, "a": 1}, "id": "call_3"},
+                    {"name": "execute", "args": {"a": 1, "b": 2}, "id": "call_4"},
+                ],
+            )
+        ]
+    )
+    handler = AsyncMock(return_value=response)
+    request = ModelRequest(model=AsyncMock(), messages=[], state={})
+
+    result = await SanitizeToolInputsMiddleware().awrap_model_call(request, handler)
+
+    assert [call["id"] for call in result.result[0].tool_calls] == ["call_1", "call_3"]
+
+
+async def test_does_not_deduplicate_calls_across_ai_messages() -> None:
+    response = ModelResponse(
+        result=[
+            AIMessage(content="", tool_calls=[{"name": "execute", "args": {}, "id": "call_1"}]),
+            AIMessage(content="", tool_calls=[{"name": "execute", "args": {}, "id": "call_2"}]),
+        ]
+    )
+    handler = AsyncMock(return_value=response)
+    request = ModelRequest(model=AsyncMock(), messages=[], state={})
+
+    result = await SanitizeToolInputsMiddleware().awrap_model_call(request, handler)
+
+    assert [call["id"] for message in result.result for call in message.tool_calls] == [
+        "call_1",
+        "call_2",
+    ]

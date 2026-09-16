@@ -19,6 +19,7 @@ async def test_missing_run_context_cannot_qualify_feedback(monkeypatch, config):
 @pytest.mark.asyncio
 async def test_qualifies_only_current_thread_and_run(monkeypatch):
     mark = AsyncMock()
+    monkeypatch.setattr(answered, "answer_marked_for_run", AsyncMock(return_value=False))
     monkeypatch.setattr(
         answered,
         "get_config",
@@ -27,3 +28,22 @@ async def test_qualifies_only_current_thread_and_run(monkeypatch):
     monkeypatch.setattr(answered, "mark_answered_question", mark)
     assert await answered.mark_question_answered() == {"success": True}
     mark.assert_awaited_once_with("current-thread", "current-run")
+
+
+@pytest.mark.asyncio
+async def test_repeated_answer_is_a_terminal_noop(monkeypatch):
+    mark = AsyncMock()
+    monkeypatch.setattr(answered, "answer_marked_for_run", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        answered,
+        "get_config",
+        lambda: {"run_id": "current-run", "configurable": {"thread_id": "current-thread"}},
+    )
+    monkeypatch.setattr(answered, "mark_answered_question", mark)
+
+    assert await answered.mark_question_answered() == {
+        "success": True,
+        "already_marked": True,
+        "note": "This request is already marked answered. Do not call this tool again; deliver your final answer now.",
+    }
+    mark.assert_not_awaited()
