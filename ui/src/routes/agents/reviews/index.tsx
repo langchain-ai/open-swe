@@ -4,11 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import {
-  BugBeetleIcon,
-  FlagIcon,
-  GitPullRequestIcon,
-} from "@phosphor-icons/react"
+import { GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { ReviewSummary } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -18,6 +14,7 @@ import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 import { MyPullRequests } from "@/features/reviews/MyPullRequests"
 import { PullRequestLinks } from "@/features/reviews/PullRequestLinks"
+import { ReviewCounts } from "@/features/reviews/components/ReviewCounts"
 import {
   validateReviewsSearch,
   type ReviewsSearch,
@@ -87,12 +84,9 @@ function ReviewsPage() {
 
   return (
     <main className="min-w-0 flex-1 overflow-y-auto">
-      <div
-        className={cn(
-          "mx-auto px-6 py-8",
-          mine ? "max-w-screen-2xl" : "max-w-3xl"
-        )}
-      >
+      {/* One width for both tabs: switching tabs must not re-centre the page
+          under the button being clicked. */}
+      <div className="mx-auto max-w-4xl px-6 py-8">
         <h1 className="font-heading text-base font-medium text-foreground">
           Pull Requests
         </h1>
@@ -213,21 +207,7 @@ function ReviewsPage() {
                   </div>
                   <div className="flex shrink-0 items-center gap-3 text-xs">
                     {statusBadge(review)}
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1",
-                        review.counts.bugs > 0
-                          ? "text-destructive"
-                          : "text-muted-foreground"
-                      )}
-                    >
-                      <BugBeetleIcon className="size-3.5" />
-                      {review.counts.bugs}
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-muted-foreground">
-                      <FlagIcon className="size-3.5" />
-                      {review.counts.flags}
-                    </span>
+                    <ReviewCounts counts={review.counts} />
                   </div>
                 </div>
               ))}
