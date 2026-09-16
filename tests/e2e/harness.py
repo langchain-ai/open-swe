@@ -114,6 +114,9 @@ async def _reset_durable_pr_state() -> None:
     ``(repo, number)`` from an earlier spec would be mistaken for this run's
     pull request: a baby-sit watch would report "already monitored from another
     agent thread", and a stale approval would block a fresh one.
+
+    ``repository`` stays: ``workspace_repository`` references it, so truncating
+    it cascades away the workspace assignments every routable-repo check needs.
     """
     from agent.baby_sit import WATCHES, stop_watch
 
@@ -126,9 +129,7 @@ async def _reset_durable_pr_state() -> None:
 
     if postgres.configured():
         async with postgres.transaction() as connection:
-            await connection.execute(
-                text("TRUNCATE expedited_approval, pull_request, repository CASCADE")
-            )
+            await connection.execute(text("TRUNCATE expedited_approval, pull_request CASCADE"))
 
 
 @app.post("/control/prepare-sandbox-repo")
