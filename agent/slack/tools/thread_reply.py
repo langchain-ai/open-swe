@@ -15,6 +15,7 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.dm import is_dm_channel
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -95,7 +96,14 @@ async def slack_thread_reply(
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
-            should_ask_for_feedback=should_ask_for_feedback and not options,
+            # A DM is a private back-and-forth, so it never asks for a rating.
+            should_ask_for_feedback=(
+                should_ask_for_feedback
+                and not options
+                and not is_dm_channel(
+                    cfg.slack_thread.channel_context if cfg.slack_thread else None
+                )
+            ),
         )
     if message_ts is None:
         if slack_error == "thread_not_found":

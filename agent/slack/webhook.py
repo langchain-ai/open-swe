@@ -931,7 +931,9 @@ async def _process_slack_mention_impl(
     )
 
     mapped_login = await _slack_login(user_id, user_email) if allowed_bot is None else None
-    thread_model_choice = await common.get_thread_model_choice(thread_id)
+    # A DM always answers on the person's own default model: a per-thread model
+    # choice is never routed into it.
+    thread_model_choice = None if dm_session else await common.get_thread_model_choice(thread_id)
 
     # Routing comes before the run's repository: a repository nobody named
     # must not outrank the channel's binding, and once a workspace has won, a
