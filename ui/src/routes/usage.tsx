@@ -763,14 +763,29 @@ function UserCell({
       {row.user.name}
     </span>
   )
+  const avatar = (
+    <Avatar>
+      {row.user.avatar_url && (
+        <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
+      )}
+      <AvatarFallback>{initials}</AvatarFallback>
+    </Avatar>
+  )
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      <Avatar>
-        {row.user.avatar_url && (
-          <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
-        )}
-        <AvatarFallback>{initials}</AvatarFallback>
-      </Avatar>
+      {profileUrl ? (
+        <a
+          href={profileUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-hidden="true"
+          tabIndex={-1}
+        >
+          {avatar}
+        </a>
+      ) : (
+        avatar
+      )}
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           {name}
@@ -790,6 +805,11 @@ function UserCell({
   )
 }
 
+function githubProfileUrl(login: string | null): string | null {
+  if (!login) return null
+  return `https://github.com/${encodeURIComponent(login)}`
+}
+
 function initialsFor(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (!parts.length) return "?"
@@ -797,11 +817,6 @@ function initialsFor(name: string): string {
   const second = parts[1]
   if (!second) return first.slice(0, 2).toUpperCase()
   return `${first[0] ?? ""}${second[0] ?? ""}`.toUpperCase()
-}
-
-function githubProfileUrl(login: string | null): string | null {
-  if (!login) return null
-  return `https://github.com/${encodeURIComponent(login)}`
 }
 
 function formatTime(value: number): string {
