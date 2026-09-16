@@ -42,7 +42,6 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   all: "All time",
 }
 
-
 function UsagePage() {
   const session = useSession()
   const period =
