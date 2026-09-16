@@ -2,6 +2,8 @@ from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
 
+from langchain_core.tools import StructuredTool
+
 from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
@@ -125,7 +127,13 @@ async def manage_code_channel(
         )
 
     if not is_code_channel_session(thread_ts):
-        return {"success": False, "error": "This session is not in a code channel"}
+        return {
+            "success": False,
+            "error": (
+                "This session is not in a code channel; only action='create' is valid here. "
+                "Do not retry other actions."
+            ),
+        }
 
     if action == "status":
         data, error = await set_session_status_result(channel_id, status)
@@ -220,6 +228,29 @@ async def manage_code_channel(
             result["warnings"] = [f"Could not set session status to closed: {status_error}"]
         return result
     return {"success": False, "error": f"Unknown action {action}"}
+
+
+async def manage_code_channel_create(
+    action: Literal["create"],
+    title: str = "",
+    invite: list[str] | None = None,
+    team_id: str = "",
+    is_private: bool = False,
+) -> dict[str, Any]:
+    """Create a code channel from a non-code Slack session."""
+    return await manage_code_channel(
+        action=action,
+        title=title,
+        invite=invite,
+        team_id=team_id,
+        is_private=is_private,
+    )
+
+
+manage_code_channel_create_tool = StructuredTool.from_function(
+    coroutine=manage_code_channel_create,
+    name="manage_code_channel",
+)
 
 
 async def _code_channel_title(client: Any, thread_id: str, fallback: str) -> str:
