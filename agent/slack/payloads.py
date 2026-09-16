@@ -51,6 +51,7 @@ class SlackMessage(SlackPayload):
     text: str | None = None
     subtype: str = ""
     bot_id: str = ""
+    app_id: str = ""
     attachments: list[JsonObject] = Field(default_factory=list)
 
     @property
@@ -75,6 +76,7 @@ class SlackEvent(SlackPayload):
     user_id: str = ""
     text: str | None = None
     bot_id: str = ""
+    app_id: str = ""
     attachments: list[JsonObject] = Field(default_factory=list)
     message: SlackMessage | None = None
     previous_message: SlackMessage | None = None
@@ -114,6 +116,7 @@ class SlackEventEnvelope(SlackPayload):
     type: str = ""
     event_id: str = ""
     team_id: str = ""
+    api_app_id: str = ""
     challenge: str = ""
     authorizations: list[SlackAuthorization] = Field(default_factory=list)
     authed_users: list[str] = Field(default_factory=list)
@@ -212,6 +215,49 @@ class SlackButtonValue(SlackPayload):
     action: str = ""
     fingerprint: str = ""
     response: str = ""
+
+
+class SlackInputValue(SlackPayload):
+    """One input element's submitted value, as ``view.state.values`` carries it."""
+
+    value: str | None = None
+
+
+class SlackViewState(SlackPayload):
+    values: dict[str, dict[str, SlackInputValue]] = Field(default_factory=dict)
+
+
+class SlackView(SlackPayload):
+    id: str = ""
+    callback_id: str = ""
+    private_metadata: str = ""
+    state: SlackViewState = Field(default_factory=SlackViewState)
+
+
+class SlackViewSubmission(SlackPayload):
+    """A submitted modal: which view it was, who submitted it, and what they typed."""
+
+    type: str = ""
+    trigger_id: str = ""
+    view: SlackView = Field(default_factory=SlackView)
+    user: SlackInteractionUser = Field(default_factory=SlackInteractionUser)
+
+    @property
+    def callback_id(self) -> str:
+        return self.view.callback_id
+
+    @property
+    def metadata(self) -> JsonObject:
+        """``private_metadata`` parsed as JSON; ``{}`` when it is absent or malformed."""
+        if not self.view.private_metadata:
+            return {}
+        return parse_json_object(self.view.private_metadata.encode()) or {}
+
+    def submitted(self, block_id: str, action_id: str) -> str:
+        """What was typed into one input, or ``""`` when it was left empty."""
+        block = self.view.state.values.get(block_id) or {}
+        element = block.get(action_id)
+        return (element.value or "") if element is not None else ""
 
 
 def parse_json_object(body: bytes) -> JsonObject | None:

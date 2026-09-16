@@ -38,8 +38,10 @@ from agent.slack.code_channels import (
     store_block_suggestions,
 )
 from agent.source_context import SourceContext
+from agent.threads.summary import thread_is_private
 from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
 
@@ -100,6 +102,15 @@ async def manage_code_channel(
     thread_ts = str(active.get("thread_ts") or "")
 
     if action == "create":
+        try:
+            metadata = thread_metadata(await client.threads.get(thread_id))
+        except Exception:
+            return {"success": False, "error": "Cannot verify thread credential scope"}
+        if thread_is_private(metadata):
+            return {
+                "success": False,
+                "error": "Private threads cannot be promoted to code channels",
+            }
         if is_code_channel_session(thread_ts):
             return {"success": False, "error": "This session is already a code channel"}
         return await _create(
@@ -295,7 +306,14 @@ async def _create(
     new_slack = {
         **{
             key: active.get(key, "")
-            for key in ("triggering_user_id", "triggering_user_name", "triggering_user_email")
+            for key in (
+                "triggering_user_id",
+                "triggering_user_name",
+                "triggering_user_email",
+                "team_id",
+                "triggering_bot_id",
+                "triggering_bot_app_id",
+            )
         },
         "channel_id": channel_id,
         "thread_ts": CODE_CHANNEL_SESSION_TS,

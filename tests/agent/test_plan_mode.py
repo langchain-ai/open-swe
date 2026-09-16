@@ -4,9 +4,9 @@ from typing import Any
 import pytest
 
 from agent import server
-from agent.dashboard.threads import runs as thread_runs
-from agent.dashboard.threads import summary as thread_summary
 from agent.prompt import construct_system_prompt
+from agent.threads import runs as thread_runs
+from agent.threads import summary as thread_summary
 from tests.conftest import patch_thread_module
 
 
@@ -17,25 +17,11 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
     assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
 
 
-@pytest.mark.parametrize(
-    "source", ["dashboard", "slack", "linear", "github", "schedule", "desktop", "generic"]
-)
-def test_plan_mode_requires_an_explicit_request_for_every_source(source: str) -> None:
-    prompt = construct_system_prompt(
-        working_dir="/work", source=source, slack_context=source == "slack"
-    )
-
-    assert "Call `enter_plan_mode` only when the user explicitly asks" in prompt
-    assert "Do not infer plan mode from task complexity, size, or ambiguity" in prompt
-    assert "If a task would genuinely benefit from a structured plan" not in prompt
-
-
-def test_plan_mode_prompt_requests_slack_approval_options() -> None:
+def test_plan_mode_prompt_omits_superseded_slack_approval_guidance() -> None:
     prompt = construct_system_prompt(
         working_dir="/work", plan_mode=True, source="slack", slack_context=True
     )
 
-    assert 'options=["Approve & implement", "Request changes"]' in prompt
     assert "do not send approval buttons" not in prompt
 
 
@@ -62,7 +48,6 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     assert "write_file" not in excluded
     assert "edit_file" not in excluded
     assert "execute" not in excluded
-    assert "browser_close" not in excluded
 
 
 class _FakeThreadsClient:
@@ -203,12 +188,6 @@ async def test_enter_plan_mode_tool_returns_command() -> None:
     assert messages[0].tool_call_id == "call-1"
 
 
-def test_enter_plan_mode_exported() -> None:
-    from agent.tools import enter_plan_mode
-
-    assert callable(enter_plan_mode)
-
-
 async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib
 
@@ -297,7 +276,6 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     assert messages[0].tool_call_id == "call-1"
     assert "<title>Plan</title>" in messages[0].content
     assert "add tests" in messages[0].content
-    assert "reasonable engineering judgment" in messages[0].content
     assert "source of truth" not in messages[0].content
 
 

@@ -17,11 +17,11 @@ async def recreate_sandbox() -> dict[str, Any]:
 
     try:
         from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
-        from agent.server import environment_slug
+        from agent.server import workspace_slug
 
         old_sandbox_id, new_sandbox_id = await recreate_sandbox_for_thread(
             thread_id,
-            environment_slug=environment_slug(cfg),
+            workspace_slug=workspace_slug(cfg),
         )
     except Exception as exc:
         logger.exception("Failed to recreate sandbox for thread %s", thread_id)

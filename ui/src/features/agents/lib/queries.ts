@@ -21,6 +21,7 @@ import type {
   ImageChunk,
   Message,
 } from "./types"
+import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
@@ -284,15 +285,15 @@ const BUNDLED_SKILLS: Array<Skill> = [
   },
 ]
 
-export const environmentOptionKeys = {
-  all: ["environment-options"] as const,
+export const workspaceOptionKeys = {
+  all: ["workspace-options"] as const,
 }
 
-/** Environments a new thread can boot from. Empty when none are configured. */
-export function useEnvironmentOptions(enabled = true) {
+/** Workspaces a new thread can boot from. Empty when none are configured. */
+export function useWorkspaceOptions(enabled = true) {
   return useQuery({
-    queryKey: environmentOptionKeys.all,
-    queryFn: api.listEnvironmentOptions,
+    queryKey: workspaceOptionKeys.all,
+    queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     enabled,
   })
@@ -476,10 +477,11 @@ export function useSidebarProjects({
   enabled?: boolean
 }) {
   const params = { includeAutomations, includeResolved }
+  const hydrated = useSidebarPrefsHydrated()
   return useQuery({
     queryKey: agentThreadKeys.projects(params),
     queryFn: () => agentsApi.listThreadProjects(params),
-    enabled,
+    enabled: enabled && hydrated,
     placeholderData: (previous) => previous,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -517,8 +519,9 @@ function useSidebarThreadPages(
   params: Omit<ThreadsPageParams, "offset">,
   enabled: boolean
 ) {
+  const hydrated = useSidebarPrefsHydrated()
   const query = useInfiniteThreadsPages(params, {
-    enabled,
+    enabled: enabled && hydrated,
     pollWhileRunning: true,
   })
   return {
@@ -530,6 +533,25 @@ function useSidebarThreadPages(
     error: query.error,
     refetch: query.refetch,
     fetchNextPage: () => void query.fetchNextPage(),
+  }
+}
+
+/** Exported so the head-script warmup can be tested against the real request. */
+export function sidebarRecentsParams({
+  projectMode,
+  includeAutomations = false,
+  includeResolved = false,
+  sort = "created",
+}: {
+  projectMode: boolean
+  includeAutomations?: boolean
+  includeResolved?: boolean
+  sort?: ChatSort
+}): Omit<ThreadsPageParams, "offset"> {
+  return {
+    ...sidebarPageParams({ includeAutomations, includeResolved }),
+    ...(projectMode ? { ownerless: true } : {}),
+    sortBy: sort === "created" ? "created_at" : "updated_at",
   }
 }
 
@@ -547,11 +569,12 @@ export function useSidebarRecents({
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
-    {
-      ...sidebarPageParams({ includeAutomations, includeResolved }),
-      ...(projectMode ? { ownerless: true } : {}),
-      sortBy: sort === "created" ? "created_at" : "updated_at",
-    },
+    sidebarRecentsParams({
+      projectMode,
+      includeAutomations,
+      includeResolved,
+      sort,
+    }),
     enabled
   )
 }
@@ -607,7 +630,7 @@ export function useAgentThread(threadId: string) {
       query.state.data?.status === "running" ? 3000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
-    // would 404 and bounce the route back to /agents.
+    // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
 }

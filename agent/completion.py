@@ -294,7 +294,13 @@ async def _finalize_agent_usage_telemetry(
     await finalize_agent_invocation_usage(
         invocation_id=invocation_id,
         thread_id=thread_id,
+        invocation_started_at=(
+            payload.get("metadata", {}).get("invocation_started_at")
+            if isinstance(payload.get("metadata"), dict)
+            else None
+        ),
         state=state,
+        status=str(status),
     )
 
 
@@ -354,6 +360,10 @@ async def _handle_successful_run(
         return {"status": "error", "reason": "thread fetch failed"}
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    if metadata.get("source") == "incidents_agent":
+        from agent.incidents import turns
+
+        return await turns.handle_run_completion(thread_id, run_id, "success")
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
@@ -386,6 +396,12 @@ async def _handle_successful_run(
             "agent_thread_id": thread_id,
             "run_id": run_id,
             **with_invocation_id(None, invocation_id),
+            **(
+                {"invocation_started_at": payload_metadata["invocation_started_at"]}
+                if isinstance(payload_metadata, dict)
+                and isinstance(payload_metadata.get("invocation_started_at"), str)
+                else {}
+            ),
             "channel_id": channel_id,
             "thread_ts": thread_ts,
         },
@@ -457,6 +473,10 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    if metadata.get("source") == "incidents_agent":
+        from agent.incidents import turns
+
+        return await turns.handle_run_completion(thread_id, run_id, str(status))
     await _settle_failed_reviewer_check(thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
     await _settle_slack_thread_status(client, thread_id, metadata)

@@ -15,15 +15,6 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
 from agent.config import ENV
-from agent.dashboard.environment_refresh import is_snapshot_stale, maybe_start_update
-from agent.dashboard.environments import (
-    Environment,
-    SandboxResources,
-    resolve_environment,
-    sandbox_update_timeout,
-    script_command,
-)
-from agent.dashboard.sandbox_settings import get_admin_base_snapshot_id
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.sandboxes.providers.langsmith import (
@@ -44,6 +35,15 @@ from agent.sandboxes.state import (
 )
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
+from agent.workspaces.refresh import is_snapshot_stale, maybe_start_update
+from agent.workspaces.sandbox_settings import get_admin_base_snapshot_id
+from agent.workspaces.store import (
+    SandboxResources,
+    Workspace,
+    load_workspace,
+    sandbox_update_timeout,
+    script_command,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,18 +69,18 @@ class SandboxCreateConfig:
     snapshot_id: str | None
     resources: SandboxResources = field(default_factory=SandboxResources)
     create_params: dict[str, Any] = field(default_factory=dict)
-    environment: Environment | None = None
+    workspace: Workspace | None = None
 
     @classmethod
-    async def resolve(cls, environment_slug: str | None = None) -> SandboxCreateConfig:
-        environment = await resolve_environment(environment_slug)
-        if environment is None:
+    async def resolve(cls, workspace_slug: str | None = None) -> SandboxCreateConfig:
+        workspace = await load_workspace(workspace_slug)
+        if workspace is None:
             return cls(snapshot_id=await get_admin_base_snapshot_id())
         return cls(
-            snapshot_id=environment.ready_snapshot_id or await get_admin_base_snapshot_id(),
-            resources=environment.sandbox_resources(),
-            create_params=environment.sandbox_create_params(),
-            environment=environment,
+            snapshot_id=workspace.ready_snapshot_id or await get_admin_base_snapshot_id(),
+            resources=workspace.sandbox_resources(),
+            create_params=workspace.sandbox_create_params(),
+            workspace=workspace,
         )
 
     @property
@@ -100,13 +100,13 @@ class SandboxCreateConfig:
         the image is already usable, so a failed pull costs freshness, not the
         run.
         """
-        environment = self.environment
-        if environment is None or not is_snapshot_stale(environment):
+        workspace = self.workspace
+        if workspace is None or not is_snapshot_stale(workspace):
             return
         try:
             async with aphase(thread_id, "sandbox.update_script"):
                 result = await sandbox_backend.aexecute(
-                    script_command(environment.update_script, "update"),
+                    script_command(workspace.update_script, "update"),
                     timeout=sandbox_update_timeout(),
                 )
         except Exception:
@@ -115,19 +115,19 @@ class SandboxCreateConfig:
             # and losing the whole sandbox over a skipped `git pull` is worse
             # than starting from the snapshot as captured.
             logger.warning(
-                "Environment update script could not run in sandbox %s",
+                "Workspace update script could not run in sandbox %s",
                 sandbox_backend.id,
                 exc_info=True,
-                extra={"environment": environment.slug},
+                extra={"workspace": workspace.slug},
             )
             return
         if result.exit_code != 0:
             logger.warning(
-                "Environment update script exited %s in sandbox %s",
+                "Workspace update script exited %s in sandbox %s",
                 result.exit_code,
                 sandbox_backend.id,
                 extra={
-                    "environment": environment.slug,
+                    "workspace": workspace.slug,
                     "exit_code": result.exit_code,
                     "log_tail": (result.output or "")[-2000:],
                 },
@@ -148,11 +148,11 @@ async def _create_sandbox_with_proxy(
     *,
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
-    environment_slug: str | None = None,
+    workspace_slug: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
-        config = await SandboxCreateConfig.resolve(environment_slug)
+        config = await SandboxCreateConfig.resolve(workspace_slug)
     async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
         sandbox_backend = await config.boot()
 
@@ -182,7 +182,7 @@ async def _create_sandbox_with_proxy(
     # This run gets fresh checkouts now; the background capture makes the *next*
     # creation skip the step entirely.
     await config.run_update_script(sandbox_backend, thread_id)
-    _fire_and_forget(maybe_start_update(config.environment), "environment update trigger")
+    _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
     return sandbox_backend
 
 
@@ -350,7 +350,7 @@ async def ensure_sandbox_for_thread(
     *,
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
-    environment_slug: str | None = None,
+    workspace_slug: str | None = None,
     allow_replacement: bool = False,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
@@ -375,7 +375,7 @@ async def ensure_sandbox_for_thread(
     read-only reviewer, which re-preps the repo every run.
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. Newly
-    created sandboxes boot from the environment's snapshot when one is ready,
+    created sandboxes boot from the workspace's snapshot when one is ready,
     otherwise the base snapshot (admin setting, else
     ``DEFAULT_SANDBOX_SNAPSHOT_ID``).
     Re-applies git identity every run because reused/reconnected sandboxes can
@@ -405,7 +405,7 @@ async def ensure_sandbox_for_thread(
             github_proxy_token,
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
-            environment_slug=environment_slug,
+            workspace_slug=workspace_slug,
         )
         created_proxy_config = get_recorded_proxy_base_config(thread_id)
         logger.info("Sandbox created: %s", sandbox_backend.id)
@@ -434,7 +434,7 @@ async def ensure_sandbox_for_thread(
                     github_proxy_token,
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
-                    environment_slug=environment_slug,
+                    workspace_slug=workspace_slug,
                 )
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)
             except Exception as create_exc:
@@ -520,7 +520,7 @@ async def reset_sandbox_for_thread(
 async def recreate_sandbox_for_thread(
     thread_id: str,
     *,
-    environment_slug: str | None = None,
+    workspace_slug: str | None = None,
 ) -> tuple[str, str]:
     """Bind a thread to a fresh sandbox while preserving its previous sandbox."""
     cached = SANDBOX_BACKENDS.get(thread_id)
@@ -531,7 +531,7 @@ async def recreate_sandbox_for_thread(
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
-        environment_slug=environment_slug,
+        workspace_slug=workspace_slug,
     )
     if new_sandbox.id == old_sandbox_id:
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")

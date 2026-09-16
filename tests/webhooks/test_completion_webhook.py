@@ -281,6 +281,7 @@ async def test_schedule_source_with_slack_context_posts_failure_reply(
 async def test_success_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
 
@@ -342,6 +343,7 @@ async def test_success_status_deduplicates_cost_refresh(
     metadata["session_cost_refresh_scheduled_run_ids"] = ["run-1"]
     client = _FakeClient(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
     schedule = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "schedule_session_cost_refresh", schedule)
 

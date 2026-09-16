@@ -18,9 +18,10 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
+from agent.run_config import RunConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
-from agent.server import DesktopAgentState, _registered_tool_name, get_agent
+from agent.server import DesktopAgentState, _registered_tool_name, get_agent, workspace_slug
 
 
 @pytest.fixture(autouse=True)
@@ -56,6 +57,18 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in middleware)
     subagents = cast(list[dict], captured["subagents"])
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in subagents[0]["middleware"])
+
+
+@pytest.mark.asyncio
+async def test_unknown_scope_omits_workspace_and_personal_mcps():
+    with (
+        patch("agent.server.private_credential_login", side_effect=TimeoutError),
+        patch("agent.server._mcp_tools_for", new_callable=AsyncMock) as mcps,
+        patch("agent.server._notion_tools_for", new_callable=AsyncMock) as notion,
+    ):
+        await _capture_create_deep_agent_kwargs()
+    mcps.assert_not_awaited()
+    notion.assert_not_awaited()
 
 
 class _DummyAgent:
@@ -113,12 +126,12 @@ async def _capture_create_deep_agent_kwargs(
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.server.cached_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
         patch(
-            "agent.server.get_team_agent_routing_models",
+            "agent.server.cached_agent_routing_models",
             new_callable=AsyncMock,
             return_value={
                 "fast": ("google_genai:gemini-3.8-flash", "low"),
@@ -185,9 +198,9 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
     SANDBOX_BACKENDS.pop("thread-ctx", None)
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
-        patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
+        patch("agent.server.cached_team_default_model_pair", side_effect=load_defaults),
         patch(
-            "agent.server._cached_agent_routing_models",
+            "agent.server.cached_agent_routing_models",
             new_callable=AsyncMock,
             return_value={
                 "fast": ("openai:gpt-5.6-sol", "low"),
@@ -195,11 +208,11 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
                 "performance": ("openai:gpt-5.6-sol", "high"),
             },
         ),
-        patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
+        patch("agent.server.cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
-        patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
-        patch("agent.server.load_workspace_mcp_tools", new_callable=AsyncMock, return_value=[]),
-        patch("agent.server.load_browser_tools", return_value=[]),
+        patch("agent.server.cached_fable_enabled", new_callable=AsyncMock, return_value=True),
+        patch("agent.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
+        patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
@@ -214,10 +227,51 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("configurable_update", "profile", "thread_settings", "expected"),
+    [
+        ({}, None, None, "openai:gpt-5.6-sol"),
+        (
+            {"agent_model_id": "anthropic:claude-opus-5", "agent_effort": "high"},
+            None,
+            None,
+            "anthropic:claude-opus-5",
+        ),
+        (
+            {},
+            {"default_model": "google_genai:gemini-3.8-flash", "reasoning_effort": "low"},
+            None,
+            "google_genai:gemini-3.8-flash",
+        ),
+        (
+            {},
+            None,
+            {"model_id": "anthropic:claude-opus-5", "effort": "high"},
+            "anthropic:claude-opus-5",
+        ),
+    ],
+)
+async def test_resolved_configured_model_is_available_to_tools(
+    configurable_update: dict[str, object],
+    profile: dict[str, object] | None,
+    thread_settings: dict[str, object] | None,
+    expected: str,
+) -> None:
+    config = _base_config()
+    config["configurable"].update(configurable_update)
+    await _capture_create_deep_agent_kwargs(
+        config, profile=profile, thread_settings=thread_settings
+    )
+
+    assert config["configurable"]["resolved_agent_model_id"] == expected
+
+
+@pytest.mark.asyncio
 async def test_model_routing_is_applied_when_enabled() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
 
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
@@ -236,6 +290,7 @@ async def test_model_routing_is_disabled_by_default() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config)
 
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
@@ -299,8 +354,8 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
     assert skill.file_data and "name: baby-sit" in skill.file_data["content"]
     artifacts = await backend.aread("/bundled-skills/html-artifacts/SKILL.md")
     assert artifacts.file_data and "name: html-artifacts" in artifacts.file_data["content"]
-    environments = await backend.aread("/bundled-skills/environments/SKILL.md")
-    assert environments.file_data and "name: environments" in environments.file_data["content"]
+    environments = await backend.aread("/bundled-skills/workspaces/SKILL.md")
+    assert environments.file_data and "name: workspaces" in environments.file_data["content"]
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
@@ -388,34 +443,6 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_loads_browser_tools_dynamically_without_a_browser_subagent() -> None:
-    from langchain_core.tools import StructuredTool
-
-    from agent.middleware import DynamicToolMiddleware
-
-    async def browser_navigate(url: str) -> str:
-        """Navigate to a URL."""
-        return url
-
-    browser_tool = StructuredTool.from_function(coroutine=browser_navigate)
-    with patch("agent.server.load_browser_tools", return_value=[browser_tool]):
-        captured = await _capture_create_deep_agent_kwargs()
-
-    tools = captured["tools"]
-    middleware = captured["middleware"]
-    subagents = captured["subagents"]
-    assert isinstance(tools, list)
-    assert isinstance(middleware, list)
-    assert isinstance(subagents, list)
-    assert browser_tool not in tools
-    assert {subagent["name"] for subagent in subagents} == {"general-purpose"}
-
-    dynamic_tools = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
-    loader = dynamic_tools.tools[0]
-    assert "browser_navigate (integration: Browser)" in loader.description
-
-
-@pytest.mark.asyncio
 async def test_agent_includes_read_user_settings_only_on_parent() -> None:
     from agent.tools import read_user_settings
 
@@ -455,15 +482,16 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_includes_sandbox_reset_only_in_admin_threads(
+async def test_agent_includes_admin_tools_only_in_private_dashboard_admin_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.tools import sandbox_reset
+    from agent.tools import read_only_sql, sandbox_reset
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert sandbox_reset not in tools
+    assert read_only_sql not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
     config = _base_config()
@@ -474,6 +502,17 @@ async def test_agent_includes_sandbox_reset_only_in_admin_threads(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert sandbox_reset in tools
+    assert read_only_sql in tools
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert read_only_sql not in general_purpose["tools"]
+
+    configurable["source"] = "schedule"
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert read_only_sql not in tools
 
 
 @pytest.mark.asyncio
@@ -645,20 +684,6 @@ async def test_general_purpose_subagent_guards_workflow_pushes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_general_purpose_subagent_carries_open_swe_shared_base() -> None:
-    from agent.prompt import OPEN_SWE_SHARED_BASE
-
-    captured = await _capture_create_deep_agent_kwargs()
-    subagents = captured["subagents"]
-    assert isinstance(subagents, list)
-    gp = next(s for s in subagents if s["name"] == "general-purpose")
-    prompt = gp["system_prompt"]
-    assert prompt.startswith(OPEN_SWE_SHARED_BASE)
-    # GP task-mechanics guidance still trails the shared base.
-    assert "calling agent only sees your final" in prompt
-
-
-@pytest.mark.asyncio
 async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     config = _base_config()
     configurable = config.get("configurable")
@@ -681,6 +706,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
         "manage_code_channel",
+        "manage_incident",
         "notify_automation_channel",
         "slack_add_reaction",
         "slack_attach_html",
@@ -698,7 +724,14 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "list_threads",
         "manage_thread",
         "read_user_settings",
+        "submit_thread_feedback",
     }
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)
     assert subagent_names == parent_names - parent_only_names
+
+
+def test_workspace_slug_reads_workspace_then_environment() -> None:
+    assert workspace_slug(RunConfig(workspace="oss")) == "oss"
+    assert workspace_slug(RunConfig(environment="legacy")) == "legacy"
+    assert workspace_slug(RunConfig()) is None

@@ -153,6 +153,28 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("identifies read-only SQL calls for table rendering", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "read_only_sql",
+            args: { query: "SELECT 1" },
+            type: "tool_call",
+          },
+        ],
+      }),
+    ])
+
+    expect(messages[0]?.chunks[0]).toMatchObject({
+      kind: "tool-execution",
+      toolKind: "sql",
+    })
+  })
+
   it("attaches validated output iframe artifacts to their tool call", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({ id: "user-1", content: "draw a chart" }),

@@ -67,7 +67,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandbox provisioning, connection, proxy configuration, and environment snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 
@@ -357,7 +357,7 @@ Datadog documents its headers and site-specific endpoints in the
 Enter Datadog key values directly, without a `Bearer` prefix. The `core` toolset
 includes logs, metrics, traces, dashboards, monitors, and incidents.
 
-Allowed tools appear in the agent's **Workspace MCPs** tool group with connection
+Allowed tools appear in the agent's **MCPs** tool group with connection
 prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming
 collisions. Catalogs are cached for ten minutes
 per settings revision. Changing a connection causes the next run to discover its
@@ -388,12 +388,32 @@ Saved secrets must only be preserved from the previous record in the same scope.
 Catalog and token caches include the source namespace. Each tool call resolves the
 current winning connection again, checks its allowlist, and refuses to switch scopes
 mid-run. Source lookup errors must raise instead of returning an empty result, so a
-failed lookup cannot expose a lower-precedence connection. Only workspace sources
-are wired into the product today; user-scoped storage, authorization, and UI can use
-this package when added.
+failed lookup cannot expose a lower-precedence connection. The product wires the
+workspace source and the triggering user's personal source (below) into every remote
+coding-agent run.
 An unavailable server omits its tools without preventing other connections from
 loading. This catalog is not attached to the separate read-only reviewer or
 Investigate graphs.
+
+### Personal MCP servers
+
+Any signed-in user can connect remote MCP servers with their own credentials under
+**My settings → Personal MCPs**. The form, JSON import, OAuth, header handling, and
+tool discovery work exactly like workspace connections. Records live in the Store
+under `["user_mcps", <trimmed lowercase github login>]`, so one user's connections and credentials are
+never visible to, reused by, or revealed to another user. The dashboard API is
+`/dashboard/api/my-mcps` and requires only a signed-in session.
+
+Personal connections load only inside a **private thread owned by the triggering
+user**, the same rule that applies to personal Notion connections. Collaborative
+(workspace or Slack channel) threads can be prompted by anyone, so they run without
+personal credentials; to use yours, continue the thread privately from the dashboard.
+Both scopes share the **MCPs** tool group. A personal connection with the same name as a
+workspace connection replaces it entirely for that user's runs, and a disabled personal
+connection hides the workspace one rather than falling back to it.
+Desktop (local) runs do not load MCP connections yet. GitHub PR follow-ups targeting a
+private thread are rejected unless the commenter owns that thread, before credentials
+are read or a run is dispatched.
 
 ### Adding a Python tool
 
@@ -459,20 +479,6 @@ else:
 
 return create_deep_agent(tools=tools, ...)
 ```
-
-### Browser automation (Stagehand)
-
-The main agent can dynamically load `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close` to drive Chromium inside the task sandbox via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK. Because the browser shares the sandbox network namespace, it can test development servers on `localhost`. Static reads should still use `fetch_url`.
-
-The browser schemas appear in the `load_integration_tools` catalog only when the tools are available, and remain out of the model context until loaded. The tools require a LangSmith sandbox and a supported model credential. The real credential remains outside the sandbox and is injected by the sandbox egress proxy; only a placeholder is visible to sandbox processes.
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | Model key used by Stagehand. |
-| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Stagehand model; Anthropic and OpenAI are supported. |
-| `STAGEHAND_HEADLESS` | `true` | Run Chromium headless. |
-
-The sandbox snapshot must include Chromium and Stagehand, install `agent/resources/stagehand_runtime.py` at `/opt/open-swe/stagehand_runtime.py`, and set `STAGEHAND_LOCAL_CHROME_PATH` to the Chromium executable (usually `/usr/bin/chromium`).
 
 ---
 

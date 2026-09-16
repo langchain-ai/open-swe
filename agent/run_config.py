@@ -100,10 +100,12 @@ class RunConfig(BaseModel):
     run_id: str | None = None
     invocation_id: str | None = None
     prepare_run_id: str | None = None
+    invocation_started_at: str | None = None
     offload_conversation: bool = False
     source: str | None = None
     task: str | None = None
     environment: str | None = None
+    workspace: str | None = None
     local_project_path: str | None = None
 
     # Actor
@@ -143,6 +145,7 @@ class RunConfig(BaseModel):
 
     # Model selection
     agent_model_id: str | None = None
+    resolved_agent_model_id: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
     reviewer_model_id: str | None = None
@@ -157,6 +160,7 @@ class RunConfig(BaseModel):
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     stop_summary: bool | None = None
+    slack_ask: bool | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
 
@@ -267,3 +271,10 @@ class RunConfig(BaseModel):
     @property
     def is_eval(self) -> bool:
         return self.eval is True or self.reviewer_eval is True
+
+    @property
+    def workspace_slug(self) -> str | None:
+        for value in (self.workspace, self.environment):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None

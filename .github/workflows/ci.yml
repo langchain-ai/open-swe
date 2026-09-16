@@ -52,6 +52,20 @@ jobs:
     needs: e2e-changes
     if: ${{ needs.e2e-changes.outputs.agent_unit_tests == 'true' }}
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_ANALYTICS_POSTGRES_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -194,6 +208,20 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_URI: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -244,6 +272,20 @@ jobs:
     if: ${{ needs.e2e-changes.outputs.desktop == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_URI: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1

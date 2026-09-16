@@ -6,14 +6,16 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.tools import BaseTool
 from mcp.types import CallToolResult, TextContent, Tool
 
 from agent import completion
-from agent.dashboard import workspace_mcps
 from agent.github import token as auth
 from agent.linear import notifications
 from agent.mcp import MCPConnectionUpdate, runtime
+from agent.mcp import workspace as workspace_mcps
 from agent.middleware import sandbox_circuit_breaker
+from agent.run_config import RunConfig
 
 
 @dataclass
@@ -42,6 +44,7 @@ def comment_tool() -> str:
 @pytest.fixture
 async def linear_mcp(fake_store, monkeypatch: pytest.MonkeyPatch, comment_tool: str) -> LinearMCP:
     await workspace_mcps.save_workspace_mcp(
+        "default",
         "linear",
         MCPConnectionUpdate(
             name="linear", url="https://mcp.linear.app/mcp", allowed_tools=[comment_tool]
@@ -137,9 +140,10 @@ async def test_rejected_mcp_comment_is_not_reported_as_delivered(linear_mcp: Lin
 @pytest.mark.parametrize("change", ["disabled", "unselected", "deleted"])
 async def test_unavailable_linear_mcp_does_not_send(linear_mcp: LinearMCP, change: str) -> None:
     if change == "deleted":
-        await workspace_mcps.delete_workspace_mcp("linear")
+        await workspace_mcps.delete_workspace_mcp("default", "linear")
     else:
         await workspace_mcps.save_workspace_mcp(
+            "default",
             "linear",
             MCPConnectionUpdate(
                 name="linear",
@@ -163,6 +167,7 @@ async def test_notification_only_discovers_the_linear_connection(
     linear_mcp: LinearMCP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await workspace_mcps.save_workspace_mcp(
+        "default",
         "other",
         MCPConnectionUpdate(
             name="other", url="https://other.example/mcp", allowed_tools=["save_comment"]
@@ -229,6 +234,7 @@ async def test_notification_rechecks_permission_after_discovery(
     async def revoke_during_discovery(record, namespace):
         definitions = await discover(record, namespace)
         await workspace_mcps.save_workspace_mcp(
+            "default",
             "linear",
             MCPConnectionUpdate(name="linear", url="https://mcp.linear.app/mcp", allowed_tools=[]),
         )
@@ -254,3 +260,23 @@ async def test_notification_times_out_without_retrying(
     monkeypatch.setattr(linear_mcp, "call_tool", never_finishes)
     assert not await notifications.post_linear_notification("issue-1", "Run failed")
     assert calls == [("save_comment", {"issueId": "issue-1", "body": "Run failed"})]
+
+
+async def test_notification_workspace_resolves_from_active_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The active run's workspace, not ``default``, picks the MCP connection to load."""
+    monkeypatch.setattr(
+        RunConfig, "from_runtime", classmethod(lambda cls: RunConfig(workspace="oss"))
+    )
+    workspaces_seen = []
+
+    async def fake_load_workspace_mcp_tools(
+        workspace: str, *, connection_name: str | None = None
+    ) -> list[BaseTool]:
+        workspaces_seen.append(workspace)
+        return []
+
+    monkeypatch.setattr(notifications, "load_workspace_mcp_tools", fake_load_workspace_mcp_tools)
+    assert not await notifications.post_linear_notification("issue-1", "Run failed")
+    assert workspaces_seen == ["oss"]

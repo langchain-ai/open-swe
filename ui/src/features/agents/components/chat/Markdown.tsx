@@ -14,6 +14,7 @@ import {
   TriangleAlert,
 } from "lucide-react"
 import "streamdown/styles.css"
+import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
 import {
   orderedListGutterStyle,
@@ -202,9 +203,9 @@ const COMPONENTS: Components = {
     children,
     ...props
   }: ExtraProps & ComponentProps<"a">) => (
-    <a {...props} target="_blank" rel="noreferrer">
+    <PreviewablePullRequestLink {...props} target="_blank" rel="noreferrer">
       {children}
-    </a>
+    </PreviewablePullRequestLink>
   ),
 }
 

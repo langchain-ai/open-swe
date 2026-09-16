@@ -10,10 +10,15 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoSlack } from "react-icons/io5"
 
+import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
+
+const menuItemClassName =
+  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
 
 export function ThreadMenuItems({
   thread,
+  localThread,
   pinned,
   archived,
   isDeleting,
@@ -22,6 +27,7 @@ export function ThreadMenuItems({
   onDelete,
 }: {
   thread: AgentThread | null
+  localThread?: DesktopLocalThreadSummary
   pinned: boolean
   archived: boolean
   isDeleting: boolean
@@ -37,26 +43,34 @@ export function ThreadMenuItems({
           target="_blank"
           rel="noreferrer"
           closeOnClick
-          className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+          className={menuItemClassName}
         >
           <TreeStructureIcon className="size-3.5" />
           Open trace
         </Menu.LinkItem>
       )}
+      {localThread && (
+        <Menu.Item
+          onClick={() => {
+            void window.openSweDesktop?.openLocalTrace(localThread.id)
+          }}
+          className={menuItemClassName}
+        >
+          <TreeStructureIcon className="size-3.5" />
+          Open trace
+        </Menu.Item>
+      )}
       {thread?.sourceUrl && (
         <Menu.LinkItem
           href={thread.sourceAppUrl ?? thread.sourceUrl}
           closeOnClick
-          className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+          className={menuItemClassName}
         >
           <IoLogoSlack className="size-3.5" />
           Open in Slack
         </Menu.LinkItem>
       )}
-      <Menu.Item
-        onClick={onTogglePin}
-        className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-      >
+      <Menu.Item onClick={onTogglePin} className={menuItemClassName}>
         {pinned ? (
           <PushPinSlashIcon className="size-3.5" />
         ) : (
@@ -73,16 +87,24 @@ export function ThreadMenuItems({
             }
           }}
           title={thread.sandboxId ?? undefined}
-          className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+          className={`${menuItemClassName} data-disabled:pointer-events-none data-disabled:opacity-50`}
         >
           <CopyIcon className="size-3.5" />
           Copy sandbox ID
         </Menu.Item>
       )}
-      <Menu.Item
-        onClick={onToggleArchived}
-        className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
-      >
+      {localThread && (
+        <Menu.Item
+          onClick={() => {
+            void navigator.clipboard.writeText(localThread.id)
+          }}
+          className={menuItemClassName}
+        >
+          <CopyIcon className="size-3.5" />
+          Copy thread ID
+        </Menu.Item>
+      )}
+      <Menu.Item onClick={onToggleArchived} className={menuItemClassName}>
         {archived ? (
           <ArrowCounterClockwiseIcon className="size-3.5" />
         ) : (
@@ -93,7 +115,7 @@ export function ThreadMenuItems({
       <Menu.Item
         onClick={onDelete}
         disabled={isDeleting}
-        className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+        className={`${menuItemClassName} text-destructive data-disabled:pointer-events-none data-disabled:opacity-50`}
       >
         <TrashIcon className="size-3.5" />
         Delete thread

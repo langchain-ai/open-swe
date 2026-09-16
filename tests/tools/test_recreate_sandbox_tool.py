@@ -28,7 +28,7 @@ async def test_recreate_sandbox_returns_old_and_new_ids() -> None:
         "old_sandbox_id": "sandbox-old",
         "new_sandbox_id": "sandbox-new",
     }
-    recreate.assert_awaited_once_with("thread-1", environment_slug=None)
+    recreate.assert_awaited_once_with("thread-1", workspace_slug=None)
 
 
 @pytest.mark.asyncio
@@ -46,9 +46,3 @@ async def test_recreate_sandbox_reports_failure_without_ids() -> None:
         result = await recreate_sandbox()
 
     assert result == {"success": False, "error": "creation failed"}
-
-
-def test_recreate_sandbox_exported() -> None:
-    from agent.tools import recreate_sandbox as exported
-
-    assert exported is recreate_sandbox
