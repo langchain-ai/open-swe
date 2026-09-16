@@ -19,10 +19,10 @@ from agent.run_config import RunConfig
 def test_resolve_prompt_default_repo_never_loads_team_default(
     monkeypatch: pytest.MonkeyPatch, config: RunConfig, expected: dict[str, str] | None
 ) -> None:
-    async def fake_get_team_default_repo() -> dict[str, str] | None:
+    async def fake_get_workspace_default_repo() -> dict[str, str] | None:
         raise AssertionError("team default should not be loaded")
 
-    monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
+    monkeypatch.setattr(server, "get_workspace_default_repo", fake_get_workspace_default_repo)
 
     assert asyncio.run(server._resolve_prompt_default_repo(config)) == expected
 
@@ -32,11 +32,13 @@ def test_resolve_prompt_default_repo_falls_back_to_team_default(
 ) -> None:
     seen: list[str | None] = []
 
-    async def fake_get_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
+    async def fake_get_workspace_default_repo(
+        workspace: str | None = None,
+    ) -> dict[str, str] | None:
         seen.append(workspace)
         return {"owner": "team", "name": "repo"}
 
-    monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
+    monkeypatch.setattr(server, "get_workspace_default_repo", fake_get_workspace_default_repo)
 
     repo = asyncio.run(server._resolve_prompt_default_repo(RunConfig(workspace="oss")))
 

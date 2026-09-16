@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from agent.dashboard.deps import ADMIN_DEP, ADMIN_OR_TOKEN_DEP, SESSION_DEP, session_is_admin
-from agent.dashboard.team_settings import delete_workspace_settings
+from agent.dashboard.workspace_settings import delete_workspace_settings
 from agent.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,

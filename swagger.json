@@ -1582,354 +1582,6 @@
         "title": "SlashCommandResponse",
         "type": "object"
       },
-      "TeamSettingsUpdate": {
-        "description": "A settings record at either tier.\n\nEvery field is optional. On the instance record, None means the hardcoded\ndefault; on a workspace's record, None inherits the instance value.",
-        "properties": {
-          "default_agent_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Model"
-          },
-          "default_agent_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Reasoning Effort"
-          },
-          "default_agent_routing_balanced_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Balanced Model"
-          },
-          "default_agent_routing_balanced_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Balanced Reasoning Effort"
-          },
-          "default_agent_routing_fast_alt_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Alt Model"
-          },
-          "default_agent_routing_fast_alt_probability": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Alt Probability"
-          },
-          "default_agent_routing_fast_alt_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Alt Reasoning Effort"
-          },
-          "default_agent_routing_fast_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Model"
-          },
-          "default_agent_routing_fast_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Reasoning Effort"
-          },
-          "default_agent_routing_performance_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Performance Model"
-          },
-          "default_agent_routing_performance_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Performance Reasoning Effort"
-          },
-          "default_agent_subagent_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Subagent Model"
-          },
-          "default_agent_subagent_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Subagent Reasoning Effort"
-          },
-          "default_chat_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Chat Model"
-          },
-          "default_chat_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Chat Reasoning Effort"
-          },
-          "default_grouping_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Grouping Model"
-          },
-          "default_grouping_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Grouping Reasoning Effort"
-          },
-          "default_repo": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Repo"
-          },
-          "default_reviewer_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Reviewer Model"
-          },
-          "default_reviewer_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Reviewer Reasoning Effort"
-          },
-          "default_reviewer_subagent_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Reviewer Subagent Model"
-          },
-          "default_reviewer_subagent_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Reviewer Subagent Reasoning Effort"
-          },
-          "default_thread_title_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Thread Title Model"
-          },
-          "default_thread_title_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Thread Title Reasoning Effort"
-          },
-          "fable_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fable Enabled"
-          },
-          "gateway_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Gateway Enabled"
-          },
-          "model_routing_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Routing Enabled"
-          },
-          "org_guidelines": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Org Guidelines"
-          },
-          "pr_summaries": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Summaries"
-          },
-          "review_draft_prs": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Draft Prs"
-          },
-          "review_trace_links": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Trace Links"
-          }
-        },
-        "title": "TeamSettingsUpdate",
-        "type": "object"
-      },
       "TextAnchor": {
         "properties": {
           "context_after": {
@@ -2633,6 +2285,354 @@
           "name"
         ],
         "title": "WorkspaceCreate",
+        "type": "object"
+      },
+      "WorkspaceSettingsUpdate": {
+        "description": "A settings record at either tier.\n\nEvery field is optional. On the instance record, None means the hardcoded\ndefault; on a workspace's record, None inherits the instance value.",
+        "properties": {
+          "default_agent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Model"
+          },
+          "default_agent_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Reasoning Effort"
+          },
+          "default_agent_routing_balanced_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Balanced Model"
+          },
+          "default_agent_routing_balanced_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Balanced Reasoning Effort"
+          },
+          "default_agent_routing_fast_alt_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Alt Model"
+          },
+          "default_agent_routing_fast_alt_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Alt Probability"
+          },
+          "default_agent_routing_fast_alt_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Alt Reasoning Effort"
+          },
+          "default_agent_routing_fast_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Model"
+          },
+          "default_agent_routing_fast_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Reasoning Effort"
+          },
+          "default_agent_routing_performance_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Performance Model"
+          },
+          "default_agent_routing_performance_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Performance Reasoning Effort"
+          },
+          "default_agent_subagent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Subagent Model"
+          },
+          "default_agent_subagent_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Subagent Reasoning Effort"
+          },
+          "default_chat_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Chat Model"
+          },
+          "default_chat_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Chat Reasoning Effort"
+          },
+          "default_grouping_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Grouping Model"
+          },
+          "default_grouping_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Grouping Reasoning Effort"
+          },
+          "default_repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Repo"
+          },
+          "default_reviewer_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reviewer Model"
+          },
+          "default_reviewer_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reviewer Reasoning Effort"
+          },
+          "default_reviewer_subagent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reviewer Subagent Model"
+          },
+          "default_reviewer_subagent_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reviewer Subagent Reasoning Effort"
+          },
+          "default_thread_title_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Thread Title Model"
+          },
+          "default_thread_title_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Thread Title Reasoning Effort"
+          },
+          "fable_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fable Enabled"
+          },
+          "gateway_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gateway Enabled"
+          },
+          "model_routing_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Routing Enabled"
+          },
+          "org_guidelines": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org Guidelines"
+          },
+          "pr_summaries": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Summaries"
+          },
+          "review_draft_prs": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Draft Prs"
+          },
+          "review_trace_links": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Trace Links"
+          }
+        },
+        "title": "WorkspaceSettingsUpdate",
         "type": "object"
       },
       "WorkspaceSettingsView": {
@@ -7697,6 +7697,83 @@
         ]
       }
     },
+    "/dashboard/api/settings": {
+      "get": {
+        "description": "The instance record: what every workspace inherits.",
+        "operationId": "api_get_instance_settings_dashboard_api_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Instance Settings Dashboard Api Settings Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Instance Settings",
+        "tags": [
+          "dashboard",
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "api_put_instance_settings_dashboard_api_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Put Instance Settings Dashboard Api Settings Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Put Instance Settings",
+        "tags": [
+          "dashboard",
+          "settings"
+        ]
+      }
+    },
     "/dashboard/api/skills": {
       "get": {
         "operationId": "api_list_skills_dashboard_api_skills_get",
@@ -8249,83 +8326,6 @@
           "dashboard",
           "slack",
           "slack"
-        ]
-      }
-    },
-    "/dashboard/api/team-settings": {
-      "get": {
-        "description": "The instance record: what every workspace inherits.",
-        "operationId": "api_get_team_settings_dashboard_api_team_settings_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Team Settings Dashboard Api Team Settings Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Team Settings",
-        "tags": [
-          "dashboard",
-          "team-settings"
-        ]
-      },
-      "put": {
-        "operationId": "api_put_team_settings_dashboard_api_team_settings_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TeamSettingsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Put Team Settings Dashboard Api Team Settings Put",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Put Team Settings",
-        "tags": [
-          "dashboard",
-          "team-settings"
         ]
       }
     },
@@ -10853,7 +10853,7 @@
         "summary": "Api Get Workspace Settings",
         "tags": [
           "dashboard",
-          "team-settings"
+          "settings"
         ]
       },
       "put": {
@@ -10873,7 +10873,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TeamSettingsUpdate"
+                "$ref": "#/components/schemas/WorkspaceSettingsUpdate"
               }
             }
           },
@@ -10909,7 +10909,7 @@
         "summary": "Api Put Workspace Settings",
         "tags": [
           "dashboard",
-          "team-settings"
+          "settings"
         ]
       }
     },

@@ -1,4 +1,4 @@
-"""Short-TTL reads of one workspace's team settings.
+"""Short-TTL reads of one workspace's workspace settings.
 
 Graph factories read these on every run, so they are cached. The cache lives in
 a module-level dict shared by every run in the process, which is why the slug is
@@ -6,22 +6,22 @@ part of every key: one worker serves every workspace, and the workspace that
 populated a key first must not answer for the others.
 
 Callers pass the run's slug explicitly. A factory runs outside the graph's
-context, where :func:`agent.dashboard.team_settings.resolve_settings_workspace`
+context, where :func:`agent.dashboard.workspace_settings.resolve_settings_workspace`
 cannot see a ``configurable`` and would silently answer ``default``.
 """
 
 from typing import Any, Literal
 
-from agent.dashboard.team_settings import (
+from agent.dashboard.workspace_settings import (
     get_effective_gateway_enabled,
     get_org_review_guidelines,
-    get_team_agent_routing_models,
-    get_team_default_model,
-    get_team_default_model_pair,
-    get_team_default_thread_title_model,
-    get_team_fable_enabled,
-    get_team_model_routing_enabled,
-    get_team_settings,
+    get_workspace_agent_routing_models,
+    get_workspace_default_model,
+    get_workspace_default_model_pair,
+    get_workspace_default_thread_title_model,
+    get_workspace_fable_enabled,
+    get_workspace_model_routing_enabled,
+    get_workspace_settings,
     resolve_settings_workspace,
 )
 from agent.utils import ttl_cache
@@ -35,34 +35,34 @@ def _key(prefix: str, workspace: str) -> str:
     return f"{prefix}:{workspace}"
 
 
-async def cached_team_settings(workspace: str | None) -> dict[str, Any]:
+async def cached_workspace_settings(workspace: str | None) -> dict[str, Any]:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
         _key("team:settings", slug),
         SETTINGS_TTL_SECONDS,
-        lambda: get_team_settings(slug),
+        lambda: get_workspace_settings(slug),
     )
 
 
-async def cached_team_default_model_pair(
+async def cached_workspace_default_model_pair(
     kind: Literal["agent", "reviewer"], workspace: str | None
 ) -> tuple[tuple[str, str], tuple[str, str]]:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
         _key(f"team-default-model-pair:{kind}", slug),
         SETTINGS_TTL_SECONDS,
-        lambda: get_team_default_model_pair(kind, slug),
+        lambda: get_workspace_default_model_pair(kind, slug),
     )
 
 
-async def cached_team_default_model(
+async def cached_workspace_default_model(
     role: Literal["agent", "reviewer", "chat"], workspace: str | None
 ) -> tuple[str, str]:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
         _key(f"team-default-model:{role}", slug),
         SETTINGS_TTL_SECONDS,
-        lambda: get_team_default_model(role, slug),
+        lambda: get_workspace_default_model(role, slug),
     )
 
 
@@ -71,7 +71,7 @@ async def cached_agent_routing_models(workspace: str | None) -> dict[str, tuple[
     return await ttl_cache.cached(
         _key("team:agent-routing-models", slug),
         SETTINGS_TTL_SECONDS,
-        lambda: get_team_agent_routing_models(slug),
+        lambda: get_workspace_agent_routing_models(slug),
     )
 
 
@@ -80,7 +80,7 @@ async def cached_thread_title_model(workspace: str | None) -> tuple[str, str]:
     return await ttl_cache.cached(
         _key("team:thread-title-model", slug),
         SETTINGS_TTL_SECONDS,
-        lambda: get_team_default_thread_title_model(slug),
+        lambda: get_workspace_default_thread_title_model(slug),
     )
 
 
@@ -98,7 +98,7 @@ async def cached_fable_enabled(workspace: str | None) -> bool:
     return await ttl_cache.cached(
         _key("team:fable-enabled", slug),
         SETTINGS_TTL_SECONDS,
-        lambda: get_team_fable_enabled(slug),
+        lambda: get_workspace_fable_enabled(slug),
     )
 
 
@@ -107,7 +107,7 @@ async def cached_model_routing_enabled(workspace: str | None) -> bool:
     return await ttl_cache.cached(
         _key("team:model-routing-enabled", slug),
         SETTINGS_TTL_SECONDS,
-        lambda: get_team_model_routing_enabled(slug),
+        lambda: get_workspace_model_routing_enabled(slug),
     )
 
 

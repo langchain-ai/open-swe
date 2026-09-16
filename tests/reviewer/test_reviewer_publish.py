@@ -573,7 +573,7 @@ async def test_resolve_review_trace_url_enabled_by_team_setting() -> None:
 
     with (
         patch(
-            "agent.tools.publish_review.get_team_review_trace_links_enabled",
+            "agent.tools.publish_review.get_workspace_review_trace_links_enabled",
             AsyncMock(return_value=True),
         ),
         patch(
@@ -593,7 +593,7 @@ async def test_resolve_review_trace_url_disabled_by_team_setting() -> None:
     trace_url = MagicMock(return_value="https://smith/t")
     with (
         patch(
-            "agent.tools.publish_review.get_team_review_trace_links_enabled",
+            "agent.tools.publish_review.get_workspace_review_trace_links_enabled",
             AsyncMock(return_value=False),
         ),
         patch("agent.tools.publish_review.get_langsmith_trace_url", trace_url),
@@ -611,7 +611,7 @@ async def test_resolve_review_trace_url_config_override_skips_team_lookup() -> N
     team_lookup = AsyncMock(return_value=True)
     trace_url = MagicMock(return_value="https://smith/t")
     with (
-        patch("agent.tools.publish_review.get_team_review_trace_links_enabled", team_lookup),
+        patch("agent.tools.publish_review.get_workspace_review_trace_links_enabled", team_lookup),
         patch("agent.tools.publish_review.get_langsmith_trace_url", trace_url),
     ):
         url = await _resolve_review_trace_url("reviewer-thread-id", False)

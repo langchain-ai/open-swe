@@ -81,7 +81,7 @@ def gateway_openai_use_responses() -> bool:
 
 
 def resolve_gateway_enabled(team_value: bool | None) -> bool:
-    """Combine the team-settings toggle with the env default.
+    """Combine the workspace-settings toggle with the env default.
 
     A team value of ``True``/``False`` is authoritative; ``None`` inherits the
     ``LANGSMITH_GATEWAY_ENABLED`` deployment default.

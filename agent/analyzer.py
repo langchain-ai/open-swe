@@ -31,7 +31,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from agent.dashboard.team_settings_cache import cached_gateway_enabled
+from agent.dashboard.workspace_settings_cache import cached_gateway_enabled
 from agent.github.app import get_github_app_installation_token
 from agent.middleware import (
     BasePrepareRunMiddleware,

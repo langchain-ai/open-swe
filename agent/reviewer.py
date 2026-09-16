@@ -40,14 +40,14 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.dashboard.options import gate_fable_model
-from agent.dashboard.team_settings import (
-    get_team_default_grouping_model,
-    get_team_fable_enabled,
+from agent.dashboard.workspace_settings import (
+    get_workspace_default_grouping_model,
+    get_workspace_fable_enabled,
 )
-from agent.dashboard.team_settings_cache import (
+from agent.dashboard.workspace_settings_cache import (
     cached_gateway_enabled,
     cached_org_review_guidelines,
-    cached_team_default_model_pair,
+    cached_workspace_default_model_pair,
 )
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
@@ -589,9 +589,9 @@ async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseC
         model_id = cfg.grouping_model_id
         effort = cfg.grouping_reasoning_effort
     else:
-        model_id, effort = await get_team_default_grouping_model(cfg.workspace_slug)
+        model_id, effort = await get_workspace_default_grouping_model(cfg.workspace_slug)
     model_id, effort = gate_fable_model(
-        model_id, effort, fable_enabled=await get_team_fable_enabled(cfg.workspace_slug)
+        model_id, effort, fable_enabled=await get_workspace_fable_enabled(cfg.workspace_slug)
     )
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -990,7 +990,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         (
             (model_id, reasoning_effort),
             (subagent_model_id, subagent_effort),
-        ) = await cached_team_default_model_pair("reviewer", cfg.workspace_slug)
+        ) = await cached_workspace_default_model_pair("reviewer", cfg.workspace_slug)
         logger.info(
             "Using team default reviewer model: model=%s effort=%s",
             model_id,
@@ -1004,7 +1004,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     if cfg.reviewer_subagent_model_id:
         subagent_model_id = cfg.reviewer_subagent_model_id
         subagent_effort = cfg.reviewer_subagent_reasoning_effort
-    fable_enabled = await get_team_fable_enabled(cfg.workspace_slug)
+    fable_enabled = await get_workspace_fable_enabled(cfg.workspace_slug)
     model_id, reasoning_effort = gate_fable_model(
         model_id, reasoning_effort, fable_enabled=fable_enabled
     )

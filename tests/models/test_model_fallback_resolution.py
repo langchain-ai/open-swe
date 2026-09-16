@@ -19,10 +19,10 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
-from agent.dashboard.team_settings import (
-    TeamSettingsUpdate,
-    get_team_default_model,
-    normalize_team_settings_for_response,
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettingsUpdate,
+    get_workspace_default_model,
+    normalize_workspace_settings_for_response,
 )
 
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
@@ -125,11 +125,11 @@ async def test_team_default_stale_anthropic_stays_on_provider() -> None:
         "default_agent_reasoning_effort": "xhigh",
     }
     with patch(
-        "agent.dashboard.team_settings.get_team_settings",
+        "agent.dashboard.workspace_settings.get_workspace_settings",
         new_callable=AsyncMock,
         return_value=settings,
     ):
-        assert await get_team_default_model("agent") == (SUPPORTED_ANTHROPIC, "xhigh")
+        assert await get_workspace_default_model("agent") == (SUPPORTED_ANTHROPIC, "xhigh")
 
 
 @pytest.mark.asyncio
@@ -139,11 +139,11 @@ async def test_team_default_unknown_provider_falls_back_to_global() -> None:
         "default_reviewer_reasoning_effort": "high",
     }
     with patch(
-        "agent.dashboard.team_settings.get_team_settings",
+        "agent.dashboard.workspace_settings.get_workspace_settings",
         new_callable=AsyncMock,
         return_value=settings,
     ):
-        assert await get_team_default_model("reviewer") == default_model_pair()
+        assert await get_workspace_default_model("reviewer") == default_model_pair()
 
 
 def test_profile_stale_anthropic_upgrades_to_supported() -> None:
@@ -175,24 +175,24 @@ def test_profile_response_and_override_defer_deprecated_models() -> None:
     ) == (None, None)
 
 
-def test_team_settings_update_rejects_unknown_openai_model() -> None:
+def test_workspace_settings_update_rejects_unknown_openai_model() -> None:
     with pytest.raises(ValueError, match="unsupported agent model"):
-        TeamSettingsUpdate(
+        WorkspaceSettingsUpdate(
             default_agent_model="openai:gpt-5.6-slo",
             default_agent_reasoning_effort="medium",
         )
 
 
-def test_team_settings_update_rejects_invalid_effort_for_openai_model() -> None:
+def test_workspace_settings_update_rejects_invalid_effort_for_openai_model() -> None:
     with pytest.raises(ValueError, match="effort 'bogus' not supported"):
-        TeamSettingsUpdate(
+        WorkspaceSettingsUpdate(
             default_agent_model=SUPPORTED_OPENAI,
             default_agent_reasoning_effort="bogus",
         )
 
 
-def test_team_settings_response_defers_deprecated_models() -> None:
-    settings = normalize_team_settings_for_response(
+def test_workspace_settings_response_defers_deprecated_models() -> None:
+    settings = normalize_workspace_settings_for_response(
         {
             "default_agent_model": DEPRECATED_GLM,
             "default_agent_reasoning_effort": "high",
@@ -207,7 +207,7 @@ def test_fable_cannot_be_saved_as_default() -> None:
     profile = ProfileUpdate(default_model=FABLE, reasoning_effort="high")
     with pytest.raises(ValueError, match="cannot be a default model"):
         profile.validate_pairing()
-    update = TeamSettingsUpdate(
+    update = WorkspaceSettingsUpdate(
         fable_enabled=True,
         default_agent_model=FABLE,
         default_agent_reasoning_effort="high",

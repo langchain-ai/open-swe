@@ -1,4 +1,4 @@
-"""Workspaces: repos, Slack channels, and team settings, plus the sandbox they boot.
+"""Workspaces: repos, Slack channels, and workspace settings, plus the sandbox they boot.
 
 A workspace owns one or more repositories (a repo belongs to exactly one
 workspace), zero or more Slack channels, its MCP connections, and its team

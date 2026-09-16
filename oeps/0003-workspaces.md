@@ -45,7 +45,7 @@ A workspace has an immutable slug and a display name, plus:
 - **Slack channels.** Zero or more channel ids whose messages route here. A channel routes to one
   workspace.
 - **MCP connections**, moved from the instance-wide set into the workspace.
-- **Settings** that are team settings today: model defaults, review toggles, organization
+- **Settings**, the former team settings: model defaults, review toggles, organization
   guidelines, gateway and Fable toggles, default repository. These are tiered; see
   "Settings tiers" below.
 
@@ -57,7 +57,7 @@ sign-in allowlist, and the base snapshot fallback.
 
 Settings resolve from the least to the most specific tier, each overriding the one before:
 
-1. **Instance.** The team settings record as it existed before workspaces, kept under its
+1. **Instance.** The settings record as it existed before workspaces (then "team settings"), kept under its
    original Store key so an upgrade needs no migration. Admins edit it on the Admin page.
 2. **Workspace.** A sparse record of overrides per workspace slug. A field that is unset inherits
    the instance value, so a new workspace behaves exactly like the instance until an admin

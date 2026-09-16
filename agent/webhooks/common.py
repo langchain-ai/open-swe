@@ -34,10 +34,6 @@ from agent.dashboard.profiles import (  # noqa: F401
     get_valid_access_token,
     has_access_token_record,
 )
-from agent.dashboard.team_settings import (
-    get_team_default_repo,
-    get_team_settings,
-)
 from agent.dashboard.user_mappings import (
     email_for_login,  # noqa: F401
     login_for_email,  # noqa: F401
@@ -45,6 +41,10 @@ from agent.dashboard.user_mappings import (
 )
 from agent.dashboard.user_mappings import (
     refresh_cache as refresh_user_mapping_cache,  # noqa: F401
+)
+from agent.dashboard.workspace_settings import (
+    get_workspace_default_repo,
+    get_workspace_settings,
 )
 from agent.dispatch import dispatch_agent_run
 from agent.github.app import (
@@ -255,7 +255,7 @@ __all__ = [
     "get_slack_repo_config",
     "get_slack_user_info",
     "get_slack_user_names",
-    "get_team_default_repo",
+    "get_workspace_default_repo",
     "get_valid_access_token",
     "has_access_token_record",
     "is_bot_token_only_mode",
@@ -796,7 +796,9 @@ async def get_slack_repo_config(
     if not repo_config:
         # A channel bound to a workspace takes that workspace's default
         # repository, not whatever `default` happens to have configured.
-        repo_config = await get_team_default_repo(await workspace_for_slack_channel(channel_id))
+        repo_config = await get_workspace_default_repo(
+            await workspace_for_slack_channel(channel_id)
+        )
 
     if not repo_config and default_owner and default_name:
         repo_config = {"owner": default_owner, "name": default_name}
@@ -1252,7 +1254,7 @@ async def draft_review_enabled_for_author(
             override = profile.get("review_draft_prs")
             if isinstance(override, bool):
                 return override
-    team = await get_team_settings(await workspace_for_repo_config(repo_config))
+    team = await get_workspace_settings(await workspace_for_repo_config(repo_config))
     return bool(team.get("review_draft_prs"))
 
 

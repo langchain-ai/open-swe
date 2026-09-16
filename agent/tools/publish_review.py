@@ -8,7 +8,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from agent.analytics.usage import record_reviewer_publication
-from agent.dashboard.team_settings import get_team_review_trace_links_enabled
+from agent.dashboard.workspace_settings import get_workspace_review_trace_links_enabled
 from agent.github.checks import review_check_conclusion
 from agent.github.pull_requests import PullRequest
 from agent.github.thread_token import (
@@ -148,7 +148,7 @@ async def publish_review(
 async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:
     if config_override is False:
         return None
-    if not await get_team_review_trace_links_enabled():
+    if not await get_workspace_review_trace_links_enabled():
         return None
     if not thread_id:
         return None

@@ -94,7 +94,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
             return_value="/workspace",
         ),
         patch(
-            "agent.server.cached_team_default_model_pair",
+            "agent.server.cached_workspace_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),

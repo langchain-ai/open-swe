@@ -33,8 +33,8 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
 
-TEAM_SETTINGS_NAMESPACE: list[str] = ["team_settings"]
-# The instance record keeps the key team settings had before workspaces existed,
+INSTANCE_SETTINGS_NAMESPACE: list[str] = ["team_settings"]
+# The instance record keeps the key workspace settings had before workspaces existed,
 # so an upgrade needs no data migration.
 INSTANCE_SETTINGS_KEY = "default"
 # One sparse record per workspace slug: a field that is missing or None
@@ -51,7 +51,7 @@ ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
 
 
-class TeamSettingsUpdate(BaseModel):
+class WorkspaceSettingsUpdate(BaseModel):
     """A settings record at either tier.
 
     Every field is optional. On the instance record, None means the hardcoded
@@ -112,7 +112,7 @@ class TeamSettingsUpdate(BaseModel):
         return text
 
     @model_validator(mode="after")
-    def _validate_model_pairs(self) -> TeamSettingsUpdate:
+    def _validate_model_pairs(self) -> WorkspaceSettingsUpdate:
         self.default_agent_model, self.default_agent_reasoning_effort = _normalize_stale_model_pair(
             self.default_agent_model,
             self.default_agent_reasoning_effort,
@@ -298,7 +298,7 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
-def normalize_team_settings_for_response(settings: dict[str, Any]) -> dict[str, Any]:
+def normalize_workspace_settings_for_response(settings: dict[str, Any]) -> dict[str, Any]:
     value = dict(settings)
     for model_field, effort_field in _MODEL_PAIR_FIELDS:
         model = value.get(model_field)
@@ -421,11 +421,11 @@ def _set_fields(record: Mapping[str, Any] | None) -> dict[str, Any]:
 def _finish(merged: dict[str, Any]) -> dict[str, Any]:
     for stale_field in _STALE_FIELDS:
         merged.pop(stale_field, None)
-    return normalize_team_settings_for_response(merged)
+    return normalize_workspace_settings_for_response(merged)
 
 
 async def _instance_record() -> dict[str, Any]:
-    return _set_fields(await get_value(TEAM_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY))
+    return _set_fields(await get_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY))
 
 
 async def _workspace_record(slug: str) -> dict[str, Any]:
@@ -433,14 +433,14 @@ async def _workspace_record(slug: str) -> dict[str, Any]:
     if record is None and slug != DEFAULT_WORKSPACE_SLUG:
         # #2807 stored every workspace's record beside the instance one; a
         # record written there stays in force until the workspace is saved again.
-        record = await get_value(TEAM_SETTINGS_NAMESPACE, slug)
+        record = await get_value(INSTANCE_SETTINGS_NAMESPACE, slug)
     return _set_fields(record)
 
 
 async def get_instance_settings() -> dict[str, Any]:
     """The instance record merged over the hardcoded defaults.
 
-    Every workspace inherits these; see :func:`get_team_settings` for what a
+    Every workspace inherits these; see :func:`get_workspace_settings` for what a
     run actually sees.
     """
     defaults = _default_settings()
@@ -452,7 +452,7 @@ async def get_instance_settings() -> dict[str, Any]:
     return _finish({**defaults, **instance})
 
 
-async def get_team_settings(workspace: str | None = None) -> dict[str, Any]:
+async def get_workspace_settings(workspace: str | None = None) -> dict[str, Any]:
     """The settings a run in ``workspace`` sees.
 
     Tiered: the hardcoded defaults, then the instance record, then the
@@ -469,7 +469,7 @@ async def get_team_settings(workspace: str | None = None) -> dict[str, Any]:
         instance = await _instance_record()
         overrides = await _workspace_record(slug)
     except Exception:
-        logger.warning("team settings lookup failed; using defaults", exc_info=True)
+        logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
         return defaults
     return _finish({**defaults, **instance, **overrides})
 
@@ -481,25 +481,27 @@ class WorkspaceSettingsView(TypedDict):
     overrides: dict[str, Any]
 
 
-async def get_workspace_settings(slug: str) -> WorkspaceSettingsView:
+async def workspace_settings_view(slug: str) -> WorkspaceSettingsView:
     overrides = await _workspace_record(slug)
     overrides.pop("updated_at", None)
-    return {"effective": await get_team_settings(slug), "overrides": overrides}
+    return {"effective": await get_workspace_settings(slug), "overrides": overrides}
 
 
-def _record_values(update: TeamSettingsUpdate) -> dict[str, Any]:
+def _record_values(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
     return {**update.model_dump(), "updated_at": now_iso()}
 
 
-async def upsert_instance_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
+async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
     """Replace the instance record. Raises ``ValueError`` for a Fable model saved as a default."""
     update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
-    await put_value(TEAM_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
+    await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
     return value
 
 
-async def upsert_workspace_settings(slug: str, update: TeamSettingsUpdate) -> WorkspaceSettingsView:
+async def upsert_workspace_overrides(
+    slug: str, update: WorkspaceSettingsUpdate
+) -> WorkspaceSettingsView:
     """Replace the workspace's overrides; a field left None inherits the instance value.
 
     Raises ``ValueError`` for a Fable model saved as a default while Fable is on,
@@ -512,33 +514,20 @@ async def upsert_workspace_settings(slug: str, update: TeamSettingsUpdate) -> Wo
     value = {k: v for k, v in _record_values(update).items() if v is not None}
     await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
     if slug != DEFAULT_WORKSPACE_SLUG:
-        await delete_value(TEAM_SETTINGS_NAMESPACE, slug)
-    return await get_workspace_settings(slug)
+        await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    return await workspace_settings_view(slug)
 
 
 async def delete_workspace_settings(slug: str) -> None:
     await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
 
 
-async def upsert_team_settings(
-    update: TeamSettingsUpdate, workspace: str | None = None
-) -> dict[str, Any]:
-    """Write the instance record, or ``workspace``'s overrides when one is named.
-
-    Returns what a read now sees at that tier.
-    """
-    if workspace is None:
-        await upsert_instance_settings(update)
-        return await get_instance_settings()
-    return (await upsert_workspace_settings(slugify(workspace), update))["effective"]
-
-
-async def get_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
-    settings = await get_team_settings(workspace)
+async def get_workspace_default_repo(workspace: str | None = None) -> dict[str, str] | None:
+    settings = await get_workspace_settings(workspace)
     return _parse_repo(settings.get("default_repo"))
 
 
-async def get_team_default_model(
+async def get_workspace_default_model(
     role: Literal["agent", "reviewer", "chat"],
     workspace: str | None = None,
 ) -> tuple[str, str]:
@@ -553,7 +542,7 @@ async def get_team_default_model(
     ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
     admin setting is unset/invalid it inherits the team **agent** default.
     """
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     if role == "chat":
         model = settings.get("default_chat_model")
         effort = settings.get("default_chat_reasoning_effort")
@@ -576,12 +565,12 @@ async def get_team_default_model(
     return _resolve_default_pair(model, effort)
 
 
-async def get_team_default_model_pair(
+async def get_workspace_default_model_pair(
     role: Literal["agent", "reviewer"],
     workspace: str | None = None,
 ) -> tuple[tuple[str, str], tuple[str, str]]:
     """Return default ``(main, subagent)`` model pairs for ``role`` from one store read."""
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     if role == "agent":
         main = _resolve_default_pair(
             settings.get("default_agent_model"),
@@ -603,10 +592,10 @@ async def get_team_default_model_pair(
     return main, subagent
 
 
-async def get_team_agent_routing_models(
+async def get_workspace_agent_routing_models(
     workspace: str | None = None,
 ) -> dict[str, tuple[str, str]]:
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     tiers = ("fast", "fast_alt", "balanced", "performance")
     models = {
         tier: _resolve_default_pair(
@@ -629,7 +618,7 @@ async def get_team_agent_routing_models(
     return models
 
 
-def get_team_fast_alt_probability(settings: Mapping[str, Any]) -> float:
+def get_workspace_fast_alt_probability(settings: Mapping[str, Any]) -> float:
     """The stored fast-route split, defaulting to the 50/50 experiment value.
 
     An explicit ``0`` disables the experiment (no fast turns go to the alt
@@ -642,7 +631,7 @@ def get_team_fast_alt_probability(settings: Mapping[str, Any]) -> float:
     return probability if 0.0 <= probability <= 1.0 else 0.5
 
 
-async def get_team_default_grouping_model(workspace: str | None = None) -> tuple[str, str]:
+async def get_workspace_default_grouping_model(workspace: str | None = None) -> tuple[str, str]:
     """Return the team-wide default ``(model_id, reasoning_effort)`` for the
     review diff-grouping pass.
 
@@ -651,7 +640,7 @@ async def get_team_default_grouping_model(workspace: str | None = None) -> tuple
     pass is a cheap, fast companion to the reviewer, so it should track that
     cheaper tier rather than the primary reviewer model.
     """
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     model = settings.get("default_grouping_model")
     effort = settings.get("default_grouping_reasoning_effort")
     if (
@@ -690,8 +679,8 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
     return ANTHROPIC_THREAD_TITLE_MODEL, ANTHROPIC_THREAD_TITLE_REASONING_EFFORT
 
 
-async def get_team_default_thread_title_model(workspace: str | None = None) -> tuple[str, str]:
-    settings = await get_team_settings(workspace)
+async def get_workspace_default_thread_title_model(workspace: str | None = None) -> tuple[str, str]:
+    settings = await get_workspace_settings(workspace)
     model = settings.get("default_thread_title_model")
     effort = settings.get("default_thread_title_reasoning_effort")
     if (
@@ -709,53 +698,53 @@ async def get_team_default_thread_title_model(workspace: str | None = None) -> t
     )
 
 
-async def get_team_review_trace_links_enabled(workspace: str | None = None) -> bool:
+async def get_workspace_review_trace_links_enabled(workspace: str | None = None) -> bool:
     """Return whether GitHub review bodies should include a LangSmith trace link."""
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     return bool(settings.get("review_trace_links", True))
 
 
-async def get_team_model_routing_enabled(workspace: str | None = None) -> bool:
+async def get_workspace_model_routing_enabled(workspace: str | None = None) -> bool:
     """Return whether adaptive model routing is enabled org-wide."""
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     value = settings.get("model_routing_enabled")
     return value if isinstance(value, bool) else False
 
 
-async def get_team_gateway_enabled(workspace: str | None = None) -> bool | None:
+async def get_workspace_gateway_enabled(workspace: str | None = None) -> bool | None:
     """Return the stored LLM Gateway toggle (``None`` means inherit the env default)."""
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     value = settings.get("gateway_enabled")
     return value if isinstance(value, bool) else None
 
 
-async def get_team_fable_enabled(workspace: str | None = None) -> bool:
+async def get_workspace_fable_enabled(workspace: str | None = None) -> bool:
     """Return whether Fable models are enabled for the team."""
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     value = settings.get("fable_enabled")
     return bool(value) if isinstance(value, bool) else False
 
 
 async def get_effective_gateway_enabled(workspace: str | None = None) -> bool:
     """Resolve whether LLM Gateway routing is on: team setting, else env default."""
-    return resolve_gateway_enabled(await get_team_gateway_enabled(workspace))
+    return resolve_gateway_enabled(await get_workspace_gateway_enabled(workspace))
 
 
 async def get_org_review_guidelines(workspace: str | None = None) -> str | None:
     """Return the org-wide reviewer guidelines supplement, if configured."""
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     value = settings.get("org_guidelines")
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
 
 
-async def get_team_default_subagent_model(
+async def get_workspace_default_subagent_model(
     role: Literal["agent", "reviewer"],
     workspace: str | None = None,
 ) -> tuple[str, str]:
     """Return the team-wide default subagent ``(model_id, reasoning_effort)`` for ``role``."""
-    settings = await get_team_settings(workspace)
+    settings = await get_workspace_settings(workspace)
     if role == "agent":
         model = settings.get("default_agent_subagent_model")
         effort = settings.get("default_agent_subagent_reasoning_effort")
@@ -781,7 +770,7 @@ def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
     return default_model_pair()
 
 
-router = APIRouter(tags=["team-settings"])
+router = APIRouter(tags=["settings"])
 
 
 def _normalized_workspace(raw: str) -> str:
@@ -798,15 +787,18 @@ async def _existing_workspace(raw: str) -> str:
     return slug
 
 
-@router.get("/team-settings")
-async def api_get_team_settings(_session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
+@router.get("/settings")
+# The pre-workspaces path, kept for the dashboard until it moves; hidden from the schema.
+@router.get("/team-settings", include_in_schema=False)
+async def api_get_instance_settings(_session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
     """The instance record: what every workspace inherits."""
     return await get_instance_settings()
 
 
-@router.put("/team-settings")
-async def api_put_team_settings(
-    body: TeamSettingsUpdate, _admin: dict[str, Any] = ADMIN_DEP
+@router.put("/settings")
+@router.put("/team-settings", include_in_schema=False)
+async def api_put_instance_settings(
+    body: WorkspaceSettingsUpdate, _admin: dict[str, Any] = ADMIN_DEP
 ) -> dict[str, Any]:
     try:
         return await upsert_instance_settings(body)
@@ -818,16 +810,16 @@ async def api_put_team_settings(
 async def api_get_workspace_settings(
     workspace: str, _session: dict[str, Any] = SESSION_DEP
 ) -> WorkspaceSettingsView:
-    return await get_workspace_settings(await _existing_workspace(workspace))
+    return await workspace_settings_view(await _existing_workspace(workspace))
 
 
 @router.put("/workspaces/{workspace}/settings")
 async def api_put_workspace_settings(
     workspace: str,
-    body: TeamSettingsUpdate,
+    body: WorkspaceSettingsUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> WorkspaceSettingsView:
     try:
-        return await upsert_workspace_settings(await _existing_workspace(workspace), body)
+        return await upsert_workspace_overrides(await _existing_workspace(workspace), body)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

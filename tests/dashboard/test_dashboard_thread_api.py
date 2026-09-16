@@ -12,8 +12,12 @@ from fastapi import HTTPException
 from agent.dashboard import deps, options_routes, profiles
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
-from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
 from agent.dashboard.ttft import AssistantTextObservation
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettingsUpdate,
+    upsert_instance_settings,
+    upsert_workspace_overrides,
+)
 from agent.threads import diffs as thread_diffs
 from agent.threads import handlers
 from agent.threads import listing as thread_listing
@@ -113,7 +117,7 @@ async def test_resolve_agent_model_choice_applies_profile_before_team_default(mo
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
-    patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
+    patch_thread_module(monkeypatch, "get_workspace_default_model", fake_team_default)
 
     model_id, effort = await thread_runs._resolve_agent_model_choice(
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
@@ -130,7 +134,7 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
-    patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
+    patch_thread_module(monkeypatch, "get_workspace_default_model", fake_team_default)
 
     model_id, effort = await thread_runs._resolve_agent_model_choice(
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
@@ -146,7 +150,7 @@ async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(m
     async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _VISION_MODEL, "medium"
 
-    patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
+    patch_thread_module(monkeypatch, "get_workspace_default_model", fake_team_default)
 
     model_id, effort = await thread_runs._resolve_agent_model_choice(
         {"default_model": "anthropic:claude-opus-5", "reasoning_effort": "high"},
@@ -162,7 +166,9 @@ async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> N
     async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
-    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+    monkeypatch.setattr(
+        "agent.dashboard.agent_overrides.get_workspace_default_model", fake_team_default
+    )
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
 
     model_id = await resolve_agent_model_id(None)
@@ -173,7 +179,9 @@ async def test_resolve_agent_model_id_applies_profile_override(monkeypatch) -> N
     async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
-    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+    monkeypatch.setattr(
+        "agent.dashboard.agent_overrides.get_workspace_default_model", fake_team_default
+    )
 
     async def fake_load_profile(login: str) -> dict:
         return {"default_model": _VISION_MODEL, "reasoning_effort": "medium"}
@@ -188,7 +196,9 @@ async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -
     async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
-    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+    monkeypatch.setattr(
+        "agent.dashboard.agent_overrides.get_workspace_default_model", fake_team_default
+    )
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
 
     model_id = await resolve_agent_model_id(None, per_thread_model_id="anthropic:claude-opus-5")
@@ -199,7 +209,9 @@ async def test_resolve_agent_model_id_deprecated_override_uses_team_default(monk
     async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
-    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+    monkeypatch.setattr(
+        "agent.dashboard.agent_overrides.get_workspace_default_model", fake_team_default
+    )
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
 
     model_id = await resolve_agent_model_id(
@@ -245,7 +257,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
         return f"{login}@example.com"
 
     patch_thread_module(monkeypatch, "get_profile", fake_profile)
-    patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
+    patch_thread_module(monkeypatch, "get_workspace_default_model", fake_team_default)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
@@ -357,18 +369,18 @@ async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
 
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
-    await upsert_team_settings(
-        TeamSettingsUpdate(
+    await upsert_instance_settings(
+        WorkspaceSettingsUpdate(
             default_agent_model="anthropic:claude-sonnet-5",
             default_agent_reasoning_effort="high",
         )
     )
-    await upsert_team_settings(
-        TeamSettingsUpdate(
+    await upsert_workspace_overrides(
+        "oss",
+        WorkspaceSettingsUpdate(
             default_agent_model="openai:gpt-6-astra",
             default_agent_reasoning_effort="low",
         ),
-        workspace="oss",
     )
 
     command = {
@@ -2740,17 +2752,17 @@ async def test_get_my_profile_drops_deprecated_models() -> None:
 async def test_options_omits_fable_when_disabled() -> None:
     with (
         patch(
-            "agent.dashboard.options_routes.get_team_fable_enabled",
+            "agent.dashboard.options_routes.get_workspace_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.options_routes.get_team_default_model",
+            "agent.dashboard.options_routes.get_workspace_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.options_routes.get_team_default_subagent_model",
+            "agent.dashboard.options_routes.get_workspace_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
@@ -2763,17 +2775,17 @@ async def test_options_omits_fable_when_disabled() -> None:
 async def test_options_includes_fable_when_enabled() -> None:
     with (
         patch(
-            "agent.dashboard.options_routes.get_team_fable_enabled",
+            "agent.dashboard.options_routes.get_workspace_fable_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.dashboard.options_routes.get_team_default_model",
+            "agent.dashboard.options_routes.get_workspace_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.options_routes.get_team_default_subagent_model",
+            "agent.dashboard.options_routes.get_workspace_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
@@ -2792,17 +2804,17 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     fable_pair = (_FABLE, "high")
     with (
         patch(
-            "agent.dashboard.options_routes.get_team_fable_enabled",
+            "agent.dashboard.options_routes.get_workspace_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.options_routes.get_team_default_model",
+            "agent.dashboard.options_routes.get_workspace_default_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
         patch(
-            "agent.dashboard.options_routes.get_team_default_subagent_model",
+            "agent.dashboard.options_routes.get_workspace_default_subagent_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),

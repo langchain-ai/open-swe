@@ -149,7 +149,7 @@ class TestLinearWebhookRepoOverride:
         with (
             patch("agent.webhooks.common.verify_linear_signature", return_value=True),
             patch(
-                "agent.webhooks.common.get_team_default_repo",
+                "agent.webhooks.common.get_workspace_default_repo",
                 AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
             ),
             patch("agent.webhooks.common.is_repo_allowed", return_value=True),

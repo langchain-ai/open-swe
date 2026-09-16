@@ -62,7 +62,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
             return_value="/workspace",
         ),
         patch(
-            "agent.server.cached_team_default_model_pair",
+            "agent.server.cached_workspace_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
@@ -135,7 +135,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
             return_value="/workspace",
         ),
         patch(
-            "agent.server.cached_team_default_model_pair",
+            "agent.server.cached_workspace_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
@@ -200,7 +200,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
             return_value="/workspace",
         ),
         patch(
-            "agent.server.cached_team_default_model_pair",
+            "agent.server.cached_workspace_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),

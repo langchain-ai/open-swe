@@ -11,7 +11,11 @@ from typing import Any
 
 import pytest
 
-from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettingsUpdate,
+    upsert_instance_settings,
+    upsert_workspace_overrides,
+)
 from agent.run_config import Repo
 from agent.slack import webhook as slack_webhooks
 from agent.slack.request import SlackRequest
@@ -20,7 +24,7 @@ from agent.workspaces.store import WORKSPACES, WorkspaceCreate, parse_workspace_
 from tests.conftest import FakeStore
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
-# Workspaces are rows; team settings are still Store records, so the tests that
+# Workspaces are rows; workspace settings are still Store records, so the tests that
 # read one keep the store double as well.
 _needs_workspace_rows = pytest.mark.usefixtures("registry_db")
 
@@ -92,7 +96,7 @@ async def test_a_bound_channel_outranks_a_defaulted_repository(
     await WORKSPACES.create(
         WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
     )
-    await upsert_team_settings(TeamSettingsUpdate(default_repo="acme/oss"), workspace="oss")
+    await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(default_repo="acme/oss"))
 
     request = SlackRequest.model_validate(
         {
@@ -152,18 +156,18 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
     await WORKSPACES.create(
         WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
     )
-    await upsert_team_settings(
-        TeamSettingsUpdate(
+    await upsert_instance_settings(
+        WorkspaceSettingsUpdate(
             default_agent_model="anthropic:claude-opus-5",
             default_agent_reasoning_effort="high",
         )
     )
-    await upsert_team_settings(
-        TeamSettingsUpdate(
+    await upsert_workspace_overrides(
+        "oss",
+        WorkspaceSettingsUpdate(
             default_agent_model="fireworks:accounts/fireworks/models/kimi-k3",
             default_agent_reasoning_effort="high",
         ),
-        workspace="oss",
     )
 
     request = SlackRequest.model_validate(
@@ -204,7 +208,7 @@ async def test_an_inherited_default_repository_owned_elsewhere_is_not_used(
         WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
     )
     # Set on the instance, so `oss` inherits it without owning it.
-    await upsert_team_settings(TeamSettingsUpdate(default_repo="acme/internal"))
+    await upsert_instance_settings(WorkspaceSettingsUpdate(default_repo="acme/internal"))
 
     request = SlackRequest.model_validate(
         {

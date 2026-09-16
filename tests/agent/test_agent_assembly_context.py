@@ -126,7 +126,7 @@ async def _capture_create_deep_agent_kwargs(
             return_value="/workspace",
         ),
         patch(
-            "agent.server.cached_team_default_model_pair",
+            "agent.server.cached_workspace_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
@@ -198,7 +198,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
     SANDBOX_BACKENDS.pop("thread-ctx", None)
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
-        patch("agent.server.cached_team_default_model_pair", side_effect=load_defaults),
+        patch("agent.server.cached_workspace_default_model_pair", side_effect=load_defaults),
         patch(
             "agent.server.cached_agent_routing_models",
             new_callable=AsyncMock,

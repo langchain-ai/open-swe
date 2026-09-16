@@ -135,7 +135,7 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     """Build a chat model, optionally routed through the LangSmith LLM Gateway.
 
     ``use_gateway`` resolves the deployment default (``LANGSMITH_GATEWAY_ENABLED``)
-    when ``None``; async callers pass the team-settings-resolved value. When on,
+    when ``None``; async callers pass the workspace-settings-resolved value. When on,
     gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
     provider defaults below (see :mod:`agent.utils.gateway`).
     """

@@ -62,20 +62,20 @@ from agent.dashboard.options import (
     gate_fable_model,
     model_supports_effort,
 )
-from agent.dashboard.team_settings import (
-    get_team_default_repo,
-    get_team_fast_alt_probability,
+from agent.dashboard.user_mappings import email_for_login
+from agent.dashboard.workspace_settings import (
+    get_workspace_default_repo,
+    get_workspace_fast_alt_probability,
 )
-from agent.dashboard.team_settings_cache import (
+from agent.dashboard.workspace_settings_cache import (
     cached_agent_routing_models,
     cached_fable_enabled,
     cached_gateway_enabled,
     cached_model_routing_enabled,
-    cached_team_default_model_pair,
-    cached_team_settings,
     cached_thread_title_model,
+    cached_workspace_default_model_pair,
+    cached_workspace_settings,
 )
-from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
@@ -287,7 +287,7 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
         return None
 
     try:
-        return await get_team_default_repo(workspace_slug(cfg))
+        return await get_workspace_default_repo(workspace_slug(cfg))
     except Exception:
         logger.debug("Failed to load team default repo for prompt", exc_info=True)
         return None
@@ -942,15 +942,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 profile,
                 fable_enabled,
             ) = await asyncio.gather(
-                cached_team_default_model_pair("agent", settings_workspace),
+                cached_workspace_default_model_pair("agent", settings_workspace),
                 cached_agent_routing_models(settings_workspace),
                 cached_thread_title_model(settings_workspace),
                 cached_gateway_enabled(settings_workspace),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
                 cached_fable_enabled(settings_workspace),
             )
-            fast_alt_probability = get_team_fast_alt_probability(
-                await cached_team_settings(settings_workspace)
+            fast_alt_probability = get_workspace_fast_alt_probability(
+                await cached_workspace_settings(settings_workspace)
             )
 
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)

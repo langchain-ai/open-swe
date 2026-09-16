@@ -11,8 +11,8 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.dashboard.profiles import PROFILES_NAMESPACE
-from agent.dashboard.team_settings import get_team_default_model
 from agent.dashboard.user_mappings import cached_login_for_email, login_for_email
+from agent.dashboard.workspace_settings import get_workspace_default_model
 from agent.store import get_value
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ async def resolve_agent_model_id(
     applies; omitting it reads ``default``'s, which is only right for a run
     that lands there.
     """
-    model_id, _effort = await get_team_default_model("agent", workspace)
+    model_id, _effort = await get_workspace_default_model("agent", workspace)
     if github_login:
         profile = await load_profile(github_login)
         if profile:
