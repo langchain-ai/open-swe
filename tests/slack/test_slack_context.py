@@ -2415,3 +2415,27 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives() -> None:
         "Working on it",
         None,
     )
+
+
+@pytest.mark.parametrize("usage", [None, RunUsageSummary(models=(), total_tokens=123)])
+def test_cost_enrichment_without_model_metadata(usage: RunUsageSummary | None) -> None:
+    url = "https://app.example/agents/t1"
+    text = f"Done <{url}|Open in Web>"
+    blocks = slack_utils._with_slack_web_link_context_block(
+        text, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], url, usage
+    )
+    for pending in (False, True):
+        initial_text, initial_blocks = (
+            slack_utils.with_slack_pending_session_cost(text, blocks) if pending else (text, blocks)
+        )
+        final_text, final_blocks = slack_utils.with_slack_session_cost(
+            initial_text, initial_blocks, 0.42
+        )
+        assert final_text.endswith("$0.42")
+        assert final_blocks[-1]["elements"][0]["text"] == "$0.42"
+        assert final_blocks[0] == blocks[0]
+    cleared_text, cleared_blocks = slack_utils.with_slack_pending_session_cost(
+        initial_text, initial_blocks, clear=True
+    )
+    assert "calculating cost" not in cleared_text
+    assert "calculating cost" not in str(cleared_blocks)

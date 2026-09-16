@@ -66,7 +66,7 @@ def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | Non
 
 
 async def _mark_slack_reply_cost_pending(
-    payload: SessionCostRefresh, client: LangGraphClient
+    payload: SessionCostRefresh, client: LangGraphClient, *, clear: bool = False
 ) -> None:
     """Best-effort: flag the mapped final reply as awaiting its deferred cost."""
     mapping = await lookup_slack_run_message_mapping(
@@ -86,12 +86,23 @@ async def _mark_slack_reply_cost_pending(
     blocks = message.get("blocks")
     if not isinstance(text, str) or (blocks is not None and not isinstance(blocks, list)):
         return
-    updated_text, updated_blocks = with_slack_pending_session_cost(text, blocks)
+    updated_text, updated_blocks = with_slack_pending_session_cost(text, blocks, clear=clear)
     if updated_text == text and updated_blocks == blocks:
         return
-    await update_slack_message(
+    updated, error = await update_slack_message(
         payload["channel_id"], message_ts, updated_text, blocks=updated_blocks
     )
+    if not updated:
+        logger.warning("Could not update pending cost label", extra={"slack_error": error})
+
+
+async def _clear_pending_cost(state: Mapping[str, object], client: LangGraphClient) -> None:
+    try:
+        payload = _payload(state, 0)
+        if payload is not None:
+            await _mark_slack_reply_cost_pending(payload, client, clear=True)
+    except Exception:
+        logger.warning("Could not clear pending cost label", exc_info=True)
 
 
 async def schedule_session_cost_refresh(
@@ -209,6 +220,7 @@ async def run_session_cost_refresh(
         raw_attempt if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool) else -1
     )
     if attempt < 0 or attempt >= len(_RETRY_DELAYS_SECONDS):
+        await _clear_pending_cost(state, client)
         return {"status": "unavailable", "reason": "invalid attempt"}
 
     try:
@@ -218,6 +230,7 @@ async def run_session_cost_refresh(
         status, reason = "pending", "refresh attempt failed"
     if status != "pending":
         if status == "unavailable":
+            await _clear_pending_cost(state, client)
             logger.info(
                 "Session-cost refresh unavailable for run %s: %s", state.get("run_id"), reason
             )
@@ -225,8 +238,11 @@ async def run_session_cost_refresh(
     next_attempt = attempt + 1
     if next_attempt >= len(_RETRY_DELAYS_SECONDS):
         logger.info("Session-cost refresh exhausted for run %s: %s", state.get("run_id"), reason)
+        await _clear_pending_cost(state, client)
         return {"status": "exhausted", "reason": reason}
     scheduled = await schedule_session_cost_refresh(state, attempt=next_attempt, client=client)
+    if not scheduled:
+        await _clear_pending_cost(state, client)
     return {
         "status": "retry_scheduled" if scheduled else "unavailable",
         "reason": reason,

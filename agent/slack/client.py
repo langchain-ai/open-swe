@@ -502,7 +502,11 @@ def _replace_slack_session_cost(text: str, cost: float, *, require_web_link: boo
         return text
     cleaned = _SESSION_COST_LABEL_RE.sub("", text).rstrip()
     cleaned = _MAIN_AGENT_TOKEN_LABEL_RE.sub("", cleaned).rstrip()
-    return f"{cleaned} • {format_slack_session_cost(cost)}"
+    return (
+        f"{cleaned} • {format_slack_session_cost(cost)}"
+        if cleaned
+        else format_slack_session_cost(cost)
+    )
 
 
 def with_slack_session_cost(
@@ -552,14 +556,38 @@ def with_slack_session_cost(
         and all(block.get("type") == "rich_text" for block in updated_blocks)
     ):
         updated_blocks = None
+    elif target is None and updated_text != text:
+        updated_blocks.append(
+            {
+                "type": "context",
+                "block_id": "open_swe_usage_footer",
+                "elements": [{"type": "mrkdwn", "text": format_slack_session_cost(cost)}],
+            }
+        )
     return updated_text, updated_blocks
 
 
 def with_slack_pending_session_cost(
     text: str,
     blocks: list[dict[str, Any]] | None,
+    *,
+    clear: bool = False,
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Append the pending cost label to a live Slack footer awaiting its cost."""
+    if clear:
+        suffix = f" • {SLACK_COST_PENDING_LABEL}"
+        updated_text = text.removesuffix(suffix)
+        updated_blocks = copy.deepcopy(blocks)
+        for block in updated_blocks or []:
+            if block.get("type") != "context":
+                continue
+            values = [block.get("text"), *(block.get("elements") or [])]
+            for value in values:
+                if isinstance(value, dict) and isinstance(value.get("text"), str):
+                    value["text"] = value["text"].removesuffix(suffix)
+                    if value["text"] == SLACK_COST_PENDING_LABEL:
+                        value["text"] = "Cost unavailable"
+        return updated_text, updated_blocks
     if SLACK_COST_PENDING_LABEL in text or SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text, blocks
     updated_text = f"{text} • {SLACK_COST_PENDING_LABEL}"
@@ -585,6 +613,13 @@ def with_slack_pending_session_cost(
             if isinstance(value_text, str) and SLACK_COST_PENDING_LABEL not in value_text:
                 value["text"] = f"{value_text} • {SLACK_COST_PENDING_LABEL}"
                 return updated_text, updated_blocks
+    updated_blocks.append(
+        {
+            "type": "context",
+            "block_id": "open_swe_usage_footer",
+            "elements": [{"type": "mrkdwn", "text": SLACK_COST_PENDING_LABEL}],
+        }
+    )
     return updated_text, updated_blocks
 
 

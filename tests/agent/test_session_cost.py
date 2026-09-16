@@ -425,3 +425,45 @@ async def test_refresh_stops_after_final_attempt(monkeypatch: pytest.MonkeyPatch
 
     assert result == {"status": "exhausted", "reason": "LangSmith not ready"}
     assert client.runs.created == []
+
+
+@pytest.mark.parametrize("status,attempt", [("unavailable", 0), ("pending", 4), ("pending", 0)])
+async def test_terminal_refresh_clears_pending_footer(
+    monkeypatch: pytest.MonkeyPatch, status: str, attempt: int
+) -> None:
+    monkeypatch.setattr(
+        session_cost, "_refresh_once", AsyncMock(return_value=(status, "unavailable"))
+    )
+    monkeypatch.setattr(
+        session_cost, "schedule_session_cost_refresh", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        session_cost,
+        "lookup_slack_run_message_mapping",
+        AsyncMock(return_value={"thread_ts": "1.0", "message_ts": "1.1"}),
+    )
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(
+            return_value={
+                "text": "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost",
+                "blocks": None,
+            }
+        ),
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+    await session_cost.run_session_cost_refresh(
+        {
+            "agent_thread_id": "t1",
+            "run_id": "r1",
+            "invocation_id": "i1",
+            "channel_id": "C1",
+            "thread_ts": "1.0",
+            "attempt": attempt,
+        },
+        client=SimpleNamespace(),
+    )
+    update.assert_awaited_once()
+    assert update.call_args.args[2].endswith("model-a")
