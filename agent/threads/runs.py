@@ -608,7 +608,7 @@ async def _enrich_run_start_command(
         run_input["messages"] = structured
     metadata_update: dict[str, Any] = {
         "source": DASHBOARD_SOURCE,
-        # Continuing on the web promotes a `/swe` question thread for good.
+        # Continuing on the web promotes a `/oswe` question thread for good.
         "unlisted": False,
         "plan_mode": plan_mode_requested,
         "model_selection": model_selection,

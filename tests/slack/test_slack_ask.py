@@ -11,7 +11,7 @@ from agent.slack.tools import thread_reply as slack_thread_reply
 from agent.threads.listing import _metadata_matches_filters
 
 
-def _command_request(text: str, command: str = "/swe") -> Request:
+def _command_request(text: str, command: str = "/oswe") -> Request:
     body = urlencode(
         {
             "channel_id": "C1",
@@ -64,7 +64,7 @@ async def test_command_without_a_question_explains_itself() -> None:
 
     result = await slack_routes.slack_command(_command_request(""), background_tasks)
 
-    assert "/swe" in result["text"]
+    assert "/oswe" in result["text"]
     assert background_tasks.tasks == []
 
 

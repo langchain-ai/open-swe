@@ -254,7 +254,7 @@ DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
-# A `/swe` question researches and answers; it never mutates the repository or
+# A `/oswe` question researches and answers; it never mutates the repository or
 # spawns follow-on work. `execute` stays so the agent can explore the checkout.
 SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {
@@ -599,7 +599,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
 
 
 def _slack_ask_mode(cfg: RunConfig) -> bool:
-    """A `/swe` question: one ephemeral answer, no Slack thread to post into."""
+    """A `/oswe` question: one ephemeral answer, no Slack thread to post into."""
     return (
         cfg.slack_ask is True
         and cfg.slack_thread is not None

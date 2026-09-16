@@ -1,4 +1,4 @@
-This run answers one `/swe` question asked from Slack.
+This run answers one `/oswe` question asked from Slack.
 
 - There is no Slack thread and no conversation to continue. One person asked one question and is waiting for one answer.
 - Send exactly one `slack_thread_reply`, and send it last: it carries the complete answer, and it reaches the asker alone as an ephemeral message. Do not acknowledge the question first, and do not repeat the answer in your final assistant response.

@@ -1,4 +1,4 @@
-"""The `/swe` slash command: one question, one ephemeral answer, no Slack thread.
+"""The `/oswe` slash command: one question, one ephemeral answer, no Slack thread.
 
 The agent thread behind the answer is real — it carries the usual `Open in Web`
 link and can be pinned or continued on the dashboard — but it is stamped
@@ -25,7 +25,7 @@ from agent.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
-ASK_COMMAND = "/swe"
+ASK_COMMAND = "/oswe"
 MAX_QUESTION_CHARS = 2000
 _CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
 _START_FAILURE = "Open SWE could not start that question. Try again in a moment."
@@ -157,7 +157,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
 
 
 async def process_slack_ask(request: SlackAskRequest) -> None:
-    """Answer one `/swe` question, reporting any failure back to the asker."""
+    """Answer one `/oswe` question, reporting any failure back to the asker."""
     try:
         await _process_slack_ask(request)
     except Exception:

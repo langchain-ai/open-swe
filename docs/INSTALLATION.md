@@ -143,7 +143,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
         },
         "slash_commands": [
             {
-                "command": "/swe",
+                "command": "/oswe",
                 "url": "https://<your-url>/webhooks/slack/commands",
                 "description": "Ask Open SWE a single question",
                 "usage_hint": "how does thread routing work?",
@@ -216,7 +216,7 @@ SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```
 
-`/swe <question>` answers a single question without starting a Slack thread: the reply is ephemeral, visible only to whoever asked. Its agent thread stays out of the dashboard thread list, but the `Open in Web` link on the reply opens it, and pinning or continuing it there makes it an ordinary thread.
+`/oswe <question>` answers a single question without starting a Slack thread: the reply is ephemeral, visible only to whoever asked. Its agent thread stays out of the dashboard thread list, but the `Open in Web` link on the reply opens it, and pinning or continuing it there makes it an ordinary thread.
 
 Both Slack URLs must point at the Open SWE deployment, and Block Kit buttons only work with Interactivity enabled and pointed at `/webhooks/slack/interactivity`. Slack messages are routed to the thread's repository, a `repo:owner/name` token in the message, or the team default repository. Open SWE refuses Slack Connect channels (`is_ext_shared`) and fails closed when it cannot verify a channel.
 

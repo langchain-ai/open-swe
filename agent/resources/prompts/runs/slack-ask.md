@@ -1,4 +1,4 @@
-$asked_by asked Open SWE a single question with the `/swe` Slack command:
+$asked_by asked Open SWE a single question with the `/oswe` Slack command:
 
 $question
 

@@ -116,7 +116,7 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 | `/` | Dashboard |
 | `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
-| `POST /webhooks/slack/commands` | The `/swe` slash command |
+| `POST /webhooks/slack/commands` | The `/oswe` slash command |
 | `POST /webhooks/linear` | Linear comment webhooks |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |

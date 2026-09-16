@@ -31,7 +31,7 @@ const BASE_BOT_EVENTS = [
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
 
-export const ASK_COMMAND = "/swe"
+export const ASK_COMMAND = "/oswe"
 
 export interface SlackManifestConfig {
   backendUrl?: string | null

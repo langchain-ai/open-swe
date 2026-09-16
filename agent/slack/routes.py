@@ -565,7 +565,7 @@ async def slack_webhook(
 async def slack_command(
     request: common.Request, background_tasks: common.BackgroundTasks
 ) -> SlashCommandResponse:
-    """Answer a single `/swe` question, ephemerally and without a Slack thread."""
+    """Answer a single `/oswe` question, ephemerally and without a Slack thread."""
     body = await request.body()
     _verify_signature(request, body, "commands")
 

@@ -56,7 +56,7 @@ describe("slackAppManifest", () => {
 
       expect(manifest.features.slash_commands).toEqual([
         expect.objectContaining({
-          command: "/swe",
+          command: "/oswe",
           url: "https://openswe.example.com/webhooks/slack/commands",
         }),
       ])
