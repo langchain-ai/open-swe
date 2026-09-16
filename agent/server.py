@@ -192,6 +192,7 @@ from agent.tools import (
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
+    slack_read_channel_messages,
     slack_read_thread_messages,
     slack_start_new_thread,
     slack_thread_reply,
@@ -1176,6 +1177,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
+        slack_read_channel_messages,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
@@ -1215,6 +1217,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
+        slack_read_channel_messages,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
@@ -1255,7 +1258,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
-        static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
+        static_tools = apply_tool_descriptions(
+            [slack_read_channel_messages, slack_read_thread_messages, slack_thread_reply]
+        )
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {

@@ -101,6 +101,8 @@ def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_ask.common, "login_for_slack_id", AsyncMock(return_value="octocat"))
     monkeypatch.setattr(slack_ask.common, "get_valid_access_token", AsyncMock(return_value="gho_x"))
     monkeypatch.setattr(slack_ask, "get_thread_active_status", AsyncMock(return_value=False))
+    monkeypatch.setattr(slack_ask, "fetch_slack_channel_messages", AsyncMock(return_value=[]))
+    monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={}))
 
 
 @pytest.mark.asyncio
@@ -185,6 +187,73 @@ async def test_named_repository_picks_the_workspace(monkeypatch: pytest.MonkeyPa
 
     assert resolve_workspace.await_args.kwargs["repo"] == ("acme", "api")
     assert dispatch.await_args.args[2]["workspace"] == "payments"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("linked_asker")
+async def test_channel_context_reaches_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        slack_ask.common,
+        "get_slack_repo_config",
+        AsyncMock(return_value=slack_ask.common.SlackRepoResolution()),
+    )
+    monkeypatch.setattr(
+        slack_ask.common, "upsert_agent_thread_metadata", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        slack_ask,
+        "fetch_slack_channel_messages",
+        AsyncMock(
+            return_value=[
+                {"ts": "1.000001", "user": "U2", "text": "deploys are failing"},
+                {
+                    "ts": "2.000002",
+                    "user": "U3",
+                    "text": "opened a PR",
+                    "thread_ts": "2.000002",
+                    "reply_count": 3,
+                },
+            ]
+        ),
+    )
+    monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={"U2": "ada"}))
+    dispatch = AsyncMock()
+    monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
+
+    await slack_ask.process_slack_ask(
+        slack_ask.SlackAskRequest(
+            channel_id="C1", user_id="U1", question="what broke?", thread_id="t-3"
+        )
+    )
+
+    prompt = dispatch.await_args.args[1]
+    assert prompt.startswith("<markdown>")
+    assert prompt.endswith("</markdown>")
+    assert "@ada(U2)" in prompt
+    assert "deploys are failing" in prompt
+    assert "[thread: 3 replies, thread_ts=2.000002]" in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("linked_asker")
+async def test_channel_context_stays_inside_its_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        slack_ask,
+        "fetch_slack_channel_messages",
+        AsyncMock(
+            return_value=[
+                {"ts": f"{index}.000000", "user": "U2", "text": "x" * 4000}
+                for index in range(1, 30)
+            ]
+        ),
+    )
+    monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={}))
+
+    context = await slack_ask._channel_context("C1")
+
+    assert len(context) <= slack_ask._CHANNEL_CONTEXT_MAX_CHARS
+    assert context.startswith(slack_ask._CHANNEL_CONTEXT_TRIMMED)
+    assert "29.000000" in context
 
 
 def test_unlisted_threads_stay_out_of_the_thread_list() -> None:

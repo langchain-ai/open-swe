@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 SLACK_THREAD_MAX_MESSAGES = 500
+SLACK_CHANNEL_HISTORY_MAX_MESSAGES = 100
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
 
@@ -317,11 +318,26 @@ def _format_forwarded_slack_attachments(attachments: Any) -> str:
     return "\n".join(forwarded)
 
 
+def _slack_thread_reply_marker(message: dict[str, Any]) -> str:
+    """A pointer to the replies hanging off a channel message, when it has any."""
+    raw_thread_ts = message.get("thread_ts")
+    thread_ts = raw_thread_ts.strip() if isinstance(raw_thread_ts, str) else ""
+    reply_count = message.get("reply_count")
+    if not _SLACK_MESSAGE_TS_RE.fullmatch(thread_ts) or not isinstance(reply_count, int):
+        return ""
+    if reply_count < 1:
+        return ""
+    plural = "reply" if reply_count == 1 else "replies"
+    return f" [thread: {reply_count} {plural}, thread_ts={thread_ts}]"
+
+
 def format_slack_messages_for_prompt(
     messages: list[dict[str, Any]],
     user_names_by_id: dict[str, str] | None = None,
     bot_user_id: str = "",
     bot_username: str = "",
+    *,
+    include_thread_replies: bool = False,
 ) -> str:
     """Format Slack messages, including forwarded context, as readable prompt text."""
     if not messages:
@@ -348,7 +364,8 @@ def format_slack_messages_for_prompt(
         identifier = (
             f" [message_ts={message_ts}]" if _SLACK_MESSAGE_TS_RE.fullmatch(message_ts) else ""
         )
-        line = f"{author}{identifier}: {text}"
+        replies = _slack_thread_reply_marker(message) if include_thread_replies else ""
+        line = f"{author}{identifier}{replies}: {text}"
         if forwarded:
             line += f"\n{forwarded}"
         lines.append(line)
@@ -1388,6 +1405,42 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     messages.sort(key=lambda item: parse_slack_ts(item.get("ts")))
     if truncated:
         messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
+    return messages
+
+
+_SLACK_NOISE_SUBTYPES = frozenset(
+    {"channel_join", "channel_leave", "channel_topic", "channel_purpose", "channel_name"}
+)
+
+
+async def fetch_slack_channel_messages(channel_id: str, limit: int = 30) -> list[dict[str, Any]]:
+    """The most recent top-level messages in a channel, oldest first.
+
+    Thread replies are not in channel history, so a message that has any carries
+    its `reply_count` and `thread_ts` for `slack_read_thread_messages` to follow.
+    """
+    if not SLACK_BOT_TOKEN or not channel_id:
+        return []
+
+    capped = max(1, min(limit, SLACK_CHANNEL_HISTORY_MAX_MESSAGES))
+    async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        try:
+            payload = await client.conversations_history(channel=channel_id, limit=capped)
+        except SLACK_REQUEST_ERRORS as exc:
+            logger.warning(
+                "Slack channel history fetch failed", extra={"slack_error": slack_error(exc)}
+            )
+            return []
+
+    batch = payload.get("messages", [])
+    if not isinstance(batch, list):
+        return []
+    messages = [
+        item
+        for item in batch
+        if isinstance(item, dict) and item.get("subtype") not in _SLACK_NOISE_SUBTYPES
+    ]
+    messages.sort(key=lambda item: parse_slack_ts(item.get("ts")))
     return messages
 
 

@@ -15,7 +15,10 @@ from pydantic import BaseModel
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import render_prompt
 from agent.slack.client import (
+    fetch_slack_channel_messages,
+    format_slack_messages_for_prompt,
     get_slack_user_info,
+    get_slack_user_names,
     post_slack_ephemeral_message,
     slack_channel_allows_operations,
 )
@@ -29,6 +32,13 @@ logger = logging.getLogger(__name__)
 
 ASK_COMMAND = "/oswe"
 MAX_QUESTION_CHARS = 2000
+CHANNEL_CONTEXT_MESSAGE_LIMIT = 30
+CHANNEL_CONTEXT_MAX_TOKENS = 5000
+# No tokenizer in this process, and a Slack transcript is plain prose, so four
+# characters to the token holds the budget closely enough.
+_CHANNEL_CONTEXT_MAX_CHARS = CHANNEL_CONTEXT_MAX_TOKENS * 4
+_CHANNEL_CONTEXT_TRIMMED = "[earlier messages omitted to stay inside the context budget]"
+_NO_CHANNEL_CONTEXT = "(unavailable — read the channel yourself if the request needs it)"
 _CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
 _START_FAILURE = "Open SWE could not start that request. Try again in a moment."
 _QUEUED = "Added to what I'm already working on for you here."
@@ -61,6 +71,38 @@ async def _slack_user_profile(user_id: str) -> tuple[str, str]:
     name = profile.get("display_name") or profile.get("real_name") or ""
     email = profile.get("email") or ""
     return (name if isinstance(name, str) else ""), (email if isinstance(email, str) else "")
+
+
+def _channel_label(channel_context: dict[str, Any] | None) -> str:
+    """`` (#eng)`` when Slack names the channel, empty when it does not."""
+    if not isinstance(channel_context, dict):
+        return ""
+    for key in ("name_normalized", "name"):
+        value = channel_context.get(key)
+        if isinstance(value, str) and value.strip():
+            return f" (#{value.strip()})"
+    return ""
+
+
+async def _channel_context(channel_id: str) -> str:
+    """Recent channel messages, oldest trimmed away until they fit the budget."""
+    messages = await fetch_slack_channel_messages(channel_id, CHANNEL_CONTEXT_MESSAGE_LIMIT)
+    if not messages:
+        return ""
+    user_ids = [
+        user_id for msg in messages if isinstance(user_id := msg.get("user"), str) and user_id
+    ]
+    user_names = await get_slack_user_names(user_ids) if user_ids else {}
+    transcript = format_slack_messages_for_prompt(messages, user_names, include_thread_replies=True)
+    kept: list[str] = []
+    remaining = _CHANNEL_CONTEXT_MAX_CHARS - len(_CHANNEL_CONTEXT_TRIMMED) - 1
+    for line in reversed(transcript.splitlines()):
+        remaining -= len(line) + 1
+        if remaining < 0:
+            kept.append(_CHANNEL_CONTEXT_TRIMMED)
+            break
+        kept.append(line)
+    return "\n".join(reversed(kept))
 
 
 async def _refuse(request: SlackAskRequest, text: str) -> None:
@@ -173,6 +215,9 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         command=request.command,
         asked_by=user_name or f"<@{request.user_id}>",
         request=request.question,
+        channel_id=request.channel_id,
+        channel_name=_channel_label(channel_context),
+        channel_context=await _channel_context(request.channel_id) or _NO_CHANNEL_CONTEXT,
     )
     # The thread is shared by every command this person runs in this channel, so
     # a command sent while the last one is still working joins it instead of
