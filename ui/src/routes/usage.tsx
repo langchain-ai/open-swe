@@ -24,6 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { safeModelLabel } from "@/lib/modelLabel"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/usage")({
@@ -445,7 +446,9 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
             <tr key={`${cohort.model_id}-${cohort.model_attribution_quality}`}>
               <td className="px-4 py-3">
                 <div className="font-medium">
-                  {cohort.model_id ?? "Unavailable"}
+                  {cohort.model_id
+                    ? safeModelLabel(cohort.model_id) || "Unavailable"
+                    : "Unavailable"}
                 </div>
                 <div className="text-muted-foreground">
                   {cohort.model_attribution_quality} attribution
@@ -535,7 +538,7 @@ function UsageTable({
                 />
               </td>
               <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
-                {row.favorite_model}
+                {safeModelLabel(row.favorite_model) || "Unavailable"}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.invocations)}
