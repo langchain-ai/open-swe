@@ -683,6 +683,7 @@ test.describe("threads workspace", () => {
     ).toBeVisible();
 
     await page.reload();
+    await dismissOnboardingIfShown(page);
     await expect(sidebar).toContainText(TITLES.noProject);
     const unpinNoProject = sidebar.getByRole("button", {
       name: "Unpin No project",
