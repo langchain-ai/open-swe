@@ -16,6 +16,7 @@ from agent.dashboard.team_settings import (
     upsert_workspace_settings,
 )
 from agent.run_config import RunConfig
+from agent.store import get_value
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
 
@@ -35,6 +36,20 @@ async def test_the_pre_workspaces_record_is_the_instance_record(fake_store: Fake
     fake_store.seed(TEAM_SETTINGS_NAMESPACE, "default", {"org_guidelines": "legacy rules"})
     assert (await get_instance_settings())["org_guidelines"] == "legacy rules"
     assert (await get_team_settings("oss"))["org_guidelines"] == "legacy rules"
+
+
+async def test_records_written_beside_the_instance_one_still_apply(fake_store: FakeStore) -> None:
+    """#2807 kept every workspace's record in the instance namespace; those survive the upgrade."""
+    await upsert_instance_settings(TeamSettingsUpdate(org_guidelines="internal only"))
+    fake_store.seed(
+        TEAM_SETTINGS_NAMESPACE, "oss", {"org_guidelines": "be public", "fable_enabled": None}
+    )
+    assert (await get_team_settings("oss"))["org_guidelines"] == "be public"
+
+    # Saving the workspace moves it to its own record, so the old one cannot resurface.
+    await upsert_workspace_settings("oss", TeamSettingsUpdate())
+    assert (await get_team_settings("oss"))["org_guidelines"] == "internal only"
+    assert await get_value(TEAM_SETTINGS_NAMESPACE, "oss") is None
 
 
 async def test_an_override_applies_to_its_workspace_only(fake_store: FakeStore) -> None:
@@ -70,6 +85,28 @@ async def test_clearing_an_override_restores_inheritance(fake_store: FakeStore) 
     assert view["overrides"] == {}
     assert view["effective"]["default_agent_model"] == "anthropic:claude-sonnet-5"
     assert view["effective"]["default_agent_reasoning_effort"] == "high"
+
+
+async def test_fable_rules_follow_the_toggle_a_workspace_resolves_to(fake_store: FakeStore) -> None:
+    fable_model = "anthropic:claude-fable-5-1"
+
+    # Fable on at the instance: a workspace inheriting the toggle cannot save it as a default.
+    await upsert_instance_settings(TeamSettingsUpdate(fable_enabled=True))
+    with pytest.raises(ValueError, match="cannot be a default model"):
+        await upsert_workspace_settings(
+            "oss",
+            TeamSettingsUpdate(
+                default_agent_model=fable_model, default_agent_reasoning_effort="high"
+            ),
+        )
+
+    # Fable off at the instance: the kill switch swaps the selection for a safe fallback.
+    await upsert_instance_settings(TeamSettingsUpdate(fable_enabled=False))
+    view = await upsert_workspace_settings(
+        "oss",
+        TeamSettingsUpdate(default_agent_model=fable_model, default_agent_reasoning_effort="high"),
+    )
+    assert view["overrides"]["default_agent_model"] not in FABLE_MODEL_IDS
 
 
 async def test_settings_workspace_comes_from_the_running_config(

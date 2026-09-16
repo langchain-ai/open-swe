@@ -207,12 +207,13 @@ def test_fable_cannot_be_saved_as_default() -> None:
     profile = ProfileUpdate(default_model=FABLE, reasoning_effort="high")
     with pytest.raises(ValueError, match="cannot be a default model"):
         profile.validate_pairing()
+    update = TeamSettingsUpdate(
+        fable_enabled=True,
+        default_agent_model=FABLE,
+        default_agent_reasoning_effort="high",
+    )
     with pytest.raises(ValueError, match="cannot be a default model"):
-        TeamSettingsUpdate(
-            fable_enabled=True,
-            default_agent_model=FABLE,
-            default_agent_reasoning_effort="high",
-        )
+        update.apply_fable_policy(fable_enabled=True)
 
 
 def test_profile_update_rejects_unknown_provider() -> None:

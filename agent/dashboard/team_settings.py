@@ -203,7 +203,16 @@ class TeamSettingsUpdate(BaseModel):
             self.default_thread_title_reasoning_effort,
             "thread title",
         )
-        if self.fable_enabled:
+        return self
+
+    def apply_fable_policy(self, *, fable_enabled: bool) -> None:
+        """Enforce the Fable rules against the toggle this record resolves to.
+
+        Applied at write time rather than in validation: a workspace record may
+        inherit the toggle from the instance, so the payload alone cannot say
+        whether Fable is on.
+        """
+        if fable_enabled:
             for model_field, _ in _MODEL_PAIR_FIELDS:
                 model = getattr(self, model_field)
                 if model in NON_DEFAULT_MODEL_IDS:
@@ -241,7 +250,6 @@ class TeamSettingsUpdate(BaseModel):
                     )
                     setattr(self, model_field, new_model)
                     setattr(self, effort_field, new_effort)
-        return self
 
 
 def _validate_model_effort_pair(model: str | None, effort: str | None, role: str) -> None:
@@ -421,7 +429,12 @@ async def _instance_record() -> dict[str, Any]:
 
 
 async def _workspace_record(slug: str) -> dict[str, Any]:
-    return _set_fields(await get_value(WORKSPACE_SETTINGS_NAMESPACE, slug))
+    record = await get_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
+    if record is None and slug != DEFAULT_WORKSPACE_SLUG:
+        # #2807 stored every workspace's record beside the instance one; a
+        # record written there stays in force until the workspace is saved again.
+        record = await get_value(TEAM_SETTINGS_NAMESPACE, slug)
+    return _set_fields(record)
 
 
 async def get_instance_settings() -> dict[str, Any]:
@@ -479,15 +492,27 @@ def _record_values(update: TeamSettingsUpdate) -> dict[str, Any]:
 
 
 async def upsert_instance_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
+    """Replace the instance record. Raises ``ValueError`` for a Fable model saved as a default."""
+    update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
     await put_value(TEAM_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
     return value
 
 
 async def upsert_workspace_settings(slug: str, update: TeamSettingsUpdate) -> WorkspaceSettingsView:
-    """Replace the workspace's overrides; a field left None inherits the instance value."""
+    """Replace the workspace's overrides; a field left None inherits the instance value.
+
+    Raises ``ValueError`` for a Fable model saved as a default while Fable is on,
+    whether the workspace sets that toggle itself or inherits it.
+    """
+    fable_enabled = update.fable_enabled
+    if fable_enabled is None:
+        fable_enabled = bool((await get_instance_settings())["fable_enabled"])
+    update.apply_fable_policy(fable_enabled=fable_enabled)
     value = {k: v for k, v in _record_values(update).items() if v is not None}
     await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
+    if slug != DEFAULT_WORKSPACE_SLUG:
+        await delete_value(TEAM_SETTINGS_NAMESPACE, slug)
     return await get_workspace_settings(slug)
 
 
@@ -783,7 +808,10 @@ async def api_get_team_settings(_session: dict[str, Any] = SESSION_DEP) -> dict[
 async def api_put_team_settings(
     body: TeamSettingsUpdate, _admin: dict[str, Any] = ADMIN_DEP
 ) -> dict[str, Any]:
-    return await upsert_instance_settings(body)
+    try:
+        return await upsert_instance_settings(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/workspaces/{workspace}/settings")
@@ -799,4 +827,7 @@ async def api_put_workspace_settings(
     body: TeamSettingsUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> WorkspaceSettingsView:
-    return await upsert_workspace_settings(await _existing_workspace(workspace), body)
+    try:
+        return await upsert_workspace_settings(await _existing_workspace(workspace), body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
