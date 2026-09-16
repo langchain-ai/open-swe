@@ -2382,3 +2382,36 @@ def test_deferred_cost_updates_footer_without_placeholder(linked_in_body: bool) 
         updated_text,
         updated_blocks,
     )
+
+
+def test_pending_cost_marks_latest_reply_until_cost_arrives() -> None:
+    url = "https://app.example/agents/t1"
+    usage = RunUsageSummary(models=("model-a",), total_tokens=123)
+    blocks = slack_utils._with_slack_web_link_context_block(
+        "Done", [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}], url, usage
+    )
+    text = slack_utils.append_slack_web_link_footer("Done", url, usage)
+    assert "calculating cost" not in text
+
+    pending_text, pending_blocks = slack_utils.with_slack_pending_session_cost(text, blocks)
+    assert pending_text.endswith("model-a • calculating cost")
+    assert pending_blocks is not None
+    assert pending_blocks[-1]["elements"][0]["text"].endswith("model-a • calculating cost")
+
+    # Idempotent while awaiting cost, and the refresh swaps the label for the cost.
+    assert slack_utils.with_slack_pending_session_cost(pending_text, pending_blocks) == (
+        pending_text,
+        pending_blocks,
+    )
+    final_text, final_blocks = slack_utils.with_slack_session_cost(
+        pending_text, pending_blocks, 0.42
+    )
+    assert final_text.endswith("model-a • $0.42")
+    assert final_blocks is not None
+    assert final_blocks[-1]["elements"][0]["text"].endswith("model-a • $0.42")
+
+    # Messages without a web footer (e.g. interim acknowledgements) stay untouched.
+    assert slack_utils.with_slack_pending_session_cost("Working on it", None) == (
+        "Working on it",
+        None,
+    )
