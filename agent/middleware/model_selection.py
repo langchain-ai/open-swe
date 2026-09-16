@@ -17,6 +17,7 @@ from agent.prompts import load_prompt, render_prompt
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "fast_alt", "balanced", "performance"]
+RoutingMode = Literal["auto", "performance"]
 
 # A/B experiment: "fast" sends a share of fast-routed turns to a second model
 # (``fast_alt``) so the two can be compared under real traffic. The share is
@@ -96,11 +97,13 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         *,
         route_model_ids: Mapping[str, str] | None = None,
         fast_alt_probability: float = _FAST_ALT_SPLIT,
+        routing_mode: RoutingMode = "auto",
         thread_id: str | None = None,
     ) -> None:
         self._models = dict(models)
         self._route_model_ids = dict(route_model_ids or {})
         self._fast_alt_probability = fast_alt_probability
+        self._routing_mode = routing_mode
         self._thread_id = thread_id
         # `nostream` keeps the routing decision out of the user-facing message
         # stream; it stays visible in traces, unlike the offloading summarizer.
@@ -122,6 +125,8 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return "performance"
         if model_route := state.get("model_route"):
             return model_route
+        if self._routing_mode == "performance":
+            return "performance"
         messages = state.get("messages", [])
         approved_plan = next(
             (
@@ -147,7 +152,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             and "fast_alt" in self._models
             and fast_alt_bucket(self._thread_id) < self._fast_alt_probability
         ):
-            return "fast_alt"
+            route = "fast_alt"
         return route
 
     async def abefore_model(
@@ -157,7 +162,8 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     ) -> dict[str, Route]:
         del runtime
         route = await self.select_route(state)
-        await _emit_routed_model(self._models, self._route_model_ids, route)
+        if self._routing_mode == "auto":
+            await _emit_routed_model(self._models, self._route_model_ids, route)
         if state.get("plan_mode"):
             return {}
         return {"model_route": route}
