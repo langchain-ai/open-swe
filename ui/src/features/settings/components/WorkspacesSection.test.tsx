@@ -24,6 +24,14 @@ afterEach(() => {
 })
 
 function renderSection(isAdmin: boolean) {
+  // The pickers browse Slack and the GitHub installation; tests that care
+  // mock these before rendering, the rest get empty directories.
+  if (!vi.isMockFunction(api.listSlackChannels)) {
+    vi.spyOn(api, "listSlackChannels").mockResolvedValue([])
+  }
+  if (!vi.isMockFunction(api.me)) {
+    vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
+  }
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -243,9 +251,12 @@ describe("WorkspacesSection", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit Core" }))
     await screen.findByLabelText("Instructions")
-    fireEvent.change(screen.getByLabelText("Repositories"), {
-      target: { value: "acme/api\nacme/web\n" },
+    fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
+    fireEvent.change(await screen.findByLabelText("Add a repository by name"), {
+      target: { value: " acme/web " },
     })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save 2 repositories" }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(updateSpy).toHaveBeenCalled())
@@ -294,11 +305,38 @@ describe("WorkspacesSection", () => {
     )
   })
 
-  it("creates a workspace from the create form with name, repos, and slack channel ids", async () => {
+  it("creates a workspace from the create form with a repository and a picked channel", async () => {
     vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "core",
-      workspaces: [],
+      workspaces: [
+        {
+          slug: "core",
+          name: "Core",
+          repos: ["acme/api"],
+          slack_channel_ids: ["C0000000001"],
+          is_default: true,
+          has_snapshot: true,
+        },
+      ],
     })
+    vi.spyOn(api, "listSlackChannels").mockResolvedValue([
+      {
+        id: "C0000000001",
+        name: "commits",
+        is_private: false,
+        is_member: true,
+        is_ext_shared: false,
+        num_members: 12,
+      },
+      {
+        id: "C0000000002",
+        name: "oss-help",
+        is_private: false,
+        is_member: true,
+        is_ext_shared: false,
+        num_members: 40,
+      },
+    ])
     const createSpy = vi.spyOn(api, "createWorkspace").mockResolvedValue({
       slug: "preview",
       name: "Preview",
@@ -315,18 +353,27 @@ describe("WorkspacesSection", () => {
     fireEvent.change(screen.getByLabelText("Workspace name"), {
       target: { value: "Preview" },
     })
-    fireEvent.change(screen.getByLabelText("Repositories"), {
-      target: { value: "acme/api\n" },
+    fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
+    fireEvent.change(await screen.findByLabelText("Add a repository by name"), {
+      target: { value: "acme/web" },
     })
-    fireEvent.change(screen.getByLabelText("Slack channel IDs"), {
-      target: { value: "C0000000002\n" },
-    })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 repository" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
+    // Core's channel is offered but not selectable; the free one is.
+    const taken = await screen.findByRole("checkbox", { name: "#commits" })
+    expect(taken.hasAttribute("disabled")).toBe(true)
+    fireEvent.click(screen.getByRole("checkbox", { name: "#oss-help" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
+    expect(screen.getByText("#oss-help")).toBeTruthy()
+
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
 
     await waitFor(() => expect(createSpy).toHaveBeenCalled())
     expect(createSpy).toHaveBeenCalledWith({
       name: "Preview",
-      repos: ["acme/api"],
+      repos: ["acme/web"],
       slack_channel_ids: ["C0000000002"],
     })
   })

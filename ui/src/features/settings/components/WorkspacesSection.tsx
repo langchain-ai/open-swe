@@ -8,6 +8,12 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  RepositoryPicker,
+  SlackChannelPicker,
+  slackChannelLabel,
+  useSlackChannelDirectory,
+} from "./WorkspaceBindingPickers"
+import {
   api,
   type WorkspaceCreate,
   type WorkspaceOption,
@@ -99,34 +105,26 @@ function Chips({ values }: { values: Array<string> }) {
   )
 }
 
-/** A textarea's raw lines, trimmed and with blanks dropped. */
-function parseLines(value: string): Array<string> {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-}
-
 interface WorkspaceDraft {
   name: string
-  repos: string
-  slackChannelIds: string
+  repos: Array<string>
+  slackChannelIds: Array<string>
   prompt: string
 }
 
 function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
   return {
     name: workspace.name,
-    repos: workspace.repos.join("\n"),
-    slackChannelIds: workspace.slack_channel_ids.join("\n"),
+    repos: workspace.repos,
+    slackChannelIds: workspace.slack_channel_ids,
     prompt: workspace.prompt,
   }
 }
 
 const EMPTY_DRAFT: WorkspaceDraft = {
   name: "",
-  repos: "",
-  slackChannelIds: "",
+  repos: [],
+  slackChannelIds: [],
   prompt: "",
 }
 
@@ -134,10 +132,17 @@ function WorkspaceEditor({
   draft,
   onChange,
   promptHint,
+  workspaceSlug,
+  workspaces,
+  channelLabel,
 }: {
   draft: WorkspaceDraft
   onChange: (next: WorkspaceDraft) => void
   promptHint: string
+  /** The workspace being edited; null while creating one. */
+  workspaceSlug: string | null
+  workspaces: Array<WorkspaceOption>
+  channelLabel: (id: string) => string
 }) {
   return (
     <div className="space-y-3 border-t border-border px-4 py-3.5">
@@ -149,26 +154,48 @@ function WorkspaceEditor({
           onChange={(e) => onChange({ ...draft, name: e.target.value })}
         />
       </label>
-      <label className="block text-sm">
+      <div className="text-sm">
         Repositories
-        <Textarea
+        <div
+          role="group"
           aria-label="Repositories"
-          placeholder={"owner/repo\none per line"}
-          value={draft.repos}
-          onChange={(e) => onChange({ ...draft, repos: e.target.value })}
-        />
-      </label>
-      <label className="block text-sm">
-        Slack channel IDs
-        <Textarea
-          aria-label="Slack channel IDs"
-          placeholder={"C0123456789\none per line"}
-          value={draft.slackChannelIds}
-          onChange={(e) =>
-            onChange({ ...draft, slackChannelIds: e.target.value })
-          }
-        />
-      </label>
+          className="mt-1 flex flex-wrap items-center gap-2"
+        >
+          {draft.repos.length > 0 ? (
+            <Chips values={draft.repos} />
+          ) : (
+            <span className="text-xs text-muted-foreground">None yet</span>
+          )}
+          <RepositoryPicker
+            selected={draft.repos}
+            onChange={(repos) => onChange({ ...draft, repos })}
+            workspaceSlug={workspaceSlug}
+            workspaces={workspaces}
+          />
+        </div>
+      </div>
+      <div className="text-sm">
+        Slack channels
+        <div
+          role="group"
+          aria-label="Slack channels"
+          className="mt-1 flex flex-wrap items-center gap-2"
+        >
+          {draft.slackChannelIds.length > 0 ? (
+            <Chips values={draft.slackChannelIds.map(channelLabel)} />
+          ) : (
+            <span className="text-xs text-muted-foreground">None yet</span>
+          )}
+          <SlackChannelPicker
+            selected={draft.slackChannelIds}
+            onChange={(slackChannelIds) =>
+              onChange({ ...draft, slackChannelIds })
+            }
+            workspaceSlug={workspaceSlug}
+            workspaces={workspaces}
+          />
+        </div>
+      </div>
       <label className="block text-sm">
         Instructions
         <Textarea
@@ -184,6 +211,8 @@ function WorkspaceEditor({
 
 function WorkspaceRow({
   workspace,
+  workspaces,
+  channelLabel,
   isDefault,
   isAdmin,
   editing,
@@ -197,6 +226,8 @@ function WorkspaceRow({
   onSave,
 }: {
   workspace: WorkspaceOption
+  workspaces: Array<WorkspaceOption>
+  channelLabel: (id: string) => string
   isDefault: boolean
   isAdmin: boolean
   editing: boolean
@@ -246,7 +277,7 @@ function WorkspaceRow({
         </div>
       </div>
       <Chips values={workspace.repos} />
-      <Chips values={workspace.slack_channel_ids} />
+      <Chips values={workspace.slack_channel_ids.map(channelLabel)} />
       {steps.length > 0 && <RefreshSteps steps={steps} />}
       {workspace.refresh_error && (
         <p className="text-xs/relaxed text-destructive">
@@ -269,6 +300,9 @@ function WorkspaceRow({
             draft={draft}
             onChange={onDraftChange}
             promptHint="Instructions appended to every run in this workspace"
+            workspaceSlug={workspace.slug}
+            workspaces={workspaces}
+            channelLabel={channelLabel}
           />
           <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
             {saveError && (
@@ -316,6 +350,10 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
     refetchInterval: 5000,
   })
   const options = workspaces.data
+  // Channel names are an admin's view; everyone else sees the stored ids.
+  const channelDirectory = useSlackChannelDirectory(isAdmin)
+  const channelLabel = (id: string) =>
+    slackChannelLabel(channelDirectory.data, id)
 
   const [editingSlug, setEditingSlug] = useState<string | null>(null)
   const [draft, setDraft] = useState<WorkspaceDraft | null>(null)
@@ -368,8 +406,8 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
     try {
       const body: WorkspaceUpdate = {
         name: draft.name.trim(),
-        repos: parseLines(draft.repos),
-        slack_channel_ids: parseLines(draft.slackChannelIds),
+        repos: draft.repos,
+        slack_channel_ids: draft.slackChannelIds,
         // The draft is only ever populated from the full record, so a blank
         // field here is the admin deliberately clearing the instructions.
         prompt: draft.prompt.trim(),
@@ -393,8 +431,8 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
     try {
       const body: WorkspaceCreate = {
         name: createDraft.name.trim(),
-        repos: parseLines(createDraft.repos),
-        slack_channel_ids: parseLines(createDraft.slackChannelIds),
+        repos: createDraft.repos,
+        slack_channel_ids: createDraft.slackChannelIds,
       }
       const prompt = createDraft.prompt.trim()
       if (prompt) body.prompt = prompt
@@ -436,6 +474,8 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
           <WorkspaceRow
             key={workspace.slug}
             workspace={workspace}
+            workspaces={options.workspaces}
+            channelLabel={channelLabel}
             isDefault={workspace.slug === options.default_slug}
             isAdmin={isAdmin}
             editing={editingSlug === workspace.slug}
@@ -457,6 +497,9 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
               draft={createDraft}
               onChange={setCreateDraft}
               promptHint="Instructions appended to every run in this workspace"
+              workspaceSlug={null}
+              workspaces={options?.workspaces ?? []}
+              channelLabel={channelLabel}
             />
             <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
               {createError && (

@@ -544,6 +544,16 @@ export interface WorkspaceOption {
   refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
+/** A channel the Slack bot can see, offered when binding channels to a workspace. */
+export interface SlackChannelOption {
+  id: string
+  name: string
+  is_private: boolean
+  is_member: boolean
+  is_ext_shared: boolean
+  num_members: number | null
+}
+
 export interface WorkspaceOptionList {
   workspaces: Array<WorkspaceOption>
   default_slug: string
@@ -1027,6 +1037,7 @@ export const api = {
       `/team-settings?workspace=${encodeURIComponent(workspace)}`
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
+  listSlackChannels: () => request<SlackChannelOption[]>("/slack/channels"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {

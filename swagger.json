@@ -1565,6 +1565,50 @@
         "title": "SlackBotOption",
         "type": "object"
       },
+      "SlackChannelOption": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_ext_shared": {
+            "title": "Is Ext Shared",
+            "type": "boolean"
+          },
+          "is_member": {
+            "title": "Is Member",
+            "type": "boolean"
+          },
+          "is_private": {
+            "title": "Is Private",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "num_members": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Members"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "is_private",
+          "is_member",
+          "is_ext_shared"
+        ],
+        "title": "SlackChannelOption",
+        "type": "object"
+      },
       "SlashCommandResponse": {
         "properties": {
           "response_type": {
@@ -8184,6 +8228,38 @@
         "tags": [
           "dashboard",
           "slack",
+          "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slack/channels": {
+      "get": {
+        "description": "The channels a workspace can be bound to, for the picker on the Workspaces page.",
+        "operationId": "api_list_slack_channels_dashboard_api_slack_channels_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SlackChannelOption"
+                  },
+                  "title": "Response Api List Slack Channels Dashboard Api Slack Channels Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Slack Channels",
+        "tags": [
+          "dashboard",
           "slack"
         ]
       }
