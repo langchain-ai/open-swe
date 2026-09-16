@@ -551,25 +551,26 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
     ]
 
 
-# Thread-scoped LangSmith feedback key; unsuffixed so it averages across threads.
 PR_OPENED_FEEDBACK_KEY = "pr_opened"
 
 
 async def _record_pr_opened_feedback(thread_id: str, *, pr_url: str) -> None:
-    try:
-        await create_langsmith_thread_feedback(
-            thread_id,
-            PR_OPENED_FEEDBACK_KEY,
-            score=1.0,
-            comment=pr_url,
-            source_info={
-                "source": "open_pull_request",
-                "thread_id": thread_id,
-                "pr_url": pr_url,
-            },
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("Failed to record opened PR feedback for thread %s", thread_id, exc_info=True)
+    """Record ``pr_opened`` feedback on the thread's trace.
+
+    The key is constant across threads so LangSmith can count PR-producing
+    threads against ``pr_merged``. Presence is the signal; the score is always 1.
+
+    Args:
+        thread_id: LangGraph thread the PR was opened from.
+        pr_url: Stored as the feedback comment.
+    """
+    await create_langsmith_thread_feedback(
+        thread_id,
+        PR_OPENED_FEEDBACK_KEY,
+        score=1.0,
+        comment=pr_url,
+        source_info={"source": "open_pull_request", "thread_id": thread_id, "pr_url": pr_url},
+    )
 
 
 async def _record_pr_telemetry(
