@@ -1,4 +1,9 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
 
 // The whole expedited-review path, end to end, with only the LLM and the
 // external SaaS boundaries faked:
@@ -169,7 +174,9 @@ test.describe("Expedited Slack review", () => {
         mention_bot: true,
       },
     });
-    const { thread_id: threadId } = (await send.json()) as { thread_id: string };
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
     expect(threadId).toBeTruthy();
 
     // 2. The agent implements it, opens the PR, and starts watching its checks.
