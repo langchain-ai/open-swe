@@ -34,6 +34,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   isThinking?: boolean
   settingUpSandbox?: boolean
   isOffloading?: boolean
+  /** Takes over the activity line while the event stream is reconnecting. */
+  reconnectLabel?: string | null
   project?: Project | null
   contentWidthClass?: string
   /** Horizontal padding on centered content (scroll track stays edge-to-edge). */
