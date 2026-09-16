@@ -81,7 +81,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
 
 
 @pytest.mark.asyncio
-async def test_routing_experiment_control_skips_classifier_and_metadata(
+async def test_routing_experiment_control_uses_performance_without_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mark_applied = MagicMock()
@@ -96,7 +96,7 @@ async def test_routing_experiment_control_skips_classifier_and_metadata(
 
     assert "model_route" not in state
     assert state["model_routing_attempted"] is True
-    assert (await _invoke(middleware, state)).model is models["balanced"]
+    assert (await _invoke(middleware, state)).model is models["performance"]
     classifier.assert_not_awaited()
     mark_applied.assert_not_called()
 

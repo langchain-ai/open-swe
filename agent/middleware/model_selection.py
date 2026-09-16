@@ -148,11 +148,11 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         if self._selected_route is not None:
             return self._selected_route
         if state.get("model_routing_attempted"):
-            return "balanced"
+            return "performance"
         if self._routing_enabled is None:
             self._routing_enabled = random.random() < self._routing_probability
         if not self._routing_enabled:
-            return "balanced"
+            return "performance"
         messages = state.get("messages", [])
         approved_plan = next(
             (
@@ -207,6 +207,10 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         route = (
             "performance"
             if request.state.get("plan_mode")
+            or (
+                request.state.get("model_routing_attempted")
+                and not request.state.get("model_route")
+            )
             else request.state.get("model_route", "balanced")
         )
         model = self._models.get(route) or self._models.get(
