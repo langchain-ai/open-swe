@@ -83,22 +83,22 @@ TOKEN_ENCRYPTION_KEY=""         # openssl rand -base64 32  (encrypts stored GitH
 DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session cookie and OAuth state)
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
 
-POSTGRES_URI=""                 # postgresql://localhost:5432/open_swe; startup migrations create its schema and refuse to start without it
+POSTGRES_URI=""                 # leave unset to use the local container `make dev` starts; or point it at your own database
 ```
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys). How the running model is chosen is covered in the same section. Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
-`POSTGRES_URI` needs a real local PostgreSQL database; `make dev` refuses to start without one. Point it at any database you can create schemas in — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the `repository`, `users`, and `workspace` tables.
+Open SWE needs a PostgreSQL database for its own tables, and `langgraph dev` does not provide one: it keeps LangGraph's threads and Store in memory, so the platform's Postgres is not there locally. With `POSTGRES_URI` unset in both the shell and `.env`, `make dev` and `make dev-ui` run a `postgres:16` container named `open-swe-postgres` on `127.0.0.1:5433` and point the backend at it. The container binds to loopback only and keeps its data in a Docker volume of the same name, so stopping or removing the container preserves your local users, workspaces, and settings. `make postgres` starts it on its own, and `make dev` fails with a hint if Docker is not running. Set `POSTGRES_URI` to skip the container and use any database you can create schemas in — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the `repository`, `users`, and `workspace` tables.
 
 `TEST_ANALYTICS_POSTGRES_URI` is the same thing for the test suite, and only for it: the tests that exercise those tables create a throwaway schema per test, migrate it, and drop it afterwards, so point it at a separate database (`postgresql+asyncpg://<user>@localhost:5432/open_swe_test`) rather than the one `make dev` uses. Unset, every such test skips rather than fails, so a run without it proves less than it appears to; CI sets it, so a regression in that code is caught there either way.
 
 ## 6. Run
 
-Check existing processes and ports before starting. When switching worktrees, stop the previous backend gracefully and wait for it to release port 2024 before starting the replacement. Prepare the [worktree state](#langgraph-state-across-worktrees) before startup.
+`make dev` refuses to start while something else listens on port 2024, and names the process. When switching worktrees, stop the previous backend gracefully and wait for it to release port 2024 before starting the replacement. Prepare the [worktree state](#langgraph-state-across-worktrees) before startup.
 
 ```bash
 make build-dashboard   # pnpm install + Vite build into ui/.output/public
-make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard
+make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard (starts the Postgres container first)
 ```
 
 `langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. The bundled UI is a static build, so rebuild it when you pull UI changes, or skip `make build-dashboard` if you only need webhooks and the API. It reloads on code changes only: after editing `.env`, restart it.
@@ -116,6 +116,7 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 | `/` | Dashboard |
 | `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
+| `POST /webhooks/slack/commands` | The `/oswe` slash command |
 | `POST /webhooks/linear` | Linear comment webhooks |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
@@ -185,6 +186,20 @@ The dev server then attaches that session to everything it proxies, and presents
 
 `pnpm run build`, `pnpm run typecheck`, and `pnpm run test` run across the workspace through Turborepo (`pnpm --filter open-swe-dashboard run <script>` scopes one); `pnpm run lint` (oxlint) and `pnpm run format` / `pnpm run format:check` (oxfmt) run once from the root over every JS and TS file.
 
+## Test a PR in preview (LangChain maintainers)
+
+The shared [preview environment](https://dev.open-swe.langchain.dev/agents) combines `main`, `preview-manual`, and open organization-member PRs labeled `preview`; it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
+
+1. Add the **`preview`** label to your PR.
+2. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour. Labeling alone does not deploy.
+3. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**. A successful run may still omit a PR.
+4. Wait for the dashboard rollout, then confirm in LangSmith Deployments that the preview backend revision matches the published `preview` commit and deployed successfully.
+5. Open [preview](https://dev.open-swe.langchain.dev/agents) and test with non-production tasks and repositories. For local UI iteration against that backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
+
+Conflicting PRs are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch. Resolve the conflict before reapplying the label. Use **force** only to rebuild an unchanged preview tree.
+
+To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every seven days, a scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
+
 ## Desktop app (experimental)
 
 The Electron app in `desktop/` includes the compiled dashboard UI. Run it next to the backend:
@@ -204,13 +219,15 @@ The dashboard records two performance spans, in every build, with the same code 
 | Span | Starts | Steps | Ends |
 |---|---|---|---|
 | `thread_load` | The navigation to `/agents/:threadId` (or the document's time origin on a full page load, `cold=true`) | `detail` (thread summary, `GET /threads/:id`), `hydrate` (SDK state fetch, `GET /threads/:id/state`), `paint` | First frame after the transcript rendered |
-| `agent_run` | Pressing send (`joined=true` when the run was started elsewhere, e.g. a queued message) | `accepted`, `stream_open`, `first_event`, `first_token` (client-side time to first assistant text) | The run's streaming phase ends (`reason`: success, error, interrupt, stopped) |
+| `agent_run` | Pressing send (`joined=true` when the run was started elsewhere, e.g. a queued message) | `accepted`, `stream_open`, `first_event`, `generation_start` (first assistant message, so the run is visibly producing thinking or a tool call), `first_text` (first streamed assistant text) | The run's streaming phase ends (`reason`: success, error, interrupt, stopped) |
 
 Each span carries attributes: request time-to-first-byte and the backend's `Server-Timing` phases for the detail and state requests (`detail_srv_thread_get_ms`, `state_srv_get_state_ms`, …), whether the detail came from the sidebar cache, message and chunk counts, time spent in `streamMessagesToUi` (`build_ms`), protocol event and text-delta counts, the lag between the server's event timestamp and receipt (`lag_avg_ms`, includes clock skew, read as a trend), and, in development builds only, React commit time for the transcript while streaming (`commit_ms`).
 
 **Locally.** Spans print to the console in dev builds (`[perf] thread_load 812ms — detail 120 · hydrate 640 · paint 812`). Open a thread with `?perf=1` for an overlay listing recent spans with a copy-as-JSON button (`?perf=0` hides it again; the flag persists in `localStorage`). `window.__openSwePerf.spans()` and `.export()` return the same data for scripts and Playwright. Every span is also a User Timing mark and measure named `osw:*`, so it appears on the Timings track of the Chrome Performance panel next to long tasks and network requests, which is where to look once a span says *what* is slow. Compare cold and warm loads separately (`cold`, `detail_cached`), and reload a few times per change: single samples are noisy.
 
-**In production.** With Datadog RUM configured, ended spans are sent as custom duration vitals named `thread_load` and `agent_run`, attributes in the vital context and `client` (`web` or `desktop`) in the global context. Abandoned spans (navigated away, hydration failed) stay local only. The backend side of the same picture is the `Server-Timing` header on `GET /dashboard/api/threads/{id}` and `/state` (logged as `thread state timings`) and the `open_swe_dashboard_thread_ttft` histogram.
+**In production.** With Datadog RUM configured, ended spans are sent as custom duration vitals named `thread_load` and `agent_run`, attributes in the vital context and `client` (`web` or `desktop`) in the global context. Abandoned spans (navigated away, hydration failed) stay local only. The backend side of the same picture is the `Server-Timing` header on `GET /dashboard/api/threads/{id}` and `/state` (logged as `thread state timings`) and the `open_swe_dashboard_thread_ttft` histogram, which measures the same thing as `first_text` rather than the first token of any kind.
+
+For "how long until the agent answers", read `@context.step_generation_start_ms`; `@context.step_first_text_ms` sits after the opening tool calls and is much larger.
 
 **Desktop diagnostics.** Installed builds keep *View → Toggle Developer Tools* and add *Help → Save Diagnostics Report…*, which writes the renderer's recent console output, the main process's warnings, app and OS versions, and the exported perf spans to a text file, with session cookies, bearer tokens and provider keys redacted. Ask users to attach that file to a report.
 

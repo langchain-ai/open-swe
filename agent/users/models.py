@@ -56,6 +56,13 @@ class User(Base):
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
+    def login_for(self, provider: Provider) -> str:
+        """This person's handle on ``provider``, for display; never an identity key."""
+        login = next(
+            (identity.login for identity in self.identities if identity.provider == provider), ""
+        )
+        return login or self.display_name or str(self.id)[:8]
+
     @classmethod
     async def get(cls, user_id: UUID) -> Self | None:
         async with postgres.session() as session:

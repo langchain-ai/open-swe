@@ -11,6 +11,8 @@ from agent.agent_cost import run_agent_cost_refresh
 from agent.baby_sit import evaluate_watch
 from agent.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from agent.background_tasks import monitor_background_tasks
+from agent.expedited_review.watch import CRON_TASK as EXPEDITED_REVIEW_TASK
+from agent.expedited_review.watch import evaluate_approval
 from agent.reconcile import reconcile_stale_runs
 from agent.run_config import RunConfig
 from agent.schedules.store import launch_scheduled_agent_run
@@ -55,6 +57,11 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         if not key:
             return {"result": {"status": "missing_watch_key"}}
         return {"result": {"status": await evaluate_watch(key)}}
+    if task == EXPEDITED_REVIEW_TASK:
+        key = state.watch_key or cfg.watch_key
+        if not key:
+            return {"result": {"status": "missing_watch_key"}}
+        return {"result": {"status": await evaluate_approval(key)}}
     if task == BACKGROUND_TASK_CRON_KIND:
         thread_id = state.thread_id or cfg.thread_id
         if not thread_id:

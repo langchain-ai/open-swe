@@ -11,6 +11,7 @@ import type {
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -43,13 +44,13 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
 function UsagePage() {
   const session = useSession()
   const period =
-    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "30d"
+    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
   const navigate = Route.useNavigate()
   const activePeriod: UsageLeaderboardPeriod = ["7d", "30d", "all"].includes(
     period
   )
     ? period
-    : "30d"
+    : "7d"
 
   if (session.isLoading) {
     return (
@@ -203,6 +204,7 @@ function UsageAnalyticsPeriod({
           </div>
         ) : (
           <UsageTable
+            currentUserRank={leaderboard.data.current_user_rank}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
             page={leaderboardPage}
@@ -486,6 +488,7 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
 }
 
 function UsageTable({
+  currentUserRank,
   rows,
   totalMembers,
   page,
@@ -493,6 +496,7 @@ function UsageTable({
   onPageChange,
   onPageSizeChange,
 }: {
+  currentUserRank: number | null
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
   page: number
@@ -526,7 +530,10 @@ function UsageTable({
             >
               <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
               <td className="px-2 py-3">
-                <UserCell row={row} />
+                <UserCell
+                  row={row}
+                  isCurrentUser={row.rank === currentUserRank}
+                />
               </td>
               <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
                 {row.favorite_model}
@@ -583,6 +590,8 @@ function TablePagination({
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
+  if (total <= 10) return null
+
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const start = total ? (page - 1) * pageSize + 1 : 0
   const end = Math.min(page * pageSize, total)
@@ -732,22 +741,63 @@ function CounterList({
   )
 }
 
-function UserCell({ row }: { row: UsageLeaderboardRow }) {
+function UserCell({
+  row,
+  isCurrentUser,
+}: {
+  row: UsageLeaderboardRow
+  isCurrentUser: boolean
+}) {
   const initials = initialsFor(row.user.name)
-  const detail = row.user.email ?? row.user.github_login ?? "unknown"
+  const detail = row.user.github_login
+  const profileUrl = githubProfileUrl(row.user.github_login)
+  const name = profileUrl ? (
+    <a
+      href={profileUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="truncate font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    >
+      {row.user.name}
+    </a>
+  ) : (
+    <span className="truncate font-medium text-foreground">
+      {row.user.name}
+    </span>
+  )
+  const avatar = (
+    <Avatar>
+      {row.user.avatar_url && (
+        <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
+      )}
+      <AvatarFallback>{initials}</AvatarFallback>
+    </Avatar>
+  )
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      <Avatar>
-        {row.user.avatar_url && (
-          <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
-        )}
-        <AvatarFallback>{initials}</AvatarFallback>
-      </Avatar>
+      {profileUrl ? (
+        <a
+          href={profileUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-hidden="true"
+          tabIndex={-1}
+        >
+          {avatar}
+        </a>
+      ) : (
+        avatar
+      )}
       <div className="flex min-w-0 flex-col">
-        <span className="truncate font-medium text-foreground">
-          {row.user.name}
-        </span>
-        {detail !== row.user.name ? (
+        <div className="flex min-w-0 items-center gap-1.5">
+          {name}
+          {isCurrentUser ? (
+            <Badge variant="secondary" aria-label="You">
+              You
+            </Badge>
+          ) : null}
+        </div>
+        {detail && detail !== row.user.name ? (
           <span className="truncate text-xs text-muted-foreground">
             {detail}
           </span>
@@ -755,6 +805,11 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
       </div>
     </div>
   )
+}
+
+function githubProfileUrl(login: string | null): string | null {
+  if (!login) return null
+  return `https://github.com/${encodeURIComponent(login)}`
 }
 
 function initialsFor(name: string): string {

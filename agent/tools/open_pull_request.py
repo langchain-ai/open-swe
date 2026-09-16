@@ -29,6 +29,7 @@ from agent.slack.code_channels import (
 )
 from agent.threads.plan_store import get_plan_content
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from agent.utils.langsmith import create_langsmith_thread_feedback
 
 logger = logging.getLogger(__name__)
 
@@ -550,6 +551,28 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
     ]
 
 
+PR_OPENED_FEEDBACK_KEY = "pr_opened"
+
+
+async def _record_pr_opened_feedback(thread_id: str, *, pr_url: str) -> None:
+    """Record ``pr_opened`` feedback so LangSmith can count it against ``pr_merged``.
+
+    One row per thread, so a thread opening several PRs collapses to the last
+    write. Deliberate for now: it keeps the aggregate simple.
+
+    Args:
+        thread_id: LangGraph thread the PR was opened from.
+        pr_url: Stored as the feedback comment.
+    """
+    await create_langsmith_thread_feedback(
+        thread_id,
+        PR_OPENED_FEEDBACK_KEY,
+        score=1.0,
+        comment=pr_url,
+        source_info={"source": "open_pull_request", "thread_id": thread_id, "pr_url": pr_url},
+    )
+
+
 async def _record_pr_telemetry(
     *,
     client: httpx2.AsyncClient,
@@ -560,6 +583,7 @@ async def _record_pr_telemetry(
     base: str,
     pr: dict[str, Any],
     resolves_thread: bool = False,
+    record_opening: bool = True,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
@@ -602,14 +626,19 @@ async def _record_pr_telemetry(
             created_at=details.get("created_at") or pr.get("created_at"),
             merged_at=details.get("merged_at") or pr.get("merged_at"),
             invocation_id=cfg.invocation_id,
-            model_id=cfg.agent_model_id,
+            model_id=cfg.resolved_agent_model_id,
             source=cfg.source,
             repository_private=(
                 details.get("base", {}).get("repo", {}).get("private")
                 if isinstance(details.get("base"), dict)
                 else None
             ),
+            record_opening=record_opening,
         )
+        if record_opening and isinstance(thread_id, str) and thread_id:
+            await _record_pr_opened_feedback(
+                thread_id, pr_url=pr_url if isinstance(pr_url, str) else ""
+            )
         if isinstance(thread_id, str) and thread_id:
             repo_private = None
             base_repo = details.get("base", {}).get("repo")
@@ -938,6 +967,7 @@ async def _open_pull_request(
                     base=base,
                     pr=existing,
                     resolves_thread=resolves_thread,
+                    record_opening=False,
                 )
                 return {
                     "success": True,

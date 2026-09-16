@@ -96,7 +96,7 @@ function CodeChannelLink({ url }: { url?: string | null }) {
       className="mb-2 flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
       <IoLogoSlack className="size-3.5" />
-      Open code channel
+      Open in Slack
       <ArrowUpRight className="size-3" />
     </a>
   )

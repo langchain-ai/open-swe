@@ -434,7 +434,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                     {gaps.map((gap) => (
                       <li
                         key={gap}
-                        className="flex gap-2 text-xs leading-relaxed text-warning-foreground"
+                        className="flex min-w-0 gap-2 text-xs leading-relaxed [overflow-wrap:anywhere] text-warning-foreground"
                       >
                         <CircleHelp className="mt-0.5 size-3.5 shrink-0" />
                         {gap}

@@ -71,6 +71,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     model_routing_enabled: bool | None = None
     gateway_enabled: bool | None = None
     fable_enabled: bool | None = None
+    expedited_review_enabled: bool | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -338,6 +339,7 @@ def _default_settings() -> dict[str, Any]:
         "model_routing_enabled": None,
         "gateway_enabled": None,
         "fable_enabled": False,
+        "expedited_review_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -741,6 +743,12 @@ class WorkspaceSettings(Mapping[str, Any]):
     def fable_enabled(self) -> bool:
         value = self.get("fable_enabled")
         return bool(value) if isinstance(value, bool) else False
+
+    @property
+    def expedited_review_enabled(self) -> bool:
+        """Whether the experimental expedited Slack review is switched on."""
+        value = self.get("expedited_review_enabled")
+        return value if isinstance(value, bool) else False
 
     @property
     def org_review_guidelines(self) -> str | None:

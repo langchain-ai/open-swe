@@ -335,6 +335,63 @@ it("hides a GitHub login when it duplicates the user name", async () => {
   client.clear()
 })
 
+it("shows the GitHub username and marks the current user", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    current_user_rank: 1,
+    rows: [
+      {
+        ...costRow,
+        user: {
+          name: "Mason Daugherty",
+          github_login: "mdrxy",
+          email: "mason@example.com",
+        },
+      },
+    ],
+  })
+  const client = mountReport()
+  const row = (await screen.findByText("Mason Daugherty")).closest("tr")!
+  expect(within(row).getByText("mdrxy")).toBeTruthy()
+  expect(within(row).getByText("You")).toBeTruthy()
+  expect(within(row).queryByText("mason@example.com")).toBeNull()
+  client.clear()
+})
+
+it("links the user name and avatar to their GitHub profile only when a login exists", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 2,
+    rows: [
+      { ...costRow, rank: 1 },
+      {
+        ...costRow,
+        rank: 2,
+        user: {
+          name: "Anonymous Reader",
+          github_login: null,
+          email: "r@example.com",
+        },
+      },
+    ],
+  })
+  const client = mountReport()
+  const linked = await screen.findByRole("link", { name: "Cost Reader" })
+  expect(linked.getAttribute("href")).toBe("https://github.com/reader")
+  expect(linked.getAttribute("target")).toBe("_blank")
+  expect(linked.getAttribute("rel")).toBe("noreferrer")
+  expect(screen.queryByRole("link", { name: "Anonymous Reader" })).toBeNull()
+  const avatarLink = screen.getByText("CR").closest("a")
+  expect(avatarLink?.getAttribute("href")).toBe("https://github.com/reader")
+  expect(avatarLink?.getAttribute("target")).toBe("_blank")
+  expect(avatarLink?.getAttribute("rel")).toBe("noreferrer")
+  expect(screen.getByText("AR").closest("a")).toBeNull()
+  client.clear()
+})
+
 const costRow: UsageLeaderboardRow = {
   rank: 1,
   user: { name: "Cost Reader", github_login: "reader", email: null },

@@ -106,6 +106,7 @@ from agent.slack.client import (
     lookup_slack_thread_id,  # noqa: F401
     normalize_slack_channel_context,  # noqa: F401
     parse_slack_ts,  # noqa: F401
+    post_slack_ephemeral_message,
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
@@ -532,12 +533,14 @@ async def upsert_agent_thread_metadata(
     github_login: str = "",
     user_email: str = "",
     title: str = "",
+    static_title: bool = False,
     source_context: SourceContext | None = None,
     workspace: str | None = None,
     slack_participant_user_ids: Collection[str] = (),
     visibility: str = "public",
     owner_login: str = "",
     owner_type: str = "user",
+    unlisted: bool = False,
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -573,6 +576,10 @@ async def upsert_agent_thread_metadata(
         metadata["title"] = title[:80]
     if workspace:
         metadata["workspace"] = workspace
+    # Only ever set here: the dashboard clears it when someone continues the
+    # thread on the web, and that promotion must survive later Slack events.
+    if unlisted:
+        metadata["unlisted"] = True
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -631,7 +638,9 @@ async def upsert_agent_thread_metadata(
     if existing_meta.get("title") and "title" in metadata:
         # Preserve a title that was already chosen (first message wins).
         metadata.pop("title")
-    elif source == "slack" and "title" in metadata:
+    elif source == "slack" and "title" in metadata and not static_title:
+        # The seed is what title generation is allowed to replace; a thread whose
+        # name is fixed never offers one.
         metadata["title_seed"] = metadata["title"]
 
     # A helper may have pre-created a bare stub this request; it still needs the
@@ -927,6 +936,7 @@ async def post_account_link_prompt(
     user_email: str | None,
     reason: str = "unlinked",
     agent_thread_id: str | None = None,
+    ephemeral: bool = False,
 ) -> None:
     """Prompt a Slack user to connect their account via the dashboard.
 
@@ -958,7 +968,12 @@ async def post_account_link_prompt(
             "again."
         )
     try:
-        await post_slack_thread_reply(channel_id, thread_ts, text, agent_thread_id=agent_thread_id)
+        if ephemeral:
+            await post_slack_ephemeral_message(channel_id, user_id, text)
+        else:
+            await post_slack_thread_reply(
+                channel_id, thread_ts, text, agent_thread_id=agent_thread_id
+            )
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 
@@ -1017,6 +1032,7 @@ GH_PR_AGENT_STATE_ACTIONS = frozenset(
 )
 _TERMINAL_PR_STATES = frozenset(["closed", "merged"])
 _PRS_CLOSED_ATTENTION_REASON = "prs_closed"
+PR_MERGED_FEEDBACK_KEY = "pr_merged"
 
 
 def _pr_linked(metadata: Mapping[str, Any]) -> bool:
@@ -1339,20 +1355,32 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
 
 
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
-    try:
-        await create_langsmith_thread_feedback(
+    """Record merge feedback on the thread's trace under two keys.
+
+    ``github_pr_merged:<url>`` stays unique per PR; ``pr_merged`` is constant
+    across threads so LangSmith can filter and count merges project-wide.
+
+    Args:
+        thread_id: LangGraph thread the PR was opened from.
+        pr_url: Stored as the feedback comment.
+    """
+    source_info = {"source": "github_pr_merged", "thread_id": thread_id, "pr_url": pr_url}
+    await asyncio.gather(
+        create_langsmith_thread_feedback(
             thread_id,
             f"github_pr_merged:{pr_url}",
             score=1.0,
             comment=f"Agent-authored pull request merged: {pr_url}",
-            source_info={
-                "source": "github_pr_merged",
-                "thread_id": thread_id,
-                "pr_url": pr_url,
-            },
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("Failed to record merged PR feedback for thread %s", thread_id, exc_info=True)
+            source_info=source_info,
+        ),
+        create_langsmith_thread_feedback(
+            thread_id,
+            PR_MERGED_FEEDBACK_KEY,
+            score=1.0,
+            comment=pr_url,
+            source_info=source_info,
+        ),
+    )
 
 
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
