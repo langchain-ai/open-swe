@@ -269,6 +269,7 @@ async def test_resolved_configured_model_is_available_to_tools(
 @pytest.mark.asyncio
 async def test_model_routing_is_applied_when_enabled() -> None:
     config = _base_config()
+    config["configurable"]["thread_id"] = "thread-1"
     agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
 
     assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
@@ -276,6 +277,8 @@ async def test_model_routing_is_applied_when_enabled() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" in middleware_names
+    assert config["configurable"]["model_routing_mode"] == "auto"
+    assert config["metadata"]["model_routing_mode"] == "auto"
     assert "model_routing_applied" not in config["metadata"]
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
@@ -283,6 +286,22 @@ async def test_model_routing_is_applied_when_enabled() -> None:
         "openai:gpt-5.6-sol",
         "anthropic:claude-opus-5",
     ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_control_uses_performance_model() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["configurable"]["model_routing_mode"] == "performant"
+    assert config["metadata"]["model_routing_mode"] == "performant"
+    assert "model_routing_applied" not in config["metadata"]
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert calls[0][0] == "anthropic:claude-opus-5"
 
 
 @pytest.mark.asyncio

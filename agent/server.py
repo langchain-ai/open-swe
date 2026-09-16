@@ -19,6 +19,8 @@ from agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
+_MODEL_ROUTING_SPLIT = 0.5
+
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
@@ -120,7 +122,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from agent.middleware.model_selection import ModelSelectionState
+from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
@@ -622,6 +624,12 @@ def _slack_dm_run(cfg: RunConfig) -> bool:
     )
 
 
+def _model_routing_mode(thread_id: str) -> RoutingMode:
+    digest = hashlib.sha256(thread_id.encode()).hexdigest()
+    bucket = int(digest[:8], 16) / float(0xFFFF_FFFF)
+    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "performant"
+
+
 def _make_model_or_defer(
     model_id: str,
     *,
@@ -1105,6 +1113,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     metadata = config.get("metadata") or {}
     metadata.pop("model_routing_applied", None)
+    if adaptive_model_routing:
+        model_routing_mode = _model_routing_mode(thread_id)
+        metadata["model_routing_mode"] = model_routing_mode
+        configurable["model_routing_mode"] = model_routing_mode
+        if model_routing_mode == "performant":
+            model_id, profile_effort = routing_defaults["performance"]
+    else:
+        metadata.pop("model_routing_mode", None)
+        configurable.pop("model_routing_mode", None)
     config["metadata"] = metadata
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1314,7 +1331,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     model_selection: ModelSelectionMiddleware | None = None
-    if adaptive_model_routing:
+    if adaptive_model_routing and configurable.get("model_routing_mode") == "auto":
         routing_models = {
             route: _make_model_or_defer(
                 routed_model_id,
