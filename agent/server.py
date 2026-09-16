@@ -49,7 +49,6 @@ from langchain_core.messages import HumanMessage
 
 from agent.analytics.usage import record_agent_invocation_usage
 from agent.credential_scope import private_credential_login
-from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -74,7 +73,6 @@ from agent.dashboard.team_settings_cache import (
     cached_team_settings,
     cached_thread_title_model,
 )
-from agent.dashboard.user_mappings import email_for_login
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
@@ -148,7 +146,6 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
-from agent.schedules.store import authorized_admin_schedule
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
@@ -187,7 +184,6 @@ from agent.tools import (
     refresh_workspace_start,
     report_platform_issue,
     request_pr_review,
-    sandbox_reset,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -204,6 +200,7 @@ from agent.tools import (
     update_automation,
     web_search,
 )
+from agent.tools.admin_gate import actor_is_admin, is_private_admin_thread
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
     CollaboratorIdentity,
@@ -366,7 +363,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "manage_thread",
         "open_pull_request",
         "recreate_sandbox",
-        "sandbox_reset",
         "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
@@ -497,7 +493,6 @@ _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
 
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
-    sandbox_reset,
     list_automations,
     create_automation,
     update_automation,
@@ -518,26 +513,12 @@ def workspace_slug(cfg: RunConfig) -> str | None:
 
 
 async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
-    cfg = RunConfig.from_config(config)
-    if cfg.source == "schedule":
-        return await authorized_admin_schedule(cfg) is not None
-    login = profile_login or cfg.github_login
-    if is_admin(cfg.user_email, login=login):
-        return True
-    return is_admin(await email_for_login(login), login=login)
+    return await actor_is_admin(RunConfig.from_config(config), login=profile_login)
 
 
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether this run may manage workspaces and organization skills.
-
-    The dashboard only stamps ``admin_thread`` for an admin session, but the flag
-    is re-checked here against ``CONFIGURED_ADMINS`` so a thread cannot carry the
-    capability to a non-admin who later messages it. Scheduled runs instead verify
-    the saved authorization for their specific invocation.
-    """
-    return RunConfig.from_config(config).admin_thread is True and await _workspace_admin(
-        config, profile_login
-    )
+    """Whether this run may manage workspaces and organization skills."""
+    return await is_private_admin_thread(RunConfig.from_config(config), login=profile_login)
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:

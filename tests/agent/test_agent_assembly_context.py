@@ -510,12 +510,11 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 async def test_agent_includes_admin_tools_only_in_private_dashboard_admin_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.tools import read_only_sql, sandbox_reset
+    from agent.tools import read_only_sql
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
-    assert sandbox_reset not in tools
     assert read_only_sql not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
@@ -526,7 +525,6 @@ async def test_agent_includes_admin_tools_only_in_private_dashboard_admin_thread
     captured = await _capture_create_deep_agent_kwargs(config)
     tools = captured["tools"]
     assert isinstance(tools, list)
-    assert sandbox_reset in tools
     assert read_only_sql in tools
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
