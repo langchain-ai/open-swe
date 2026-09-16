@@ -53,15 +53,7 @@ class ApprovalVote(Base):
 
     @property
     def github_login(self) -> str:
-        """The voter's GitHub handle for display; never an identity key."""
-        return github_login_of(self.voter)
-
-
-def github_login_of(user: User) -> str:
-    login = next(
-        (identity.login for identity in user.identities if identity.provider == "github"), ""
-    )
-    return login or user.display_name or str(user.id)[:8]
+        return self.voter.login_for("github")
 
 
 class ExpeditedApproval(Base):

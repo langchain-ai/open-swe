@@ -20,7 +20,6 @@ from agent.expedited_review.approvals import (
     ApprovalVote,
     ExpeditedApproval,
     VoteDecision,
-    github_login_of,
 )
 from agent.expedited_review.readiness import Readiness, assess_readiness
 from agent.expedited_review.watch import (
@@ -75,7 +74,7 @@ class Voter:
 
 async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Voter | VoteOutcome:
     """The authorized voter behind a click, or why they are not one."""
-    login = github_login_of(user) if user is not None else ""
+    login = user.login_for("github") if user is not None else ""
     if user is None or not any(identity.provider == "github" for identity in user.identities):
         return VoteOutcome(f"Your Slack account is not linked to GitHub. {_reconnect_hint()}")
     pr = approval.pull_request
