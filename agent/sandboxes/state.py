@@ -392,13 +392,9 @@ async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
             exc_info=True,
         )
 
-    try:
-        client = get_client()
-        thread = await client.threads.get(thread_id)
-    except Exception:
-        logger.exception("Failed to fetch live thread metadata for sandbox")
-        return {}
-
+    # A failed lookup must not read as "unbound": the caller would create a
+    # replacement and bind it over the thread's real sandbox.
+    thread = await get_client().threads.get(thread_id)
     metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
     return metadata if isinstance(metadata, dict) else {}
 

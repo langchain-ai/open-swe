@@ -199,6 +199,33 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
     SANDBOX_BACKENDS.clear()
 
 
+@pytest.mark.asyncio
+async def test_ensure_sandbox_does_not_replace_sandbox_when_metadata_lookup_fails() -> None:
+    """A failed lookup is not an unbound thread; creating here would strand its real sandbox."""
+    thread_id = "thread-metadata-down"
+    set_sandbox_backend(thread_id, MagicMock(id="sandbox-live"))
+
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("langgraph api unavailable"),
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
+        ) as create,
+        patch(
+            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+        ) as update_thread,
+    ):
+        with pytest.raises(RuntimeError, match="langgraph api unavailable"):
+            await ensure_sandbox_for_thread(thread_id)
+
+    create.assert_not_awaited()
+    update_thread.assert_not_awaited()
+    assert SANDBOX_CONNECTIONS["sandbox-live"] is not None
+
+
 def test_set_sandbox_backend_drops_connection_to_the_previous_sandbox() -> None:
     thread_id = "thread-move"
     old = MagicMock(id="sandbox-old")
