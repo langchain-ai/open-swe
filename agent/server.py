@@ -267,6 +267,11 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
 )
 
 
+# Reading a Slack channel takes an explicit channel id and nothing from the run's
+# source context, so it survives every gate the thread-bound Slack tools do not.
+SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_messages"})
+
+
 def _registered_tool_name(value: Any) -> str:
     name = getattr(value, "name", None) or getattr(value, "__name__", None)
     if not isinstance(name, str) or not name:
@@ -430,6 +435,8 @@ def _subagent_middleware(
 def _is_subagent_excluded_tool(tool: Any) -> bool:
     """Return whether a tool depends on parent-only source context."""
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
+    if name in SOURCE_FREE_SLACK_TOOLS:
+        return False
     return name.startswith("slack_") or name in {
         "get_thread",
         "manage_code_channel",
@@ -1177,7 +1184,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
-        slack_read_channel_messages,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,

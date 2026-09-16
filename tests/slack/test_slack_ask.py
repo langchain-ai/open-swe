@@ -63,7 +63,7 @@ async def test_command_queues_the_question(monkeypatch: pytest.MonkeyPatch) -> N
     assert request.channel_id == "C1"
     assert request.user_id == "U1"
     # The acknowledgement links to the thread the queued run will use.
-    assert request.thread_id == slack_ask.ask_thread_id("C1", "U1")
+    assert request.thread_id == slack_ask.ask_thread_id("C1", "U1", "trigger-1")
     assert request.thread_id in result["text"]
 
 
@@ -100,7 +100,6 @@ def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_ask, "get_slack_user_info", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_ask.common, "login_for_slack_id", AsyncMock(return_value="octocat"))
     monkeypatch.setattr(slack_ask.common, "get_valid_access_token", AsyncMock(return_value="gho_x"))
-    monkeypatch.setattr(slack_ask, "get_thread_active_status", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_ask, "fetch_slack_channel_messages", AsyncMock(return_value=[]))
     monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={}))
 
@@ -133,32 +132,11 @@ async def test_command_thread_is_private_and_unlisted(monkeypatch: pytest.Monkey
     assert "thread_ts" not in configurable["slack_thread"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("linked_asker")
-async def test_a_command_joins_work_already_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    queue = AsyncMock(return_value=True)
-    dispatch = AsyncMock()
-    monkeypatch.setattr(
-        slack_ask.common,
-        "get_slack_repo_config",
-        AsyncMock(return_value=slack_ask.common.SlackRepoResolution()),
-    )
-    monkeypatch.setattr(
-        slack_ask.common, "upsert_agent_thread_metadata", AsyncMock(return_value=True)
-    )
-    monkeypatch.setattr(slack_ask, "get_thread_active_status", AsyncMock(return_value=True))
-    monkeypatch.setattr(slack_ask, "queue_message_for_thread", queue)
-    monkeypatch.setattr(slack_ask, "post_slack_ephemeral_message", AsyncMock(return_value=True))
-    monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
+def test_each_invocation_gets_its_own_thread() -> None:
+    first = slack_ask.ask_thread_id("C1", "U1", "trigger-1")
 
-    await slack_ask.process_slack_ask(
-        slack_ask.SlackAskRequest(
-            channel_id="C1", user_id="U1", question="and the other one?", thread_id="t-1"
-        )
-    )
-
-    dispatch.assert_not_awaited()
-    assert "and the other one?" in queue.await_args.args[1][0]["text"]
+    assert slack_ask.ask_thread_id("C1", "U1", "trigger-2") != first
+    assert slack_ask.ask_thread_id("C1", "U1", "trigger-1") == first
 
 
 @pytest.mark.asyncio

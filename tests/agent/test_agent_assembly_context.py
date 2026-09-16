@@ -607,12 +607,12 @@ async def test_dashboard_agent_excludes_slack_tools() -> None:
             "slack_add_reaction",
             "slack_attach_html",
             "slack_move_thread",
-            "slack_read_channel_messages",
             "slack_read_thread_messages",
             "slack_start_new_thread",
             "slack_thread_reply",
         }
     )
+    assert "slack_read_channel_messages" in tool_names
 
 
 @pytest.mark.asyncio
@@ -637,7 +637,6 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",
-        "slack_read_channel_messages",
         "slack_read_thread_messages",
         "slack_start_new_thread",
         "slack_thread_reply",
@@ -740,7 +739,6 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",
-        "slack_read_channel_messages",
         "slack_read_thread_messages",
         "slack_start_new_thread",
         "slack_thread_reply",
@@ -758,6 +756,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     }
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)
+    assert "slack_read_channel_messages" in subagent_names
     assert subagent_names == parent_names - parent_only_names
 
 
