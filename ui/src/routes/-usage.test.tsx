@@ -134,65 +134,102 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   client.clear()
 })
 
-it("shows plain-language PR outcomes while keeping cohort details available", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "ready",
-    cohorts: [
-      {
-        model_id: "example-model",
-        model_attribution_quality: "configured",
-        merged: 3,
-        closed_without_merge: 1,
-        mature_pending: 1,
-        waiting: 2,
-        cohort_size: 7,
-        decided_denominator: 4,
-        decided_merge_rate: 0.75,
-        mature_denominator: 5,
-        mature_cohort_merge_share: 0.6,
-      },
-    ],
-  })
-  const client = mountReport()
-  const row = (await screen.findByText("example-model")).closest("tr")!
-  expect(
-    within(row)
-      .getAllByRole("cell")
-      .map((cell) => cell.textContent)
-  ).toEqual(["example-modelconfigured attribution", "7", "3", "1", "3", "60%"])
+it.each([
+  [14, "hover"],
+  [21, "focus"],
+  [7, "tap"],
+] as const)(
+  "shows Open totals and age breakdown at %i days on %s",
+  async (maturityDays, interaction) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+      ...captured,
+      status: "ready",
+      maturity_days: maturityDays,
+      cohorts: [
+        {
+          model_id: "example-model",
+          model_attribution_quality: "configured",
+          merged: 3,
+          closed_without_merge: 1,
+          mature_pending: 1,
+          waiting: 2,
+          cohort_size: 7,
+          decided_denominator: 4,
+          decided_merge_rate: 0.75,
+          mature_denominator: 5,
+          mature_cohort_merge_share: 0.6,
+        },
+      ],
+    })
+    const client = mountReport()
+    const row = (await screen.findByText("example-model")).closest("tr")!
+    expect(
+      within(row)
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent)
+    ).toEqual([
+      "example-modelconfigured attribution",
+      "7",
+      "3",
+      "1",
+      "3",
+      "60%",
+    ])
 
-  const table = row.closest("table")!
-  expect(
-    within(table)
-      .getAllByRole("columnheader")
-      .map((header) => header.textContent)
-  ).toEqual([
-    "Opening model",
-    "PRs opened",
-    "Merged",
-    "Closed without merge",
-    "Open",
-    "Merge rate",
-  ])
+    const table = row.closest("table")!
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((header) => header.textContent)
+    ).toEqual([
+      "Opening model",
+      "PRs opened",
+      "Merged",
+      "Closed without merge",
+      "Open",
+      "Merge rate",
+    ])
 
-  const mergeRate = within(table).getByText("Merge rate")
-  act(() => mergeRate.focus())
-  expect(
-    await screen.findByText(
-      /Includes PRs old enough to have a meaningful outcome/
-    )
-  ).toBeTruthy()
+    const openCount = within(row).getByRole("button", { name: "3" })
+    if (interaction === "hover") {
+      fireEvent.mouseEnter(openCount)
+      fireEvent.mouseMove(openCount)
+    } else if (interaction === "focus") {
+      act(() => openCount.focus())
+    } else {
+      fireEvent.pointerDown(openCount, { pointerType: "touch" })
+      fireEvent.pointerUp(openCount, { pointerType: "touch" })
+      fireEvent.click(openCount)
+    }
+    const breakdown = (
+      await screen.findByText(`2 open for less than ${maturityDays} days`)
+    ).parentElement!
+    expect(
+      within(breakdown).getByText(`2 open for less than ${maturityDays} days`)
+    ).toBeTruthy()
+    expect(
+      within(breakdown).getByText(`1 open for ${maturityDays} days or longer`)
+    ).toBeTruthy()
+    fireEvent.mouseLeave(openCount)
+    act(() => openCount.blur())
+    fireEvent.keyDown(openCount, { key: "Escape" })
 
-  fireEvent.click(screen.getByText("How this is calculated"))
-  expect(
-    screen.getByText("Open", { selector: "strong" }).closest("p")?.textContent
-  ).toContain("includes every PR that is still open")
-  expect(screen.queryByText(/resolved merge rate/)).toBeNull()
-  expect(screen.getByText(/Merge rate = merged/)).toBeTruthy()
-  expect(screen.queryByText(/Resolved merge rate = merged/)).toBeNull()
-  client.clear()
-})
+    const mergeRate = within(table).getByText("Merge rate")
+    act(() => mergeRate.focus())
+    expect(
+      await screen.findByText(/Includes merged and closed PRs/)
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByText("How these numbers work"))
+    expect(
+      screen.getByText("Open", { selector: "strong" }).closest("p")?.textContent
+    ).toContain("includes PRs that haven’t been merged or closed")
+    expect(screen.queryByText(/resolved merge rate/)).toBeNull()
+    expect(screen.getByText(/Merge rate = merged/)).toBeTruthy()
+    expect(screen.queryByText(/Resolved merge rate = merged/)).toBeNull()
+    client.clear()
+  }
+)
 
 it("offers recovery from unavailability without claiming an empty or suppressed report", async () => {
   const query = vi
