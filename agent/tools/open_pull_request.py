@@ -555,17 +555,10 @@ PR_OPENED_FEEDBACK_KEY = "pr_opened"
 
 
 async def _record_pr_opened_feedback(thread_id: str, *, pr_url: str) -> None:
-    """Record ``pr_opened`` feedback on the thread's trace.
+    """Record ``pr_opened`` feedback so LangSmith can count it against ``pr_merged``.
 
-    Every thread writes the same key, so LangSmith can pull up the threads that
-    produced a PR and count them against ``pr_merged`` for a merge rate. The
-    score is always 1 and nothing ever writes a 0 -- what you are really querying
-    is whether the key is there at all.
-
-    A thread that opens several PRs collapses to this one row, and the concurrent
-    writes would race besides. That is deliberate for now: assuming one PR per
-    thread is what keeps the numbers simple to aggregate, and the per-PR detail
-    is still on the ``github_pr_merged:<url>`` keys if we ever need it.
+    One row per thread, so a thread opening several PRs collapses to the last
+    write. Deliberate for now: it keeps the aggregate simple.
 
     Args:
         thread_id: LangGraph thread the PR was opened from.
