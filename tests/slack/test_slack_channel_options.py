@@ -1,5 +1,6 @@
 """The channel directory behind the workspace Slack picker."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
 from agent.slack import channel_options
+from agent.utils import ttl_cache
 
 
 def _rate_limited(retry_after: str) -> SlackApiError:
@@ -147,6 +149,42 @@ async def test_a_long_rate_limit_leaves_the_directory_partial(
     # Served from cache for now, so the next browse does not hammer Slack.
     assert await channel_options.list_slack_channels() == directory
     assert len(client.calls["conversations_list"]) == 1
+
+
+async def test_a_partial_directory_is_retried_on_schedule_however_often_it_is_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(ttl_cache, "_now", lambda: clock["now"])
+    client = _FakeClient(
+        [_MEMBER_PAGE, _MEMBER_PAGE],
+        [
+            _rate_limited("30"),
+            {
+                "channels": [{"id": "C2", "name": "oss-help", "is_member": False}],
+                "response_metadata": {"next_cursor": ""},
+            },
+        ],
+    )
+    _install(monkeypatch, client)
+
+    assert (await channel_options.list_slack_channels()).partial is True
+    await asyncio.sleep(0)  # the shorter expiry lands on the next loop iteration
+
+    clock["now"] += 30
+    assert (await channel_options.list_slack_channels()).partial is True
+    assert len(client.calls["conversations_list"]) == 1
+
+    # Past the short expiry the stale directory is served once more while a
+    # refresh runs in the background; the next read has the full list.
+    clock["now"] += 40
+    assert (await channel_options.list_slack_channels()).partial is True
+    await asyncio.gather(*ttl_cache._REFRESH_TASKS.values())
+    assert len(client.calls["conversations_list"]) == 2
+    directory = await channel_options.list_slack_channels()
+
+    assert [option.id for option in directory.channels] == ["C2", "G1"]
+    assert directory.partial is False
 
 
 async def test_rate_limiting_the_bots_own_channels_asks_the_admin_to_retry(

@@ -94,6 +94,10 @@ async def _collect(fetch: _Fetch) -> list[dict[str, Any]]:
         seen_cursors.add(cursor)
 
 
+def _by_name(option: SlackChannelOption) -> tuple[str, str]:
+    return (option.name.casefold(), option.id)
+
+
 def _channel_option(
     channel: dict[str, Any], *, member: bool | None = None
 ) -> SlackChannelOption | None:
@@ -156,14 +160,17 @@ async def list_slack_channels() -> SlackChannelDirectory:
                     "Slack rate limited the channel directory; listing only the bot's channels",
                     extra={"slack_error": slack_error(exc)},
                 )
-            return SlackChannelDirectory(
-                channels=sorted(
-                    options.values(), key=lambda option: (option.name.casefold(), option.id)
-                ),
-                partial=partial,
+            directory = SlackChannelDirectory(
+                channels=sorted(options.values(), key=_by_name), partial=partial
             )
+            if partial:
+                # The cache stores what a loader returns for the full TTL right
+                # after it returns, so the shorter expiry has to land on the next
+                # loop iteration. Doing it here, rather than after every read,
+                # keeps a cache hit from pushing the retry out again and again.
+                asyncio.get_running_loop().call_soon(
+                    ttl_cache.set_cached, key, directory, PARTIAL_DIRECTORY_TTL_SECONDS
+                )
+            return directory
 
-        directory = await ttl_cache.cached_stale_while_revalidate(key, DIRECTORY_TTL_SECONDS, load)
-        if directory.partial:
-            ttl_cache.set_cached(key, directory, PARTIAL_DIRECTORY_TTL_SECONDS)
-        return directory
+        return await ttl_cache.cached_stale_while_revalidate(key, DIRECTORY_TTL_SECONDS, load)
