@@ -6,6 +6,8 @@ import {
   type Page,
 } from "@playwright/test";
 
+import { dismissOnboardingIfShown } from "./helpers/dashboard";
+
 const USER = {
   login: "threads-workspace-e2e",
   email: "threads-workspace-e2e@example.com",
@@ -536,6 +538,7 @@ test.describe("threads workspace", () => {
     await loginAs(page);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
 
     const sidebar = page.locator("[data-sidebar-frame]");
     await sidebar.getByRole("button", { name: "Projects options" }).click();
@@ -646,6 +649,7 @@ test.describe("threads workspace", () => {
     expect(loginResponse.ok()).toBeTruthy();
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
 
     const sidebar = page.locator("[data-sidebar-frame]");
     const noProject = sidebar.getByRole("button", {
