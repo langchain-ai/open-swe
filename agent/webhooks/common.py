@@ -536,6 +536,7 @@ async def upsert_agent_thread_metadata(
     github_login: str = "",
     user_email: str = "",
     title: str = "",
+    static_title: bool = False,
     source_context: SourceContext | None = None,
     workspace: str | None = None,
     slack_participant_user_ids: Collection[str] = (),
@@ -640,7 +641,9 @@ async def upsert_agent_thread_metadata(
     if existing_meta.get("title") and "title" in metadata:
         # Preserve a title that was already chosen (first message wins).
         metadata.pop("title")
-    elif source == "slack" and "title" in metadata:
+    elif source == "slack" and "title" in metadata and not static_title:
+        # The seed is what title generation is allowed to replace; a thread whose
+        # name is fixed never offers one.
         metadata["title_seed"] = metadata["title"]
 
     # A helper may have pre-created a bare stub this request; it still needs the

@@ -104,6 +104,7 @@ async def test_title_generation_renames_code_channel(monkeypatch: pytest.MonkeyP
     client = type("Client", (), {"threads": threads})()
     rename = AsyncMock(return_value=(True, None))
     monkeypatch.setattr("agent.thread_title.rename_session", rename)
+    monkeypatch.setattr("agent.thread_title.is_code_channel", AsyncMock(return_value=True))
 
     await generate_and_store_thread_title(
         thread_id="thread-123",
@@ -113,6 +114,34 @@ async def test_title_generation_renames_code_channel(monkeypatch: pytest.MonkeyP
     )
 
     rename.assert_awaited_once_with("C-code", "Review thread title generation")
+
+
+@pytest.mark.asyncio
+async def test_title_generation_leaves_a_dm_session_unnamed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DM shares the session timestamp but has no session name to set."""
+    threads = _Threads(
+        {
+            "source": "slack",
+            "title": "please review title generation",
+            "title_seed": "please review title generation",
+            "source_context": {"slack_thread": {"channel_id": "D1", "thread_ts": "0"}},
+        }
+    )
+    client = type("Client", (), {"threads": threads})()
+    rename = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr("agent.thread_title.rename_session", rename)
+    monkeypatch.setattr("agent.thread_title.is_code_channel", AsyncMock(return_value=False))
+
+    await generate_and_store_thread_title(
+        thread_id="thread-123",
+        conversation="please review title generation",
+        model=cast(BaseChatModel, _Model()),
+        client=client,
+    )
+
+    rename.assert_not_awaited()
 
 
 class _PromotingThreads(_Threads):
@@ -145,6 +174,7 @@ async def test_title_generation_renames_channel_promoted_during_update(
     client = type("Client", (), {"threads": threads})()
     rename = AsyncMock(return_value=(True, None))
     monkeypatch.setattr("agent.thread_title.rename_session", rename)
+    monkeypatch.setattr("agent.thread_title.is_code_channel", AsyncMock(return_value=True))
 
     await generate_and_store_thread_title(
         thread_id="thread-123",

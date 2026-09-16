@@ -16,12 +16,13 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.dm import is_dm_session
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
     slack_thread_detached,
 )
-from agent.slack.thinking import restore_slack_thinking_status
+from agent.slack.thinking import restore_slack_session_status, restore_slack_thinking_status
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -98,7 +99,15 @@ async def slack_thread_reply(
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
-            should_ask_for_feedback=should_ask_for_feedback and not options,
+            # A DM session is a private back-and-forth, so it never asks for a rating.
+            should_ask_for_feedback=(
+                should_ask_for_feedback
+                and not options
+                and not is_dm_session(
+                    cfg.slack_thread.channel_context if cfg.slack_thread else None,
+                    str(thread_ts),
+                )
+            ),
         )
     if message_ts is None:
         if slack_error == "thread_not_found":
@@ -113,8 +122,13 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    if run_id and not is_code_channel_session(str(thread_ts)):
-        await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+    if run_id:
+        # Slack drops the status when the app posts; a session keeps its on
+        # whichever message currently holds it rather than on the session itself.
+        if is_code_channel_session(str(thread_ts)):
+            await restore_slack_session_status(client, str(channel_id), str(thread_ts))
+        else:
+            await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
 
 
