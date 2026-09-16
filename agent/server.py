@@ -1326,6 +1326,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
+        assert model_routing_mode is not None
         routing_models = {
             route: _make_model_or_defer(
                 routed_model_id,
