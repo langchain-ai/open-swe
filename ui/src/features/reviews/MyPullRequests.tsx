@@ -171,6 +171,26 @@ function overallStatus(pr: OpenPullRequest) {
   return "Reviewable"
 }
 
+const alarmingStatuses: readonly string[] = [
+  "Conflicted",
+  "Failing",
+  "Changes Requested",
+]
+
+// A draft still has to show a conflict or a failing check: they are what the
+// author has to act on, and they outlive the draft flag.
+function statusLabels(pr: OpenPullRequest): string[] {
+  const status = overallStatus(pr)
+  if (status !== "Draft") return [status]
+  return [
+    status,
+    ...(pr.mergeable === false || pr.mergeState === "dirty"
+      ? ["Conflicted"]
+      : []),
+    ...(pr.ci === "failing" ? ["Failing"] : []),
+  ]
+}
+
 function MergePullRequest({
   pr,
   onMerged,
@@ -755,7 +775,8 @@ export function MyPullRequests({
   })
   const filtered = all.filter(
     (pr) =>
-      !filter?.length || filter.some((status) => overallStatus(pr) === status)
+      !filter?.length ||
+      filter.some((status) => statusLabels(pr).includes(status))
   )
   const visible = filtered.slice(page * pageSize, (page + 1) * pageSize)
   const selected = all.filter((pr) => selection.has(pullRequestKey(pr)))
@@ -1019,19 +1040,28 @@ export function MyPullRequests({
                         <Diffstat pr={pr} />
                       </td>
                       <td className="min-w-44 px-4 py-4">
-                        <span
-                          className={cn(
-                            "font-medium",
-                            [
-                              "Conflicted",
-                              "Failing",
-                              "Changes Requested",
-                            ].includes(overallStatus(pr)) && "text-destructive",
-                            overallStatus(pr) === "Approved" &&
-                              "text-emerald-600 dark:text-emerald-400"
-                          )}
-                        >
-                          {overallStatus(pr)}
+                        <span className="flex flex-wrap items-center gap-x-1 font-medium">
+                          {statusLabels(pr).map((status, index) => (
+                            <span
+                              key={status}
+                              className={cn(
+                                alarmingStatuses.includes(status) &&
+                                  "text-destructive",
+                                status === "Approved" &&
+                                  "text-emerald-600 dark:text-emerald-400"
+                              )}
+                            >
+                              {index > 0 && (
+                                <span
+                                  aria-hidden="true"
+                                  className="mr-1 text-muted-foreground"
+                                >
+                                  ·
+                                </span>
+                              )}
+                              {status}
+                            </span>
+                          ))}
                         </span>
                         {pr.failingChecks.length > 0 && (
                           <ul className="mt-1 space-y-1 text-destructive">

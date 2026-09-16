@@ -342,10 +342,10 @@ describe("My PRs", () => {
     mount()
     await screen.findByText("Change 3")
     const rows = screen.getAllByRole("row").slice(1)
-    for (const row of rows)
-      expect(
-        within(row).getAllByRole("cell")[5]?.firstElementChild?.textContent
-      ).toBe("Draft")
+    for (const row of rows) expect(within(row).getByText("Draft")).toBeTruthy()
+    expect(within(rows[0]!).getByText("Conflicted")).toBeTruthy()
+    expect(within(rows[1]!).getByText("Failing")).toBeTruthy()
+    expect(within(rows[2]!).queryByText("Conflicted")).toBeNull()
     expect(within(rows[0]!).getByRole("button", { name: "Fix" })).toBeTruthy()
     expect(within(rows[1]!).getByRole("button", { name: "Fix" })).toBeTruthy()
     expect(within(rows[2]!).queryByRole("button", { name: "Fix" })).toBeNull()
@@ -505,6 +505,36 @@ describe("My PRs", () => {
     fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
     await screen.findByRole("group", { name: bulk })
     expect(bulkButton("Merge").disabled).toBe(true)
+  })
+
+  it("shows a draft's conflicts and failing checks alongside Draft", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, { draft: true, mergeable: false, mergeState: "dirty" }),
+        pull(2, {
+          repo: "acme/other",
+          draft: true,
+          ci: "failing",
+          failingChecks: ["Browser E2E"],
+        }),
+        pull(3, { repo: "acme/third", draft: true }),
+      ],
+    })
+    mount()
+    const cell = async (title: string) =>
+      within((await screen.findByText(title)).closest("tr")!)
+    expect((await cell("Change 1")).getByText("Conflicted")).toBeTruthy()
+    expect((await cell("Change 2")).getByText("Failing")).toBeTruthy()
+    for (const title of ["Change 1", "Change 2", "Change 3"]) {
+      expect((await cell(title)).getByText("Draft")).toBeTruthy()
+    }
+    // Filtering by Conflicted has to reach the conflicted draft.
+    fireEvent.click(screen.getByLabelText("Filter by status"))
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Conflicted" })
+    )
+    expect(titles()).toEqual(["Change 1"])
   })
 
   it("does not offer a merge while the checks could not be read", async () => {
@@ -717,7 +747,7 @@ describe("My PRs", () => {
     expect(screen.getByText("Not reviewed")).toBeTruthy()
   })
 
-  it("prioritizes draft, conflicts and failing checks above review decisions", async () => {
+  it("ranks conflicts and failing checks above review decisions, and keeps both on a draft", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -740,7 +770,7 @@ describe("My PRs", () => {
             within(row).getAllByRole("cell")[5]?.firstElementChild?.textContent
         )
     ).toEqual([
-      "Draft",
+      "Draft·Conflicted·Failing",
       "Conflicted",
       "Failing",
       "Changes Requested",
