@@ -21,7 +21,7 @@ from agent.slack.orphan import (
     move_thread_to_dashboard,
     slack_thread_detached,
 )
-from agent.slack.thinking import restore_slack_thinking_status
+from agent.slack.thinking import restore_slack_session_status, restore_slack_thinking_status
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -118,8 +118,13 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    if run_id and not is_code_channel_session(str(thread_ts)):
-        await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+    if run_id:
+        # Slack drops the status when the app posts; a session keeps its on
+        # whichever message currently holds it rather than on the session itself.
+        if is_code_channel_session(str(thread_ts)):
+            await restore_slack_session_status(client, str(channel_id), str(thread_ts))
+        else:
+            await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
 
 

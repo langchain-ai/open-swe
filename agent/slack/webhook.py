@@ -1157,7 +1157,10 @@ async def _process_slack_mention_impl(
         if staged_files:
             operational_context += f"\n\n{_slack_files_section(staged_files)}"
 
-    explicitly_tagged = _interrupts_active_run(
+    # Anything said in a DM is said to Open SWE, and the person expects the next
+    # thing they type to redirect the work in front of them rather than queue
+    # behind it.
+    explicitly_tagged = dm_session or _interrupts_active_run(
         text,
         bot_user_id,
         treat_all_messages_as_mentions=treat_all_messages_as_mentions,
@@ -1247,15 +1250,14 @@ async def _process_slack_mention_impl(
                 triggering_user_id=user_id,
                 agent_thread_id=thread_id,
             )
-    # A DM gets no thinking status: the session names no Slack thread to hang one
-    # on, and a per-message anchor cannot be cleared reliably — every message
-    # funnels into the one agent thread, so a finishing run sees the next one
-    # still active and leaves its own indicator spinning for good.
-    if not code_channel and not dm_session and isinstance(run_id, str) and run_id:
+    if not code_channel and isinstance(run_id, str) and run_id:
         await show_slack_thinking_status(
             client=langgraph_client,
             thread_id=thread_id,
             run_id=run_id,
             channel_id=channel_id,
-            thread_ts=thread_ts,
+            # A DM session names no Slack thread, so the status hangs on the
+            # message being answered and the session owns only that one.
+            thread_ts=(reply_thread_ts or original_message_ts) if dm_session else thread_ts,
+            session_ts=thread_ts if dm_session else "",
         )
