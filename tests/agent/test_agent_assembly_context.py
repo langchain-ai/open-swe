@@ -18,9 +18,10 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
+from agent.run_config import RunConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
-from agent.server import DesktopAgentState, _registered_tool_name, get_agent
+from agent.server import DesktopAgentState, _registered_tool_name, get_agent, workspace_slug
 
 
 @pytest.fixture(autouse=True)
@@ -125,12 +126,12 @@ async def _capture_create_deep_agent_kwargs(
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.server.cached_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
         patch(
-            "agent.server.get_team_agent_routing_models",
+            "agent.server.cached_agent_routing_models",
             new_callable=AsyncMock,
             return_value={
                 "fast": ("google_genai:gemini-3.8-flash", "low"),
@@ -197,9 +198,9 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
     SANDBOX_BACKENDS.pop("thread-ctx", None)
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
-        patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
+        patch("agent.server.cached_team_default_model_pair", side_effect=load_defaults),
         patch(
-            "agent.server._cached_agent_routing_models",
+            "agent.server.cached_agent_routing_models",
             new_callable=AsyncMock,
             return_value={
                 "fast": ("openai:gpt-5.6-sol", "low"),
@@ -207,9 +208,9 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
                 "performance": ("openai:gpt-5.6-sol", "high"),
             },
         ),
-        patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
+        patch("agent.server.cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
-        patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
+        patch("agent.server.cached_fable_enabled", new_callable=AsyncMock, return_value=True),
         patch("agent.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),
@@ -311,8 +312,8 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
     assert skill.file_data and "name: baby-sit" in skill.file_data["content"]
     artifacts = await backend.aread("/bundled-skills/html-artifacts/SKILL.md")
     assert artifacts.file_data and "name: html-artifacts" in artifacts.file_data["content"]
-    environments = await backend.aread("/bundled-skills/environments/SKILL.md")
-    assert environments.file_data and "name: environments" in environments.file_data["content"]
+    environments = await backend.aread("/bundled-skills/workspaces/SKILL.md")
+    assert environments.file_data and "name: workspaces" in environments.file_data["content"]
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
@@ -686,3 +687,9 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)
     assert subagent_names == parent_names - parent_only_names
+
+
+def test_workspace_slug_reads_workspace_then_environment() -> None:
+    assert workspace_slug(RunConfig(workspace="oss")) == "oss"
+    assert workspace_slug(RunConfig(environment="legacy")) == "legacy"
+    assert workspace_slug(RunConfig()) is None

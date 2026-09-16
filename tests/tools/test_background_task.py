@@ -6,14 +6,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from agent.environments import refresh
-from agent.environments.store import Environment, RefreshStep
 from agent.tools.background_task import background_task
+from agent.workspaces import refresh
+from agent.workspaces.store import RefreshStep, Workspace
 
 
 @pytest.fixture
 def admin(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Environment refreshes are admin-only, so most of these run as one."""
+    """Workspace refreshes are admin-only, so most of these run as one."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     config = cast(RunnableConfig, {"configurable": {"github_login": "ramonn"}})
     with patch("agent.run_config.get_config", return_value=config):
@@ -28,8 +28,8 @@ def member(monkeypatch: pytest.MonkeyPatch) -> Any:
         yield
 
 
-def _running(**overrides: Any) -> Environment:
-    return Environment(
+def _running(**overrides: Any) -> Workspace:
+    return Workspace(
         slug="base",
         refresh_status="refreshing",
         refresh_kind="full",
@@ -47,9 +47,9 @@ def _running(**overrides: Any) -> Environment:
     ).model_copy(update=overrides)
 
 
-def _store(*records: Environment) -> Any:
+def _store(*records: Workspace) -> Any:
     return patch.object(
-        refresh.ENVIRONMENTS, "list_all", new_callable=AsyncMock, return_value=list(records)
+        refresh.WORKSPACES, "list_all", new_callable=AsyncMock, return_value=list(records)
     )
 
 
@@ -60,6 +60,9 @@ def test_a_task_id_routes_to_exactly_one_provider() -> None:
     """The command provider claims everything the refresh provider does not."""
     from agent.tools.background_execute import owns_task as command_owns
 
+    assert refresh.owns_task("ws-run-1")
+    assert not command_owns("ws-run-1")
+    # Handles minted before the rename still route to the refresh provider.
     assert refresh.owns_task("env-run-1")
     assert not command_owns("env-run-1")
     assert command_owns("cmd-abc")
@@ -67,7 +70,7 @@ def test_a_task_id_routes_to_exactly_one_provider() -> None:
     assert command_owns("2b1c4f9e-0000-4000-8000-000000000000")
 
 
-# --- environment refreshes ---
+# --- workspace refreshes ---
 
 
 @pytest.mark.asyncio
@@ -82,11 +85,11 @@ async def test_a_running_refresh_reports_its_step_and_the_live_trace(admin: Any)
             return_value="+ apt-get install -y ripgrep",
         ) as read_log,
     ):
-        result = await background_task("status", "env-run-1")
+        result = await background_task("status", "ws-run-1")
 
     assert result["success"] is True
     assert result["status"] == "running"
-    assert result["kind"] == "environment_refresh"
+    assert result["kind"] == "workspace_refresh"
     assert result["step"] == "setup"
     assert [step["label"] for step in result["steps"]] == ["boot", "setup"]
     assert result["output"] == "+ apt-get install -y ripgrep"
@@ -101,7 +104,7 @@ async def test_an_unreadable_builder_costs_the_trace_not_the_poll(admin: Any) ->
         _store(_running()),
         patch.object(refresh, "_read_builder_log", new_callable=AsyncMock, return_value=None),
     ):
-        result = await background_task("status", "env-run-1")
+        result = await background_task("status", "ws-run-1")
 
     assert result["success"] is True
     assert result["step"] == "setup"
@@ -119,7 +122,7 @@ async def test_a_settled_refresh_reads_its_log_off_the_record(admin: Any) -> Non
         refresh_steps=[RefreshStep(label="setup", status="failed", exit_code=2)],
     )
     with _store(settled):
-        result = await background_task("status", "env-run-1")
+        result = await background_task("status", "ws-run-1")
 
     assert result["status"] == "failed"
     assert result["error"] == "setup script exited 2"
@@ -131,7 +134,7 @@ async def test_a_settled_refresh_reads_its_log_off_the_record(admin: Any) -> Non
 async def test_a_superseded_handle_resolves_to_nothing(admin: Any) -> None:
     """Keyed on the run, so a stale id never reports a later refresh's progress."""
     with _store(_running(refresh_run_id="run-2")):
-        result = await background_task("status", "env-run-1")
+        result = await background_task("status", "ws-run-1")
 
     assert result["error"] == "task not found"
     assert "superseded" in result["detail"]
@@ -153,7 +156,7 @@ async def test_list_merges_both_kinds(admin: Any) -> None:
         result = await background_task("list")
 
     assert {task["kind"] for task in result["tasks"]} == {
-        "environment_refresh",
+        "workspace_refresh",
         "sandbox_command",
     }
 
@@ -172,7 +175,7 @@ async def test_one_provider_failing_does_not_blank_the_listing(admin: Any) -> No
         result = await background_task("list")
 
     assert result["success"] is True
-    assert [task["kind"] for task in result["tasks"]] == ["environment_refresh"]
+    assert [task["kind"] for task in result["tasks"]] == ["workspace_refresh"]
 
 
 # --- authorization ---
@@ -182,7 +185,7 @@ async def test_one_provider_failing_does_not_blank_the_listing(admin: Any) -> No
 async def test_a_non_admin_cannot_read_a_refresh(member: Any) -> None:
     """Workspace-wide state, and a `bash -x` trace expands its arguments."""
     with _store(_running()):
-        result = await background_task("status", "env-run-1")
+        result = await background_task("status", "ws-run-1")
 
     assert result["success"] is False
     assert "Only workspace admins" in result["error"]
@@ -194,7 +197,7 @@ async def test_a_non_admin_cannot_cancel_a_rebuild(member: Any) -> None:
     """A stop would cancel a rebuild every other run depends on."""
     stop = AsyncMock()
     with _store(_running()), patch.object(refresh, "task_stop", stop):
-        result = await background_task("stop", "env-run-1")
+        result = await background_task("stop", "ws-run-1")
 
     assert result["success"] is False
     stop.assert_not_awaited()

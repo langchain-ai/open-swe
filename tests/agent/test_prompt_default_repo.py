@@ -30,11 +30,15 @@ def test_resolve_prompt_default_repo_never_loads_team_default(
 def test_resolve_prompt_default_repo_falls_back_to_team_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_get_team_default_repo() -> dict[str, str] | None:
+    seen: list[str | None] = []
+
+    async def fake_get_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
+        seen.append(workspace)
         return {"owner": "team", "name": "repo"}
 
     monkeypatch.setattr(server, "get_team_default_repo", fake_get_team_default_repo)
 
-    repo = asyncio.run(server._resolve_prompt_default_repo(RunConfig()))
+    repo = asyncio.run(server._resolve_prompt_default_repo(RunConfig(workspace="oss")))
 
     assert repo == {"owner": "team", "name": "repo"}
+    assert seen == ["oss"]

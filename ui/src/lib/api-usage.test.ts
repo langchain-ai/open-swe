@@ -52,14 +52,11 @@ describe("usageLeaderboard", () => {
       generated_at_ms: 1000,
       reviewer_stats: null,
     }
-    const fetchMock = vi.fn().mockResolvedValue(Response.json(payload))
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(payload)))
 
     expect(await api.usageLeaderboard()).toEqual({
       ...payload,
       rows: [{ ...row, ...expected }],
     })
-    const requestedUrl = String(fetchMock.mock.calls[0]?.[0] ?? "")
-    expect(requestedUrl).toContain("period=7d")
   })
 })

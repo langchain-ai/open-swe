@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from agent.dashboard.options import (
     FABLE_MODEL_IDS,
@@ -15,15 +15,26 @@ from agent.dashboard.team_settings import (
     get_team_default_subagent_model,
     get_team_fable_enabled,
 )
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, slugify
 
 router = APIRouter(tags=["options"])
 
 
 @router.get("/options")
-async def options() -> dict[str, Any]:
-    agent_model, agent_effort = await get_team_default_model("agent")
-    subagent_model, subagent_effort = await get_team_default_subagent_model("agent")
-    fable_enabled = await get_team_fable_enabled()
+async def options(workspace: str = DEFAULT_WORKSPACE_SLUG) -> dict[str, Any]:
+    """The models and defaults a composer may offer for ``workspace``.
+
+    Model defaults and the Fable flag are per workspace, so a picker that asked
+    without one would advertise ``default``'s settings wherever the run will
+    not land there.
+    """
+    try:
+        workspace = slugify(workspace)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    agent_model, agent_effort = await get_team_default_model("agent", workspace)
+    subagent_model, subagent_effort = await get_team_default_subagent_model("agent", workspace)
+    fable_enabled = await get_team_fable_enabled(workspace)
     # Never advertise a default that isn't in the selectable list: when Fable is
     # off, gate a stale Fable default down to its non-Fable fallback so the Cloud
     # Agents page (and the PUT /profile it drives) don't choke on it.

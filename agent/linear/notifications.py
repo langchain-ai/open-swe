@@ -5,16 +5,28 @@ import logging
 
 from langchain_core.messages import ToolMessage
 
+from agent.run_config import RunConfig
 from agent.tool_loaders.workspace_mcp import load_workspace_mcp_tools
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 logger = logging.getLogger(__name__)
+
+
+def _notification_workspace() -> str:
+    """The active run's workspace, or ``default`` when no run is active."""
+    try:
+        return RunConfig.from_runtime().workspace_slug or DEFAULT_WORKSPACE_SLUG
+    except RuntimeError:
+        return DEFAULT_WORKSPACE_SLUG
 
 
 async def post_linear_notification(issue_id: str, body: str) -> bool:
     """Use the workspace's selected Linear comment tool; never retry a mutation."""
     try:
         async with asyncio.timeout(30):
-            tools = await load_workspace_mcp_tools(connection_name="linear")
+            tools = await load_workspace_mcp_tools(
+                _notification_workspace(), connection_name="linear"
+            )
             for name in ("save_comment", "create_comment"):
                 tool = next(
                     (tool for tool in tools if (tool.metadata or {}).get("mcp_tool_name") == name),
