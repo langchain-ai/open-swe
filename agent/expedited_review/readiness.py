@@ -1,9 +1,12 @@
 """When a pull request revision is ready to be voted on.
 
-Ready means: open, not a draft, no merge conflict, every check successful, no
-unresolved review thread, no standing request for changes, and — where Open SWE
-reviews the repository — an Open SWE review published for this exact head SHA.
-Silence from a reviewer is not completion.
+Ready means: open, not a draft, no merge conflict, no check still running, no
+required check failing, no unresolved review thread, no standing request for
+changes, and — where Open SWE reviews the repository — an Open SWE review
+published for this exact head SHA. Silence from a reviewer is not completion.
+
+A failing check that GitHub does not require does not block the vote; it is
+named on the card so the voters approve with their eyes open.
 """
 
 import logging
@@ -37,6 +40,8 @@ class PullRequestSnapshot:
     mergeable_state: str
     check_state: str
     unresolved_threads: int
+    failing_checks: list[str] = field(default_factory=list)
+    failures_are_required: bool = True
     changes_requested_by: list[str] = field(default_factory=list)
     open_swe_review_required: bool = False
     open_swe_reviewed_head: bool = False
@@ -58,6 +63,13 @@ class Readiness:
         return self.snapshot.state != "open" or self.snapshot.mergeable is False
 
 
+def _failed_check_blocker(snapshot: PullRequestSnapshot) -> str:
+    if not snapshot.failing_checks:
+        return "a check finished without success"
+    noun = "check" if len(snapshot.failing_checks) == 1 else "checks"
+    return f"failing {noun}: {', '.join(snapshot.failing_checks)}"
+
+
 def readiness_blockers(snapshot: PullRequestSnapshot) -> list[str]:
     blockers: list[str] = []
     if snapshot.merged:
@@ -72,10 +84,8 @@ def readiness_blockers(snapshot: PullRequestSnapshot) -> list[str]:
         blockers.append("GitHub is still computing mergeability")
     if snapshot.check_state == "pending":
         blockers.append("checks are still running")
-    elif snapshot.check_state == "failure":
-        blockers.append("a check failed")
-    elif snapshot.check_state == "blocked":
-        blockers.append("a check finished without success")
+    elif snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
+        blockers.append(_failed_check_blocker(snapshot))
     if snapshot.unresolved_threads:
         noun = "thread" if snapshot.unresolved_threads == 1 else "threads"
         blockers.append(f"{snapshot.unresolved_threads} unresolved review {noun}")
@@ -181,8 +191,9 @@ async def assess_readiness(
             review.head_sha == head_sha for review in stored.reviews
         )
 
-    check_state, _ = aggregate_check_state(check_runs, statuses)
+    check_state, failures = aggregate_check_state(check_runs, statuses)
     author_login = author if isinstance(author, str) else ""
+    mergeable_state = str(pr.get("mergeable_state") or "")
     snapshot = PullRequestSnapshot(
         state=str(pr.get("state") or ""),
         merged=bool(pr.get("merged")) or isinstance(pr.get("merged_at"), str),
@@ -191,9 +202,15 @@ async def assess_readiness(
         title=str(pr.get("title") or ""),
         author=author_login,
         mergeable=mergeable if isinstance(mergeable, bool) else None,
-        mergeable_state=str(pr.get("mergeable_state") or ""),
+        mergeable_state=mergeable_state,
         check_state=check_state,
         unresolved_threads=len(threads),
+        failing_checks=sorted({str(failure["name"]) for failure in failures}),
+        # GitHub says "unstable" when the pull request is mergeable and only
+        # checks it does not require are unhappy, and "blocked" when a required
+        # one is. Trusting it keeps us from having to read branch protection,
+        # which needs admin, and from guessing at ruleset precedence.
+        failures_are_required=mergeable_state != "unstable",
         changes_requested_by=sorted(
             login
             for login, state in _latest_reviews_by_user(reviews, author_login).items()

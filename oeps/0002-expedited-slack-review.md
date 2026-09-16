@@ -44,7 +44,9 @@ Open SWE watches the PR through GitHub webhooks with a cron fallback. The card
 appears only when, for the enrolled revision:
 
 - the PR is open, not a draft, and conflict-free;
-- every check passed (pending, failed, or inconclusive checks block);
+- no check is still running, and every check GitHub requires has passed. A failing
+  check GitHub does not require is named on the card instead of blocking it, so the
+  voters decide with it in front of them;
 - no review thread is unresolved and nobody has a standing request for changes;
 - where Open SWE auto-review is enabled for the repository, Open SWE has published a
   review for this exact head SHA. Silence is not completion.
@@ -84,13 +86,17 @@ commit, changed diff, or regressed check also kills the vote.
 
 ### Merge
 
-Quorum → revalidate readiness → merge with a GitHub App token scoped to contents
+Quorum → revalidate readiness and the pinned diff (retargeting the base branch
+changes the diff without changing the head SHA) → merge with a GitHub App token scoped to contents
 and pull requests on that repository, conditional on the reviewed head SHA, using a
 merge method the repository allows. GitHub says no → the vote fails and the agent is
 told why. No admin bypass, ever.
 
 A rejection committed before the merge call wins. A transport error leaves the vote
-in `merging`; the next evaluation either confirms the merge or retries it.
+in `merging`; the next evaluation either confirms the merge or retries it. A
+transient blocker sends it back to `open` with its votes intact, and readiness
+recovering resumes the merge — nobody can vote it forward from there, because the
+two people who already approved are the ones being refused.
 
 On confirmed merge: card → merged, merged reaction on the Slack root, watch dropped.
 The thread resolves through the existing merged-PR handling.

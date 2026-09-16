@@ -28,6 +28,34 @@ def test_branch_protection_waiting_on_approvals_is_not_a_blocker() -> None:
     assert readiness_blockers(_snapshot(mergeable_state="blocked")) == []
 
 
+def test_a_failing_check_github_does_not_require_is_named_but_does_not_block() -> None:
+    advisory = _snapshot(
+        check_state="failure",
+        mergeable_state="unstable",
+        failing_checks=["flaky-e2e"],
+        failures_are_required=False,
+    )
+
+    assert readiness_blockers(advisory) == []
+    assert Readiness(advisory, readiness_blockers(advisory)).ready
+
+
+def test_a_failing_required_check_blocks_and_names_itself() -> None:
+    blockers = readiness_blockers(
+        _snapshot(check_state="failure", failing_checks=["unit tests", "lint"])
+    )
+
+    assert blockers == ["failing checks: unit tests, lint"]
+
+
+def test_checks_still_running_block_even_when_nothing_is_required() -> None:
+    blockers = readiness_blockers(
+        _snapshot(check_state="pending", mergeable_state="unstable", failures_are_required=False)
+    )
+
+    assert any("still running" in blocker for blocker in blockers)
+
+
 def test_every_gate_reports_independently() -> None:
     blockers = readiness_blockers(
         _snapshot(

@@ -15,7 +15,11 @@ from langgraph_sdk import get_client
 from agent.dashboard.team_settings import get_team_expedited_review_enabled
 from agent.dispatch import dispatch_agent_run
 from agent.expedited_review import card
-from agent.expedited_review.approvals import ApprovalState, ExpeditedApproval
+from agent.expedited_review.approvals import (
+    REQUIRED_APPROVALS,
+    ApprovalState,
+    ExpeditedApproval,
+)
 from agent.expedited_review.eligibility import (
     ChangedFile,
     Ineligible,
@@ -152,7 +156,9 @@ async def _update_card(
     if not approval.slack_channel_id or not approval.slack_message_ts:
         return
     if outcome is None:
-        text, blocks = card.open_card(approval, title=title, files=files)
+        text, blocks = card.open_card(
+            approval, title=title, files=files, failing_checks=approval.advisory_failures
+        )
     else:
         text, blocks = card.closed_card(approval, title=title, files=files, outcome=outcome)
     ok, error = await update_slack_message(
@@ -233,7 +239,10 @@ async def _post_card(
     if location is None:
         await retire(approval, "failed", "No Slack thread to post the review card in.")
         return "failed"
-    text, blocks = card.open_card(approval, title=readiness.snapshot.title, files=files)
+    advisory = [] if readiness.snapshot.failures_are_required else readiness.snapshot.failing_checks
+    text, blocks = card.open_card(
+        approval, title=readiness.snapshot.title, files=files, failing_checks=advisory
+    )
     message_ts, error = await post_slack_thread_reply_with_ts(
         location[0],
         location[1],
@@ -248,14 +257,38 @@ async def _post_card(
         )
         return "error"
     updated = await transition(
-        approval.id, expected=("waiting",), state="open", slack_message_ts=message_ts
+        approval.id,
+        expected=("waiting",),
+        state="open",
+        slack_message_ts=message_ts,
+        advisory_failures=advisory,
     )
     if updated is None:
+        # Another evaluation won the transition. Retract the card this pass just
+        # posted — never ``location[1]``, which is the thread's root message.
         await update_slack_message(
-            location[0], location[1], "This expedited review is no longer active.", blocks=None
+            location[0], message_ts, "This expedited review is no longer active.", blocks=None
         )
         return "stale"
     return "open"
+
+
+async def _resume_quorum(approval: ExpeditedApproval, readiness: Readiness, token: str) -> str:
+    """Merge an ``open`` approval that already has quorum.
+
+    A transient blocker (mergeability still recomputing, a check rerunning) sends
+    a ``merging`` row back to ``open`` with its votes intact. Nobody can vote it
+    forward from there — both voters are refused as having already approved — so
+    readiness recovering has to pick it back up.
+    """
+    if len(approval.approvals) < REQUIRED_APPROVALS:
+        return "open"
+    from agent.expedited_review.voting import complete_merge
+
+    resumed = await transition(approval.id, expected=("open",), state="merging")
+    if resumed is None:
+        return "open"
+    return await complete_merge(resumed, readiness, token)
 
 
 async def evaluate_approval(key: str) -> str:
@@ -299,11 +332,9 @@ async def evaluate_approval(key: str) -> str:
         )
         return "superseded"
 
-    if approval.state == "merging":
-        from agent.expedited_review.voting import complete_merge
-
-        return await complete_merge(approval, readiness, token)
-
+    # Ahead of the merge, not just the card: retargeting the base branch changes
+    # a pull request's diff without changing its head SHA, so the SHA check
+    # above is not enough to know the votes still apply to what would land.
     files = await _files_for(approval, token)
     verdict = assess_eligibility(files)
     if isinstance(verdict, Ineligible):
@@ -313,9 +344,14 @@ async def evaluate_approval(key: str) -> str:
         await retire(approval, "superseded", "The diff changed; votes were discarded.")
         return "superseded"
 
+    if approval.state == "merging":
+        from agent.expedited_review.voting import complete_merge
+
+        return await complete_merge(approval, readiness, token)
+
     if approval.state == "open":
         if readiness.ready:
-            return "open"
+            return await _resume_quorum(approval, readiness, token)
         if readiness.terminal or snapshot.check_state == "failure":
             reason = "; ".join(readiness.blockers)
             await retire(

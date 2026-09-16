@@ -24,6 +24,7 @@ def upgrade() -> None:
             slack_message_ts text NOT NULL DEFAULT '',
             run_config jsonb NOT NULL DEFAULT '{}'::jsonb,
             cron_id text NOT NULL DEFAULT '',
+            advisory_failures jsonb NOT NULL DEFAULT '[]'::jsonb,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )

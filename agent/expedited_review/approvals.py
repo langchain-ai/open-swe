@@ -79,6 +79,9 @@ class ExpeditedApproval(Base):
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
     cron_id: Mapped[str] = mapped_column(server_default="", default="")
+    # Checks failing that GitHub does not require, so the card can keep naming
+    # them across re-renders that have no readiness pass of their own.
+    advisory_failures: Mapped[list[str]] = mapped_column(JSONB, default_factory=list)
     votes: Mapped[list[ApprovalVote]] = relationship(
         default_factory=list, cascade="all, delete-orphan", order_by=lambda: ApprovalVote.voted_at
     )
