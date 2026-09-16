@@ -507,6 +507,29 @@ describe("My PRs", () => {
     expect(bulkButton("Merge").disabled).toBe(true)
   })
 
+  it("offers both a fix and a merge when only optional checks fail", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, {
+          reviewDecision: "approved",
+          mergeState: "unstable",
+          ci: "failing",
+          failingChecks: ["Browser E2E"],
+        }),
+      ],
+    })
+    mount()
+    const row = (await screen.findByText("Change 1")).closest("tr")!
+    expect(within(row).getByText("Failing")).toBeTruthy()
+    expect(within(row).getByText("Browser E2E")).toBeTruthy()
+    expect(within(row).getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(within(row).getByRole("button", { name: "Merge" })).toBeTruthy()
+    await selectAll()
+    expect(bulkButton("Merge").disabled).toBe(false)
+    expect(bulkButton("Fix").disabled).toBe(false)
+  })
+
   it("shows a draft's conflicts and failing checks alongside Draft", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
