@@ -21,6 +21,7 @@ from agent.slack.client import (
 )
 from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
+from agent.utils.thread_ops import get_thread_active_status, queue_message_for_thread
 from agent.webhooks import common
 from agent.workspaces.routing import resolve_workspace
 
@@ -29,22 +30,26 @@ logger = logging.getLogger(__name__)
 ASK_COMMAND = "/oswe"
 MAX_QUESTION_CHARS = 2000
 _CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
-_START_FAILURE = "Open SWE could not start that question. Try again in a moment."
+_START_FAILURE = "Open SWE could not start that request. Try again in a moment."
+_QUEUED = "Added to what I'm already working on for you here."
 
 
 class SlackAskRequest(BaseModel):
     channel_id: str
     user_id: str
     question: str
-    # Minted by the route, so the acknowledgement it returns inside Slack's
-    # three seconds can already link to the thread this run will create.
     thread_id: str
     command: str = ASK_COMMAND
     team_id: str = ""
 
 
-def new_ask_thread_id() -> str:
-    return str(uuid.uuid4())
+def ask_thread_id(channel_id: str, user_id: str) -> str:
+    """The one scratch thread this person's slash commands share in this channel.
+
+    Derived rather than stored so the route can link to it inside Slack's three
+    seconds, and so every later command lands in the same conversation.
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-ask:{channel_id}:{user_id}"))
 
 
 async def _slack_user_profile(user_id: str) -> tuple[str, str]:
@@ -62,12 +67,12 @@ async def _refuse(request: SlackAskRequest, text: str) -> None:
     await post_slack_ephemeral_message(request.channel_id, request.user_id, text)
 
 
-async def _answerable(request: SlackAskRequest, login: str | None, email: str) -> bool:
-    """Whether the asker is linked to a GitHub account Open SWE can run as."""
+async def _runnable_login(request: SlackAskRequest, login: str | None, email: str) -> str | None:
+    """The GitHub login to run as, or None once the asker has been asked to link one."""
     if login:
         try:
             if await common.get_valid_access_token(login):
-                return True
+                return login
         except Exception:  # noqa: BLE001
             logger.debug("Could not resolve a GitHub token for %s", login, exc_info=True)
     has_record = False
@@ -84,7 +89,7 @@ async def _answerable(request: SlackAskRequest, login: str | None, email: str) -
         reason="revoked" if has_record else "unlinked",
         ephemeral=True,
     )
-    return False
+    return None
 
 
 async def _process_slack_ask(request: SlackAskRequest) -> None:
@@ -94,10 +99,13 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         return
 
     user_name, user_email = await _slack_user_profile(request.user_id)
-    login = await common.login_for_slack_id(request.user_id) or (
-        await common.login_for_email(user_email) if user_email else None
+    login = await _runnable_login(
+        request,
+        await common.login_for_slack_id(request.user_id)
+        or (await common.login_for_email(user_email) if user_email else None),
+        user_email,
     )
-    if not await _answerable(request, login, user_email):
+    if login is None:
         return
 
     thread_id = request.thread_id
@@ -129,18 +137,20 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         team_id=request.team_id,
         channel_context=channel_context,
     )
-    visibility = "private" if channel_context.get("is_im") is True else "public"
+    # Private, always: a slash command is invisible to the channel and the answer
+    # goes only to the asker, and a private thread is what scopes the run to their
+    # own credentials, skills, and instructions.
     persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
         repo_config=repo,
-        github_login=login or "",
+        github_login=login,
         user_email=user_email,
         title=request.question,
         source_context=SourceContext(slack_thread=slack_thread),
         workspace=workspace,
-        visibility=visibility,
-        owner_login=login or "",
+        visibility="private",
+        owner_login=login,
         unlisted=True,
     )
     if not persisted:
@@ -153,24 +163,33 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "source": "slack",
         "slack_ask": True,
         "plan_mode": False,
+        "github_login": login,
         "user_email": user_email,
         "workspace": workspace,
         "environment": workspace,
     }
-    if login:
-        configurable["github_login"] = login
-    await dispatch_agent_run(
-        thread_id,
-        render_prompt(
-            "runs/slack-ask.md",
-            asked_by=user_name or f"<@{request.user_id}>",
-            question=request.question,
-        ),
-        configurable,
-        source="slack",
+    prompt = render_prompt(
+        "runs/slack-ask.md",
+        command=request.command,
+        asked_by=user_name or f"<@{request.user_id}>",
+        request=request.question,
     )
+    # The thread is shared by every command this person runs in this channel, so
+    # a command sent while the last one is still working joins it instead of
+    # interrupting the work in flight.
+    if await get_thread_active_status(thread_id) and await queue_message_for_thread(
+        thread_id, [{"type": "text", "text": prompt}]
+    ):
+        await _refuse(request, _QUEUED)
+        logger.info(
+            "Queued a Slack slash command",
+            extra={"agent_thread_id": thread_id, "slack_channel": request.channel_id},
+        )
+        return
+
+    await dispatch_agent_run(thread_id, prompt, configurable, source="slack")
     logger.info(
-        "Started a Slack question run",
+        "Started a Slack slash command run",
         extra={"agent_thread_id": thread_id, "slack_channel": request.channel_id},
     )
 

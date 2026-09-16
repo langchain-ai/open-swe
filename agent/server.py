@@ -254,19 +254,15 @@ DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
-# A `/oswe` question researches and answers; it never mutates the repository or
-# spawns follow-on work. `execute` stays so the agent can explore the checkout.
+# A `/oswe` request has a channel but no Slack thread, so only the tools that act
+# on one are out of reach. Everything else, writes included, stays available.
 SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {
-        "approve_plan",
-        "delete",
-        "edit_file",
-        "enter_plan_mode",
-        "open_pull_request",
-        "request_pr_review",
-        "save_plan",
-        "task",
-        "write_file",
+        "manage_code_channel",
+        "manage_incident",
+        "slack_add_reaction",
+        "slack_attach_html",
+        "slack_move_thread",
     }
 )
 
@@ -1244,10 +1240,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
-    elif slack_ask_mode:
-        static_tools = apply_tool_descriptions(
-            [fetch_url, web_search, http_request, slack_thread_reply]
-        )
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
