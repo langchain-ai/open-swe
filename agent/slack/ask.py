@@ -19,6 +19,7 @@ from agent.slack.client import (
     post_slack_ephemeral_message,
     slack_channel_allows_operations,
 )
+from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.webhooks import common
 from agent.workspaces.routing import resolve_workspace
@@ -93,7 +94,8 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         return
 
     thread_id = str(uuid.uuid4())
-    workspace = (await resolve_workspace(slack_channel_id=request.channel_id, login=login)).slug
+    # A repository the channel names owns the routing decision, so it has to be
+    # resolved before the workspace is.
     resolution = await common.get_slack_repo_config(
         request.channel_id,
         "",
@@ -101,7 +103,17 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         channel_context=channel_context,
         thread_id=thread_id,
     )
-    repo = resolution.repo.model_dump() if resolution.repo else None
+    workspace = (
+        await resolve_workspace(
+            repo=resolution.routing_repo,
+            slack_channel_id=request.channel_id,
+            login=login,
+        )
+    ).slug
+    resolved_repo = resolution.repo
+    if resolved_repo is not None and not resolution.explicit:
+        resolved_repo = await workspace_scoped_default_repo(resolved_repo, workspace)
+    repo = resolved_repo.model_dump() if resolved_repo else None
     slack_thread = SlackThreadRef(
         channel_id=request.channel_id,
         triggering_user_id=request.user_id,

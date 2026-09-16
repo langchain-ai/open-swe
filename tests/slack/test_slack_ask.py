@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 from urllib.parse import urlencode
@@ -5,6 +6,7 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
+from agent.run_config import Repo
 from agent.slack import ask as slack_ask
 from agent.slack import routes as slack_routes
 from agent.slack.tools import thread_reply as slack_thread_reply
@@ -111,6 +113,40 @@ async def test_question_thread_is_unlisted_and_dispatched_in_ask_mode(
     assert configurable["slack_ask"] is True
     assert configurable["slack_thread"]["triggering_user_id"] == "U1"
     assert "thread_ts" not in configurable["slack_thread"]
+
+
+@pytest.mark.asyncio
+async def test_named_repository_picks_the_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    resolve_workspace = AsyncMock(return_value=SimpleNamespace(slug="payments"))
+    monkeypatch.setattr(
+        slack_ask.common, "resolve_slack_channel_context", AsyncMock(return_value={"name": "eng"})
+    )
+    monkeypatch.setattr(slack_ask, "slack_channel_allows_operations", lambda _context: True)
+    monkeypatch.setattr(slack_ask, "get_slack_user_info", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_ask.common, "login_for_slack_id", AsyncMock(return_value="octocat"))
+    monkeypatch.setattr(slack_ask.common, "get_valid_access_token", AsyncMock(return_value="gho_x"))
+    monkeypatch.setattr(
+        slack_ask.common,
+        "get_slack_repo_config",
+        AsyncMock(
+            return_value=slack_ask.common.SlackRepoResolution(
+                repo=Repo(owner="acme", name="api"), explicit=True
+            )
+        ),
+    )
+    monkeypatch.setattr(slack_ask, "resolve_workspace", resolve_workspace)
+    monkeypatch.setattr(
+        slack_ask.common, "upsert_agent_thread_metadata", AsyncMock(return_value=True)
+    )
+    dispatch = AsyncMock()
+    monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
+
+    await slack_ask.process_slack_ask(
+        slack_ask.SlackAskRequest(channel_id="C1", user_id="U1", question="why?")
+    )
+
+    assert resolve_workspace.await_args.kwargs["repo"] == ("acme", "api")
+    assert dispatch.await_args.args[2]["workspace"] == "payments"
 
 
 def test_unlisted_threads_stay_out_of_the_thread_list() -> None:
