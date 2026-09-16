@@ -27,7 +27,10 @@ function renderSection(isAdmin: boolean) {
   // The pickers browse Slack and the GitHub installation; tests that care
   // mock these before rendering, the rest get empty directories.
   if (!vi.isMockFunction(api.listSlackChannels)) {
-    vi.spyOn(api, "listSlackChannels").mockResolvedValue([])
+    vi.spyOn(api, "listSlackChannels").mockResolvedValue({
+      channels: [],
+      partial: false,
+    })
   }
   if (!vi.isMockFunction(api.me)) {
     vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
@@ -319,24 +322,27 @@ describe("WorkspacesSection", () => {
         },
       ],
     })
-    vi.spyOn(api, "listSlackChannels").mockResolvedValue([
-      {
-        id: "C0000000001",
-        name: "commits",
-        is_private: false,
-        is_member: true,
-        is_ext_shared: false,
-        num_members: 12,
-      },
-      {
-        id: "C0000000002",
-        name: "oss-help",
-        is_private: false,
-        is_member: true,
-        is_ext_shared: false,
-        num_members: 40,
-      },
-    ])
+    vi.spyOn(api, "listSlackChannels").mockResolvedValue({
+      channels: [
+        {
+          id: "C0000000001",
+          name: "commits",
+          is_private: false,
+          is_member: true,
+          is_ext_shared: false,
+          num_members: 12,
+        },
+        {
+          id: "C0000000002",
+          name: "oss-help",
+          is_private: false,
+          is_member: true,
+          is_ext_shared: false,
+          num_members: 40,
+        },
+      ],
+      partial: true,
+    })
     const createSpy = vi.spyOn(api, "createWorkspace").mockResolvedValue({
       slug: "preview",
       name: "Preview",
@@ -361,8 +367,12 @@ describe("WorkspacesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save 1 repository" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-    // Core's channel is offered but not selectable; the free one is.
+    // Core's channel is offered but not selectable; the free one is. The
+    // directory came back partial, and the picker says so.
     const taken = await screen.findByRole("checkbox", { name: "#commits" })
+    expect(
+      screen.getByText(/only channels the bot is in are listed/)
+    ).toBeTruthy()
     expect(taken.hasAttribute("disabled")).toBe(true)
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-help" }))
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))

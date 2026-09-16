@@ -13,7 +13,7 @@ from agent.slack.allowed_bots import (
     allow_slack_bot,
     list_slack_bots,
 )
-from agent.slack.channel_options import SlackChannelOption, list_slack_channels
+from agent.slack.channel_options import SlackChannelDirectory, list_slack_channels
 from agent.slack.connect import router as connect_router
 
 router = APIRouter(tags=["slack"])
@@ -30,7 +30,7 @@ async def api_list_slack_bots(
 @router.get("/slack/channels")
 async def api_list_slack_channels(
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> list[SlackChannelOption]:
+) -> SlackChannelDirectory:
     """The channels a workspace can be bound to, for the picker on the Workspaces page."""
     return await list_slack_channels()
 

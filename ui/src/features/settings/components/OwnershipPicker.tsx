@@ -60,6 +60,8 @@ export interface OwnershipPickerProps {
   manual?: ManualEntry
   loading?: boolean
   loadError?: string | null
+  /** A caveat about the directory itself, shown above the rows. */
+  notice?: string | null
   disabled?: boolean
 }
 
@@ -95,6 +97,7 @@ export function OwnershipPicker({
   manual,
   loading = false,
   loadError = null,
+  notice = null,
   disabled = false,
 }: OwnershipPickerProps) {
   const [open, setOpen] = useState(false)
@@ -277,6 +280,11 @@ export function OwnershipPicker({
           )}
         </div>
         <div className="max-h-80 overflow-y-auto border-t border-border pb-2">
+          {notice && (
+            <p className="flex items-center gap-1 px-3 pt-3 text-xs text-muted-foreground">
+              <WarningIcon size={12} /> {notice}
+            </p>
+          )}
           {loading && (
             <p className="px-3 py-3 text-xs text-muted-foreground">Loading…</p>
           )}

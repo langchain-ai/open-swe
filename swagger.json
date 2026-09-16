@@ -1565,6 +1565,27 @@
         "title": "SlackBotOption",
         "type": "object"
       },
+      "SlackChannelDirectory": {
+        "properties": {
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/SlackChannelOption"
+            },
+            "title": "Channels",
+            "type": "array"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "channels"
+        ],
+        "title": "SlackChannelDirectory",
+        "type": "object"
+      },
       "SlackChannelOption": {
         "properties": {
           "id": {
@@ -8241,11 +8262,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/SlackChannelOption"
-                  },
-                  "title": "Response Api List Slack Channels Dashboard Api Slack Channels Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/SlackChannelDirectory"
                 }
               }
             },

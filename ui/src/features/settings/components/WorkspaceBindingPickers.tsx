@@ -7,7 +7,11 @@ import {
   LockSimpleIcon,
 } from "@phosphor-icons/react"
 
-import { api, type SlackChannelOption, type WorkspaceOption } from "@/lib/api"
+import {
+  api,
+  type SlackChannelDirectory,
+  type WorkspaceOption,
+} from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import {
   OwnershipPicker,
@@ -29,10 +33,10 @@ export function useSlackChannelDirectory(enabled: boolean) {
 
 /** `#name` for a channel the directory knows, else the id as stored. */
 export function slackChannelLabel(
-  directory: Array<SlackChannelOption> | undefined,
+  directory: SlackChannelDirectory | undefined,
   id: string
 ): string {
-  const channel = directory?.find((entry) => entry.id === id)
+  const channel = directory?.channels.find((entry) => entry.id === id)
   return channel ? `#${channel.name}` : id
 }
 
@@ -137,7 +141,7 @@ export function SlackChannelPicker({
   )
   const items = useMemo<Array<PickerItem>>(
     () =>
-      (directory.data ?? []).map((channel) => ({
+      (directory.data?.channels ?? []).map((channel) => ({
         id: channel.id,
         label: `#${channel.name}`,
         meta: [
@@ -194,7 +198,16 @@ export function SlackChannelPicker({
       loading={directory.isLoading}
       loadError={
         directory.isError
-          ? "Could not load channels from Slack; add them by ID."
+          ? `Could not load channels from Slack${
+              directory.error instanceof Error
+                ? ` (${directory.error.message})`
+                : ""
+            }; add them by ID.`
+          : null
+      }
+      notice={
+        directory.data?.partial
+          ? "Slack is rate limiting the full directory, so only channels the bot is in are listed. Add others by ID."
           : null
       }
       disabled={disabled}
