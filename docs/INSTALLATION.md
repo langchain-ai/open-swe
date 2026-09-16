@@ -145,8 +145,8 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
             {
                 "command": "/oswe",
                 "url": "https://<your-url>/webhooks/slack/commands",
-                "description": "Ask Open SWE a single question",
-                "usage_hint": "how does thread routing work?",
+                "description": "Ask Open SWE",
+                "usage_hint": "[your request or question]",
                 "should_escape": false
             }
         ]

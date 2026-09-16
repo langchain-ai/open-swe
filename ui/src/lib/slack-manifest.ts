@@ -61,8 +61,8 @@ export function slackAppManifest(
       {
         command: ASK_COMMAND,
         url: `${backendUrl}/webhooks/slack/commands`,
-        description: "Ask Open SWE a single question",
-        usage_hint: "how does thread routing work?",
+        description: "Ask Open SWE",
+        usage_hint: "[your request or question]",
         should_escape: false,
       },
     ],
