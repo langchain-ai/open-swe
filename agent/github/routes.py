@@ -48,7 +48,9 @@ async def github_webhook(
         "name": webhook_repo.get("name", ""),
     }
 
-    if event_type in EXPEDITED_REVIEW_EVENTS:
+    # Ahead of the per-event branches below, several of which return early, but
+    # still behind the repository allowlist those branches are gated on.
+    if event_type in EXPEDITED_REVIEW_EVENTS and common.is_repo_allowed(webhook_repo_config):
         background_tasks.add_task(service.process_expedited_review_event, payload, event_type)
 
     issue = payload.get("issue", {})

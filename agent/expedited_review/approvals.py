@@ -139,6 +139,19 @@ class ExpeditedApproval(Base):
             )
 
     @classmethod
+    async def all_for_repo(cls, owner: str, repo: str) -> list[Self]:
+        """Every approval a repository has ever had, oldest first."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(Repository.key == f"{owner}/{repo}".lower())
+                .order_by(cls.created_at, cls.id)
+            )
+            return list(rows)
+
+    @classmethod
     async def active_in_repo(cls, owner: str, repo: str) -> list[Self]:
         async with postgres.session() as session:
             rows = await session.scalars(
