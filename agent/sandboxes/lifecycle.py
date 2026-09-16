@@ -321,6 +321,16 @@ async def _connect_existing_sandbox(
     pings the box first: refreshing the proxy below has to reach it anyway, and
     raises the same unreachable error when it cannot.
     """
+    # The cache is per-process; a reset or recreate on another worker moves the
+    # thread without invalidating this copy, and the id in thread metadata wins.
+    if cached is not None and sandbox_id is not None and cached.id != sandbox_id:
+        logger.warning(
+            "Cached sandbox %s for thread %s is stale; metadata binds %s",
+            cached.id,
+            thread_id,
+            sandbox_id,
+        )
+        cached = None
     if cached is not None:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
         sandbox_backend = cached

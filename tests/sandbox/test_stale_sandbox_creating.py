@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.sandboxes.state import get_or_create_sandbox_backend_proxy
+from agent.sandboxes.state import get_or_create_sandbox_backend_proxy, set_sandbox_backend
 
 
 @pytest.mark.asyncio
@@ -138,5 +138,56 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
     assert proxy.current is existing_backend
     connect_sandbox.assert_awaited_once_with("sandbox-existing")
     assert refresh_proxy.await_count == 1
+    update_thread.assert_not_awaited()
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+async def test_ensure_sandbox_drops_cached_backend_that_disagrees_with_metadata() -> None:
+    """A reset on another worker rebinds the thread; this worker's cache is stale."""
+    thread_id = "thread-stale-cache"
+    SANDBOX_BACKENDS.clear()
+    stale_backend = MagicMock()
+    stale_backend.id = "sandbox-old"
+    proxy = set_sandbox_backend(thread_id, stale_backend)
+    new_backend = MagicMock()
+    new_backend.id = "sandbox-new"
+
+    async def passthrough(
+        sandbox_backend,
+        _thread_id,
+        _github_proxy_token=None,
+        _github_proxy_repositories=None,
+        _base_proxy_config=None,
+    ):
+        return sandbox_backend
+
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            new_callable=AsyncMock,
+            return_value="sandbox-new",
+        ),
+        patch(
+            "agent.sandboxes.lifecycle.create_sandbox",
+            new_callable=AsyncMock,
+            return_value=new_backend,
+        ) as connect_sandbox,
+        patch(
+            "agent.sandboxes.lifecycle._refresh_github_proxy_or_fail",
+            new_callable=AsyncMock,
+            side_effect=passthrough,
+        ),
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch(
+            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+        ) as update_thread,
+    ):
+        result = await ensure_sandbox_for_thread(thread_id)
+
+    assert result is proxy
+    assert proxy.current is new_backend
+    connect_sandbox.assert_awaited_once_with("sandbox-new")
+    # The stale cached id must never be written back over the metadata binding.
     update_thread.assert_not_awaited()
     SANDBOX_BACKENDS.clear()
