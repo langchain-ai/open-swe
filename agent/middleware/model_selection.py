@@ -16,6 +16,7 @@ from agent.prompts import load_prompt, render_prompt
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "balanced", "performance"]
+PersistedRoute = Route | Literal["fast_alt"]
 RoutingMode = Literal["auto", "performance"]
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
@@ -51,7 +52,7 @@ class RouteDecision(BaseModel):
 
 
 class ModelSelectionState(AgentState):
-    model_route: NotRequired[Route]
+    model_route: NotRequired[PersistedRoute]
     plan_mode: NotRequired[bool]
 
 
@@ -107,7 +108,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         if state.get("plan_mode") if plan_mode is None else plan_mode:
             return "performance"
         if model_route := state.get("model_route"):
-            return model_route
+            return "fast" if model_route == "fast_alt" else model_route
         if self._routing_mode == "performance":
             return "performance"
         messages = state.get("messages", [])
@@ -150,11 +151,13 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        route = (
+        route: PersistedRoute = (
             "performance"
             if request.state.get("plan_mode")
             else request.state.get("model_route", "balanced")
         )
+        if route == "fast_alt":
+            route = "fast"
         model = self._models.get(route) or self._models.get("balanced")
         if model is None:
             model = self._models["balanced"]
