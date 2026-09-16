@@ -45,6 +45,7 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
     create.assert_awaited_once_with(
         thread_id=thread_id,
         workspace_slug=None,
+        source="workspace",
     )
     configure.assert_awaited_once_with(new_sandbox)
     update.assert_awaited_once_with(
@@ -81,8 +82,31 @@ async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
         )
 
     assert result == ("sandbox-old", "sandbox-new")
-    create.assert_awaited_once_with(thread_id=thread_id, workspace_slug=None)
+    create.assert_awaited_once_with(
+        thread_id=thread_id, workspace_slug="langchainplus", source="base"
+    )
     SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+async def test_base_source_skips_workspace_lookup_entirely() -> None:
+    """An absent slug still resolves the `default` workspace, so base must not rely on it."""
+    from agent.sandboxes.lifecycle import SandboxCreateConfig
+
+    with (
+        patch("agent.sandboxes.lifecycle.load_workspace", new_callable=AsyncMock) as load_workspace,
+        patch(
+            "agent.sandboxes.lifecycle.get_admin_base_snapshot_id",
+            new_callable=AsyncMock,
+            return_value="snapshot-base",
+        ),
+    ):
+        config = await SandboxCreateConfig.resolve("langchainplus", source="base")
+
+    load_workspace.assert_not_awaited()
+    assert config.snapshot_id == "snapshot-base"
+    assert config.workspace is None
+    assert config.create_params == {}
 
 
 @pytest.mark.asyncio

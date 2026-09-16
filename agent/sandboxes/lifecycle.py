@@ -58,6 +58,9 @@ async def _resolve_proxy_token(
     return token, expires_at, None
 
 
+SandboxSource = Literal["workspace", "base"]
+
+
 @dataclass(frozen=True, slots=True)
 class SandboxCreateConfig:
     """What a new sandbox boots from: snapshot, VM sizing, provider create params."""
@@ -68,8 +71,15 @@ class SandboxCreateConfig:
     workspace: Workspace | None = None
 
     @classmethod
-    async def resolve(cls, workspace_slug: str | None = None) -> SandboxCreateConfig:
-        workspace = await load_workspace(workspace_slug)
+    async def resolve(
+        cls,
+        workspace_slug: str | None = None,
+        *,
+        source: SandboxSource = "workspace",
+    ) -> SandboxCreateConfig:
+        # An absent slug is not "no workspace": load_workspace falls back to the
+        # `default` workspace, so "base" has to skip the lookup outright.
+        workspace = None if source == "base" else await load_workspace(workspace_slug)
         if workspace is None:
             return cls(snapshot_id=await get_admin_base_snapshot_id())
         return cls(
@@ -145,10 +155,11 @@ async def _create_sandbox_with_proxy(
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     workspace_slug: str | None = None,
+    source: SandboxSource = "workspace",
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
-        config = await SandboxCreateConfig.resolve(workspace_slug)
+        config = await SandboxCreateConfig.resolve(workspace_slug, source=source)
     async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
         sandbox_backend = await config.boot()
 
@@ -464,9 +475,6 @@ async def ensure_sandbox_for_thread(
     return set_sandbox_backend(thread_id, sandbox_backend)
 
 
-SandboxSource = Literal["workspace", "base"]
-
-
 async def recreate_sandbox_for_thread(
     thread_id: str,
     *,
@@ -486,7 +494,8 @@ async def recreate_sandbox_for_thread(
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
-        workspace_slug=None if source == "base" else workspace_slug,
+        workspace_slug=workspace_slug,
+        source=source,
     )
     if new_sandbox.id == old_sandbox_id:
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")
