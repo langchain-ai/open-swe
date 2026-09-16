@@ -176,6 +176,26 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert copied[0]["additional_kwargs"]["x"] == 1
 
 
+async def test_continue_privately_carries_new_workspace_key(private_thread):
+    thread, client = private_thread
+    thread["metadata"] = {"source": "slack", "workspace": "oss"}
+    client.threads.get_state.return_value = {"values": {"messages": []}}
+    await handlers.continue_thread_privately("private-thread", "bob")
+    metadata = client.threads.create.call_args.kwargs["metadata"]
+    assert metadata["workspace"] == "oss"
+    assert "environment" not in metadata
+
+
+async def test_continue_privately_falls_back_to_legacy_environment_key(private_thread):
+    thread, client = private_thread
+    thread["metadata"] = {"source": "slack", "environment": "old"}
+    client.threads.get_state.return_value = {"values": {"messages": []}}
+    await handlers.continue_thread_privately("private-thread", "bob")
+    metadata = client.threads.create.call_args.kwargs["metadata"]
+    assert metadata["workspace"] == "old"
+    assert "environment" not in metadata
+
+
 async def test_continue_privately_rolls_back_when_copy_fails(private_thread):
     thread, client = private_thread
     thread["metadata"]["visibility"] = "public"

@@ -93,6 +93,20 @@ async def transaction() -> AsyncIterator[AsyncConnection]:
 
 
 @asynccontextmanager
+async def read_only_transaction() -> AsyncIterator[AsyncConnection]:
+    async with engine().connect() as conn:
+        transaction = await conn.begin()
+        try:
+            await conn.execute(text("SET TRANSACTION READ ONLY"))
+            await conn.execute(text(f"SET LOCAL search_path TO {SCHEMA}, public"))
+            yield conn
+        finally:
+            if transaction.is_active:
+                await transaction.rollback()
+            await conn.invalidate()
+
+
+@asynccontextmanager
 async def session() -> AsyncIterator[AsyncSession]:
     """An ORM session joined to one ``transaction()``, flushed before it commits."""
     async with transaction() as conn:

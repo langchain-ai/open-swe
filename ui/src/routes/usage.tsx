@@ -4,7 +4,6 @@ import { useState } from "react"
 
 import type {
   AnalyticsMetadata,
-  ModelOption,
   PRMergeRateCohort,
   ReviewerStatsPayload,
   UsageLeaderboardPeriod,
@@ -24,7 +23,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
-import { useOptions } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
@@ -45,15 +43,14 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
 
 function UsagePage() {
   const session = useSession()
-  const options = useOptions()
   const period =
-    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
+    (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "30d"
   const navigate = Route.useNavigate()
   const activePeriod: UsageLeaderboardPeriod = ["7d", "30d", "all"].includes(
     period
   )
     ? period
-    : "7d"
+    : "30d"
 
   if (session.isLoading) {
     return (
@@ -70,7 +67,6 @@ function UsagePage() {
         period={activePeriod}
         login={session.data.login}
         isAdmin={session.data.is_admin}
-        models={options.data?.models ?? []}
         onPeriodChange={(value) =>
           navigate({ to: "/usage", search: { period: value } })
         }
@@ -83,13 +79,11 @@ export function UsageAnalytics({
   period: activePeriod,
   login,
   isAdmin,
-  models = [],
   onPeriodChange,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
-  models?: Array<ModelOption>
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
@@ -100,7 +94,6 @@ export function UsageAnalytics({
       period={activePeriod}
       login={login}
       isAdmin={isAdmin}
-      models={models}
       pageSize={leaderboardPageSize}
       onPageSizeChange={setLeaderboardPageSize}
       onPeriodChange={onPeriodChange}
@@ -112,7 +105,6 @@ function UsageAnalyticsPeriod({
   period: activePeriod,
   login,
   isAdmin,
-  models,
   pageSize: leaderboardPageSize,
   onPageSizeChange: setLeaderboardPageSize,
   onPeriodChange,
@@ -120,7 +112,6 @@ function UsageAnalyticsPeriod({
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
-  models: Array<ModelOption>
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
@@ -159,7 +150,7 @@ function UsageAnalyticsPeriod({
   return (
     <>
       <AnalyticsCoverage reports={metadata} />
-      <PRMergeRateSection report={report} models={models} />
+      <PRMergeRateSection report={report} />
 
       <SettingsSection
         title="Agent leaderboard"
@@ -213,7 +204,6 @@ function UsageAnalyticsPeriod({
           </div>
         ) : (
           <UsageTable
-            models={models}
             currentUserRank={leaderboard.data.current_user_rank}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
@@ -321,10 +311,8 @@ function usePRMergeRateReport(
 
 function PRMergeRateSection({
   report,
-  models,
 }: {
   report: ReturnType<typeof usePRMergeRateReport>
-  models: Array<ModelOption>
 }) {
   const data = report.isError ? undefined : report.data
   const emptyMessage =
@@ -364,11 +352,7 @@ function PRMergeRateSection({
           </button>
         </div>
       ) : data?.status === "ready" ? (
-        <PRMergeRateTable
-          key={data.period}
-          cohorts={data.cohorts}
-          models={models}
-        />
+        <PRMergeRateTable key={data.period} cohorts={data.cohorts} />
       ) : (
         <p
           className="p-6 text-center text-xs text-muted-foreground"
@@ -426,13 +410,7 @@ function PRMergeRateSection({
   )
 }
 
-function PRMergeRateTable({
-  cohorts,
-  models,
-}: {
-  cohorts: PRMergeRateCohort[]
-  models: Array<ModelOption>
-}) {
+function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const pageCount = Math.max(1, Math.ceil(cohorts.length / pageSize))
@@ -463,7 +441,7 @@ function PRMergeRateTable({
             <tr key={`${cohort.model_id}-${cohort.model_attribution_quality}`}>
               <td className="px-4 py-3">
                 <div className="font-medium">
-                  {formatModelName(models, cohort.model_id)}
+                  {cohort.model_id ?? "Unavailable"}
                 </div>
                 <div className="text-muted-foreground">
                   {cohort.model_attribution_quality} attribution
@@ -510,7 +488,6 @@ function PRMergeRateTable({
 }
 
 function UsageTable({
-  models,
   currentUserRank,
   rows,
   totalMembers,
@@ -519,7 +496,6 @@ function UsageTable({
   onPageChange,
   onPageSizeChange,
 }: {
-  models: Array<ModelOption>
   currentUserRank: number | null
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
@@ -560,7 +536,7 @@ function UsageTable({
                 />
               </td>
               <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
-                {formatModelName(models, row.favorite_model)}
+                {row.favorite_model}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.invocations)}
@@ -614,8 +590,6 @@ function TablePagination({
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
-  if (total <= 10) return null
-
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const start = total ? (page - 1) * pageSize + 1 : 0
   const end = Math.min(page * pageSize, total)
@@ -814,27 +788,6 @@ function UserCell({
       </div>
     </div>
   )
-}
-
-function githubProfileUrl(login: string | null): string | null {
-  if (!login) return null
-  return `https://github.com/${encodeURIComponent(login)}`
-}
-
-function formatModelName(
-  models: Array<ModelOption>,
-  modelId: string | null
-): string {
-  if (!modelId) return "Unavailable"
-  return (
-    models.find((model) => model.id === modelId)?.label ??
-    stripProvider(modelId)
-  )
-}
-
-function stripProvider(modelId: string): string {
-  const separator = modelId.indexOf(":")
-  return separator >= 0 ? modelId.slice(separator + 1) : modelId
 }
 
 function initialsFor(name: string): string {

@@ -11,14 +11,14 @@ _TOOL_MODULES = {
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "create_sandbox_service_url": ".create_sandbox_service_url",
     "delete_automation": ".automations",
-    "delete_environment": ".environments",
+    "delete_workspace": ".workspaces",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
     "http_request": ".http_request",
     "list_automations": ".automations",
-    "list_environments": ".environments",
+    "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
     "list_threads": ".threads",
@@ -31,16 +31,17 @@ _TOOL_MODULES = {
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
+    "read_only_sql": ".read_only_sql",
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
-    "refresh_environment_start": ".environments",
+    "refresh_workspace_start": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
-    "publish_environment": ".environments",
+    "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
     "sandbox_reset": ".sandbox_reset",
@@ -71,14 +72,14 @@ __all__ = [
     "create_sandbox_file_download_url",
     "create_sandbox_service_url",
     "delete_automation",
-    "delete_environment",
+    "delete_workspace",
     "enter_plan_mode",
     "fetch_review_diff",
     "fetch_url",
     "get_thread",
     "http_request",
     "list_automations",
-    "list_environments",
+    "list_workspaces",
     "list_findings",
     "list_review_findings",
     "list_threads",
@@ -91,15 +92,16 @@ __all__ = [
     "open_pull_request",
     "output_iframe",
     "publish_review",
+    "read_only_sql",
     "read_repo_file",
     "read_user_settings",
     "recreate_sandbox",
-    "refresh_environment_start",
+    "refresh_workspace_start",
     "report_platform_issue",
     "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
-    "publish_environment",
+    "publish_workspace",
     "save_organization_skill",
     "delete_organization_skill",
     "save_plan",
@@ -148,12 +150,6 @@ if TYPE_CHECKING:
     from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from agent.tools.create_sandbox_service_url import create_sandbox_service_url
     from agent.tools.enter_plan_mode import enter_plan_mode
-    from agent.tools.environments import (
-        delete_environment,
-        list_environments,
-        publish_environment,
-        refresh_environment_start,
-    )
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url
     from agent.tools.http_request import http_request
@@ -166,6 +162,7 @@ if TYPE_CHECKING:
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
     from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
+    from agent.tools.read_only_sql import read_only_sql
     from agent.tools.read_user_settings import read_user_settings
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
@@ -180,6 +177,12 @@ if TYPE_CHECKING:
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill
     from agent.tools.web_search import web_search
+    from agent.tools.workspaces import (
+        delete_workspace,
+        list_workspaces,
+        publish_workspace,
+        refresh_workspace_start,
+    )
 
 
 def _load_export(name: str) -> Any:

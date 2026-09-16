@@ -1618,6 +1618,13 @@ if (!hasSingleInstanceLock) {
     configureDesktopIpc();
     createMenu();
     createWindow();
+    // Otherwise the first local thread opened after launch waits behind the
+    // backend's boot, showing a blank page for seconds.
+    if (localThreadStore.list().length) {
+      backendSupervisor.start().catch((error) => {
+        console.warn("Could not start the local backend ahead of use", error);
+      });
+    }
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,

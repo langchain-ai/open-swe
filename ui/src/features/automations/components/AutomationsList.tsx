@@ -261,7 +261,11 @@ function AutomationRow({
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
             <span className="flex items-center gap-1">
               <ClockIcon className="size-3.5" />
-              {describeCron(schedule.schedule)}
+              {schedule.trigger === "github_issue_opened"
+                ? "GitHub issue opened"
+                : schedule.schedule
+                  ? describeCron(schedule.schedule)
+                  : "No trigger"}
             </span>
             {schedule.repo && <span>{schedule.repo}</span>}
             {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}

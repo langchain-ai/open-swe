@@ -148,12 +148,17 @@ def normalize_profile_subagent_overrides(
 async def resolve_agent_model_id(
     github_login: str | None,
     per_thread_model_id: str | None = None,
+    workspace: str | None = None,
 ) -> str:
     """Resolve the agent model ID using the same precedence as ``get_agent``.
 
     Order: per-thread override → profile override → team default.
+
+    ``workspace`` is the workspace the run will land in, whose team default
+    applies; omitting it reads ``default``'s, which is only right for a run
+    that lands there.
     """
-    model_id, _effort = await get_team_default_model("agent")
+    model_id, _effort = await get_team_default_model("agent", workspace)
     if github_login:
         profile = await load_profile(github_login)
         if profile:
