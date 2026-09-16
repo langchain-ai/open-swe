@@ -202,6 +202,24 @@ def dispatch_client() -> LangGraphClient:
     return get_client(url=_langgraph_url())
 
 
+def _slack_conversation_type(source: str, config: LangGraphRunConfig | None) -> str | None:
+    if source != "slack" or not isinstance(config, dict):
+        return None
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return None
+    slack_thread = configurable.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return None
+    channel_context = slack_thread.get("channel_context")
+    if not isinstance(channel_context, dict):
+        return None
+    is_im = channel_context.get("is_im")
+    if not isinstance(is_im, bool):
+        return None
+    return "dm" if is_im else "channel"
+
+
 def prepare_run_config(
     config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
@@ -240,7 +258,11 @@ async def create_durable_run(
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
-    run_config = prepare_run_config(config, metadata)
+    run_metadata = dict(metadata or {})
+    conversation_type = _slack_conversation_type(source, config)
+    if conversation_type is not None:
+        run_metadata["slack_conversation_type"] = conversation_type
+    run_config = prepare_run_config(config, run_metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
         "config": run_config,
