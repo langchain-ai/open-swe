@@ -318,9 +318,10 @@ def _normalize_checks(
     return failing, pending, inconclusive
 
 
-async def _fetch_unresolved_review_threads(
+async def fetch_unresolved_review_threads(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> list[dict[str, Any]] | None:
+    """Unresolved review threads on a PR, or ``None`` when GitHub could not answer."""
     unresolved: list[dict[str, Any]] = []
     cursor: str | None = None
     seen_cursors: set[str] = set()
@@ -457,7 +458,7 @@ async def _pull_request_status(client: httpx2.AsyncClient, record: object) -> di
     )
     pull, review_threads = await asyncio.gather(
         _fetch_pull_request(client, owner, repo, number),
-        _fetch_unresolved_review_threads(client, owner, repo, number),
+        fetch_unresolved_review_threads(client, owner, repo, number),
     )
     if review_threads is not None:
         result.update(

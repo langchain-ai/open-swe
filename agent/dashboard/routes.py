@@ -13,7 +13,6 @@ from agent.dashboard.team_settings import router as team_settings_router
 from agent.dashboard.user_instructions import router as user_instructions_router
 from agent.dashboard.user_mappings import router as user_mappings_router
 from agent.dashboard.user_preferences import router as user_preferences_router
-from agent.environments.routes import router as environments_router
 from agent.github.dashboard_routes import router as repos_router
 from agent.github.pull_request_dashboard_routes import router as pull_requests_router
 from agent.incidents.document_routes import router as incident_documents_router
@@ -24,6 +23,7 @@ from agent.schedules.routes import router as schedules_router
 from agent.skill_store.routes import router as skills_router
 from agent.slack.dashboard_routes import router as slack_router
 from agent.threads.routes import router as threads_router
+from agent.workspaces.routes import router as workspaces_router
 
 router = APIRouter(
     prefix="/dashboard/api",
@@ -42,7 +42,7 @@ router.include_router(notion_router)
 router.include_router(slack_router)
 router.include_router(team_settings_router)
 router.include_router(mcp_router)
-router.include_router(environments_router)
+router.include_router(workspaces_router)
 router.include_router(repos_router)
 router.include_router(pull_requests_router)
 router.include_router(review_router)

@@ -25,6 +25,7 @@ from e2e_env import (
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
+EPHEMERALS: list[dict[str, Any]] = []
 CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
 _code_channel_seq = [0]
@@ -61,6 +62,14 @@ def add_slack_message(
             "is_bot": is_bot,
         }
     )
+    return ts
+
+
+def add_ephemeral(channel: str, user: str, text: str) -> str:
+    """Record an ephemeral reply. Open SWE tells a single clicker things this way
+    (why a vote was refused, for one), so a test has to be able to read them."""
+    ts = next_slack_ts()
+    EPHEMERALS.append({"channel": channel, "user": user, "text": text, "ts": ts})
     return ts
 
 
@@ -206,9 +215,25 @@ def _diff_files(owner: str, repo: str, base: str, head: str) -> list[dict[str, A
                     "filename": name,
                     "additions": int(adds) if adds.isdigit() else 0,
                     "deletions": int(dels) if dels.isdigit() else 0,
+                    "patch": _file_patch(remote, base, head, name),
                 }
             )
     return files
+
+
+def _file_patch(remote: Path, base: str, head: str, filename: str) -> str | None:
+    """One file's unified diff, hunks only, as GitHub's ``patch`` field carries it.
+
+    ``None`` for a blob git produced no textual hunks for (a binary file), which
+    is how the real API reports one — and what callers key "no readable diff" on.
+    """
+    try:
+        out = _git("--git-dir", str(remote), "diff", base, head, "--", filename)
+    except subprocess.CalledProcessError:
+        return None
+    lines = out.splitlines()
+    start = next((index for index, line in enumerate(lines) if line.startswith("@@")), None)
+    return "\n".join(lines[start:]) if start is not None else None
 
 
 def branch_exists(owner: str, repo: str, branch: str) -> bool:
@@ -453,7 +478,7 @@ def repo_private() -> bool:
 
 
 # --- LangSmith snapshots ---------------------------------------------------
-# Captures the environment tools asked for: {"snapshot_id", "name", "sandbox_id"}.
+# Captures the workspace tools asked for: {"snapshot_id", "name", "sandbox_id"}.
 # The E2E sandbox is the local provider, so there is no real snapshot service —
 # this store stands in for it and is what the specs assert on.
 SNAPSHOTS: list[dict[str, Any]] = []
@@ -474,13 +499,100 @@ def record_snapshot_delete(snapshot_id: str) -> None:
     DELETED_SNAPSHOTS.append(snapshot_id)
 
 
+_review_seq = [0]
+
+# Repository permission per GitHub login, as ``/collaborators/{u}/permission``
+# reports it. Anyone absent reads as "read", which is what fails the vote gate.
+COLLABORATOR_PERMISSIONS: dict[str, str] = {}
+
+
+def collaborator_permission(login: str) -> str:
+    return COLLABORATOR_PERMISSIONS.get(login.lower(), "read")
+
+
+def set_collaborator_permission(login: str, permission: str) -> None:
+    COLLABORATOR_PERMISSIONS[login.lower()] = permission
+
+
+def submit_review(
+    number: int,
+    owner: str,
+    repo: str,
+    *,
+    author: str,
+    state: str,
+    commit_id: str,
+    body: str = "",
+) -> dict[str, Any] | None:
+    """Record a submitted PR review, as ``POST /pulls/{n}/reviews`` would.
+
+    GitHub rejects a self-approval, so an author approving their own pull
+    request is refused here too — that is exactly the case the expedited flow
+    has to survive without counting a GitHub review.
+    """
+    pull = find_pull(number, owner, repo)
+    if pull is None:
+        return None
+    if state == "APPROVE" and author == pull["author"]:
+        return {"_error": "Can not approve your own pull request"}
+    _review_seq[0] += 1
+    review = {
+        "id": _review_seq[0],
+        "author": author,
+        "user": {"login": author},
+        "state": "APPROVED" if state == "APPROVE" else state,
+        "body": body,
+        "commit_id": commit_id,
+        "url": f"https://github.com/{owner}/{repo}/pull/{number}#pullrequestreview-{_review_seq[0]}",
+        "submitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    pull["reviews"].append(review)
+    if any(item["state"] == "APPROVED" for item in pull["reviews"]):
+        pull["review_decision"] = "APPROVED"
+    return review
+
+
+def merge_pull(
+    number: int, owner: str, repo: str, *, sha: str, merge_method: str
+) -> tuple[int, dict[str, Any]]:
+    """Merge a pull request the way the REST endpoint does: ``(status, body)``.
+
+    ``sha`` is the caller's claim about the head it reviewed. GitHub answers 409
+    when that no longer matches, which is the guarantee the expedited merge
+    leans on, so the fake enforces it rather than merging whatever is current.
+    """
+    pull = find_pull(number, owner, repo)
+    if pull is None:
+        return 404, {"message": "Not Found"}
+    if pull["state"] != "open" or pull["merged"]:
+        return 405, {"message": "Pull request is not mergeable"}
+    if pull["draft"]:
+        return 405, {"message": "Draft pull requests cannot be merged"}
+    if sha and sha != pull["head_sha"]:
+        return 409, {"message": "Head branch was modified. Review and try the merge again."}
+    if not pull["mergeable"]:
+        return 405, {"message": "Pull request is not mergeable"}
+    pull["merged"] = True
+    pull["state"] = "closed"
+    pull["merged_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    pull["merge_method"] = merge_method
+    return 200, {
+        "sha": pull["head_sha"],
+        "merged": True,
+        "message": "Pull Request successfully merged",
+    }
+
+
 def reset() -> None:
     SLACK_MESSAGES.clear()
+    EPHEMERALS.clear()
     CODE_CHANNELS.clear()
     PULLS.clear()
     REPO_MERGE_METHODS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
+    COLLABORATOR_PERMISSIONS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
+    _review_seq[0] = 0
     seed_bare_remotes()

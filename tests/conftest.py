@@ -1,13 +1,17 @@
 """Shared pytest fixtures."""
 
+import hashlib
+import hmac
+import json
 import os
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 from uuid import uuid4
 
+import httpx
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -17,6 +21,7 @@ from agent.database import postgres
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
+from agent.workspaces.store import WORKSPACES
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 
@@ -93,6 +98,37 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     client = FakeStoreClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client.store
+
+
+async def post_signed_github_webhook(
+    event_type: str,
+    payload: Mapping[str, object],
+    *,
+    secret: str,
+    delivery_id: str | None = None,
+) -> httpx.Response:
+    """POST a signed GitHub webhook to the real app, on the test's own event loop.
+
+    An in-process ``httpx.AsyncClient`` rather than ``TestClient``: a
+    workspace-backed route reads ownership through ``registry_db``'s engine,
+    which is bound to the loop the test runs on, while ``TestClient`` drives the
+    request from a worker thread with an event loop of its own.
+    """
+    from agent.api.app import app
+
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    headers = {
+        "Content-Type": "application/json",
+        "X-GitHub-Event": event_type,
+        "X-Hub-Signature-256": f"sha256={signature}",
+    }
+    if delivery_id is not None:
+        headers["X-GitHub-Delivery"] = delivery_id
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await client.post("/webhooks/github", content=body, headers=headers)
 
 
 _TEST_POSTGRES_URI_SETTING = "TEST_ANALYTICS_POSTGRES_URI"
@@ -183,6 +219,19 @@ def _reset_ttl_cache() -> Iterator[None]:
     ttl_cache.clear()
     yield
     ttl_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _workspace_store_import_completed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Treat the startup import of LangGraph Store workspaces as done.
+
+    Tests do not run the application lifespan, and until that import succeeds
+    :func:`agent.workspaces.routing.repo_is_routable` fails closed rather than
+    reading an empty table as "nobody owns this repository". A test about that
+    path sets the flag back to ``False`` itself.
+    """
+    monkeypatch.setattr(WORKSPACES, "import_completed", True)
+    monkeypatch.setattr(WORKSPACES, "unimported_repos", frozenset())
 
 
 @pytest.fixture(autouse=True)

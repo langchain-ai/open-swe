@@ -59,3 +59,17 @@ async def test_launch_preserves_legacy_cost_payloads(
 
     assert result == {"result": {"status": "updated"}}
     handler.assert_awaited_once_with(expected)
+
+
+async def test_launch_runs_refresh_crons_registered_under_the_old_task_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tick = AsyncMock(return_value={"status": "refreshed"})
+    monkeypatch.setattr(scheduler, "run_workspace_refresh_tick", tick)
+
+    result = await scheduler._launch(
+        scheduler.SchedulerState(task="environment_refresh", environment_slug="base"), {}
+    )
+
+    assert result == {"result": {"status": "refreshed"}}
+    tick.assert_awaited_once_with("base", "full")

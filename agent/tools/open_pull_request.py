@@ -560,6 +560,7 @@ async def _record_pr_telemetry(
     base: str,
     pr: dict[str, Any],
     resolves_thread: bool = False,
+    record_opening: bool = True,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
@@ -602,13 +603,14 @@ async def _record_pr_telemetry(
             created_at=details.get("created_at") or pr.get("created_at"),
             merged_at=details.get("merged_at") or pr.get("merged_at"),
             invocation_id=cfg.invocation_id,
-            model_id=cfg.agent_model_id,
+            model_id=cfg.resolved_agent_model_id,
             source=cfg.source,
             repository_private=(
                 details.get("base", {}).get("repo", {}).get("private")
                 if isinstance(details.get("base"), dict)
                 else None
             ),
+            record_opening=record_opening,
         )
         if isinstance(thread_id, str) and thread_id:
             repo_private = None
@@ -938,6 +940,7 @@ async def _open_pull_request(
                     base=base,
                     pr=existing,
                     resolves_thread=resolves_thread,
+                    record_opening=False,
                 )
                 return {
                     "success": True,

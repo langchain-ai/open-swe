@@ -110,6 +110,16 @@ async def _find_pr_threads(
     )
 
 
+def _pr_thread_lock_key(login: str, url: str) -> str:
+    """One key for every dispatcher, because they all create-or-find the same thread.
+
+    Separate keys would let two of them read an empty lookup at once and dispatch
+    competing agents onto the same branch; the per-thread lock taken afterwards
+    cannot catch that, since by then the thread ids differ.
+    """
+    return f"pr-thread:{login}:{url}"
+
+
 async def _find_or_create_pr_thread(
     owner: str,
     repo: str,
@@ -184,7 +194,7 @@ async def open_pull_request_thread(
     await _ensure_dashboard_github_token(login)
     url = f"https://github.com/{full_name}/pull/{number}"
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(client, f"fix:{login}:{url}"):
+    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
             owner,
             repo,
@@ -214,7 +224,7 @@ async def address_pull_request_comments(
     url = f"https://github.com/{full_name}/pull/{number}"
     client = langgraph_client()
     prompt = render_prompt("runs/pull-request-comments.md", url=url)
-    async with agent_thread_pr_state_lock(client, f"comments:{login}:{url}"):
+    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
             owner,
             repo,
@@ -271,7 +281,7 @@ async def fix_pull_request(
             "runs/pull-request-fix-context.md",
             snapshot=context.model_dump_json(indent=2),
         )
-    async with agent_thread_pr_state_lock(client, f"fix:{login}:{url}"):
+    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
             owner,
             repo,

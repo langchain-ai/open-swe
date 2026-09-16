@@ -105,7 +105,33 @@ async def control_reset() -> JSONResponse:
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
+    await _reset_durable_pr_state()
     return JSONResponse({"ok": True})
+
+
+async def _reset_durable_pr_state() -> None:
+    """Drop the per-pull-request state that outlives the in-memory fakes.
+
+    ``fakes.reset()`` restarts pull request numbering at 1, so anything keyed by
+    ``(repo, number)`` from an earlier spec would be mistaken for this run's
+    pull request: a baby-sit watch would report "already monitored from another
+    agent thread", and a stale approval would block a fresh one.
+
+    ``repository`` stays: ``workspace_repository`` references it, so truncating
+    it cascades away the workspace assignments every routable-repo check needs.
+    """
+    from agent.baby_sit import WATCHES, stop_watch
+
+    for watch in await WATCHES.search_all():
+        await stop_watch(watch.key)
+
+    from sqlalchemy import text
+
+    from agent.database import postgres
+
+    if postgres.configured():
+        async with postgres.transaction() as connection:
+            await connection.execute(text("TRUNCATE expedited_approval, pull_request CASCADE"))
 
 
 @app.post("/control/prepare-sandbox-repo")
@@ -123,7 +149,7 @@ async def control_state() -> JSONResponse:
 
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
-    """Snapshot captures/deletes the environment tools asked the platform for."""
+    """Snapshot captures/deletes the workspace tools asked the platform for."""
     return JSONResponse({"captured": fakes.SNAPSHOTS, "deleted": fakes.DELETED_SNAPSHOTS})
 
 
@@ -219,6 +245,95 @@ async def control_seed_pull_request(request: Request) -> JSONResponse:
     )
 
 
+@app.post("/control/github-event")
+async def control_github_event(request: Request) -> JSONResponse:
+    """Deliver a signed GitHub webhook to the real ``/webhooks/github`` route.
+
+    The mirror of ``/mock/slack/action`` for the other side: CI and review
+    events arrive asynchronously in production, and the only faithful way to
+    test what Open SWE does about them is to make GitHub knock on the door.
+    """
+    body = await request.json()
+    event = str(body.get("event") or "")
+    payload = body.get("payload")
+    if not event or not isinstance(payload, dict):
+        raise HTTPException(400, "An event name and payload object are required")
+    response = await _deliver_github_event(event, payload, str(body.get("delivery") or ""))
+    return JSONResponse(
+        {"status_code": response.status_code, "body": response.json()},
+        status_code=response.status_code,
+    )
+
+
+@app.post("/control/collaborator-permission")
+async def control_collaborator_permission(request: Request) -> JSONResponse:
+    body = await request.json()
+    login = str(body.get("login") or "")
+    permission = str(body.get("permission") or "read")
+    if not login:
+        raise HTTPException(400, "A GitHub login is required")
+    fakes.set_collaborator_permission(login, permission)
+    return JSONResponse({"ok": True, "login": login, "permission": permission})
+
+
+@app.post("/control/team-settings")
+async def control_team_settings(request: Request) -> JSONResponse:
+    """Patch workspace settings, then drop the factory's TTL cache so the next
+    run sees them instead of a stale snapshot.
+
+    A patch, not a replace: the settings record is one store item shared by
+    every spec and it outlives the dev server, so writing a bare update would
+    reset unrelated fields — the default agent model included, which the
+    dashboard's first-run onboarding reads — for every spec that follows.
+    """
+    from agent.dashboard.team_settings import (
+        TeamSettingsUpdate,
+        get_team_settings,
+        upsert_team_settings,
+    )
+    from agent.utils import ttl_cache
+
+    body = await request.json()
+    current = await get_team_settings()
+    patched = {
+        key: body.get(key, current.get(key))
+        for key in TeamSettingsUpdate.model_fields
+        if key in body or key in current
+    }
+    settings = await upsert_team_settings(TeamSettingsUpdate.model_validate(patched))
+    ttl_cache.clear()
+    return JSONResponse({"ok": True, "settings": settings})
+
+
+@app.get("/control/expedited-approvals")
+async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> JSONResponse:
+    """Every expedited approval row for a repository, newest last."""
+    from agent.expedited_review.approvals import ExpeditedApproval
+
+    approvals = await ExpeditedApproval.all_for_repo(owner, repo)
+    return JSONResponse(
+        [
+            {
+                "id": str(approval.id),
+                "state": approval.state,
+                "detail": approval.detail,
+                "head_sha": approval.head_sha,
+                "pr_number": approval.pull_request.number,
+                "approvers": approval.approvers,
+                "votes": [
+                    {
+                        "github_login": vote.github_login,
+                        "decision": vote.decision,
+                        "github_review_id": vote.github_review_id,
+                    }
+                    for vote in approval.votes
+                ],
+            }
+            for approval in approvals
+        ]
+    )
+
+
 @app.get("/control/queued")
 async def control_queued(thread_id: str = "") -> JSONResponse:
     """Count the follow-ups parked on a busy thread's message queue.
@@ -243,16 +358,31 @@ _MAPPINGS_SEEDED = False
 
 
 async def _seed_test_user_mappings() -> None:
-    """Link each named test user's Slack id to their dashboard login, as the real
-    Slack-link flow would, so the webhook's account gate lets them through."""
+    """Give each named test user the records a signed-in person would have.
+
+    Two stores, because both are real: a ``users`` row with a GitHub and a Slack
+    identity (what the OAuth callback and the Slack link flow write), and the
+    legacy Slack-id → login mapping the webhook account gate still reads.
+    """
     global _MAPPINGS_SEEDED
     if _MAPPINGS_SEEDED:
         return
     from agent.dashboard.user_mappings import upsert_mapping
+    from agent.users import User
 
     for user in TEST_USERS:
         await upsert_mapping(
             github_login=user["login"], work_email=user["email"], slack_user_id=user["slack_id"]
+        )
+        signed_in = await User.sign_in(
+            "github",
+            user["github_id"],
+            login=user["login"],
+            email=user["email"],
+            display_name=user["name"],
+        )
+        await signed_in.link(
+            "slack", user["slack_id"], login=user["login"], email=user["email"], team_id="T_E2E"
         )
     _MAPPINGS_SEEDED = True
 
@@ -276,6 +406,23 @@ async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> 
     transport = httpx2.ASGITransport(app=app)
     async with httpx2.AsyncClient(transport=transport, base_url="http://harness") as client:
         return await client.post("/webhooks/slack", content=raw, headers=headers)
+
+
+async def _deliver_github_event(
+    event: str, payload: dict[str, Any], delivery: str = ""
+) -> httpx2.Response:
+    """POST a signed GitHub webhook delivery to the real /webhooks/github route."""
+    raw = json.dumps(payload).encode()
+    signature = hmac.new(GITHUB_WEBHOOK_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    headers = {
+        "Content-Type": "application/json",
+        "X-GitHub-Event": event,
+        "X-GitHub-Delivery": delivery or str(uuid.uuid7()),
+        "X-Hub-Signature-256": f"sha256={signature}",
+    }
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url="http://harness") as client:
+        return await client.post("/webhooks/github", content=raw, headers=headers)
 
 
 async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response:
@@ -637,6 +784,7 @@ async def mock_github_data() -> JSONResponse:
                 "author": p["author"],
                 "body": p["body"],
                 "files": p["files"],
+                "reviews": p["reviews"],
                 "created_at": p["created_at"],
                 "updated_at": p["updated_at"],
                 "url": _pr_html_url(p),
@@ -701,8 +849,17 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
             "login": pr["author"],
             "avatar_url": f"{BASE_URL}/logo-mark.png",
         },
+        "merged_at": pr.get("merged_at"),
         "head": {"ref": pr["head"], "sha": pr["head_sha"]},
-        "base": {"ref": pr["base"], "repo": {"private": fakes.repo_private()}},
+        "base": {
+            "ref": pr["base"],
+            "repo": {
+                "private": fakes.repo_private(),
+                "allow_squash_merge": True,
+                "allow_merge_commit": False,
+                "allow_rebase_merge": False,
+            },
+        },
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "changed_files": len(pr["files"]),
@@ -724,6 +881,14 @@ def _gh_search_item_json(pr: dict[str, Any]) -> dict[str, Any]:
         "created_at": pr["created_at"],
         "updated_at": pr["updated_at"],
     }
+
+
+def _token_login(request: Request) -> str:
+    """The login behind a per-user OAuth token, or ``""`` for the App token."""
+    authorization = request.headers.get("Authorization", "")
+    token = authorization.removeprefix("Bearer ").strip()
+    prefix = "dummy-user-oauth-token:"
+    return token.removeprefix(prefix) if token.startswith(prefix) else ""
 
 
 @app.get("/fake-gh/installation/repositories")
@@ -840,26 +1005,54 @@ async def gh_update_pull(owner: str, repo: str, number: int, request: Request) -
     return JSONResponse(_gh_pr_json(pr))
 
 
-@app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")
-async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/files")
+async def gh_list_pull_files(owner: str, repo: str, number: int) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    if not pr["mergeable"]:
-        return JSONResponse({"message": "Pull Request is not mergeable"}, status_code=405)
+    return JSONResponse(pr["files"])
+
+
+@app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
+async def gh_submit_pull_review(
+    owner: str, repo: str, number: int, request: Request
+) -> JSONResponse:
+    """Submit a review as the person whose token was used, as GitHub does."""
     body = await request.json()
-    sha = str(body.get("sha") or pr["head_sha"])
-    if sha != pr["head_sha"]:
-        return JSONResponse(
-            {"message": "Head branch was modified. Review and try the merge again."},
-            status_code=409,
-        )
-    fakes.update_pull_health(number, {"merged": True, "state": "closed"})
-    pr["merge_method"] = str(body.get("merge_method") or "")
-    pr["updated_at"] = fakes.github_timestamp()
-    return JSONResponse({"merged": True, "sha": sha, "message": "Pull Request successfully merged"})
+    author = _token_login(request)
+    if not author:
+        return JSONResponse({"message": "Resource not accessible by integration"}, status_code=403)
+    review = fakes.submit_review(
+        number,
+        owner,
+        repo,
+        author=author,
+        state=str(body.get("event") or "COMMENT"),
+        commit_id=str(body.get("commit_id") or ""),
+        body=str(body.get("body") or ""),
+    )
+    if review is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    if "_error" in review:
+        return JSONResponse({"message": review["_error"]}, status_code=422)
+    return JSONResponse(review, status_code=200)
 
 
+@app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")
+async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
+    body = await request.json()
+    status, payload = fakes.merge_pull(
+        number,
+        owner,
+        repo,
+        sha=str(body.get("sha") or ""),
+        merge_method=str(body.get("merge_method") or "merge"),
+    )
+    return JSONResponse(payload, status_code=status)
+
+
+# Seeded reviews carry only ``{author, state}``, so the list has to be
+# normalised: the dashboard's review-decision read needs a login and an id.
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
 async def gh_list_pull_reviews(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
@@ -869,6 +1062,13 @@ async def gh_list_pull_reviews(owner: str, repo: str, number: int, page: int = 1
         return JSONResponse([])
     return JSONResponse(
         [fakes.review_rest_json(review, index) for index, review in enumerate(pr["reviews"])]
+    )
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/collaborators/{username}/permission")
+async def gh_collaborator_permission(owner: str, repo: str, username: str) -> JSONResponse:  # noqa: ARG001
+    return JSONResponse(
+        {"permission": fakes.collaborator_permission(username), "user": {"login": username}}
     )
 
 
@@ -997,7 +1197,11 @@ async def slack_post_message(request: Request) -> JSONResponse:
         blocks=body.get("blocks"),
         is_bot=True,
     )
-    return _ok({"ts": ts, "message": {"ts": ts}})
+    message: dict[str, Any] = {"ts": ts}
+    thread_ts = body.get("thread_ts") or ""
+    if thread_ts:
+        message["thread_ts"] = thread_ts
+    return _ok({"ts": ts, "message": message})
 
 
 @app.post("/fake-slack/chat.update")
@@ -1016,8 +1220,16 @@ async def slack_update_message(request: Request) -> JSONResponse:
 
 @app.post("/fake-slack/chat.postEphemeral")
 async def slack_post_ephemeral(request: Request) -> JSONResponse:
-    await request.body()
-    return _ok({"message_ts": fakes.next_slack_ts()})
+    body = await request.json()
+    ts = fakes.add_ephemeral(
+        str(body.get("channel") or ""), str(body.get("user") or ""), str(body.get("text") or "")
+    )
+    return _ok({"message_ts": ts})
+
+
+@app.get("/mock/slack/ephemerals")
+async def mock_slack_ephemerals() -> JSONResponse:
+    return JSONResponse(fakes.EPHEMERALS)
 
 
 @app.post("/fake-slack/reactions.add")

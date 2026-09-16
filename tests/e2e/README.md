@@ -22,11 +22,14 @@ code runs for real.
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
 | `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
 | `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
-| Environment tools, store records, snapshot naming + status       | **real**                                                                   |
+| Workspace tools, store records, snapshot naming + status       | **real**                                                                   |
 | Electron UI, main process, IPC, git diff                         | **real**                                                                   |
 | Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                      |
 | LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the local sandbox has nothing to snapshot         |
-| GitHub App token mint, `api.github.com/user` identity            | stubbed (offline)                                                          |
+| GitHub App token mint + installation lookup, `api.github.com/user` identity | stubbed (offline)                                              |
+| GitHub webhook deliveries (CI, review, PR events)                | **real** route, driven by `POST /control/github-event` (signed)            |
+| Submitted PR reviews, conditional merge, collaborator permission  | **fake** (`/fake-gh/...`), enforcing self-approval and head-SHA rules      |
+| `users` rows + provider identities for the named test users      | **real** (seeded through `User.sign_in` / `link`)                          |
 
 The fake GitHub/Slack stores are the single source of truth the mock UIs render,
 so what Playwright asserts on is exactly what the real agent produced.
@@ -41,7 +44,9 @@ so what Playwright asserts on is exactly what the real agent produced.
   real `traced_agent`.
 - `harness.py` — langgraph `http.app`: the real `agent.webapp` plus the fake
   GitHub/Slack APIs, the mock UIs, and the control/compose endpoints.
-- `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote.
+- `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote. PR
+  files carry a real per-file `patch`, so eligibility checks that read the diff
+  see what GitHub would return.
 - `langgraph.e2e.json` — dev-server config pointing at the two entrypoints above.
 - `static/{slack,github}.html` — the mock Slack/GitHub UIs (external SaaS we can't
   run locally). The dashboard is **not** mocked — it's the real `ui/` app.

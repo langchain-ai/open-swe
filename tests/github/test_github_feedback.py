@@ -2,7 +2,7 @@ import json
 from typing import Any, cast
 
 import pytest
-from fastapi import BackgroundTasks, Request
+from fastapi import BackgroundTasks, Request, Response
 
 from agent.github import feedback as github_feedback
 from agent.github import routes as github_routes
@@ -178,9 +178,11 @@ async def test_github_webhook_ignores_reaction_event(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(webhook_common, "verify_github_signature", lambda *args, **kwargs: True)
 
-    response = await github_routes.github_webhook(
-        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    body = await github_routes.github_webhook(
+        cast(Request, _FakeRequest(payload)),
+        Response(),
+        cast(BackgroundTasks, background_tasks),
     )
 
-    assert response == {"status": "ignored", "reason": "Unsupported event type: reaction"}
+    assert body == {"status": "ignored", "reason": "Unsupported event type: reaction"}
     assert background_tasks.tasks == []
