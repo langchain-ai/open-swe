@@ -11,16 +11,18 @@ from agent.run_config import RunConfig
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     get_active_slack_thread,
+    post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.dm import is_dm_session
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
     slack_thread_detached,
 )
-from agent.slack.thinking import restore_slack_thinking_status
+from agent.slack.thinking import restore_slack_session_status, restore_slack_thinking_status
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -41,6 +43,8 @@ async def slack_thread_reply(
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
+    if cfg.slack_ask is True:
+        return await _ephemeral_reply(cfg, message, blocks, state)
     client = get_langgraph_client()
     active = await get_active_slack_thread(
         client,
@@ -95,7 +99,15 @@ async def slack_thread_reply(
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
-            should_ask_for_feedback=should_ask_for_feedback and not options,
+            # A DM session is a private back-and-forth, so it never asks for a rating.
+            should_ask_for_feedback=(
+                should_ask_for_feedback
+                and not options
+                and not is_dm_session(
+                    cfg.slack_thread.channel_context if cfg.slack_thread else None,
+                    str(thread_ts),
+                )
+            ),
         )
     if message_ts is None:
         if slack_error == "thread_not_found":
@@ -110,8 +122,43 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    if run_id and not is_code_channel_session(str(thread_ts)):
-        await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+    if run_id:
+        # Slack drops the status when the app posts; a session keeps its on
+        # whichever message currently holds it rather than on the session itself.
+        if is_code_channel_session(str(thread_ts)):
+            await restore_slack_session_status(client, str(channel_id), str(thread_ts))
+        else:
+            await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+    return {"success": True}
+
+
+async def _ephemeral_reply(
+    cfg: RunConfig,
+    message: str,
+    blocks: list[dict[str, Any]] | None,
+    state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    slack_thread = cfg.slack_thread
+    channel_id = slack_thread.channel_id if slack_thread else ""
+    user_id = slack_thread.triggering_user_id if slack_thread else ""
+    if not channel_id or not user_id:
+        return {"success": False, "error": "Missing the Slack channel or user to answer"}
+    if not message.strip():
+        return {"success": False, "error": "Message cannot be empty"}
+    posted = await post_slack_ephemeral_reply(
+        channel_id,
+        user_id,
+        convert_mentions_to_slack_format(message),
+        blocks=blocks,
+        usage=summarize_run_usage(state),
+        agent_thread_id=cfg.thread_id,
+    )
+    if not posted:
+        return {
+            "success": False,
+            "error": "post failed",
+            "hint": "The ephemeral answer could not be delivered. Retry once, then stop.",
+        }
     return {"success": True}
 
 

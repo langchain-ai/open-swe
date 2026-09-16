@@ -339,6 +339,21 @@ function CloudAgentsPage() {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="Slack">
+        <div className="divide-y divide-border">
+          <SettingsRow
+            label="Keep my DM as one conversation"
+            description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread for every message."
+            control={
+              <Switch
+                checked={profile.data?.dm_session_enabled ?? false}
+                onCheckedChange={(v) => persist({ dm_session_enabled: v })}
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="Rules">
         <SettingsNavRow
           to="/agents/instructions"
