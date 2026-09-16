@@ -134,6 +134,115 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   client.clear()
 })
 
+it("shows plain-language PR outcomes while keeping cohort details available", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    status: "ready",
+    cohorts: [
+      {
+        model_id: "example-model",
+        model_attribution_quality: "configured",
+        merged: 3,
+        closed_without_merge: 1,
+        mature_pending: 1,
+        waiting: 2,
+        cohort_size: 7,
+        decided_denominator: 4,
+        decided_merge_rate: 0.75,
+        mature_denominator: 5,
+        mature_cohort_merge_share: 0.6,
+      },
+    ],
+  })
+  const client = mountReport()
+  const row = (await screen.findByText("example-model")).closest("tr")!
+  expect(
+    within(row)
+      .getAllByRole("cell")
+      .map((cell) => cell.textContent)
+  ).toEqual(["example-modelconfigured attribution", "7", "3", "1", "3", "60%"])
+
+  const table = row.closest("table")!
+  expect(
+    within(table)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent)
+  ).toEqual([
+    "Opening model",
+    "PRs opened",
+    "Merged",
+    "Closed without merge",
+    "Open",
+    "Merge rate",
+  ])
+
+  const mergeRate = within(table).getByText("Merge rate")
+  act(() => mergeRate.focus())
+  expect(
+    await screen.findByText(
+      /Includes PRs old enough to have a meaningful outcome/
+    )
+  ).toBeTruthy()
+
+  fireEvent.click(screen.getByText("How this is calculated"))
+  expect(
+    screen.getByText("Open", { selector: "strong" }).closest("p")?.textContent
+  ).toContain("includes every PR that is still open")
+  expect(screen.queryByText(/resolved merge rate/)).toBeNull()
+  expect(screen.getByText(/Merge rate = merged/)).toBeTruthy()
+  expect(screen.queryByText(/Resolved merge rate = merged/)).toBeNull()
+  client.clear()
+})
+
+it("shortens model paths across usage tables", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    status: "ready",
+    cohorts: [
+      {
+        model_id: "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        model_attribution_quality: "configured",
+        merged: 1,
+        closed_without_merge: 0,
+        mature_pending: 0,
+        waiting: 0,
+        cohort_size: 1,
+        decided_denominator: 1,
+        decided_merge_rate: 1,
+        mature_denominator: 1,
+        mature_cohort_merge_share: 1,
+      },
+    ],
+  })
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      {
+        rank: 1,
+        user: { name: "Model Reader", github_login: "reader", email: null },
+        favorite_model: "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        invocations: 1,
+        prs_opened: 1,
+        merged_prs: 1,
+        agent_loc: 1,
+        additions: 1,
+        deletions: 0,
+        total_tokens: 1,
+        total_cost_usd: 0,
+        invocations_without_cost: 0,
+        invocations_with_partial_cost: 0,
+        avg_invocation_seconds: 1,
+      },
+    ],
+  })
+
+  const client = mountReport()
+  expect(await screen.findAllByText("glm-5p3-flash")).toHaveLength(2)
+  expect(screen.queryByText(/accounts\/fireworks\/models/)).toBeNull()
+  client.clear()
+})
+
 it("offers recovery from unavailability without claiming an empty or suppressed report", async () => {
   const query = vi
     .spyOn(api, "prMergeRateByModel")

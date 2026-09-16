@@ -155,6 +155,16 @@ async def test_message_without_a_mention_is_marked_untagged() -> None:
     assert await _untagged_flag_for("how about now", "Ev-plain") is True
 
 
+async def test_file_share_without_a_mention_is_marked_untagged() -> None:
+    payload = _message_payload("the alignment is still wrong", "Ev-file")
+    payload["event"]["subtype"] = "file_share"
+    background_tasks = _FakeBackgroundTasks()
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    )
+    assert cast(dict[str, object], response)["status"] == "accepted"
+
+
 async def test_message_update_queues_only_the_new_text() -> None:
     background_tasks = _FakeBackgroundTasks()
 

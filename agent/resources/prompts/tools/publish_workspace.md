@@ -7,9 +7,9 @@ the workspace created or updated to point at it, so a failed capture leaves
 nothing half-written and a failed provision is fixed here, interactively,
 rather than in a script run somewhere you cannot see.
 
-Boot from the right image before provisioning: ``sandbox_reset`` with the base
-``snapshot_id`` for a rebuild from scratch, or with the workspace's current
-snapshot to layer one change onto a working image.
+Boot from the right image before provisioning: ``recreate_sandbox(source="base")``
+for a rebuild from scratch, or ``recreate_sandbox(workspace=<slug>)`` to layer
+one change onto that workspace's current image.
 
 ``setup_script`` is optional and is the reproducibility contract: when given,
 a nightly rebuild runs it from the base snapshot on a throwaway sandbox and
