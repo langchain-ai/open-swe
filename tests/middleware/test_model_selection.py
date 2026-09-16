@@ -9,6 +9,7 @@ from agent.middleware.model_selection import (
     ModelSelectionMiddleware,
     RouteDecision,
     fast_alt_bucket,
+    routing_mode,
 )
 
 
@@ -276,6 +277,12 @@ def test_fast_alt_bucket_is_deterministic_per_thread() -> None:
     assert fast_alt_bucket(None) == fast_alt_bucket(None)
     assert fast_alt_bucket("thread-a") != fast_alt_bucket("thread-b")
     assert 0.0 <= fast_alt_bucket("thread-a") < 1.0
+
+
+def test_routing_mode_is_deterministic_and_respects_probability_bounds() -> None:
+    assert routing_mode("thread-a") == routing_mode("thread-a")
+    assert routing_mode("thread-a", auto_probability=1.0) == "auto"
+    assert routing_mode("thread-a", auto_probability=0.0) == "performant"
 
 
 @pytest.mark.asyncio

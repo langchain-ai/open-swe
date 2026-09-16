@@ -120,7 +120,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from agent.middleware.model_selection import ModelSelectionState
+from agent.middleware.model_selection import ModelSelectionState, routing_mode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
@@ -1103,9 +1103,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model_id, profile_effort = routing_defaults["fast"]
         subagent_model_id, subagent_effort = routing_defaults["fast"]
 
+    model_routing_mode = "auto" if adaptive_model_routing else None
+    if adaptive_model_routing:
+        model_routing_mode = routing_mode(thread_id)
+        adaptive_model_routing = model_routing_mode == "auto"
+        if not adaptive_model_routing:
+            model_id, profile_effort = routing_defaults["performance"]
+            subagent_model_id, subagent_effort = routing_defaults["performance"]
+
     config["metadata"] = {
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
+        **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled

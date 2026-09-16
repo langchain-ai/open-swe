@@ -93,6 +93,7 @@ async def _capture_create_deep_agent_kwargs(
     *,
     profile: dict[str, object] | None = None,
     thread_settings: dict[str, object] | None = None,
+    routing_mode: str = "auto",
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
     make_model_calls: list[tuple[str, dict[str, object]]] = []
@@ -146,6 +147,7 @@ async def _capture_create_deep_agent_kwargs(
             return_value=thread_settings or {},
         ),
         patch("agent.server.fallback_model_id_for", return_value=None),
+        patch("agent.server.routing_mode", return_value=routing_mode),
         patch("agent.server.make_model", side_effect=fake_make_model),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
@@ -277,12 +279,33 @@ async def test_model_routing_is_applied_when_enabled() -> None:
     ]
     assert "ModelSelectionMiddleware" in middleware_names
     assert config["metadata"]["model_routing_applied"] is True
+    assert config["metadata"]["model_routing_mode"] == "auto"
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
         "google_genai:gemini-3.8-flash",
         "openai:gpt-5.6-sol",
         "anthropic:claude-opus-5",
     ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_performant_arm_skips_classifier() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(
+        config,
+        profile={"model_routing_enabled": True},
+        routing_mode="performant",
+    )
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["configurable"]["resolved_agent_model_id"] == "anthropic:claude-opus-5"
+    assert config["metadata"]["model_routing_applied"] is False
+    assert config["metadata"]["model_routing_mode"] == "performant"
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert calls[0][0] == "anthropic:claude-opus-5"
 
 
 @pytest.mark.asyncio
