@@ -66,6 +66,45 @@ def farewell(name):
 EOF
 """.strip()
 
+# The expedited-review flow needs a change small enough to qualify (at most ten
+# changed lines, no protected paths), so it touches one line of one file.
+EXPEDITE_MARKER = "E2E_EXPEDITE"
+EXPEDITE_NOW_MARKER = "E2E_EXPEDITE_NOW"
+EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
+
+# The seeded remote holds only a README, so the first turn writes the file. Two
+# added lines keeps the pull request inside the ten-line eligibility limit.
+_EXPEDITE_SETUP_SCRIPT = f"""
+set -e
+rm -rf repo
+git clone "$E2E_REMOTE" repo
+cd repo
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {FEATURE_BRANCH}
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return "Hello!!"
+EOF
+git add -A
+git commit -m "{EXPEDITE_PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+echo PUSHED_OK
+""".strip()
+
+_EXPEDITE_FIX_SCRIPT = f"""
+set -e
+cd repo
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return "Hello!"
+EOF
+git add -A
+git commit -m "Restore the expected greeting"
+git push origin {FEATURE_BRANCH}
+echo FIXED_OK
+""".strip()
+
 _COMMIT_SCRIPT = f"""
 set -e
 cd repo
@@ -355,6 +394,95 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
             "output_tokens": 345,
             "total_tokens": 12_345,
         },
+    )
+
+
+def _expedite_watch_step(messages: list[BaseMessage]) -> AIMessage:
+    """Ask for the durable CI watch on the PR the previous step opened."""
+    url = _pr_url_from_messages(messages) or ""
+    return AIMessage(
+        content="Watching the pull request until CI settles.",
+        tool_calls=[
+            {
+                "name": "manage_baby_sit",
+                "args": {"pr_url": url, "action": "start"},
+                "id": "call-expedite-watch",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _expedite_request_step(messages: list[BaseMessage]) -> AIMessage:
+    """Nominate the PR for expedited review in the Slack thread."""
+    url = _pr_url_from_messages(messages) or ""
+    return AIMessage(
+        content="Asking for an expedited review in the thread.",
+        tool_calls=[
+            {
+                "name": "expedite_pr_approval",
+                "args": {"pr_url": url},
+                "id": f"call-expedite-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _expedite_opened_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    text = (
+        f"Opened <{url}|{EXPEDITE_PR_TITLE}> and I'm watching its checks. "
+        "I'll ask for an expedited review once they are green."
+    )
+    return AIMessage(
+        content="Reporting the pull request in the Slack thread.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {"message": text},
+                "id": f"call-expedite-opened-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _expedite_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    text = (
+        f"Asked for an expedited review of <{url}|{EXPEDITE_PR_TITLE}>. "
+        "Two approvals in this thread will merge it."
+    )
+    return AIMessage(
+        content="Replying in the Slack thread.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {"message": text},
+                "id": f"call-expedite-reply-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _expedite_fixed_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    text = (
+        f"Fixed the failing check on <{url}|{EXPEDITE_PR_TITLE}> and pushed. "
+        "Waiting for CI to go green before asking for approvals again."
+    )
+    return AIMessage(
+        content="Reporting the fix in the Slack thread.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {"message": text},
+                "id": f"call-expedite-fix-reply-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
     )
 
 
@@ -845,6 +973,60 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_reply_step),
     ),
+    # Expedited review, turn 1: implement a one-line change, open a ready PR,
+    # start the durable CI watch, and nominate it for approval in Slack. The
+    # card cannot appear yet — checks have not reported.
+    "expedite": (
+        _tool_step(
+            "Acknowledging the request.",
+            "slack_thread_reply",
+            {"message": "On it — this is a one-liner, I'll ask for an expedited review."},
+            "call-expedite-ack",
+        ),
+        _tool_step(
+            "Making the change and pushing the branch.",
+            "execute",
+            {"command": _EXPEDITE_SETUP_SCRIPT},
+            "call-expedite-setup",
+        ),
+        _tool_step(
+            "Opening a pull request that is ready for review.",
+            "open_pull_request",
+            {
+                "owner": OWNER,
+                "repo": REPO,
+                "head": FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": EXPEDITE_PR_TITLE,
+                "body": "Restores the single exclamation mark in the greeting.",
+                "draft": False,
+                "resolves_thread": True,
+            },
+            "call-expedite-pr",
+        ),
+        _dynamic_step(_expedite_watch_step),
+        _dynamic_step(_expedite_opened_reply_step),
+    ),
+    # Turn 2: a failing check woke the watch. Fix the code and push; the next
+    # green webhook is what lets the pending approval post its card.
+    "expedite_fix": (
+        _tool_step(
+            "Fixing the failing check and pushing.",
+            "execute",
+            {"command": _EXPEDITE_FIX_SCRIPT},
+            "call-expedite-fix",
+        ),
+        # Ask in the same turn. The check is still red, so the request has to
+        # park until CI reports green rather than posting a card now.
+        _dynamic_step(_expedite_request_step),
+        _dynamic_step(_expedite_fixed_reply_step),
+    ),
+    # Turn 3: checks are green (or an earlier round was withdrawn). Ask for the
+    # expedited review now that the pull request is clean.
+    "expedite_retry": (
+        _dynamic_step(_expedite_request_step),
+        _dynamic_step(_expedite_reply_step),
+    ),
     "multi_pr": (
         _tool_step(
             "Acknowledging the cross-repository request before starting work.",
@@ -1069,6 +1251,21 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "workspace", lambda ctx: ctx.human_count <= 1 and _is_workspace_request(ctx.first_text)
     ),
+    ScriptRule(
+        "expedite_fix",
+        lambda ctx: EXPEDITE_MARKER in ctx.first_text and "/baby-sit --continue" in ctx.last_text,
+    ),
+    ScriptRule(
+        "expedite_retry",
+        lambda ctx: (
+            EXPEDITE_MARKER in ctx.first_text
+            and (
+                EXPEDITE_NOW_MARKER in ctx.last_text
+                or "was withdrawn before it could merge" in ctx.last_text
+            )
+        ),
+    ),
+    ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
     ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
     ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),

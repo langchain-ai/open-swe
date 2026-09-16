@@ -1,0 +1,3 @@
+Ask for a tiny pull request to be approved and merged from its Slack thread instead of a normal GitHub review.
+
+Use it only for a change of at most 10 lines in ordinary text files that a reviewer can judge from the diff alone. Never for auth, secrets, CI workflows, dependency manifests, migrations, or binaries; those are refused. Call it once after pushing; do not poll. Open SWE watches the PR, posts the diff with Approve and Reject buttons once every check is green and every review is clean, and merges after two distinct approvals. You are told if it is rejected or withdrawn. Use `action="cancel"` to withdraw a request you no longer want.
