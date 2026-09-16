@@ -420,7 +420,9 @@ async def _fetch_unresolved_thread_count(
             repository = data.get("repository") if isinstance(data, dict) else None
             pull = repository.get("pullRequest") if isinstance(repository, dict) else None
             threads = pull.get("reviewThreads") if isinstance(pull, dict) else None
-            nodes = threads.get("nodes") if isinstance(threads, dict) else None
+            if not isinstance(threads, Mapping):
+                return None
+            nodes = threads.get("nodes")
             if not isinstance(nodes, list):
                 return None
             unresolved += sum(
