@@ -1018,6 +1018,8 @@ GH_PR_AGENT_STATE_ACTIONS = frozenset(
 )
 _TERMINAL_PR_STATES = frozenset(["closed", "merged"])
 _PRS_CLOSED_ATTENTION_REASON = "prs_closed"
+# Thread-scoped LangSmith feedback key; unsuffixed so it averages across threads.
+PR_MERGED_FEEDBACK_KEY = "pr_merged"
 
 
 def _pr_linked(metadata: Mapping[str, Any]) -> bool:
@@ -1340,20 +1342,28 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
 
 
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
-    try:
-        await create_langsmith_thread_feedback(
-            thread_id,
-            f"github_pr_merged:{pr_url}",
-            score=1.0,
-            comment=f"Agent-authored pull request merged: {pr_url}",
-            source_info={
-                "source": "github_pr_merged",
-                "thread_id": thread_id,
-                "pr_url": pr_url,
-            },
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("Failed to record merged PR feedback for thread %s", thread_id, exc_info=True)
+    # Two keys: the per-URL one keeps every PR on a thread distinguishable, while
+    # the bare ``pr_merged`` stays averageable across threads in LangSmith.
+    for key, comment in (
+        (f"github_pr_merged:{pr_url}", f"Agent-authored pull request merged: {pr_url}"),
+        (PR_MERGED_FEEDBACK_KEY, pr_url),
+    ):
+        try:
+            await create_langsmith_thread_feedback(
+                thread_id,
+                key,
+                score=1.0,
+                comment=comment,
+                source_info={
+                    "source": "github_pr_merged",
+                    "thread_id": thread_id,
+                    "pr_url": pr_url,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "Failed to record merged PR feedback for thread %s", thread_id, exc_info=True
+            )
 
 
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
