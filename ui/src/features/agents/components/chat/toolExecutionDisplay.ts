@@ -106,6 +106,11 @@ export function formatToolDisplayParts(
         return { heading: "Shell", preview: truncateMiddle(command, 60) }
       return plain(humanizeToolTitle(title))
     }
+    case "sql":
+      return {
+        heading: "SQL query",
+        preview: query ? truncateMiddle(query, 60) : null,
+      }
     case "edit":
       if (path) return formatPathDisplayParts("Edit", path)
       return plain(humanizeToolTitle(title))

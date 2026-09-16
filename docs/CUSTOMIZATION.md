@@ -67,7 +67,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandbox provisioning, connection, proxy configuration, and environment snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 

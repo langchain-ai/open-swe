@@ -339,3 +339,15 @@ async def test_failed_queue_cleanup_does_not_dispatch_summary(
 
     assert dispatched == []
     assert client.threads.updates == []
+
+
+def test_summary_configurable_carries_new_workspace_key() -> None:
+    configurable = slack_stop._summary_configurable({"workspace": "oss"}, {})
+    assert configurable["workspace"] == "oss"
+    assert configurable["environment"] == "oss"
+
+
+def test_summary_configurable_falls_back_to_legacy_environment_key() -> None:
+    configurable = slack_stop._summary_configurable({"environment": "old"}, {})
+    assert configurable["workspace"] == "old"
+    assert configurable["environment"] == "old"

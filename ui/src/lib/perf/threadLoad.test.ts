@@ -10,6 +10,7 @@ import {
   threadDetailResolved,
   threadHydrated,
   threadHydrationFailed,
+  threadLocalResolved,
   threadTranscriptBuilt,
   threadTranscriptPainted,
 } from "./threadLoad"
@@ -60,6 +61,22 @@ describe("thread load span", () => {
       chunks: 21,
     })
     expect(getPerfSpans()).toHaveLength(1)
+  })
+
+  it("tracks a desktop thread route through its IPC step", () => {
+    onRouterNavigation(`/agents/local/${THREAD_A}`, "/agents")
+    ensureThreadLoad(THREAD_A)
+    threadLocalResolved(THREAD_A)
+    threadHydrated(THREAD_A)
+    threadTranscriptPainted(THREAD_A, { messages: 1, chunks: 1 })
+
+    const [span] = getPerfSpans()
+    expect(span?.status).toBe("ended")
+    expect(span?.steps.map((step) => step.name)).toEqual([
+      "local",
+      "hydrate",
+      "paint",
+    ])
   })
 
   it("treats a mount without prior navigation as a page load from time origin", () => {

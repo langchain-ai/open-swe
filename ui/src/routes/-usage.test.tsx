@@ -14,7 +14,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import {
   api,
   ApiError,
-  type ModelOption,
   type PRMergeRatePayload,
   type UsageLeaderboardPayload,
   type UsageLeaderboardRow,
@@ -40,16 +39,6 @@ const captured: PRMergeRatePayload = {
   has_failed_events: false,
   as_of: "2026-09-11T12:01:00Z",
 }
-
-const models: ModelOption[] = [
-  {
-    id: "openai:gpt-5.6-luna",
-    label: "GPT-5.6 Luna",
-    efforts: ["high"],
-    default_effort: "high",
-    supports_images: true,
-  },
-]
 
 const emptyUsage: UsageLeaderboardPayload = {
   ...captured,
@@ -91,7 +80,6 @@ function mountReport() {
           period="30d"
           login="reader"
           isAdmin={false}
-          models={models}
           onPeriodChange={() => {}}
         />
       </TooltipProvider>
@@ -210,7 +198,6 @@ it("resets leaderboard pagination when the period changes outside the selector",
           period="30d"
           login="reader"
           isAdmin={false}
-          models={models}
           onPeriodChange={() => {}}
         />
       </TooltipProvider>
@@ -226,7 +213,6 @@ it("resets leaderboard pagination when the period changes outside the selector",
           period="7d"
           login="reader"
           isAdmin={false}
-          models={models}
           onPeriodChange={() => {}}
         />
       </TooltipProvider>
@@ -234,28 +220,6 @@ it("resets leaderboard pagination when the period changes outside the selector",
   )
   expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
   expect(api.usageLeaderboard).toHaveBeenLastCalledWith("7d", 10, undefined)
-  client.clear()
-})
-
-it("hides pagination controls until there is more than one page worth of rows", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
-  vi.mocked(api.usageLeaderboard).mockResolvedValue({
-    ...emptyUsage,
-    total_members: 10,
-    rows: [costRow],
-  })
-  const client = mountReport()
-  expect(await screen.findByText("Cost Reader")).toBeTruthy()
-  expect(screen.queryByRole("button", { name: "Next" })).toBeNull()
-  expect(screen.queryByLabelText("Rows per page")).toBeNull()
-
-  vi.mocked(api.usageLeaderboard).mockResolvedValue({
-    ...emptyUsage,
-    total_members: 11,
-    rows: [costRow],
-  })
-  await act(() => client.invalidateQueries({ queryKey: ["usageLeaderboard"] }))
-  expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
   client.clear()
 })
 
@@ -289,51 +253,6 @@ it("distinguishes unavailable usage from empty usage and recovers without duplic
   expect(
     screen.queryByText("Usage analytics is unavailable on this deployment.")
   ).toBeNull()
-  client.clear()
-})
-
-it("renders friendly model labels and strips provider prefixes for unknown models", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "ready",
-    cohorts: [
-      {
-        model_id: "openai:gpt-5.6-luna",
-        model_attribution_quality: "configured",
-        merged: 1,
-        closed_without_merge: 0,
-        mature_pending: 0,
-        waiting: 0,
-        cohort_size: 1,
-        decided_denominator: 1,
-        decided_merge_rate: 1,
-        mature_denominator: 1,
-        mature_cohort_merge_share: 1,
-      },
-      {
-        model_id: "anthropic:claude-future",
-        model_attribution_quality: "effective",
-        merged: 1,
-        closed_without_merge: 0,
-        mature_pending: 0,
-        waiting: 0,
-        cohort_size: 1,
-        decided_denominator: 1,
-        decided_merge_rate: 1,
-        mature_denominator: 1,
-        mature_cohort_merge_share: 1,
-      },
-    ],
-  })
-  vi.mocked(api.usageLeaderboard).mockResolvedValue({
-    ...emptyUsage,
-    total_members: 1,
-    rows: [{ ...costRow, favorite_model: "openai:gpt-5.6-luna" }],
-  })
-  const client = mountReport()
-  expect(await screen.findAllByText("GPT-5.6 Luna")).toHaveLength(2)
-  expect(screen.getAllByText("claude-future")).toHaveLength(1)
-  expect(screen.queryByText("openai:gpt-5.6-luna")).toBeNull()
   client.clear()
 })
 

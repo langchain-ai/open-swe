@@ -16,7 +16,7 @@ validated instead of as ``dict[str, Any]``.
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, TypeVar
+from typing import Any, NamedTuple, TypeVar
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
@@ -25,6 +25,21 @@ from pydantic import BaseModel, ValidationError
 logger = logging.getLogger(__name__)
 
 Namespace = Sequence[str]
+
+
+class StoreEntry(NamedTuple):
+    """A value alongside the namespace it actually lives in.
+
+    A search's namespace argument is a prefix match, so a caller searching a
+    namespace that has nested children of its own can get back entries whose
+    real namespace is longer than the one it asked for; ``namespace`` is that
+    real namespace, or ``None`` when the transport does not report it (the
+    in-memory test double), which only ever matches by exact namespace.
+    """
+
+    namespace: list[str] | None
+    value: dict[str, Any]
+
 
 _DEFAULT_PAGE_SIZE = 100
 
@@ -55,6 +70,14 @@ def _unwrap(item: Any) -> dict[str, Any] | None:
         return None
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
     return value if isinstance(value, dict) else None
+
+
+def _item_namespace(item: Any) -> list[str] | None:
+    """The item's own ``namespace``, when the transport reports one."""
+    namespace = (
+        item.get("namespace") if isinstance(item, dict) else getattr(item, "namespace", None)
+    )
+    return list(namespace) if isinstance(namespace, list | tuple) else None
 
 
 async def get_value(namespace: Namespace, key: str) -> dict[str, Any] | None:
@@ -112,15 +135,38 @@ async def search_all_values(
     page_size: int = _DEFAULT_PAGE_SIZE,
 ) -> list[dict[str, Any]]:
     """Every value in ``namespace``, paging until the store runs out."""
-    values: list[dict[str, Any]] = []
+    return [
+        entry.value
+        for entry in await search_all_entries(namespace, filter=filter, page_size=page_size)
+    ]
+
+
+async def search_all_entries(
+    namespace: Namespace,
+    *,
+    filter: dict[str, Any] | None = None,
+    page_size: int = _DEFAULT_PAGE_SIZE,
+) -> list[StoreEntry]:
+    """Every value in ``namespace``, each paired with the namespace it actually lives in.
+
+    Use this instead of :func:`search_all_values` when ``namespace`` may have
+    nested children of its own (for example a legacy flat namespace being
+    migrated into per-owner ones) and the caller must tell which entries
+    truly live at ``namespace`` versus one a prefix match also matched.
+    """
+    entries: list[StoreEntry] = []
     offset = 0
     while True:
         items = await _search_items(namespace, filter, page_size, offset)
         if not items:
-            return values
-        values.extend(value for item in items if (value := _unwrap(item)) is not None)
+            return entries
+        entries.extend(
+            StoreEntry(_item_namespace(item), value)
+            for item in items
+            if (value := _unwrap(item)) is not None
+        )
         if len(items) < page_size:
-            return values
+            return entries
         offset += len(items)
 
 
