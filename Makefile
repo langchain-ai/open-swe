@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui tunnel web build-dashboard desktop install-desktop install-checkout swagger
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui postgres tunnel web build-dashboard desktop install-desktop install-checkout swagger
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -7,8 +7,16 @@ all: help
 # DEVELOPMENT
 ######################
 
-dev:
+dev: .env postgres
 	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
+
+.env: .env.example
+	cp .env.example .env
+
+postgres:
+	@docker inspect open-swe-postgres >/dev/null 2>&1 || docker run --name open-swe-postgres -e POSTGRES_PASSWORD=postgres -p 5433:5432 -d postgres:16
+	@docker start open-swe-postgres >/dev/null
+	@until docker exec open-swe-postgres pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
 
 # UI development in one terminal: Vite (`make web`) and the backend fronting it, so
 # http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
@@ -103,8 +111,9 @@ typecheck:
 
 help:
 	@echo '----'
-	@echo 'dev                          - run LangGraph dev server'
+	@echo 'dev                          - start local PostgreSQL and run LangGraph dev server'
 	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
+	@echo 'postgres                     - start local PostgreSQL on :5433'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
 	@echo 'run                          - run webhook server'
