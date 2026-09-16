@@ -254,6 +254,21 @@ DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
+# A `/swe` question researches and answers; it never mutates the repository or
+# spawns follow-on work. `execute` stays so the agent can explore the checkout.
+SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
+    {
+        "approve_plan",
+        "delete",
+        "edit_file",
+        "enter_plan_mode",
+        "open_pull_request",
+        "request_pr_review",
+        "save_plan",
+        "task",
+        "write_file",
+    }
+)
 
 
 def _registered_tool_name(value: Any) -> str:
@@ -578,7 +593,18 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
     """Return whether the run has trusted Slack source context."""
     if cfg.source not in {"slack", "schedule", "incidents_agent"} or cfg.slack_thread is None:
         return False
+    if _slack_ask_mode(cfg):
+        return bool(cfg.slack_thread.channel_id.strip())
     return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
+
+
+def _slack_ask_mode(cfg: RunConfig) -> bool:
+    """A `/swe` question: one ephemeral answer, no Slack thread to post into."""
+    return (
+        cfg.slack_ask is True
+        and cfg.slack_thread is not None
+        and bool(cfg.slack_thread.triggering_user_id.strip())
+    )
 
 
 def _make_model_or_defer(
@@ -844,6 +870,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 admin_workspaces=self._admin_workspaces,
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
+                slack_ask=_slack_ask_mode(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
             ),
@@ -1115,6 +1142,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
+    slack_ask_mode = _slack_ask_mode(cfg)
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
@@ -1208,6 +1236,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
+    elif slack_ask_mode:
+        static_tools = apply_tool_descriptions(
+            [fetch_url, web_search, http_request, slack_thread_reply]
+        )
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
@@ -1356,6 +1388,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     excluded=(
                         STOP_SUMMARY_EXCLUDED_TOOLS
                         if stop_summary_mode
+                        else SLACK_ASK_EXCLUDED_TOOLS
+                        if slack_ask_mode
                         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
                         if incident_automatic
                         else DEEP_AGENT_EXCLUDED_TOOLS

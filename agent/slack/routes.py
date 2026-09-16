@@ -10,6 +10,12 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
+from agent.slack.ask import (
+    ASK_COMMAND,
+    MAX_QUESTION_CHARS,
+    SlackAskRequest,
+    process_slack_ask,
+)
 from agent.slack.client import SlackChannelContext
 from agent.slack.failures import (
     SlackRequestError,
@@ -553,6 +559,48 @@ async def slack_webhook(
         return ignored("Duplicate Slack event delivery")
 
     return await answer_slack_request(target, dispatch)
+
+
+@router.post("/webhooks/slack/commands")
+async def slack_command(
+    request: common.Request, background_tasks: common.BackgroundTasks
+) -> SlashCommandResponse:
+    """Answer a single `/swe` question, ephemerally and without a Slack thread."""
+    body = await request.body()
+    _verify_signature(request, body, "commands")
+
+    form = common.parse_qs(body.decode("utf-8"))
+    value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    channel_id = value("channel_id")
+    user_id = value("user_id")
+    command = value("command")
+    question = value("text")
+    if not (channel_id and user_id):
+        return ephemeral("That command was invalid.")
+    if not question:
+        return ephemeral(
+            f"Ask a question: `{command or ASK_COMMAND} how does thread routing work?`"
+        )
+    if len(question) > MAX_QUESTION_CHARS:
+        return ephemeral(
+            f"That question is too long for `{command or ASK_COMMAND}`. "
+            "Tag Open SWE in a message instead."
+        )
+
+    event_id = f"slack-ask:{value('trigger_id') or hashlib.sha256(body).hexdigest()}"
+    if not await common.claim_slack_event(event_id):
+        return ephemeral("Open SWE is already working on that question.")
+    background_tasks.add_task(
+        process_slack_ask,
+        SlackAskRequest(
+            channel_id=channel_id,
+            user_id=user_id,
+            question=question,
+            command=command or ASK_COMMAND,
+            team_id=value("team_id"),
+        ),
+    )
+    return ephemeral("Working on it — the answer will appear here, visible only to you.")
 
 
 @router.post("/webhooks/slack/code-channel-commands")
