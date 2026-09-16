@@ -131,6 +131,28 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("is_im", "conversation_type"),
+    [(True, "dm"), (False, "channel")],
+)
+async def test_create_durable_run_records_slack_conversation_type(
+    is_im: bool, conversation_type: str
+) -> None:
+    client = _FakeClient()
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        config={"configurable": {"slack_thread": {"channel_context": {"is_im": is_im}}}},
+        client=client,
+    )
+
+    assert client.runs.created[0]["metadata"]["slack_conversation_type"] == conversation_type
+
+
+@pytest.mark.asyncio
 async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_opt_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
