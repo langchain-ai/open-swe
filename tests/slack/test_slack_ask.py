@@ -42,7 +42,12 @@ def signed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("signed")
-async def test_command_queues_the_question() -> None:
+async def test_command_queues_the_question(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        slack_routes,
+        "dashboard_thread_url",
+        lambda thread_id: f"https://swe.test/agents/{thread_id}",
+    )
     background_tasks = BackgroundTasks()
 
     result = await slack_routes.slack_command(
@@ -57,6 +62,8 @@ async def test_command_queues_the_question() -> None:
     assert request.question == "how does thread routing work?"
     assert request.channel_id == "C1"
     assert request.user_id == "U1"
+    # The acknowledgement links to the thread the queued run will create.
+    assert request.thread_id in result["text"]
 
 
 @pytest.mark.asyncio
@@ -105,7 +112,9 @@ async def test_question_thread_is_unlisted_and_dispatched_in_ask_mode(
     monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
 
     await slack_ask.process_slack_ask(
-        slack_ask.SlackAskRequest(channel_id="C1", user_id="U1", question="why?", team_id="T1")
+        slack_ask.SlackAskRequest(
+            channel_id="C1", user_id="U1", question="why?", thread_id="t-1", team_id="T1"
+        )
     )
 
     assert upsert.await_args.kwargs["unlisted"] is True
@@ -142,7 +151,7 @@ async def test_named_repository_picks_the_workspace(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
 
     await slack_ask.process_slack_ask(
-        slack_ask.SlackAskRequest(channel_id="C1", user_id="U1", question="why?")
+        slack_ask.SlackAskRequest(channel_id="C1", user_id="U1", question="why?", thread_id="t-2")
     )
 
     assert resolve_workspace.await_args.kwargs["repo"] == ("acme", "api")

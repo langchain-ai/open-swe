@@ -36,8 +36,15 @@ class SlackAskRequest(BaseModel):
     channel_id: str
     user_id: str
     question: str
+    # Minted by the route, so the acknowledgement it returns inside Slack's
+    # three seconds can already link to the thread this run will create.
+    thread_id: str
     command: str = ASK_COMMAND
     team_id: str = ""
+
+
+def new_ask_thread_id() -> str:
+    return str(uuid.uuid4())
 
 
 async def _slack_user_profile(user_id: str) -> tuple[str, str]:
@@ -93,7 +100,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
     if not await _answerable(request, login, user_email):
         return
 
-    thread_id = str(uuid.uuid4())
+    thread_id = request.thread_id
     # A repository the channel names owns the routing decision, so it has to be
     # resolved before the workspace is.
     resolution = await common.get_slack_repo_config(

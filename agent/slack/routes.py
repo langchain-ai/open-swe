@@ -14,6 +14,7 @@ from agent.slack.ask import (
     ASK_COMMAND,
     MAX_QUESTION_CHARS,
     SlackAskRequest,
+    new_ask_thread_id,
     process_slack_ask,
 )
 from agent.slack.client import SlackChannelContext
@@ -44,6 +45,7 @@ from agent.slack.responses import (
     ignored,
 )
 from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
@@ -590,17 +592,23 @@ async def slack_command(
     event_id = f"slack-ask:{value('trigger_id') or hashlib.sha256(body).hexdigest()}"
     if not await common.claim_slack_event(event_id):
         return ephemeral("Open SWE is already working on that question.")
+    thread_id = new_ask_thread_id()
     background_tasks.add_task(
         process_slack_ask,
         SlackAskRequest(
             channel_id=channel_id,
             user_id=user_id,
             question=question,
+            thread_id=thread_id,
             command=command or ASK_COMMAND,
             team_id=value("team_id"),
         ),
     )
-    return ephemeral("Working on it — the answer will appear here, visible only to you.")
+    acknowledgement = "Working on it — the answer will appear here, visible only to you."
+    dashboard_url = dashboard_thread_url(thread_id)
+    if dashboard_url:
+        acknowledgement += f" <{dashboard_url}|Follow along in Web>"
+    return ephemeral(acknowledgement)
 
 
 @router.post("/webhooks/slack/code-channel-commands")
