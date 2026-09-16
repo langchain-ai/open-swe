@@ -3,8 +3,9 @@ Rebind this thread to a fresh sandbox.
 ``source`` selects what the new sandbox boots from:
 
 - ``workspace`` (default): the thread's workspace snapshot, with its repositories
-  already checked out. Pass ``workspace=<slug>`` (a slug from ``list_workspaces``)
-  to boot a different workspace's snapshot instead.
+  already checked out. In a private admin thread, pass ``workspace=<slug>`` (a
+  slug from ``list_workspaces``) to boot a different workspace's snapshot
+  instead; other threads are refused.
 - ``base``: the deployment's base snapshot with no workspace content — the same
   sandbox a thread without a workspace would get. Use this when the user asks
   for an empty or clean sandbox.
