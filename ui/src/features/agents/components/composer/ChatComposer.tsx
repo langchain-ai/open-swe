@@ -87,6 +87,7 @@ const SLASH_COMMANDS: Array<SlashCommandSpec> = [
 
 export interface ChatComposerProps {
   placeholder?: string
+  initialValue?: string
   autoFocus?: boolean
   compact?: boolean
   disabled?: boolean
@@ -217,6 +218,7 @@ export function buildCommandItems(
  */
 export const ChatComposer = memo(function ChatComposer({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
+  initialValue = "",
   autoFocus = false,
   compact = false,
   disabled = false,
@@ -255,7 +257,7 @@ export const ChatComposer = memo(function ChatComposer({
   contextUsage,
   routed,
 }: ChatComposerProps) {
-  const [value, setValue] = useState("")
+  const [value, setValue] = useState(initialValue)
   const [cursor, setCursor] = useState(0)
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
