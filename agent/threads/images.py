@@ -20,17 +20,21 @@ async def get_dashboard_thread_image(
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     # Images live with the thread that stored them, so a reference copied into
     # a private continuation is looked up in the source thread as a fallback.
+    # A fresh continuation has no sandbox of its own yet, so an unreachable
+    # store moves on to the next owner instead of failing the request.
+    unreachable = False
     for owner in image_owner_threads(thread_id, metadata.get("continued_from_thread_id")):
         try:
             store = await open_image_store(owner)
             content = await store.get(image_name)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.warning(
                 "Could not read a thread image",
                 extra={"thread_id": owner, "image_name": image_name},
                 exc_info=True,
             )
-            raise HTTPException(503, "Could not connect to the workspace.") from exc
+            unreachable = True
+            continue
         if content is not None:
             return Response(
                 content=content,
@@ -41,4 +45,6 @@ async def get_dashboard_thread_image(
                     "X-Content-Type-Options": "nosniff",
                 },
             )
+    if unreachable:
+        raise HTTPException(503, "Could not connect to the workspace.")
     raise HTTPException(404, "image not found")

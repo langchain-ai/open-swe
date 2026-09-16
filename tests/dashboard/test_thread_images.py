@@ -70,6 +70,29 @@ async def test_a_private_continuation_falls_back_to_the_source_thread(
     assert response.body == PNG_BYTES
 
 
+async def test_a_continuation_without_a_sandbox_still_falls_back_to_the_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_thread_module(
+        monkeypatch,
+        "_readable_thread_metadata",
+        AsyncMock(return_value={"continued_from_thread_id": "source"}),
+    )
+    source = LocalImageStore(tmp_path / "source")
+    await source.put(IMAGE_NAME, PNG_BYTES)
+
+    async def open_store(thread_id: str, *, desktop: bool = False) -> LocalImageStore:
+        if thread_id == "continued":
+            raise ValueError("Missing sandbox_id in thread metadata for continued")
+        return source
+
+    monkeypatch.setattr(images, "open_image_store", open_store)
+
+    response = await images.get_dashboard_thread_image("continued", IMAGE_NAME, "alice")
+
+    assert response.body == PNG_BYTES
+
+
 async def test_unreadable_threads_hide_their_images(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_thread_module(
         monkeypatch,
