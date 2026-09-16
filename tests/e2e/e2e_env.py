@@ -49,7 +49,7 @@ _DEFAULTS = {
     # Sandbox: real local provider, rooted in a throwaway temp dir.
     "SANDBOX_TYPE": "local",
     "LOCAL_SANDBOX_ROOT_DIR": str(_WORK_DIR),
-    # Environment scripts write themselves and their logs here. The default,
+    # Workspace scripts write themselves and their logs here. The default,
     # /open-swe/environment, assumes a sandbox where the agent is root; this
     # provider runs on the developer's own machine, whose root is not writable.
     "OPENSWE_SCRIPT_ROOT": str(TMP / "open-swe" / "environment"),
@@ -114,7 +114,7 @@ TEST_USERS = [
     },
 ]
 
-# Alice is the workspace admin (so admin threads + the environments dashboard are
+# Alice is the workspace admin (so admin threads + the workspaces dashboard are
 # reachable); Bob is a plain member, which is what the deny-side assertions use.
 ADMIN_USER = TEST_USERS[0]
 _DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(

@@ -31,6 +31,9 @@ def dispatch_run_config(
         "pr_number",
         "github_login",
         "user_email",
+        "workspace",
+        # `environment` is the pre-workspaces spelling; a watch started before
+        # the rename still carries it, and both keys mean the same workspace.
         "environment",
         "agent_model_id",
         "agent_effort",

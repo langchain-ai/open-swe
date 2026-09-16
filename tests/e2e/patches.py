@@ -181,24 +181,24 @@ def apply() -> None:
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox
     # provider, so there is nothing to capture from — record the request in the
-    # fake store instead. The environment tools, store writes, name/tag scheme
+    # fake store instead. The workspace tools, store writes, name/tag scheme
     # and status transitions all still run for real.
-    from agent.environments import store as environments_store
     from agent.sandboxes.providers import langsmith as langsmith_integration
+    from agent.workspaces import store as workspaces_store
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
     # The capture path refuses to run off the langsmith provider; with that
     # provider's snapshot API faked above, the E2E's local sandbox is capturable.
-    environments_store.require_capture_support = lambda: None
+    workspaces_store.require_capture_support = lambda: None
 
     # A refresh boots its own builder to run the scripts in. There is no platform
     # to boot one from here, so the local provider stands in and nothing is
     # reclaimed afterwards; the scripts, the capture and the record all run for real.
-    from agent.environments import refresh as environment_refresh
+    from agent.workspaces import refresh as workspace_refresh
 
-    environment_refresh.require_capture_support = lambda: None
-    environment_refresh._create_builder_sandbox = _fake_builder_sandbox
-    environment_refresh._release_builder_sandbox = _release_nothing
+    workspace_refresh.require_capture_support = lambda: None
+    workspace_refresh._create_builder_sandbox = _fake_builder_sandbox
+    workspace_refresh._release_builder_sandbox = _release_nothing
 
     _applied = True
 

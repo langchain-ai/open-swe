@@ -29,8 +29,8 @@ from agent.threads.runs import (
     _user_message_content,
 )
 from agent.threads.summary import (
-    _DASHBOARD_SOURCE,
     _SANDBOX_CREATING_SENTINEL,
+    DASHBOARD_SOURCE,
     _assert_thread_postable,
     _assert_thread_promptable,
     _assert_thread_readable,
@@ -125,7 +125,7 @@ async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[s
     queued: list[dict[str, Any]] = []
     for entry in messages:
         content = entry.get("content") if isinstance(entry, Mapping) else None
-        if not isinstance(content, Mapping) or content.get("source") != _DASHBOARD_SOURCE:
+        if not isinstance(content, Mapping) or content.get("source") != DASHBOARD_SOURCE:
             continue
         queued_id = content.get("queue_id")
         text = content.get("text")
@@ -169,14 +169,21 @@ async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[s
 
 
 async def get_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    mark_viewed: bool = True,
+    timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
+    record = timings if timings is not None else {}
     client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Thread lookup failed for %s", thread_id, exc_info=True)
-        raise HTTPException(404, "thread not found") from exc
+    with phase(record, "thread_get"):
+        try:
+            thread = await client.threads.get(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Thread lookup failed for %s", thread_id, exc_info=True)
+            raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
     _assert_thread_readable(metadata, login, email)
@@ -184,7 +191,9 @@ async def get_dashboard_thread(
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
     # `GET …/state` → `stream.messages`), so the detail endpoint returns
     # metadata only — no server-side message conversion.
-    thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(client, thread)
+    thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
+        client, thread, timings=record
+    )
     metadata = thread_metadata(thread)
     status = _run_status_to_agent_status(
         thread.get("status") if isinstance(thread.get("status"), str) else "idle",
@@ -196,21 +205,24 @@ async def get_dashboard_thread(
         ),
     )
     if mark_viewed and status != "running":
-        metadata = await _mark_thread_viewed(
-            client,
-            thread_id,
-            metadata,
-            latest_run_id=latest_run_id,
-        )
+        with phase(record, "mark_viewed"):
+            metadata = await _mark_thread_viewed(
+                client,
+                thread_id,
+                metadata,
+                latest_run_id=latest_run_id,
+            )
         thread = {**as_thread_dict(thread), "metadata": metadata}
 
-    summary = await _thread_summary(
-        thread,
-        latest_run_status=latest_run_status,
-        latest_run_id=latest_run_id,
-    )
+    with phase(record, "summary"):
+        summary = await _thread_summary(
+            thread,
+            latest_run_status=latest_run_status,
+            latest_run_id=latest_run_id,
+        )
     if status == "running":
-        summary["queuedMessages"] = await _queued_dashboard_messages(client, thread_id)
+        with phase(record, "queued"):
+            summary["queuedMessages"] = await _queued_dashboard_messages(client, thread_id)
     return summary
 
 
@@ -231,7 +243,7 @@ async def send_dashboard_message(
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     handoff_metadata = dict(metadata)
     metadata_update: dict[str, Any] = {
-        "source": _DASHBOARD_SOURCE,
+        "source": DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
         "feedback_last_activity_at_ms": now_ms,
         "plan_mode": body.plan_mode,
@@ -275,7 +287,7 @@ async def send_dashboard_message(
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     queue_payload: dict[str, Any] = {
         "text": prompt,
-        "source": _DASHBOARD_SOURCE,
+        "source": DASHBOARD_SOURCE,
         "surface": "web",
         "queue_id": (
             str(body.client_message_id) if body.client_message_id else f"queued-{uuid.uuid4()}"
@@ -363,7 +375,7 @@ async def cancel_dashboard_thread(
                 thread_id,
                 None,
                 configurable,
-                source=_DASHBOARD_SOURCE,
+                source=DASHBOARD_SOURCE,
                 input={"messages": []},
                 client=client,
             )
@@ -457,12 +469,20 @@ _CONTINUED_METADATA_KEYS = (
     "resolved_model",
     "resolved_effort",
     "plan_mode",
-    "environment",
     "repo_owner",
     "repo_name",
     "repo_explicitly_none",
     THREAD_SETTINGS_KEY,
 )
+
+
+def _continued_workspace(metadata: Mapping[str, Any]) -> str | None:
+    """The workspace to carry into a private continuation; ``environment`` is the pre-workspace key."""
+    for key in ("workspace", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 async def continue_thread_privately(
@@ -495,10 +515,13 @@ async def continue_thread_privately(
     new_metadata: dict[str, Any] = {
         key: metadata[key] for key in _CONTINUED_METADATA_KEYS if metadata.get(key) is not None
     }
+    workspace = _continued_workspace(metadata)
+    if workspace is not None:
+        new_metadata["workspace"] = workspace
     new_metadata.update(
         {
-            "source": _DASHBOARD_SOURCE,
-            "origin": _DASHBOARD_SOURCE,
+            "source": DASHBOARD_SOURCE,
+            "origin": DASHBOARD_SOURCE,
             "owner_type": "user",
             "owner_login": login.strip(),
             "visibility": "private",

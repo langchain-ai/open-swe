@@ -100,6 +100,7 @@ export interface SessionUser {
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
+  default_workspace: string | null
 }
 
 export interface ModelOption {
@@ -455,15 +456,15 @@ export interface SandboxSettings {
   updated_by: string | null
 }
 
-/** What a non-admin needs to pick an environment for a new thread. */
-export type EnvironmentRefreshStatus =
+/** What a non-admin needs to pick a workspace for a new thread. */
+export type WorkspaceRefreshStatus =
   | "never"
   | "refreshing"
   | "success"
   | "failed"
 
 /** One stage of a rebuild: booting the builder, a script, the capture. */
-export interface EnvironmentRefreshStep {
+export interface WorkspaceRefreshStep {
   label: string
   status: "running" | "success" | "failed"
   started_at?: string
@@ -472,20 +473,23 @@ export interface EnvironmentRefreshStep {
   log_path?: string | null
 }
 
-export interface EnvironmentOption {
+export interface WorkspaceOption {
   slug: string
   name: string
+  repos: Array<string>
+  slack_channel_ids: Array<string>
+  is_default: boolean
   has_snapshot: boolean
-  refresh_status?: EnvironmentRefreshStatus
+  refresh_status?: WorkspaceRefreshStatus
   refresh_kind?: "full" | "update" | null
   refresh_finished_at?: string | null
   refresh_error?: string | null
   refresh_log_excerpt?: string | null
-  refresh_steps?: Array<EnvironmentRefreshStep>
+  refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
-export interface EnvironmentOptionList {
-  environments: Array<EnvironmentOption>
+export interface WorkspaceOptionList {
+  workspaces: Array<WorkspaceOption>
   default_slug: string
 }
 
@@ -839,8 +843,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ base_snapshot_id }),
     }),
-  listEnvironmentOptions: () =>
-    request<EnvironmentOptionList>("/environments/options"),
+  listWorkspaceOptions: () =>
+    request<WorkspaceOptionList>("/workspaces/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
@@ -859,24 +863,31 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
-  revealWorkspaceMCPHeaders: (name: string) =>
+  getWorkspaceMCPs: (workspace: string) =>
+    request<MCPConnection[]>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps`
+    ),
+  revealWorkspaceMCPHeaders: (workspace: string, name: string) =>
     request<Record<string, string>>(
-      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}/headers/reveal`,
       { method: "POST", cache: "no-store" }
     ),
-  saveWorkspaceMCP: (body: MCPConnectionUpdate) =>
-    request<MCPConnection>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  deleteWorkspaceMCP: (name: string) =>
-    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    }),
-  discoverWorkspaceMCP: (body: MCPConnectionUpdate) =>
+  saveWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
+    request<MCPConnection>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  deleteWorkspaceMCP: (workspace: string, name: string) =>
+    request<void>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}`,
+      { method: "DELETE" }
+    ),
+  discoverWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
     request<{ name: string; description: string }[]>(
-      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
   getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),

@@ -2,6 +2,7 @@
 
 import json
 import re
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -10,6 +11,11 @@ from agent.incidents.models import Evidence, Hypothesis, IncidentReport
 
 CONTEXT_MARKER = "INCIDENT_CONTEXT "
 _CONTEXT_HEADER = re.compile(r"INCIDENT_CONTEXT (\{[^\n]*\})")
+# Only a bracket group made entirely of evidence references, as finalize_report appends them
+# ("[slack:1.0]", "[slack:1.0, tool:9fd2…]"). A bracket in the finding itself, such as
+# "[Errno 111]", carries meaning and has to survive into the digest.
+_EVIDENCE_REF = r"[A-Za-z][A-Za-z0-9_-]*:[A-Za-z0-9._:-]+"
+_CITATION = re.compile(rf"\s*\[{_EVIDENCE_REF}(?:\s*,\s*{_EVIDENCE_REF})*\]")
 
 
 class Claim(BaseModel):
@@ -53,9 +59,11 @@ coverage.
 Finish every investigative turn by calling record_incident_report exactly once with your
 findings. When the responder only asked to pause, resume, or complete the incident, call
 manage_incident instead; it notifies the channel, and the turn ends without a report. It
-stores the report, updates the postmortem summary, and posts the channel update when the
-findings changed or a responder asked a question; never post findings through other Slack
-tools. The summary is also the Slack update: use at most two short sentences about what
+stores the report, updates the postmortem summary, and posts the channel update when a
+responder asked a question, or, unprompted, when the findings changed and the channel has
+been quiet long enough; never post findings through other Slack tools. Record the report
+either way: a held one is offered again on the next turn, so never repost it by hand.
+The summary is also the Slack update: use at most two short sentences about what
 changed or the direct answer. Preserve replay/test context and uncertainty. Use one
 sentence for impact. Keep detailed hypotheses, checks, and open questions in their own
 fields. Consolidate repeated access failures into one gap per source. Use next_steps for
@@ -65,6 +73,30 @@ next_steps empty when there is no useful recommendation. Use an empty summary wh
 supported observation can be made. Use gaps to describe missing coverage and questions
 for the few missing facts a responder could supply.
 """
+
+
+def digest_fields(report: IncidentReport) -> dict[str, Any]:
+    """The parts of a report that state its conclusion, for deciding whether to post again.
+
+    Citations, retrieved evidence, and checked sources are deliberately excluded: every turn
+    cites the newest channel message, so including them would make each turn look new and
+    defeat the check. Wording changes still read as a new conclusion, which is why an
+    unprompted post also has to clear a minimum interval.
+    """
+
+    def bare(value: str) -> str:
+        return " ".join(_CITATION.sub("", value).split())
+
+    return {
+        "summary": bare(report.summary),
+        "impact": bare(report.impact),
+        "outcome": report.outcome,
+        "next_steps": [bare(step) for step in report.next_steps],
+        "hypotheses": [
+            [bare(hypothesis.title), hypothesis.assessment] for hypothesis in report.hypotheses
+        ],
+        "questions": [bare(question) for question in report.questions],
+    }
 
 
 def context_evidence(text: str, collector: EvidenceCollector) -> int:

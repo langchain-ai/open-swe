@@ -146,7 +146,7 @@ async def control_state() -> JSONResponse:
 
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
-    """Snapshot captures/deletes the environment tools asked the platform for."""
+    """Snapshot captures/deletes the workspace tools asked the platform for."""
     return JSONResponse({"captured": fakes.SNAPSHOTS, "deleted": fakes.DELETED_SNAPSHOTS})
 
 
@@ -1007,7 +1007,11 @@ async def slack_post_message(request: Request) -> JSONResponse:
         blocks=body.get("blocks"),
         is_bot=True,
     )
-    return _ok({"ts": ts, "message": {"ts": ts}})
+    message: dict[str, Any] = {"ts": ts}
+    thread_ts = body.get("thread_ts") or ""
+    if thread_ts:
+        message["thread_ts"] = thread_ts
+    return _ok({"ts": ts, "message": message})
 
 
 @app.post("/fake-slack/chat.update")

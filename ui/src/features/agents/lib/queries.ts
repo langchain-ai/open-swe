@@ -285,15 +285,15 @@ const BUNDLED_SKILLS: Array<Skill> = [
   },
 ]
 
-export const environmentOptionKeys = {
-  all: ["environment-options"] as const,
+export const workspaceOptionKeys = {
+  all: ["workspace-options"] as const,
 }
 
-/** Environments a new thread can boot from. Empty when none are configured. */
-export function useEnvironmentOptions(enabled = true) {
+/** Workspaces a new thread can boot from. Empty when none are configured. */
+export function useWorkspaceOptions(enabled = true) {
   return useQuery({
-    queryKey: environmentOptionKeys.all,
-    queryFn: api.listEnvironmentOptions,
+    queryKey: workspaceOptionKeys.all,
+    queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     enabled,
   })
@@ -630,7 +630,7 @@ export function useAgentThread(threadId: string) {
       query.state.data?.status === "running" ? 3000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
-    // would 404 and bounce the route back to /agents.
+    // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
 }
