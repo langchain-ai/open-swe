@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from agent.analytics.queries import usage_leaderboard
+from agent.analytics.queries import SortDirection, UsageSort, usage_leaderboard
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,8 @@ async def api_agent_usage_leaderboard(
     period: str | None = "30d",
     limit: int = Query(default=10, ge=1, le=100),
     cursor: str | None = None,
+    sort: UsageSort = "rank",
+    direction: SortDirection = "asc",
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     from asyncpg import PostgresError
@@ -32,6 +34,8 @@ async def api_agent_usage_leaderboard(
             period=period,
             limit=limit,
             cursor=cursor,
+            sort=sort,
+            direction=direction,
             current_login=session["sub"],
             current_email=session.get("email"),
             admin=session_is_admin(session),

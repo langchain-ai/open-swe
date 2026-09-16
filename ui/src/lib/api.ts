@@ -265,6 +265,18 @@ export interface UserMappingsPage {
 }
 
 export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
+export type UsageLeaderboardSort =
+  | "rank"
+  | "user"
+  | "favorite_model"
+  | "invocations"
+  | "total_tokens"
+  | "total_cost_usd"
+  | "avg_invocation_seconds"
+  | "prs_opened"
+  | "merged_prs"
+  | "agent_loc"
+export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
   reporting_cutover_at: string
@@ -913,10 +925,12 @@ export const api = {
   usageLeaderboard: (
     period: UsageLeaderboardPeriod = "7d",
     limit = 10,
-    cursor?: string
+    cursor?: string,
+    sort: UsageLeaderboardSort = "rank",
+    direction: SortDirection = "asc"
   ) =>
     request<UsageLeaderboardPayload>(
-      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}&sort=${sort}&direction=${direction}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
     ).then((payload) => ({
       ...payload,
       rows: payload.rows.map((row) => ({

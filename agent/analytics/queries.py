@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import text
@@ -13,6 +13,33 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from agent.config import ENV
 from agent.database import connection
 from agent.database.analytics import reporting_metadata, workspace_id
+
+UsageSort = Literal[
+    "rank",
+    "user",
+    "favorite_model",
+    "invocations",
+    "total_tokens",
+    "total_cost_usd",
+    "avg_invocation_seconds",
+    "prs_opened",
+    "merged_prs",
+    "agent_loc",
+]
+SortDirection = Literal["asc", "desc"]
+
+_USAGE_SORT_SQL: dict[UsageSort, str] = {
+    "rank": "rank",
+    "user": "lower(CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL THEN name ELSE 'Open SWE user' END)",
+    "favorite_model": "lower(favorite_model)",
+    "invocations": "invocations",
+    "total_tokens": "total_tokens",
+    "total_cost_usd": "total_cost_usd",
+    "avg_invocation_seconds": "avg_invocation_seconds",
+    "prs_opened": "prs_opened",
+    "merged_prs": "merged_prs",
+    "agent_loc": "agent_loc",
+}
 
 
 def period_start(period: str | None) -> datetime:
@@ -118,20 +145,35 @@ async def pr_merge_rate_by_model(
     }
 
 
-def _encode_usage_cursor(as_of: datetime, offset: int, workspace: UUID, period: str) -> str:
+def _encode_usage_cursor(
+    as_of: datetime,
+    offset: int,
+    workspace: UUID,
+    period: str,
+    sort: UsageSort,
+    direction: SortDirection,
+) -> str:
     payload = json.dumps(
         {
             "as_of": as_of.isoformat(),
             "offset": offset,
             "period": period,
             "workspace_id": str(workspace),
+            "sort": sort,
+            "direction": direction,
         },
         separators=(",", ":"),
     ).encode()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
-def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[datetime, int]:
+def _decode_usage_cursor(
+    cursor: str,
+    workspace: UUID,
+    period: str,
+    sort: UsageSort,
+    direction: SortDirection,
+) -> tuple[datetime, int]:
     try:
         encoded = cursor.encode("ascii")
         payload = json.loads(
@@ -142,6 +184,8 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
             "offset",
             "period",
             "workspace_id",
+            "sort",
+            "direction",
         }:
             raise ValueError
         as_of = datetime.fromisoformat(payload["as_of"])
@@ -149,6 +193,8 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
         if (
             payload["workspace_id"] != str(workspace)
             or payload["period"] != period
+            or payload["sort"] != sort
+            or payload["direction"] != direction
             or as_of.tzinfo is None
             or not isinstance(offset, int)
             or isinstance(offset, bool)
@@ -248,8 +294,11 @@ WITH runs AS (
         ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC,
             invocations DESC, name, person_id
     ) AS rank FROM metrics
+), ordered AS (
+    SELECT *, row_number() OVER (ORDER BY __SORT_EXPRESSION__ __SORT_DIRECTION__, rank) AS position
+    FROM ranked
 ), selected AS (
-    SELECT rank,
+    SELECT position,
         jsonb_build_object(
             'rank', rank,
             'user', jsonb_build_object(
@@ -269,9 +318,9 @@ WITH runs AS (
             'invocations_without_cost', invocations_without_cost,
             'invocations_with_partial_cost', invocations_with_partial_cost
         ) AS row
-    FROM ranked WHERE rank > :offset AND rank <= :offset + :limit
+    FROM ordered WHERE position > :offset AND position <= :offset + :limit
 )
-SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY rank), '[]'::jsonb) FROM selected) AS rows,
+SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY position), '[]'::jsonb) FROM selected) AS rows,
     count(*) AS total_members,
     min(rank) FILTER (WHERE is_current) AS current_user_rank,
     COALESCE(sum(invocations_without_cost), 0)::bigint AS invocations_without_cost,
@@ -324,15 +373,20 @@ async def usage_leaderboard(
     current_email: str | None,
     offset: int = 0,
     cursor: str | None = None,
+    sort: UsageSort = "rank",
+    direction: SortDirection = "asc",
     admin: bool = False,
 ) -> dict[str, Any]:
     """Read usage and review cohorts from one bounded PostgreSQL snapshot."""
     normalized = period if period in {"7d", "30d", "all"} else "30d"
     workspace = workspace_id()
     if cursor:
-        as_of, offset = _decode_usage_cursor(cursor, workspace, normalized)
+        as_of, offset = _decode_usage_cursor(cursor, workspace, normalized, sort, direction)
     else:
         as_of = datetime.now(UTC)
+    usage_sql = _USAGE_SQL.replace("__SORT_EXPRESSION__", _USAGE_SORT_SQL[sort]).replace(
+        "__SORT_DIRECTION__", direction.upper()
+    )
     generated_at_ms = int(as_of.timestamp() * 1000)
     parameters = {
         "workspace_id": workspace,
@@ -346,7 +400,7 @@ async def usage_leaderboard(
     async with connection() as conn:
         await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
         parameters["start"] = await _reporting_start(conn, normalized)
-        result = await conn.execute(text(_USAGE_SQL), parameters)
+        result = await conn.execute(text(usage_sql), parameters)
         usage = dict(result.mappings().one())
         result = await conn.execute(text(_REVIEWER_SQL), parameters)
         reviewer = dict(result.mappings().one())
@@ -365,7 +419,12 @@ async def usage_leaderboard(
         **usage,
         "next_cursor": (
             _encode_usage_cursor(
-                as_of, parameters["offset"] + len(usage["rows"]), workspace, normalized
+                as_of,
+                parameters["offset"] + len(usage["rows"]),
+                workspace,
+                normalized,
+                sort,
+                direction,
             )
             if len(usage["rows"]) == parameters["limit"]
             and parameters["offset"] + len(usage["rows"]) < usage["total_members"]

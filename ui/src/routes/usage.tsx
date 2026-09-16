@@ -5,15 +5,17 @@ import {
   ArrowUpNarrowWide,
   ArrowUpDown,
 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useState } from "react"
 
 import type {
   AnalyticsMetadata,
   ModelOption,
   PRMergeRateCohort,
   ReviewerStatsPayload,
+  SortDirection,
   UsageLeaderboardPeriod,
   UsageLeaderboardRow,
+  UsageLeaderboardSort,
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -41,13 +43,10 @@ export const Route = createFileRoute("/usage")({
 
 const PAGE_SIZES = [10, 25, 50, 100] as const
 
-type SortDirection = "asc" | "desc"
-
 interface SortableColumn {
-  key: string
+  key: UsageLeaderboardSort
   label: string
   align: "left" | "right"
-  sortValue: (row: UsageLeaderboardRow) => number | string
 }
 
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
@@ -139,6 +138,8 @@ function UsageAnalyticsPeriod({
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   const [leaderboardPage, setLeaderboardPage] = useState(1)
+  const [sort, setSort] = useState<UsageLeaderboardSort>("rank")
+  const [direction, setDirection] = useState<SortDirection>("asc")
   const [leaderboardCursors, setLeaderboardCursors] = useState<
     (string | undefined)[]
   >([undefined])
@@ -151,12 +152,16 @@ function UsageAnalyticsPeriod({
       leaderboardPage,
       leaderboardPageSize,
       leaderboardCursors[leaderboardPage - 1],
+      sort,
+      direction,
     ],
     queryFn: () =>
       api.usageLeaderboard(
         activePeriod,
         leaderboardPageSize,
-        leaderboardCursors[leaderboardPage - 1]
+        leaderboardCursors[leaderboardPage - 1],
+        sort,
+        direction
       ),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
@@ -231,6 +236,16 @@ function UsageAnalyticsPeriod({
             totalMembers={leaderboard.data.total_members}
             page={leaderboardPage}
             pageSize={leaderboardPageSize}
+            sort={sort}
+            direction={direction}
+            onSort={(nextSort) => {
+              setDirection(
+                sort === nextSort && direction === "desc" ? "asc" : "desc"
+              )
+              setSort(nextSort)
+              setLeaderboardPage(1)
+              setLeaderboardCursors([undefined])
+            }}
             onPageChange={(page) => {
               const nextCursor = leaderboard.data.next_cursor
               if (page > leaderboardPage && nextCursor) {
@@ -522,72 +537,21 @@ function PRMergeRateTable({
 }
 
 const USAGE_COLUMNS: Array<SortableColumn> = [
-  {
-    key: "rank",
-    label: "Rank",
-    align: "left",
-    sortValue: (row) => row.rank,
-  },
-  {
-    key: "user",
-    label: "User",
-    align: "left",
-    sortValue: (row) => row.user.name.toLowerCase(),
-  },
-  {
-    key: "favorite_model",
-    label: "Favorite Model",
-    align: "left",
-    sortValue: (row) => row.favorite_model.toLowerCase(),
-  },
-  {
-    key: "invocations",
-    label: "Invocations",
-    align: "right",
-    sortValue: (row) => row.invocations,
-  },
-  {
-    key: "total_tokens",
-    label: "Tokens",
-    align: "right",
-    sortValue: (row) => row.total_tokens,
-  },
-  {
-    key: "total_cost_usd",
-    label: "Cost",
-    align: "right",
-    sortValue: (row) => row.total_cost_usd,
-  },
+  { key: "rank", label: "Rank", align: "left" },
+  { key: "user", label: "User", align: "left" },
+  { key: "favorite_model", label: "Favorite Model", align: "left" },
+  { key: "invocations", label: "Invocations", align: "right" },
+  { key: "total_tokens", label: "Tokens", align: "right" },
+  { key: "total_cost_usd", label: "Cost", align: "right" },
   {
     key: "avg_invocation_seconds",
     label: "Avg Invocation Duration",
     align: "right",
-    sortValue: (row) => row.avg_invocation_seconds,
   },
-  {
-    key: "prs_opened",
-    label: "PRs Opened",
-    align: "right",
-    sortValue: (row) => row.prs_opened,
-  },
-  {
-    key: "merged_prs",
-    label: "Merged PRs",
-    align: "right",
-    sortValue: (row) => row.merged_prs,
-  },
-  {
-    key: "agent_loc",
-    label: "Agent LOC",
-    align: "right",
-    sortValue: (row) => row.agent_loc,
-  },
+  { key: "prs_opened", label: "PRs Opened", align: "right" },
+  { key: "merged_prs", label: "Merged PRs", align: "right" },
+  { key: "agent_loc", label: "Agent LOC", align: "right" },
 ]
-
-function compareSortValues(a: number | string, b: number | string): number {
-  if (typeof a === "number" && typeof b === "number") return a - b
-  return String(a).localeCompare(String(b))
-}
 
 function SortableHeader({
   column,
@@ -597,9 +561,9 @@ function SortableHeader({
   className,
 }: {
   column: SortableColumn
-  sortKey: string | null
+  sortKey: UsageLeaderboardSort
   sortDirection: SortDirection
-  onSort: (key: string) => void
+  onSort: (key: UsageLeaderboardSort) => void
   className: string
 }) {
   const isActive = sortKey === column.key
@@ -643,6 +607,9 @@ function UsageTable({
   totalMembers,
   page,
   pageSize,
+  sort,
+  direction,
+  onSort,
   onPageChange,
   onPageSizeChange,
 }: {
@@ -651,30 +618,12 @@ function UsageTable({
   totalMembers: number
   page: number
   pageSize: number
+  sort: UsageLeaderboardSort
+  direction: SortDirection
+  onSort: (key: UsageLeaderboardSort) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
-  const [sortKey, setSortKey] = useState<string | null>(null)
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
-
-  const handleSort = (key: string) => {
-    if (sortKey === key) {
-      setSortDirection(sortDirection === "asc" ? "desc" : "asc")
-    } else {
-      setSortKey(key)
-      setSortDirection("desc")
-    }
-  }
-
-  const sortedRows = useMemo(() => {
-    const column = USAGE_COLUMNS.find((col) => col.key === sortKey)
-    if (!column) return rows
-    const sorted = [...rows].sort((a, b) =>
-      compareSortValues(column.sortValue(a), column.sortValue(b))
-    )
-    return sortDirection === "desc" ? sorted.reverse() : sorted
-  }, [rows, sortKey, sortDirection])
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1040px] text-xs">
@@ -684,16 +633,16 @@ function UsageTable({
               <SortableHeader
                 key={column.key}
                 column={column}
-                sortKey={sortKey}
-                sortDirection={sortDirection}
-                onSort={handleSort}
+                sortKey={sort}
+                sortDirection={direction}
+                onSort={onSort}
                 className={`${index === 0 ? "w-14 pr-0 pl-4" : index === USAGE_COLUMNS.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
               />
             ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {sortedRows.map((row) => (
+          {rows.map((row) => (
             <tr
               key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
             >
