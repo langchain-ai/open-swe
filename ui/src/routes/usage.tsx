@@ -799,6 +799,11 @@ function initialsFor(name: string): string {
   return `${first[0] ?? ""}${second[0] ?? ""}`.toUpperCase()
 }
 
+function githubProfileUrl(login: string | null): string | null {
+  if (!login) return null
+  return `https://github.com/${encodeURIComponent(login)}`
+}
+
 function formatTime(value: number): string {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
