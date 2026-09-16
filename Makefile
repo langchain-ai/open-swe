@@ -7,11 +7,8 @@ all: help
 # DEVELOPMENT
 ######################
 
-dev: .env postgres
-	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
-
-.env: .env.example
-	cp .env.example .env
+dev: postgres
+	POSTGRES_URI="$${POSTGRES_URI:-postgresql://postgres:postgres@localhost:5433/postgres}" uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
 
 postgres:
 	@docker inspect open-swe-postgres >/dev/null 2>&1 || docker run --name open-swe-postgres -e POSTGRES_PASSWORD=postgres -p 5433:5432 -d postgres:16
