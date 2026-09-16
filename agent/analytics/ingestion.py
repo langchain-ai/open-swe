@@ -8,7 +8,6 @@ from uuid import UUID
 from sqlalchemy import BigInteger, Uuid, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.analytics.attribution import reject_false_openers
 from agent.analytics.events import EventEnvelope, EventName, PROpenedPayload
 from agent.analytics.summaries import mark_dirty
 from agent.config import ENV
@@ -109,6 +108,62 @@ async def ingest(event: EventEnvelope) -> bool:
             text("UPDATE deployment_metadata SET last_processed_at = clock_timestamp()")
         )
     return True
+
+
+_CANDIDATES = """
+    SELECT pr.pr_id, run.run_id
+    FROM pr_projection AS pr
+    JOIN run_projection AS run ON run.workspace_id = pr.workspace_id
+    WHERE pr.workspace_id = :workspace_id
+      AND (:pr_id IS NULL OR pr.pr_id = :pr_id)
+      AND (:run_id IS NULL OR run.run_id = :run_id)
+      AND run.started_at > pr.opened_at + interval '24 hours'
+      AND (pr.opening_run_id = run.run_id OR EXISTS (
+          SELECT 1 FROM pr_run_link_projection AS link
+          WHERE link.workspace_id = pr.workspace_id AND link.pr_id = pr.pr_id
+            AND link.run_id = run.run_id AND link.link_role = 'opening'
+      ))
+"""
+
+
+async def reject_false_openers(
+    conn: AsyncConnection,
+    *,
+    workspace_id: UUID,
+    pr_id: UUID | None = None,
+    run_id: UUID | None = None,
+    apply: bool = True,
+) -> list[UUID]:
+    """Clear only contradicted opening provenance, retaining outcomes and other links."""
+    params = {"workspace_id": workspace_id, "pr_id": pr_id, "run_id": run_id}
+    candidates = text(_CANDIDATES).bindparams(
+        bindparam("pr_id", type_=Uuid), bindparam("run_id", type_=Uuid)
+    )
+    rows = (await conn.execute(candidates, params)).tuples().all()
+    if apply:
+        for affected_pr, affected_run in rows:
+            identity = {
+                "workspace_id": workspace_id,
+                "pr_id": affected_pr,
+                "run_id": affected_run,
+            }
+            await conn.execute(
+                text(
+                    "UPDATE pr_projection SET opening_run_id = NULL, originating_model_id = NULL, "
+                    "model_attribution_quality = 'unavailable', updated_at = clock_timestamp() "
+                    "WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
+                    "AND opening_run_id = :run_id"
+                ),
+                identity,
+            )
+            await conn.execute(
+                text(
+                    "DELETE FROM pr_run_link_projection WHERE workspace_id = :workspace_id "
+                    "AND pr_id = :pr_id AND run_id = :run_id AND link_role = 'opening'"
+                ),
+                identity,
+            )
+    return sorted({UUID(str(row[0])) for row in rows}, key=str)
 
 
 async def _repair_pr_attribution(

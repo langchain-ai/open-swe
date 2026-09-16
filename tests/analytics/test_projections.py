@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import attribution, emitter, identity, ingestion
+from agent.analytics import emitter, identity, ingestion
 from agent.analytics.events import (
     EventName,
     FeedbackSubmittedPayload,
@@ -971,7 +971,7 @@ async def test_historical_correction_is_scoped_read_only_and_idempotent(analytic
         runs = (
             await conn.execute(text("SELECT * FROM run_projection ORDER BY workspace_id"))
         ).all()
-        assert await attribution.reject_false_openers(
+        assert await ingestion.reject_false_openers(
             conn, workspace_id=workspace, pr_id=pr_id, apply=False
         ) == [pr_id]
         assert (
@@ -980,12 +980,10 @@ async def test_historical_correction_is_scoped_read_only_and_idempotent(analytic
             )
             == 2
         )
-        assert await attribution.reject_false_openers(
-            conn, workspace_id=workspace, pr_id=pr_id
-        ) == [pr_id]
-        assert (
-            await attribution.reject_false_openers(conn, workspace_id=workspace, pr_id=pr_id) == []
-        )
+        assert await ingestion.reject_false_openers(conn, workspace_id=workspace, pr_id=pr_id) == [
+            pr_id
+        ]
+        assert await ingestion.reject_false_openers(conn, workspace_id=workspace, pr_id=pr_id) == []
         for item in raw_events:
             if item.workspace_id == workspace:
                 await ingestion._project(conn, item)
