@@ -188,11 +188,9 @@ it("shows plain-language PR outcomes while keeping cohort details available", as
   expect(
     screen.getByText("Open", { selector: "strong" }).closest("p")?.textContent
   ).toContain("includes every PR that is still open")
-  expect(
-    screen.getByText(/resolved merge rate answers/, { selector: "p" })
-  ).toBeTruthy()
+  expect(screen.queryByText(/resolved merge rate/)).toBeNull()
   expect(screen.getByText(/Merge rate = merged/)).toBeTruthy()
-  expect(screen.getByText(/Resolved merge rate = merged/)).toBeTruthy()
+  expect(screen.queryByText(/Resolved merge rate = merged/)).toBeNull()
   client.clear()
 })
 

@@ -380,19 +380,10 @@ function PRMergeRateSection({
               Newer open PRs are excluded so they do not lower the rate before
               they have had enough time to merge.
             </p>
-            <p>
-              The resolved merge rate answers a different question: of PRs that
-              have already closed, how many merged? It excludes all open PRs and
-              is available from the underlying analytics, but is not shown as
-              the primary result here.
-            </p>
             <ul className="list-disc space-y-1 pl-4">
               <li>
                 Merge rate = merged ÷ (merged + closed without merge + open at
                 least {data.maturity_days} days).
-              </li>
-              <li>
-                Resolved merge rate = merged ÷ (merged + closed without merge).
               </li>
             </ul>
             <p>
