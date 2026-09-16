@@ -323,6 +323,10 @@ async def _settle_slack_thread_status(
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     if slack_thread is None or not slack_thread.channel_id or not slack_thread.thread_ts:
         return
+    # DM and code-channel sessions keep one status anchored on the newest
+    # message; clearing the session ts would drop a live run's indicator.
+    if slack_thread.thread_ts == "0":
+        return
     await clear_slack_thread_status(slack_thread.channel_id, slack_thread.thread_ts, "")
 
 

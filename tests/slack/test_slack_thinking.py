@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, call
 
 from agent.slack import thinking as slack_thinking
@@ -299,7 +298,7 @@ async def test_session_status_release_leaves_a_newer_runs_indicator_alone(monkey
 
 
 async def test_thread_status_refreshes_until_the_run_ends(monkeypatch) -> None:
-    """A thread's indicator keeps refreshing; the completion webhook clears it."""
+    """A thread's indicator keeps refreshing until the run is over, then clears."""
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.0)
@@ -317,5 +316,25 @@ async def test_thread_status_refreshes_until_the_run_ends(monkeypatch) -> None:
 
     assert set_status.await_args_list == [
         call("C1", "1.0", slack_thinking._THINKING_STATUS),
-        call("C1", "1.0", slack_thinking._THINKING_STATUS),
+        call("C1", "1.0", ""),
     ]
+
+
+async def test_thread_status_survives_while_another_run_is_active(monkeypatch) -> None:
+    """A completion landing mid-run leaves the active run's indicator alone."""
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 3600.0)
+
+    client = _status_client(_AnchorStore(), "run-1")
+    client.runs.list = AsyncMock(return_value=[{"id": "run-2"}])
+
+    await slack_thinking.show_slack_thinking_status(
+        client=client,
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="1.0",
+    )
+
+    assert call("C1", "1.0", "") not in set_status.await_args_list

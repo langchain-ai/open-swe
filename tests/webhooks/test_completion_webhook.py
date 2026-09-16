@@ -541,6 +541,29 @@ async def test_error_clears_thinking_status_when_no_run_is_left(
 
 
 @pytest.mark.asyncio
+async def test_completion_leaves_session_status_anchored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DM/code-channel sessions anchor the status on the newest message, not ts 0."""
+    client = _FakeActiveRunClient(
+        {
+            "source": "slack",
+            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "0"}},
+        },
+        active=False,
+    )
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    cleared = create_autospec(completion.clear_slack_thread_status)
+    monkeypatch.setattr(completion, "clear_slack_thread_status", cleared)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "success"}
+    )
+
+    cleared.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_automated_wakeup_failure_preserves_prior_silent_behavior(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

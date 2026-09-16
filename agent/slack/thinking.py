@@ -384,8 +384,8 @@ async def show_slack_thinking_status(
     the indicator is always on the latest one and only there.
 
     Slack stops the animation when the assistant posts a message, so the status
-    is refreshed in the background for the whole run and cleared by the run
-    completion webhook once no run is left.
+    is refreshed in the background for the whole run; the completion webhook
+    clears it once no run is left.
     """
     if session_ts:
         previous = await _claim_status_anchor(client, channel_id, session_ts, thread_ts)
@@ -416,12 +416,28 @@ async def show_slack_thinking_status(
         logger.warning("Slack thinking status observer failed for run %s", run_id, exc_info=True)
     finally:
         refresher.cancel()
-        # A session's newer run owns the indicator now, and clearing it would take
-        # away the one the person is waiting on. For a thread, the run completion
-        # webhook clears the status once no run is left, so the observer never
-        # clears it here.
+        # A session's newer run owns the indicator now, and clearing it would
+        # take away the one the person is waiting on. A thread's indicator is
+        # cleared here only while no run is left; otherwise the completion
+        # webhook owns the clear.
         if session_ts:
-            await asyncio.shield(_release_status_anchor(client, channel_id, session_ts, thread_ts))
+            still_owned = await asyncio.shield(
+                _release_status_anchor(client, channel_id, session_ts, thread_ts)
+            )
+        else:
+            still_owned = not await asyncio.shield(_thread_has_active_runs(client, thread_id))
+        if still_owned:
+            await asyncio.shield(set_slack_thread_status(channel_id, thread_ts, ""))
+
+
+async def _thread_has_active_runs(client: LangGraphClient, thread_id: str) -> bool:
+    try:
+        for status in ("pending", "running"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                return True
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not list runs for thread %s", thread_id, exc_info=True)
+    return False
 
 
 async def _refresh_thinking_status(channel_id: str, thread_ts: str) -> None:
