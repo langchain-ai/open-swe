@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from langchain.agents.middleware.types import AgentState
-from langchain_core.messages import ToolCall, ToolMessage
+from langchain_core.messages import AIMessage, ToolCall, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
@@ -21,6 +21,7 @@ from agent.middleware.trace import OpenSWEMiddleware
 logger = logging.getLogger(__name__)
 
 _READ_FILE_INT_FIELDS = ("offset", "limit")
+_NUMBERED_READ_FILE_ROW = re.compile(r"\s*(\d+(?:\.\d+)?)  (.*)")
 
 
 def _coerce_int(value: object) -> int | None:
@@ -52,8 +53,90 @@ def _sanitize_read_file_args(args: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
+def _read_file_content(state: AgentState, file_path: str) -> str | None:
+    """Return the latest numbered read output for *file_path* from state."""
+    messages = state.get("messages", []) if isinstance(state, dict) else []
+    pending_paths: dict[str, str] = {}
+    content: str | None = None
+    for message in messages:
+        if isinstance(message, AIMessage):
+            for tool_call in message.tool_calls:
+                if tool_call.get("name") != "read_file":
+                    continue
+                call_id = tool_call.get("id")
+                args = tool_call.get("args")
+                if isinstance(call_id, str) and isinstance(args, dict):
+                    read_path = args.get("file_path")
+                    if isinstance(read_path, str):
+                        pending_paths[call_id] = read_path
+            continue
+        if not isinstance(message, ToolMessage) or not isinstance(message.content, str):
+            continue
+        read_path = pending_paths.pop(message.tool_call_id, None)
+        if read_path == file_path and message.status != "error":
+            rows: list[str] = []
+            for row in message.content.splitlines():
+                match = _NUMBERED_READ_FILE_ROW.fullmatch(row)
+                if match is None:
+                    break
+                rows.append(match.group(2))
+            if rows:
+                content = "\n".join(rows)
+    return content
+
+
+def _uniform_leading_whitespace(value: str) -> str | None:
+    lines = value.splitlines()
+    if not lines:
+        return None
+    prefixes = [line[: len(line) - len(line.lstrip(" \t"))] for line in lines]
+    prefix = prefixes[0][: min(map(len, prefixes))]
+    for line_prefix in prefixes[1:]:
+        common_length = 0
+        for expected, actual in zip(prefix, line_prefix, strict=False):
+            if expected != actual:
+                break
+            common_length += 1
+        prefix = prefix[:common_length]
+    if len(prefix) < 2:
+        return None
+    return prefix
+
+
+def _remove_line_prefix(value: str, prefix: str) -> str:
+    return "".join(line.removeprefix(prefix) for line in value.splitlines(keepends=True))
+
+
+def _sanitize_edit_file_args(args: dict[str, Any], state: AgentState) -> dict[str, Any]:
+    """Repair a uniformly shifted edit anchor when prior read output confirms it."""
+    old_string = args.get("old_string")
+    new_string = args.get("new_string")
+    file_path = args.get("file_path")
+    if (
+        not isinstance(old_string, str)
+        or not isinstance(new_string, str)
+        or not isinstance(file_path, str)
+    ):
+        return args
+    content = _read_file_content(state, file_path)
+    prefix = _uniform_leading_whitespace(old_string)
+    if content is None or prefix is None:
+        return args
+    sanitized_old = _remove_line_prefix(old_string, prefix)
+    if old_string in content or sanitized_old not in content:
+        return args
+    logger.warning(
+        "Removing shared leading whitespace from edit_file anchors for %s",
+        file_path,
+    )
+    sanitized = dict(args)
+    sanitized["old_string"] = sanitized_old
+    sanitized["new_string"] = _remove_line_prefix(new_string, prefix)
+    return sanitized
+
+
 class SanitizeToolInputsMiddleware(OpenSWEMiddleware):
-    """Intercept read_file calls and coerce malformed integer parameters.
+    """Sanitize malformed read_file and edit_file parameters.
 
     When the LLM produces a string value for an integer field (e.g.
     ``offset='1, 80'``), this middleware extracts the leading integer so that
@@ -65,12 +148,17 @@ class SanitizeToolInputsMiddleware(OpenSWEMiddleware):
 
     def _sanitize_request(self, request: ToolCallRequest) -> ToolCallRequest:
         tool_call = request.tool_call
-        if not isinstance(tool_call, dict) or tool_call.get("name") != "read_file":
+        if not isinstance(tool_call, dict):
             return request
         args = tool_call.get("args", {})
         if not isinstance(args, dict):
             return request
-        sanitized_args = _sanitize_read_file_args(args)
+        if tool_call.get("name") == "read_file":
+            sanitized_args = _sanitize_read_file_args(args)
+        elif tool_call.get("name") == "edit_file":
+            sanitized_args = _sanitize_edit_file_args(args, request.state)
+        else:
+            return request
         if sanitized_args is args:
             return request
         new_tool_call = cast(ToolCall, {**tool_call, "args": sanitized_args})
