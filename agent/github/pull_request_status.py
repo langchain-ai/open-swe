@@ -54,6 +54,18 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
   }
 }
 """
+_THREAD_COUNT_QUERY = """
+query PullRequestThreadCount($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { isResolved }
+      }
+    }
+  }
+}
+"""
 
 
 CheckState = Literal["passing", "failing", "pending", "unknown", "none"]
@@ -79,6 +91,7 @@ class OpenPullRequest(BaseModel):
     status_available: bool = False
     ci: CheckState = "unknown"
     review_decision: ReviewDecision | None = None
+    unresolved_threads: int | None = None
     failing_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
 
@@ -376,6 +389,57 @@ async def _fetch_unresolved_review_threads(
         return None
 
 
+async def _fetch_unresolved_thread_count(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
+) -> int | None:
+    """Count review threads GitHub still considers unresolved, or ``None`` if unreadable."""
+    unresolved = 0
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    try:
+        while True:
+            response = await github_request(
+                client,
+                "POST",
+                GITHUB_GRAPHQL,
+                json={
+                    "query": _THREAD_COUNT_QUERY,
+                    "variables": {
+                        "owner": owner,
+                        "repo": repo,
+                        "number": number,
+                        "cursor": cursor,
+                    },
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or payload.get("errors"):
+                return None
+            data = payload.get("data")
+            repository = data.get("repository") if isinstance(data, dict) else None
+            pull = repository.get("pullRequest") if isinstance(repository, dict) else None
+            threads = pull.get("reviewThreads") if isinstance(pull, dict) else None
+            nodes = threads.get("nodes") if isinstance(threads, dict) else None
+            if not isinstance(nodes, list):
+                return None
+            unresolved += sum(
+                1
+                for thread in nodes
+                if isinstance(thread, Mapping) and thread.get("isResolved") is False
+            )
+            page_info = threads.get("pageInfo")
+            if not isinstance(page_info, dict) or page_info.get("hasNextPage") is not True:
+                return unresolved
+            next_cursor = page_info.get("endCursor")
+            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+                return None
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+    except httpx2.HTTPError, ValueError:
+        return None
+
+
 async def _pull_request_status(client: httpx2.AsyncClient, record: object) -> dict[str, Any]:
     identity = pull_request_identity(record)
     if identity is None:
@@ -601,12 +665,14 @@ async def load_open_pull_request(
     if sha is None or not _SHA_PATTERN.fullmatch(sha):
         return result
     result.head_sha = sha
-    runs, statuses, decision = await asyncio.gather(
+    runs, statuses, decision, unresolved_threads = await asyncio.gather(
         _fetch_check_runs(client, owner, name, sha),
         _fetch_commit_statuses(client, owner, name, sha),
         _fetch_review_decision(client, owner, name, number),
+        _fetch_unresolved_thread_count(client, owner, name, number),
     )
     result.review_decision = decision
+    result.unresolved_threads = unresolved_threads
     if runs is None or statuses is None:
         return result
     failed, _, _ = _normalize_checks(runs, statuses)

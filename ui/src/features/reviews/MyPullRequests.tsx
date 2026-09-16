@@ -82,6 +82,12 @@ function isFixable(pr: OpenPullRequest) {
   )
 }
 
+// An unreadable count must not hide the action: the conversations may well be
+// there.
+function hasUnresolvedConversations(pr: OpenPullRequest) {
+  return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
+}
+
 // Approved is a review verdict, so it can stand while GitHub is still deciding
 // whether the branch merges or while the checks could not be read. Merging
 // needs both of those answers: GitHub blocks only required checks, so an
@@ -352,6 +358,75 @@ function FixPullRequest({ pr, login }: { pr: OpenPullRequest; login: string }) {
       {fix.error && (
         <p role="alert" className="mt-1 text-destructive">
           {fix.error.message}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function AddressPullRequestComments({
+  pr,
+  login,
+}: {
+  pr: OpenPullRequest
+  login: string
+}) {
+  const thread = useQuery({
+    queryKey: ["pr-thread-status", login, pr.repo, pr.number],
+    queryFn: () => api.pullRequestThreadStatus(pr.repo, pr.number),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  })
+  const address = useMutation({
+    mutationFn: () => api.addressPullRequestComments(pr),
+    onSuccess: (result) =>
+      toast.success(
+        `${result.already_running ? "Already addressing comments for" : "Queued comment fixes for"} ${pr.repo}#${pr.number}`
+      ),
+    onError: (error) =>
+      toast.error(`Could not queue comment fixes for ${pr.repo}#${pr.number}`, {
+        description: error.message,
+      }),
+  })
+  return (
+    <div>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={
+          thread.isPending ||
+          thread.isError ||
+          thread.data?.running ||
+          address.isPending ||
+          address.isSuccess
+        }
+        aria-live="polite"
+        onClick={() => address.mutate()}
+      >
+        {thread.data?.running || address.data?.already_running
+          ? "Addressing comments"
+          : thread.isPending
+            ? "Checking…"
+            : thread.isError
+              ? "Address comments unavailable"
+              : address.isPending
+                ? "Queuing comment fixes…"
+                : address.isSuccess
+                  ? "Comment fixes queued"
+                  : address.isError
+                    ? "Retry address comments"
+                    : "Address comments"}
+      </Button>
+      {thread.error && (
+        <p role="alert" className="mt-1 text-destructive">
+          {thread.error.message}
+        </p>
+      )}
+      {address.error && (
+        <p role="alert" className="mt-1 text-destructive">
+          {address.error.message}
         </p>
       )}
     </div>
@@ -834,6 +909,18 @@ function Diffstat({ pr }: { pr: OpenPullRequest }) {
   )
 }
 
+function UnresolvedConversations({ pr }: { pr: OpenPullRequest }) {
+  if (pr.unresolvedThreads === null)
+    return <span className="opacity-70">Conversations unavailable</span>
+  if (pr.unresolvedThreads === 0) return null
+  return (
+    <span>
+      {pr.unresolvedThreads} unresolved conversation
+      {pr.unresolvedThreads === 1 ? "" : "s"}
+    </span>
+  )
+}
+
 function PullRequestCard({
   pr,
   login,
@@ -877,7 +964,16 @@ function PullRequestCard({
                 <StatusPill key={status} status={status} />
               ))}
             </div>
-            <h3 className="mt-1 text-sm font-medium break-words">{pr.title}</h3>
+            <h3 className="mt-1 text-sm font-medium break-words">
+              <a
+                className="hover:underline"
+                href={`https://github.com/${pr.repo}/pull/${pr.number}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {pr.title}
+              </a>
+            </h3>
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
             <Diffstat pr={pr} />
@@ -900,6 +996,7 @@ function PullRequestCard({
                 {dateLabel(pr.createdAt)}
               </time>
             </span>
+            <UnresolvedConversations pr={pr} />
             {!pr.statusAvailable && !pr.detailsLoading && (
               <span className="text-amber-700 dark:text-amber-400">
                 Live PR status unavailable
@@ -947,12 +1044,13 @@ function PullRequestCard({
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
               {isFixable(pr) && <FixPullRequest pr={pr} login={login} />}
-              {isMergeable(pr) && (
-                <MergePullRequest pr={pr} onMerged={onRemoved} />
+              {hasUnresolvedConversations(pr) && (
+                <AddressPullRequestComments pr={pr} login={login} />
               )}
               {pr.draft === true && (
                 <MarkPullRequestReady pr={pr} onReady={onReady} />
               )}
+              <MergePullRequest pr={pr} onMerged={onRemoved} />
               <ClosePullRequest pr={pr} onClosed={onRemoved} />
             </div>
             <PullRequestLinks

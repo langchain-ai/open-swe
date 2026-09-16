@@ -298,6 +298,36 @@ async def test_running_slack_thread_is_reported_and_not_sent_another_fix(setup):
     setup.client.threads.update.assert_not_awaited()
 
 
+async def test_address_comments_enqueues_a_run_on_the_pull_request_thread(setup):
+    result = await pr_fixes.address_pull_request_comments("acme", "app", 12, "alice")
+
+    assert result == pr_fixes.PullRequestFixResult(thread_id="existing")
+    args = pr_fixes.dispatch_agent_run.await_args
+    assert args.args[0] == "existing"
+    assert args.args[1] == pr_fixes.render_prompt(
+        "runs/pull-request-comments.md", url="https://github.com/acme/app/pull/12"
+    )
+    assert args.kwargs["multitask_strategy"] == "enqueue"
+
+
+async def test_address_comments_on_a_busy_thread_reports_it_instead_of_dispatching(setup):
+    setup.threads["existing"]["status"] = "busy"
+
+    assert await pr_fixes.address_pull_request_comments(
+        "acme", "app", 12, "alice"
+    ) == pr_fixes.PullRequestFixResult(thread_id="existing", already_running=True)
+    pr_fixes.dispatch_agent_run.assert_not_awaited()
+    setup.client.threads.update.assert_not_awaited()
+
+
+async def test_address_comments_rejects_an_invalid_pull_request_number(setup):
+    with pytest.raises(HTTPException) as raised:
+        await pr_fixes.address_pull_request_comments("acme", "app", 0, "alice")
+    assert raised.value.status_code == 422
+    pr_fixes.require_repo_access_for_user.assert_not_awaited()
+    pr_fixes.dispatch_agent_run.assert_not_awaited()
+
+
 async def test_no_associated_thread_status_does_not_create_one(setup):
     FakeRegistry.thread_ids = []
     assert await pr_fixes.pull_request_thread_running(

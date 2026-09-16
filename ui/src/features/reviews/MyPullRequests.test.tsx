@@ -24,6 +24,7 @@ vi.mock("@/lib/api", () => ({
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
     fixPullRequest: vi.fn(),
+    addressPullRequestComments: vi.fn(),
     pullRequestThreadStatus: vi.fn(),
     mergePullRequest: vi.fn(),
     closePullRequest: vi.fn(),
@@ -77,6 +78,7 @@ const pull = (
   ci: "passing",
   failingChecks: [],
   pendingChecks: [],
+  unresolvedThreads: 0,
   ...fields,
 })
 const payload = {
@@ -252,12 +254,12 @@ describe("My PRs", () => {
         })
     )
     mount()
-    await screen.findByText("Change 1")
+    const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.change(
       screen.getByRole("combobox", { name: "Merge method for PR #1" }),
       { target: { value: "squash" } }
     )
-    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
     const merging = await screen.findByRole("button", { name: "Merging…" })
     expect((merging as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText("Change 1")).toBeTruthy()
@@ -301,11 +303,14 @@ describe("My PRs", () => {
     ).toBe(false)
   })
 
-  it("keeps titles and numbers plain and provides explicit destination links", async () => {
+  it("links the title to GitHub, keeps the number plain, and provides explicit destination links", async () => {
     mount()
     const title = await screen.findByText("Change 1")
     const card = title.closest("li")!
-    expect(title.closest("a")).toBeNull()
+    expect(title.closest("a")?.getAttribute("href")).toBe(
+      "https://github.com/acme/app/pull/1"
+    )
+    expect(title.closest("h3")).toBeTruthy()
     expect(within(card).getByText("acme/app")).toBeTruthy()
     expect(screen.queryByText("feature/example")).toBeNull()
     expect(within(card).getByText("#1").closest("a")).toBeNull()
@@ -513,8 +518,9 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Approved")).toBeTruthy()
     expect(within(card).queryByText("Status unavailable")).toBeNull()
-    // Merging needs the decision GitHub has not made yet.
-    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
+    // The card offers the merge and lets GitHub reject it; the bulk run must
+    // not attempt what GitHub has not said it will accept.
+    expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
     fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
     await screen.findByRole("group", { name: bulk })
     expect(bulkButton("Merge").disabled).toBe(true)
@@ -573,7 +579,7 @@ describe("My PRs", () => {
     expect(titles()).toEqual(["Change 1"])
   })
 
-  it("does not offer a merge while the checks could not be read", async () => {
+  it("still offers a card merge while the checks could not be read, but no bulk merge", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -587,7 +593,7 @@ describe("My PRs", () => {
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Approved")).toBeTruthy()
-    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
+    expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
     fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
     await screen.findByRole("group", { name: bulk })
     expect(bulkButton("Merge").disabled).toBe(true)
@@ -1100,5 +1106,152 @@ describe("My PRs", () => {
       expect.objectContaining({ number: 2 }),
       "merge"
     )
+  })
+
+  it("surfaces a repository rule violation from a merge the dashboard could not predict", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1)],
+    })
+    vi.mocked(api.mergePullRequest).mockRejectedValue(
+      new Error(
+        "Repository rule violations found — A conversation must be resolved before this pull request can be merged"
+      )
+    )
+    mount()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    fireEvent.change(
+      within(card).getByRole("combobox", { name: "Merge method for PR #1" }),
+      { target: { value: "squash" } }
+    )
+    fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
+    expect((await within(card).findByRole("alert")).textContent).toContain(
+      "A conversation must be resolved"
+    )
+    expect(toast.error).toHaveBeenCalledWith("Could not merge acme/app#1", {
+      description: expect.stringContaining("Repository rule violations found"),
+    })
+    expect(within(card).getByText("Change 1")).toBeTruthy()
+    await selectAll()
+    expect(bulkButton("Merge").disabled).toBe(true)
+  })
+
+  it("offers addressing comments only when conversations are left to address", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, { unresolvedThreads: 3 }),
+        pull(2, { repo: "acme/other", unresolvedThreads: 0 }),
+        pull(3, { repo: "acme/third", unresolvedThreads: null }),
+        pull(4, { repo: "acme/fourth", unresolvedThreads: 1 }),
+      ],
+    })
+    mount()
+    await screen.findByText("Change 4")
+    const shown = cards()
+    expect(
+      within(shown[0]!).getByText("3 unresolved conversations")
+    ).toBeTruthy()
+    expect(within(shown[1]!).queryByText(/unresolved conversation/)).toBeNull()
+    expect(
+      within(shown[2]!).getByText("Conversations unavailable")
+    ).toBeTruthy()
+    expect(
+      within(shown[3]!).getByText("1 unresolved conversation")
+    ).toBeTruthy()
+    const address = "Address comments"
+    expect(
+      await within(shown[0]!).findByRole("button", { name: address })
+    ).toBeTruthy()
+    expect(
+      within(shown[1]!).queryByRole("button", { name: address })
+    ).toBeNull()
+    // An unreadable count cannot hide a real action.
+    expect(
+      within(shown[2]!).getByRole("button", { name: address })
+    ).toBeTruthy()
+    expect(
+      within(shown[3]!).getByRole("button", { name: address })
+    ).toBeTruthy()
+  })
+
+  it("queues the comment fixes in the background and keeps the button disabled after success", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { unresolvedThreads: 2 })],
+    })
+    let resolve!: (value: { thread_id: string }) => void
+    vi.mocked(api.addressPullRequestComments).mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    mount()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    fireEvent.click(
+      await within(card).findByRole("button", { name: "Address comments" })
+    )
+    expect(
+      (
+        (await within(card).findByRole("button", {
+          name: "Queuing comment fixes…",
+        })) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
+    expect(api.addressPullRequestComments).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 1, unresolvedThreads: 2 })
+    )
+    resolve({ thread_id: "comments-thread" })
+    const queued = await within(card).findByRole("button", {
+      name: "Comment fixes queued",
+    })
+    expect((queued as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(queued)
+    expect(api.addressPullRequestComments).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith(
+      "Queued comment fixes for acme/app#1"
+    )
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("reports a run that is already addressing the comments", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { unresolvedThreads: 1 })],
+    })
+    vi.mocked(api.addressPullRequestComments).mockResolvedValue({
+      thread_id: "comments-thread",
+      already_running: true,
+    })
+    mount()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    fireEvent.click(
+      await within(card).findByRole("button", { name: "Address comments" })
+    )
+    expect(
+      await within(card).findByRole("button", { name: "Addressing comments" })
+    ).toBeTruthy()
+    expect(toast.success).toHaveBeenCalledWith(
+      "Already addressing comments for acme/app#1"
+    )
+  })
+
+  it("does not address comments while the associated thread is running", async () => {
+    vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { unresolvedThreads: 4 })],
+    })
+    mount()
+    const button = await screen.findByRole("button", {
+      name: "Addressing comments",
+    })
+    expect((button as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      screen.queryByRole("button", { name: "Address comments" })
+    ).toBeNull()
+    fireEvent.click(button)
+    expect(api.addressPullRequestComments).not.toHaveBeenCalled()
   })
 })

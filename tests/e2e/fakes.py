@@ -364,6 +364,16 @@ def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def review_thread_count_graphql(threads: list[dict[str, Any]]) -> dict[str, Any]:
+    """``reviewThreads`` as the unresolved-count query selects it."""
+    return {
+        "nodes": [
+            {"isResolved": review_thread_graphql(thread)["isResolved"]} for thread in threads
+        ],
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+
+
 def check_graphql(check: dict[str, Any]) -> dict[str, Any]:
     return {
         "__typename": "CheckRun",

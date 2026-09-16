@@ -919,6 +919,18 @@ async def gh_graphql(request: Request) -> JSONResponse:
                 }
             }
         )
+    if "PullRequestThreadCount" in query:
+        return JSONResponse(
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": fakes.review_thread_count_graphql(pr["review_threads"])
+                        }
+                    }
+                }
+            }
+        )
     review_threads = {
         "nodes": [fakes.review_thread_graphql(thread) for thread in pr["review_threads"]],
         "pageInfo": {"hasNextPage": False, "endCursor": None},

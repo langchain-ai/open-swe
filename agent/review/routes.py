@@ -54,6 +54,7 @@ from agent.threads.pr_fixes import (
     PullRequestFixResult,
     PullRequestThreadRef,
     PullRequestThreadStatus,
+    address_pull_request_comments,
     fix_pull_request,
     open_pull_request_thread,
     pull_request_thread_running,
@@ -193,6 +194,20 @@ async def api_fix_pull_request(
 ) -> PullRequestFixResult:
     return await fix_pull_request(
         owner, repo, pr_number, session["sub"], session.get("email"), context=context
+    )
+
+
+@router.post(
+    "/reviews/{owner}/{repo}/{pr_number}/address-comments", response_model_exclude_none=True
+)
+async def api_address_pull_request_comments(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> PullRequestFixResult:
+    return await address_pull_request_comments(
+        owner, repo, pr_number, session["sub"], session.get("email")
     )
 
 

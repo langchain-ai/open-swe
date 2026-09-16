@@ -70,6 +70,7 @@ async def test_payload_json_keys_stay_camel_case_for_the_dashboard_client():
         "headSha",
         "headRef",
         "reviewDecision",
+        "unresolvedThreads",
         "statusAvailable",
         "createdAt",
         "updatedAt",
@@ -94,6 +95,8 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypa
     queries = []
 
     async def request(_client, method, url, **kwargs):
+        if method == "POST":
+            return _threads_response([False, True])
         assert method == "GET"
         if url.endswith("/search/issues"):
             queries.append(kwargs["params"]["q"])
@@ -159,6 +162,7 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypa
     assert live.failing_checks == ["legacy-ci"]
     assert live.pending_checks == ["unit"]
     assert live.mergeable is True and live.merge_state == "blocked"
+    assert live.unresolved_threads == 1
     assert (live.additions, live.deletions) == (1, 4)
     assert live.updated_at == "2026-09-12T00:00:00Z"
     assert unavailable.status_available is False and unavailable.ci == "unknown"
@@ -240,6 +244,7 @@ async def test_pending_mergeability_is_awaited_rather_than_reported_unknown(monk
     monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
+    monkeypatch.setattr(prs, "_fetch_unresolved_thread_count", AsyncMock(return_value=0))
     result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
     assert fetches.await_count == 3
     assert result is not None
@@ -428,3 +433,78 @@ async def test_ready_route_forwards_the_pull_request_and_requires_a_token(monkey
         await pr_routes.api_ready_my_pull_request("acme", "app", 7, {"sub": "octocat"})
     assert error.value.status_code == 401
     assert mark.await_count == 1
+
+
+def _patch_detail_fetchers(monkeypatch):
+    monkeypatch.setattr(
+        prs,
+        "_fetch_pull_request",
+        AsyncMock(
+            return_value={
+                "state": "open",
+                "draft": False,
+                "mergeable": True,
+                "mergeable_state": "clean",
+                "head": {"ref": "feature", "sha": "a" * 40},
+            }
+        ),
+    )
+    monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
+    monkeypatch.setattr(prs, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
+
+
+def _threads_response(resolved_flags, *, has_next=False, cursor=None):
+    return response(
+        {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [{"isResolved": flag} for flag in resolved_flags],
+                            "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+
+async def test_unresolved_threads_are_counted_from_the_modules_graphql_endpoint(monkeypatch):
+    _patch_detail_fetchers(monkeypatch)
+    graphql = AsyncMock(
+        side_effect=[
+            _threads_response([False, True, False], has_next=True, cursor="page-2"),
+            _threads_response([True, False]),
+        ]
+    )
+    monkeypatch.setattr(prs, "github_request", graphql)
+    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 7})
+    assert result is not None
+    assert result.unresolved_threads == 3
+    assert [call.args[1:] for call in graphql.await_args_list] == [
+        ("POST", "https://fake-gh/graphql"),
+        ("POST", "https://fake-gh/graphql"),
+    ]
+    assert [call.kwargs["json"]["variables"] for call in graphql.await_args_list] == [
+        {"owner": "acme", "repo": "app", "number": 7, "cursor": None},
+        {"owner": "acme", "repo": "app", "number": 7, "cursor": "page-2"},
+    ]
+
+
+async def test_a_graphql_failure_leaves_the_unresolved_count_unknown(monkeypatch):
+    _patch_detail_fetchers(monkeypatch)
+    monkeypatch.setattr(
+        prs,
+        "github_request",
+        AsyncMock(return_value=response({"errors": [{"message": "Bad credentials"}]})),
+    )
+    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 7})
+    assert result is not None
+    assert result.unresolved_threads is None
+    assert result.review_decision == "approved"
+    assert result.head_sha == "a" * 40
+    assert result.merge_state == "clean"
+    assert result.ci == "none"

@@ -632,6 +632,9 @@ export interface OpenPullRequest {
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
   failingChecks: string[]
   pendingChecks: string[]
+  // null when the review threads could not be read, which is not the same
+  // answer as none being unresolved.
+  unresolvedThreads: number | null
 }
 
 export type MergeMethod = "squash" | "merge" | "rebase"
@@ -1015,6 +1018,11 @@ export const api = {
   fixPullRequest: (pr: OpenPullRequest) =>
     request<{ thread_id: string; already_running?: boolean }>(
       `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/fix`,
+      { method: "POST", body: JSON.stringify(pr) }
+    ),
+  addressPullRequestComments: (pr: OpenPullRequest) =>
+    request<{ thread_id: string; already_running?: boolean }>(
+      `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/address-comments`,
       { method: "POST", body: JSON.stringify(pr) }
     ),
   pullRequestThreadStatus: (repo: string, number: number) =>

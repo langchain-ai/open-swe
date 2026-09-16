@@ -199,6 +199,56 @@ async def open_pull_request_thread(
         return PullRequestThreadRef(thread_id=thread_id)
 
 
+async def address_pull_request_comments(
+    owner: str,
+    repo: str,
+    number: int,
+    login: str,
+    email: str | None = None,
+) -> PullRequestFixResult:
+    full_name = f"{owner}/{repo}"
+    if pull_request_identity({"repo_full_name": full_name, "number": number}) is None:
+        raise HTTPException(422, "invalid pull request")
+    await require_repo_access_for_user(login, full_name)
+    await _ensure_dashboard_github_token(login)
+    url = f"https://github.com/{full_name}/pull/{number}"
+    client = langgraph_client()
+    prompt = render_prompt("runs/pull-request-comments.md", url=url)
+    async with agent_thread_pr_state_lock(client, f"comments:{login}:{url}"):
+        thread_id = await _find_or_create_pr_thread(
+            owner,
+            repo,
+            number,
+            login,
+            email,
+            prompt=prompt,
+            title=f"Address comments on {full_name}#{number}",
+        )
+        current = await client.threads.get(thread_id)
+        _assert_thread_postable(thread_metadata(current), login, email)
+        if current.get("status") == "busy":
+            return PullRequestFixResult(thread_id=thread_id, already_running=True)
+        async with agent_thread_pr_state_lock(client, thread_id):
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={"resolved": False, "resolved_at_ms": None, "auto_resolved_by_prs": False},
+            )
+        current = await client.threads.get(thread_id)
+        _assert_thread_postable(thread_metadata(current), login, email)
+        configurable = await _build_dashboard_configurable(
+            thread_id, login, thread_metadata(current)
+        )
+        await dispatch_agent_run(
+            thread_id,
+            prompt,
+            configurable,
+            source="dashboard",
+            client=client,
+            multitask_strategy="enqueue",
+        )
+        return PullRequestFixResult(thread_id=thread_id)
+
+
 async def fix_pull_request(
     owner: str,
     repo: str,
