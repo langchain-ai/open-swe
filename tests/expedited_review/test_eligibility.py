@@ -47,7 +47,8 @@ def test_files_without_a_text_patch_are_refused() -> None:
     assert "logo.png" in verdict.reason
 
 
-def test_protected_paths_are_refused_wherever_they_appear() -> None:
+def test_no_path_is_refused_for_being_sensitive() -> None:
+    """Size and visibility are the only gates; nothing is denied by path."""
     for path in (
         ".github/workflows/ci.yml",
         "agent/auth/session.py",
@@ -57,13 +58,12 @@ def test_protected_paths_are_refused_wherever_they_appear() -> None:
         "requirements-dev.txt",
         "deploy/.env.production",
         "certs/server.pem",
-        "src/oauth_client.ts",
     ):
-        verdict = assess_eligibility([_file("README.md"), _file(path)])
-        assert isinstance(verdict, Ineligible), path
+        verdict = assess_eligibility([_file(path)])
+        assert isinstance(verdict, EligibleDiff), path
 
 
-def test_renames_out_of_protected_paths_are_refused() -> None:
+def test_a_rename_carrying_a_text_diff_is_eligible() -> None:
     moved = ChangedFile(
         filename="agent/session.py",
         previous_filename="agent/auth/session.py",
@@ -71,10 +71,4 @@ def test_renames_out_of_protected_paths_are_refused() -> None:
         patch="+x",
     )
 
-    assert isinstance(assess_eligibility([moved]), Ineligible)
-
-
-def test_ordinary_paths_with_protected_words_inside_identifiers_pass() -> None:
-    verdict = assess_eligibility([_file("agent/authoring_tools.py"), _file("docs/tokenizer.md")])
-
-    assert isinstance(verdict, EligibleDiff)
+    assert isinstance(assess_eligibility([moved]), EligibleDiff)

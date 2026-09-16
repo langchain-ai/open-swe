@@ -89,8 +89,8 @@ async def expedite_pr_approval(
     if isinstance(verdict, Ineligible):
         return _failure(
             f"Not eligible for expedited review: {verdict.reason}. "
-            f"Eligible changes touch at most {MAX_CHANGED_LINES} lines in text files outside "
-            "auth, secrets, workflows, dependencies, and migrations. Ask for a normal review."
+            f"Eligible changes touch at most {MAX_CHANGED_LINES} lines and every changed "
+            "file has to have a readable text diff. Ask for a normal review."
         )
 
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)

@@ -32,9 +32,15 @@ are already in the Slack thread.
 
 - The agent calls `expedite_pr_approval` with the PR URL; the backend decides
   eligibility.
-- Eligible: 1–10 changed lines, every file with a text diff. Never: paths under
-  auth, secrets, CI workflows, dependency manifests, migrations, env and key files,
-  binaries, or files GitHub cannot show a patch for.
+- Eligible: 1–10 changed lines, every file with a text diff. Binaries and anything
+  GitHub cannot show a patch for are refused, because the card could not show the
+  voters what they are approving.
+- No path is refused for being sensitive. A denylist of sensitive paths was tried and
+  dropped: it is incomplete by construction, so it stops nobody deliberate, while
+  matching path segments blocks unrelated files that merely contain a word like
+  `token`. The controls that hold are the ones that do not depend on guessing which
+  files matter — a diff small enough to read in full, two distinct people, real
+  GitHub reviews, and the repository's own branch protection on the merge.
 - An approval pins repo, PR, head SHA, and a fingerprint of the diff. One active
   approval per PR.
 
