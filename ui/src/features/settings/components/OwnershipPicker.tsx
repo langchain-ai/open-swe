@@ -151,7 +151,14 @@ export function OwnershipPicker({
       setManualError(manual.invalidHint)
       return
     }
-    if (!rows.has(id)) setExtras((current) => [...current, { id, label: id }])
+    // Typing the id of something another workspace owns must not get past
+    // the disabled row it would otherwise have to click.
+    const known = rows.get(id)
+    if (known && ownedElsewhere(known) && known.owner) {
+      setManualError(`${known.label} belongs to ${known.owner.name}.`)
+      return
+    }
+    if (!known) setExtras((current) => [...current, { id, label: id }])
     if (!draftSet.has(id)) setDraft((current) => [...current, id])
     setManualValue("")
     setManualError(null)
@@ -160,6 +167,8 @@ export function OwnershipPicker({
   const renderRow = (item: PickerItem) => {
     const elsewhere = ownedElsewhere(item)
     const checked = draftSet.has(item.id)
+    // A conflicting row that is somehow already selected stays removable.
+    const locked = elsewhere && !checked
     return (
       <label
         key={item.id}
@@ -173,7 +182,7 @@ export function OwnershipPicker({
           className="mt-1 size-3.5 shrink-0 accent-primary"
           aria-label={item.label}
           checked={checked}
-          disabled={elsewhere}
+          disabled={locked}
           onChange={() => toggle(item.id)}
         />
         {item.icon && (

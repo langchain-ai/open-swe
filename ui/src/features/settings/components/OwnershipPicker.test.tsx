@@ -121,6 +121,50 @@ describe("OwnershipPicker", () => {
     expect(onChange).toHaveBeenCalledWith(["C0999"])
   })
 
+  it("refuses a typed id that another workspace owns", async () => {
+    const { onChange } = renderPicker({
+      selected: [],
+      manual: {
+        label: "Add a channel by ID",
+        placeholder: "C0123456789",
+        normalize: (raw) => raw.trim().toUpperCase(),
+        invalidHint: "Channel IDs start with C.",
+      },
+    })
+
+    fireEvent.change(await screen.findByLabelText("Add a channel by ID"), {
+      target: { value: "c3" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "#commits belongs to Core."
+    )
+    expect(
+      screen
+        .getByRole("checkbox", { name: "#commits" })
+        .hasAttribute("disabled")
+    ).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
+    expect(onChange).toHaveBeenCalledWith([])
+  })
+
+  it("lets a conflicting row that is already selected be removed", async () => {
+    const { onChange } = renderPicker({ selected: ["C3"] })
+
+    const stuck = await screen.findByRole("checkbox", { name: "#commits" })
+    expect(stuck.hasAttribute("disabled")).toBe(false)
+    fireEvent.click(stuck)
+    expect(
+      screen
+        .getByRole("checkbox", { name: "#commits" })
+        .hasAttribute("disabled")
+    ).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
+
+    expect(onChange).toHaveBeenCalledWith([])
+  })
+
   it("still lists a selected id the directory does not know", async () => {
     renderPicker({ selected: ["C1", "C0OLD"] })
 
