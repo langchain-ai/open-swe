@@ -13,6 +13,7 @@ import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { DesktopThreadFeedbackDialog } from "@/features/agents/components/DesktopThreadFeedbackDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
 import type { AgentThread } from "@/features/agents/lib/types"
@@ -105,6 +106,7 @@ export function AgentThreadHeader({
   const deleteThread = useDeleteAgentThread()
   const continuePrivately = useContinueThreadPrivately()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const pinned = localThread
     ? prefs.pinnedLocalIds.includes(localThread.id)
     : Boolean(
@@ -230,6 +232,7 @@ export function AgentThreadHeader({
           resolveThread.mutate({ threadId: thread.id, resolved: !archived })
         }
       }}
+      onFeedback={localThread ? () => setFeedbackOpen(true) : undefined}
       onDelete={() => setDeleteOpen(true)}
     />
   )
@@ -358,6 +361,13 @@ export function AgentThreadHeader({
           </ContextMenu.Positioner>
         </ContextMenu.Portal>
       </ContextMenu.Root>
+      {localThread && (
+        <DesktopThreadFeedbackDialog
+          open={feedbackOpen}
+          onOpenChange={setFeedbackOpen}
+          threadId={localThread.id}
+        />
+      )}
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={(open) => {
