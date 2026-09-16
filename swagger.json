@@ -1628,39 +1628,6 @@
             ],
             "title": "Default Agent Routing Balanced Reasoning Effort"
           },
-          "default_agent_routing_fast_alt_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Alt Model"
-          },
-          "default_agent_routing_fast_alt_probability": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Alt Probability"
-          },
-          "default_agent_routing_fast_alt_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Alt Reasoning Effort"
-          },
           "default_agent_routing_fast_model": {
             "anyOf": [
               {

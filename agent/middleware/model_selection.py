@@ -1,4 +1,3 @@
-import hashlib
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, NotRequired
@@ -16,14 +15,8 @@ from agent.prompts import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
 
-Route = Literal["fast", "fast_alt", "balanced", "performance"]
+Route = Literal["fast", "balanced", "performance"]
 RoutingMode = Literal["auto", "performance"]
-
-# A/B experiment: "fast" sends a share of fast-routed turns to a second model
-# (``fast_alt``) so the two can be compared under real traffic. The share is
-# drawn from a hash of the thread id, so a thread always lands on the same side
-# and the split is fully repeatable.
-_FAST_ALT_SPLIT = 0.5
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 _PLAN_APPROVED_PREFIX = "Plan mode is now inactive because the plan was approved."
@@ -62,12 +55,6 @@ class ModelSelectionState(AgentState):
     plan_mode: NotRequired[bool]
 
 
-def fast_alt_bucket(thread_id: str | None) -> float:
-    """Deterministic [0, 1) bucket for a thread, from the first 8 hex digits of SHA-256."""
-    digest = hashlib.sha256((thread_id or "").encode("utf-8")).hexdigest()
-    return int(digest[:8], 16) / float(0xFFFF_FFFF)
-
-
 async def _emit_routed_model(
     models: Mapping[str, BaseChatModel],
     route_model_ids: Mapping[str, str],
@@ -96,15 +83,11 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         classifier: BaseChatModel,
         *,
         route_model_ids: Mapping[str, str] | None = None,
-        fast_alt_probability: float = _FAST_ALT_SPLIT,
         routing_mode: RoutingMode = "auto",
-        thread_id: str | None = None,
     ) -> None:
         self._models = dict(models)
         self._route_model_ids = dict(route_model_ids or {})
-        self._fast_alt_probability = fast_alt_probability
         self._routing_mode = routing_mode
-        self._thread_id = thread_id
         # `nostream` keeps the routing decision out of the user-facing message
         # stream; it stays visible in traces, unlike the offloading summarizer.
         hidden_classifier = classifier.model_copy(
@@ -147,12 +130,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
                 route = decision.model_route
         except Exception:  # noqa: BLE001
             logger.exception("Model routing classifier failed")
-        if (
-            route == "fast"
-            and "fast_alt" in self._models
-            and fast_alt_bucket(self._thread_id) < self._fast_alt_probability
-        ):
-            route = "fast_alt"
         return route
 
     async def abefore_model(
@@ -178,9 +155,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             if request.state.get("plan_mode")
             else request.state.get("model_route", "balanced")
         )
-        model = self._models.get(route) or self._models.get(
-            "fast" if route == "fast_alt" else "balanced"
-        )
+        model = self._models.get(route) or self._models.get("balanced")
         if model is None:
             model = self._models["balanced"]
         return await handler(request.override(model=model))

@@ -5,31 +5,16 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage, ToolMessage
 
-from agent.middleware.model_selection import (
-    ModelSelectionMiddleware,
-    RouteDecision,
-    fast_alt_bucket,
-)
+from agent.middleware.model_selection import ModelSelectionMiddleware, RouteDecision
 
 
 def _middleware(
     route: Literal["fast", "balanced", "performance"] = "fast",
     *,
     route_model_ids: dict[str, str] | None = None,
-    fast_alt: bool = False,
-    fast_alt_probability: float = 0.5,
     routing_mode: Literal["auto", "performance"] = "auto",
-    thread_id: str | None = None,
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
-    profiles = (
-        ("fast", "fast_alt", "balanced", "performance")
-        if fast_alt
-        else (
-            "fast",
-            "balanced",
-            "performance",
-        )
-    )
+    profiles = ("fast", "balanced", "performance")
     models = {profile: MagicMock(name=profile) for profile in profiles}
     structured = AsyncMock(return_value=RouteDecision(model_route=route))
     classifier = MagicMock()
@@ -40,9 +25,7 @@ def _middleware(
         cast(Any, models),
         classifier,
         route_model_ids=route_model_ids,
-        fast_alt_probability=fast_alt_probability,
         routing_mode=routing_mode,
-        thread_id=thread_id,
     )
     classifier.model_copy.assert_called_once_with(update={"tags": ["nostream"]})
     tagged.with_structured_output.assert_called_once_with(
@@ -280,55 +263,6 @@ async def test_plan_mode_streams_the_overriding_performance_model(
     classifier.assert_not_awaited()
     assert (await _invoke(middleware, entered_plan_mode)).model is models["performance"]
     assert (await _invoke(middleware, started_in_plan_mode)).model is models["performance"]
-
-
-@pytest.mark.asyncio
-async def test_fast_route_splits_between_fast_and_fast_alt_models() -> None:
-    middleware, models, _ = _middleware(fast_alt=True, fast_alt_probability=1.0, thread_id="t")
-    state = {"messages": [HumanMessage(content="Update the README")]}
-
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "fast_alt"
-    assert (await _invoke(middleware, state)).model is models["fast_alt"]
-
-
-@pytest.mark.asyncio
-async def test_fast_alt_is_never_picked_without_a_split() -> None:
-    middleware, models, _ = _middleware(fast_alt=False, fast_alt_probability=1.0)
-    state = {"messages": [HumanMessage(content="Update the README")]}
-
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "fast"
-    assert (await _invoke(middleware, state)).model is models["fast"]
-
-
-def test_fast_alt_bucket_is_deterministic_per_thread() -> None:
-    assert fast_alt_bucket("thread-a") == fast_alt_bucket("thread-a")
-    assert fast_alt_bucket(None) == fast_alt_bucket(None)
-    assert fast_alt_bucket("thread-a") != fast_alt_bucket("thread-b")
-    assert 0.0 <= fast_alt_bucket("thread-a") < 1.0
-
-
-@pytest.mark.asyncio
-async def test_fast_alt_split_is_repeatable_for_a_thread() -> None:
-    thread_id = "repeatable-thread"
-    probability = fast_alt_bucket(thread_id)
-    first, _, _ = _middleware(
-        fast_alt=True, fast_alt_probability=probability + 0.001, thread_id=thread_id
-    )
-    second, _, _ = _middleware(
-        fast_alt=True, fast_alt_probability=probability + 0.001, thread_id=thread_id
-    )
-    state = {"messages": [HumanMessage(content="Update the README")]}
-
-    first_state: dict[str, Any] = {**state}
-    second_state: dict[str, Any] = {**state}
-    first_state.update(await first.abefore_model(cast(Any, first_state), MagicMock()))
-    second_state.update(await second.abefore_model(cast(Any, second_state), MagicMock()))
-
-    assert first_state["model_route"] == second_state["model_route"] == "fast_alt"
 
 
 _HUMAN_ENVELOPE = (
