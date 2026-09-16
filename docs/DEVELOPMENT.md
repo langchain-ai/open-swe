@@ -177,6 +177,30 @@ The dev server then attaches that session to everything it proxies, and presents
 
 `pnpm run build`, `pnpm run typecheck`, and `pnpm run test` run across the workspace through Turborepo (`pnpm --filter open-swe-dashboard run <script>` scopes one); `pnpm run lint` (oxlint) and `pnpm run format` / `pnpm run format:check` (oxfmt) run once from the root over every JS and TS file.
 
+## Test a PR in preview (LangChain maintainers)
+
+The shared [preview environment](https://dev.open-swe.langchain.dev/agents) lets maintainers try unmerged PRs without running the app locally. It combines `main`, the shared `preview-manual` branch if present, and open PRs labeled `preview` whose authors are organization members. It is not an isolated deployment per PR. Staging follows `main` and is for post-merge testing.
+
+1. Add the **`preview`** label to your PR in GitHub's right sidebar.
+2. Open [Deployments: Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) in the private `langchainplus` repository. Click **Run workflow**, select **main**, leave **force** unchecked, and submit. You need access to that repository and permission to run workflows. Otherwise, wait for the scheduled job, which runs at :04, :19, :34, and :49 each hour; GitHub may delay scheduled runs. Adding the label does not deploy immediately.
+3. Open the run's **Summary** and find your PR and head commit under **Preview tree → Merged**. Check **Skipped** too: a successful run can omit your PR. These headings describe inclusion in the preview build, not a merge into `main`.
+4. Wait for the workflow's dashboard rollout to succeed. The backend auto-deploys separately from the updated `preview` branch; in LangSmith Deployments, check that the preview backend's revision matches the published `preview` commit and has deployed successfully before testing backend changes. A green Actions run alone does not confirm backend readiness.
+5. Open [preview](https://dev.open-swe.langchain.dev/agents), sign in, and exercise the changed behavior. Runs and integration actions are real, so use test tasks and repositories. For UI-only iteration against this backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend); that mode does not run your local Python changes.
+
+### If your PR is missing
+
+Check **Skipped** in the run summary. PRs from authors outside the organization are skipped even if labeled. If a PR conflicts with the combined preview tree, the automation leaves it out, removes its label, and comments with instructions. Reapplying the label alone will not resolve the conflict. Follow the comment's recipe to merge and resolve the changes on the shared `preview-manual` branch, preserving other maintainers' work.
+
+If the assembled tree is unchanged, the job skips publishing and rollout. Use **force** only when you need to republish and rebuild that unchanged tree.
+
+### Remove a PR from preview
+
+Remove its `preview` label, then trigger the workflow or wait for the next scheduled run. The running deployment stays unchanged until the replacement deploys. Changes already in `main` or `preview-manual` remain included; removing a label cannot remove them.
+
+The automation resets preview to plain `main` every seven days during the 07:00–07:59 `America/New_York` window on a scheduled run. It removes preview labels and deletes `preview-manual`. Reapply your label after the reset if you still need to test, or restore the manually resolved branch with the other maintainers.
+
+The [deployment workflow](https://github.com/langchain-ai/langchainplus/blob/main/.github/workflows/deploy_open_swe_preview.yaml) and [preview implementation](https://github.com/langchain-ai/langchainplus/tree/main/cmd/langdev/internal/ci/openswepreview) are the source of truth for this maintainer-only environment. Other installations can use the local setup above.
+
 ## Desktop app (experimental)
 
 The Electron app in `desktop/` includes the compiled dashboard UI. Run it next to the backend:
