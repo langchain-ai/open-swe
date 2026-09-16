@@ -249,7 +249,7 @@ export function OwnershipPicker({
       >
         {triggerLabel}
       </DialogTrigger>
-      <DialogPopup className="w-[520px]">
+      <DialogPopup className="w-full max-w-[520px]">
         <DialogTitle className="px-3 pt-3">{title}</DialogTitle>
         {description && (
           <DialogDescription className="px-3 pt-1">
