@@ -1,12 +1,13 @@
 import hashlib
 import logging
+import random
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, NotRequired
 
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
-from langgraph.config import get_stream_writer
+from langgraph.config import get_config, get_stream_writer
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
@@ -23,6 +24,7 @@ Route = Literal["fast", "fast_alt", "balanced", "performance"]
 # drawn from a hash of the thread id, so a thread always lands on the same side
 # and the split is fully repeatable.
 _FAST_ALT_SPLIT = 0.5
+_ROUTING_EXPERIMENT_SPLIT = 0.5
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 _PLAN_APPROVED_PREFIX = "Plan mode is now inactive because the plan was approved."
@@ -58,6 +60,7 @@ class RouteDecision(BaseModel):
 
 class ModelSelectionState(AgentState):
     model_route: NotRequired[Route]
+    model_routing_attempted: NotRequired[bool]
     plan_mode: NotRequired[bool]
 
 
@@ -65,6 +68,21 @@ def fast_alt_bucket(thread_id: str | None) -> float:
     """Deterministic [0, 1) bucket for a thread, from the first 8 hex digits of SHA-256."""
     digest = hashlib.sha256((thread_id or "").encode("utf-8")).hexdigest()
     return int(digest[:8], 16) / float(0xFFFF_FFFF)
+
+
+def _mark_model_routing_applied() -> None:
+    """Mark the current invocation as model-routed."""
+    try:
+        config = get_config()
+        metadata = config.setdefault("metadata", {})
+        metadata["model_routing_applied"] = True
+        from langsmith.run_helpers import get_current_run_tree
+
+        run_tree = get_current_run_tree()
+        if run_tree is not None:
+            run_tree.metadata["model_routing_applied"] = True
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not mark model routing metadata", exc_info=True)
 
 
 async def _emit_routed_model(
@@ -96,11 +114,16 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         *,
         route_model_ids: Mapping[str, str] | None = None,
         fast_alt_probability: float = _FAST_ALT_SPLIT,
+        routing_probability: float = _ROUTING_EXPERIMENT_SPLIT,
         thread_id: str | None = None,
     ) -> None:
         self._models = dict(models)
         self._route_model_ids = dict(route_model_ids or {})
         self._fast_alt_probability = fast_alt_probability
+        self._routing_probability = routing_probability
+        self._routing_enabled: bool | None = None
+        self._routing_was_applied = False
+        self._selected_route: Route | None = None
         self._thread_id = thread_id
         # `nostream` keeps the routing decision out of the user-facing message
         # stream; it stays visible in traces, unlike the offloading summarizer.
@@ -122,6 +145,14 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return "performance"
         if model_route := state.get("model_route"):
             return model_route
+        if self._selected_route is not None:
+            return self._selected_route
+        if state.get("model_routing_attempted"):
+            return "balanced"
+        if self._routing_enabled is None:
+            self._routing_enabled = random.random() < self._routing_probability
+        if not self._routing_enabled:
+            return "balanced"
         messages = state.get("messages", [])
         approved_plan = next(
             (
@@ -134,6 +165,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         )
         task = approved_plan or _latest_human_task(messages)
         route: Route = "balanced"
+        self._routing_was_applied = True
         try:
             decision = await self._classifier.ainvoke(
                 render_prompt("model-selection.md", task=task[-8_000:])
@@ -147,20 +179,25 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             and "fast_alt" in self._models
             and fast_alt_bucket(self._thread_id) < self._fast_alt_probability
         ):
-            return "fast_alt"
+            route = "fast_alt"
+        self._selected_route = route
         return route
 
     async def abefore_model(
         self,
         state: ModelSelectionState,
         runtime: Runtime,
-    ) -> dict[str, Route]:
+    ) -> dict[str, Route | bool]:
         del runtime
         route = await self.select_route(state)
-        await _emit_routed_model(self._models, self._route_model_ids, route)
+        if self._routing_was_applied and not state.get("model_routing_attempted"):
+            _mark_model_routing_applied()
+            await _emit_routed_model(self._models, self._route_model_ids, route)
         if state.get("plan_mode"):
             return {}
-        return {"model_route": route}
+        if not self._routing_was_applied:
+            return {"model_routing_attempted": True}
+        return {"model_route": route, "model_routing_attempted": True}
 
     async def awrap_model_call(
         self,

@@ -18,6 +18,7 @@ def _middleware(
     route_model_ids: dict[str, str] | None = None,
     fast_alt: bool = False,
     fast_alt_probability: float = 0.5,
+    routing_probability: float = 1.0,
     thread_id: str | None = None,
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
     profiles = (
@@ -40,6 +41,7 @@ def _middleware(
         classifier,
         route_model_ids=route_model_ids,
         fast_alt_probability=fast_alt_probability,
+        routing_probability=routing_probability,
         thread_id=thread_id,
     )
     classifier.model_copy.assert_called_once_with(update={"tags": ["nostream"]})
@@ -76,6 +78,46 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
     assert state["model_route"] == "fast"
     assert (await _invoke(middleware, state)).model is models["fast"]
     classifier.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_routing_experiment_control_skips_classifier_and_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mark_applied = MagicMock()
+    monkeypatch.setattr(
+        "agent.middleware.model_selection._mark_model_routing_applied",
+        mark_applied,
+    )
+    middleware, models, classifier = _middleware(routing_probability=0.0)
+    state = {"messages": [HumanMessage(content="Update the README")]}
+
+    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+
+    assert "model_route" not in state
+    assert state["model_routing_attempted"] is True
+    assert (await _invoke(middleware, state)).model is models["balanced"]
+    classifier.assert_not_awaited()
+    mark_applied.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_routing_decision_only_runs_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mark_applied = MagicMock()
+    monkeypatch.setattr(
+        "agent.middleware.model_selection._mark_model_routing_applied",
+        mark_applied,
+    )
+    middleware, _, classifier = _middleware()
+    state = {"messages": [HumanMessage(content="Update the README")]}
+
+    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+    await middleware.abefore_model(cast(Any, state), MagicMock())
+
+    classifier.assert_awaited_once()
+    mark_applied.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -211,7 +253,7 @@ async def test_routed_model_event_omitted_without_a_known_model_id(
 
 
 @pytest.mark.asyncio
-async def test_plan_mode_streams_the_overriding_performance_model(
+async def test_plan_mode_uses_performance_without_routing_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[dict[str, Any]] = []
@@ -238,12 +280,7 @@ async def test_plan_mode_streams_the_overriding_performance_model(
     assert await middleware.abefore_model(cast(Any, entered_plan_mode), MagicMock()) == {}
     assert await middleware.abefore_model(cast(Any, started_in_plan_mode), MagicMock()) == {}
 
-    performance = {
-        "type": "model_routed",
-        "route": "performance",
-        "model_id": "anthropic:claude-opus-5",
-    }
-    assert events == [performance, performance]
+    assert events == []
     classifier.assert_not_awaited()
     assert (await _invoke(middleware, entered_plan_mode)).model is models["performance"]
     assert (await _invoke(middleware, started_in_plan_mode)).model is models["performance"]

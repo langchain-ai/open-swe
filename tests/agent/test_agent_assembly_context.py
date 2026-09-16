@@ -276,7 +276,7 @@ async def test_model_routing_is_applied_when_enabled() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" in middleware_names
-    assert config["metadata"]["model_routing_applied"] is True
+    assert "model_routing_applied" not in config["metadata"]
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
         "google_genai:gemini-3.8-flash",
@@ -295,7 +295,7 @@ async def test_model_routing_is_disabled_by_default() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
-    assert config["metadata"]["model_routing_applied"] is False
+    assert "model_routing_applied" not in config["metadata"]
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls] == [
         "openai:gpt-5.6-sol",
@@ -323,7 +323,7 @@ async def test_model_routing_preference_is_snapshotted_for_existing_thread() -> 
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
-    assert config["metadata"]["model_routing_applied"] is False
+    assert "model_routing_applied" not in config["metadata"]
 
 
 @pytest.mark.asyncio

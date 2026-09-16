@@ -1103,10 +1103,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model_id, profile_effort = routing_defaults["fast"]
         subagent_model_id, subagent_effort = routing_defaults["fast"]
 
-    config["metadata"] = {
-        **(config.get("metadata") or {}),
-        "model_routing_applied": adaptive_model_routing,
-    }
+    metadata = config.get("metadata") or {}
+    metadata.pop("model_routing_applied", None)
+    config["metadata"] = metadata
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
     )
