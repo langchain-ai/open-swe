@@ -458,6 +458,48 @@ const costRow: UsageLeaderboardRow = {
   avg_invocation_seconds: 90,
 }
 
+it("shortens model paths to safe last components in model tables", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    status: "ready",
+    cohorts: [
+      {
+        model_id: "fireworks:accounts/fireworks/models/model name",
+        model_attribution_quality: "configured",
+        merged: 1,
+        closed_without_merge: 0,
+        mature_pending: 0,
+        waiting: 0,
+        cohort_size: 1,
+        decided_denominator: 1,
+        decided_merge_rate: 1,
+        mature_denominator: 1,
+        mature_cohort_merge_share: 1,
+      },
+    ],
+  })
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      {
+        ...costRow,
+        favorite_model: "fireworks:accounts/fireworks/models/glm-5p3-flash",
+      },
+    ],
+  })
+  const client = mountReport()
+
+  expect(await screen.findAllByText("model-name")).toHaveLength(1)
+  expect(await screen.findAllByText("glm-5p3-flash")).toHaveLength(1)
+  expect(
+    screen.queryByText("fireworks:accounts/fireworks/models/model name")
+  ).toBeNull()
+  expect(
+    screen.queryByText("fireworks:accounts/fireworks/models/glm-5p3-flash")
+  ).toBeNull()
+  client.clear()
+})
 it.each([
   {
     name: "confirmed zero",
