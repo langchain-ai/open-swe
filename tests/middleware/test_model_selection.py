@@ -18,6 +18,7 @@ def _middleware(
     route_model_ids: dict[str, str] | None = None,
     fast_alt: bool = False,
     fast_alt_probability: float = 0.5,
+    routing_mode: Literal["auto", "performant"] = "auto",
     thread_id: str | None = None,
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
     profiles = (
@@ -40,6 +41,7 @@ def _middleware(
         classifier,
         route_model_ids=route_model_ids,
         fast_alt_probability=fast_alt_probability,
+        routing_mode=routing_mode,
         thread_id=thread_id,
     )
     classifier.model_copy.assert_called_once_with(update={"tags": ["nostream"]})
@@ -76,6 +78,26 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
     assert state["model_route"] == "fast"
     assert (await _invoke(middleware, state)).model is models["fast"]
     classifier.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_performant_mode_skips_classifier_and_routing_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mark_applied = MagicMock()
+    monkeypatch.setattr(
+        "agent.middleware.model_selection._mark_model_routing_applied",
+        mark_applied,
+    )
+    middleware, models, classifier = _middleware(routing_mode="performant")
+    state = {"messages": [HumanMessage(content="Update the README")]}
+
+    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+
+    assert state["model_route"] == "performance"
+    assert (await _invoke(middleware, state)).model is models["performance"]
+    classifier.assert_not_awaited()
+    mark_applied.assert_not_called()
 
 
 @pytest.mark.asyncio

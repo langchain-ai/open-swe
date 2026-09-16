@@ -1116,12 +1116,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if adaptive_model_routing:
         model_routing_mode = _model_routing_mode(thread_id)
         metadata["model_routing_mode"] = model_routing_mode
-        configurable["model_routing_mode"] = model_routing_mode
         if model_routing_mode == "performant":
             model_id, profile_effort = routing_defaults["performance"]
     else:
+        model_routing_mode = None
         metadata.pop("model_routing_mode", None)
-        configurable.pop("model_routing_mode", None)
     config["metadata"] = metadata
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1331,7 +1330,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     model_selection: ModelSelectionMiddleware | None = None
-    if adaptive_model_routing and configurable.get("model_routing_mode") == "auto":
+    if adaptive_model_routing and model_routing_mode is not None:
         routing_models = {
             route: _make_model_or_defer(
                 routed_model_id,
@@ -1351,6 +1350,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
             },
             fast_alt_probability=fast_alt_probability,
+            routing_mode=model_routing_mode,
             thread_id=thread_id,
         )
     subagent_model = _make_model_or_defer(

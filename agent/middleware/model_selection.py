@@ -112,11 +112,13 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         *,
         route_model_ids: Mapping[str, str] | None = None,
         fast_alt_probability: float = _FAST_ALT_SPLIT,
+        routing_mode: RoutingMode = "auto",
         thread_id: str | None = None,
     ) -> None:
         self._models = dict(models)
         self._route_model_ids = dict(route_model_ids or {})
         self._fast_alt_probability = fast_alt_probability
+        self._routing_mode = routing_mode
         self._selected_route: Route | None = None
         self._thread_id = thread_id
         # `nostream` keeps the routing decision out of the user-facing message
@@ -141,6 +143,8 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return model_route
         if self._selected_route is not None:
             return self._selected_route
+        if self._routing_mode == "performant":
+            return "performance"
         messages = state.get("messages", [])
         approved_plan = next(
             (
@@ -177,7 +181,11 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     ) -> dict[str, Route]:
         del runtime
         route = await self.select_route(state)
-        if not state.get("model_route") and not state.get("plan_mode"):
+        if (
+            self._routing_mode == "auto"
+            and not state.get("model_route")
+            and not state.get("plan_mode")
+        ):
             _mark_model_routing_applied()
             await _emit_routed_model(self._models, self._route_model_ids, route)
         if state.get("plan_mode"):

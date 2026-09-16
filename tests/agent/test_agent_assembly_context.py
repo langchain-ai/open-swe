@@ -277,7 +277,7 @@ async def test_model_routing_is_applied_when_enabled() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" in middleware_names
-    assert config["configurable"]["model_routing_mode"] == "auto"
+    assert "model_routing_mode" not in config["configurable"]
     assert config["metadata"]["model_routing_mode"] == "auto"
     assert "model_routing_applied" not in config["metadata"]
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
@@ -296,8 +296,8 @@ async def test_model_routing_control_uses_performance_model() -> None:
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
-    assert "ModelSelectionMiddleware" not in middleware_names
-    assert config["configurable"]["model_routing_mode"] == "performant"
+    assert "ModelSelectionMiddleware" in middleware_names
+    assert "model_routing_mode" not in config["configurable"]
     assert config["metadata"]["model_routing_mode"] == "performant"
     assert "model_routing_applied" not in config["metadata"]
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
