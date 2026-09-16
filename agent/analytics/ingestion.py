@@ -126,44 +126,41 @@ _CANDIDATES = """
 """
 
 
-async def reject_false_openers(
+async def _reject_false_openers(
     conn: AsyncConnection,
     *,
     workspace_id: UUID,
     pr_id: UUID | None = None,
     run_id: UUID | None = None,
-    apply: bool = True,
-) -> list[UUID]:
+) -> None:
     """Clear only contradicted opening provenance, retaining outcomes and other links."""
     params = {"workspace_id": workspace_id, "pr_id": pr_id, "run_id": run_id}
     candidates = text(_CANDIDATES).bindparams(
         bindparam("pr_id", type_=Uuid), bindparam("run_id", type_=Uuid)
     )
     rows = (await conn.execute(candidates, params)).tuples().all()
-    if apply:
-        for affected_pr, affected_run in rows:
-            identity = {
-                "workspace_id": workspace_id,
-                "pr_id": affected_pr,
-                "run_id": affected_run,
-            }
-            await conn.execute(
-                text(
-                    "UPDATE pr_projection SET opening_run_id = NULL, originating_model_id = NULL, "
-                    "model_attribution_quality = 'unavailable', updated_at = clock_timestamp() "
-                    "WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
-                    "AND opening_run_id = :run_id"
-                ),
-                identity,
-            )
-            await conn.execute(
-                text(
-                    "DELETE FROM pr_run_link_projection WHERE workspace_id = :workspace_id "
-                    "AND pr_id = :pr_id AND run_id = :run_id AND link_role = 'opening'"
-                ),
-                identity,
-            )
-    return sorted({UUID(str(row[0])) for row in rows}, key=str)
+    for affected_pr, affected_run in rows:
+        identity = {
+            "workspace_id": workspace_id,
+            "pr_id": affected_pr,
+            "run_id": affected_run,
+        }
+        await conn.execute(
+            text(
+                "UPDATE pr_projection SET opening_run_id = NULL, originating_model_id = NULL, "
+                "model_attribution_quality = 'unavailable', updated_at = clock_timestamp() "
+                "WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
+                "AND opening_run_id = :run_id"
+            ),
+            identity,
+        )
+        await conn.execute(
+            text(
+                "DELETE FROM pr_run_link_projection WHERE workspace_id = :workspace_id "
+                "AND pr_id = :pr_id AND run_id = :run_id AND link_role = 'opening'"
+            ),
+            identity,
+        )
 
 
 async def _repair_pr_attribution(
@@ -173,7 +170,7 @@ async def _repair_pr_attribution(
     pr_id: UUID | None = None,
     run_id: UUID | None = None,
 ) -> None:
-    await reject_false_openers(conn, workspace_id=workspace_id, pr_id=pr_id, run_id=run_id)
+    await _reject_false_openers(conn, workspace_id=workspace_id, pr_id=pr_id, run_id=run_id)
     await conn.execute(
         text(
             """
@@ -331,7 +328,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "occurred_at": event.occurred_at,
             },
         )
-        await reject_false_openers(
+        await _reject_false_openers(
             conn, workspace_id=event.workspace_id, pr_id=event.pr_id, run_id=event.run_id
         )
     elif name == EventName.FEEDBACK_SUBMITTED:

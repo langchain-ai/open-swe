@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -917,15 +917,39 @@ async def test_opening_without_definite_contradiction_is_preserved(analytics_db,
         assert await conn.scalar(text("SELECT link_role FROM pr_run_link_projection")) == "opening"
 
 
-async def test_historical_correction_is_scoped_read_only_and_idempotent(analytics_db, monkeypatch):
+@pytest.mark.parametrize(
+    "guard",
+    [
+        "contradicted",
+        "boundary",
+        "within",
+        "earlier",
+        "missing_start",
+        "missing_pr",
+        "missing_run",
+        "other_run",
+        "other_pr",
+        "different_opener",
+    ],
+)
+@pytest.mark.parametrize("outcome", [EventName.PR_MERGED, EventName.PR_CLOSED_WITHOUT_MERGE])
+async def test_historical_opener_migration_is_scoped_and_idempotent(
+    analytics_db, monkeypatch, guard, outcome
+):
     from unittest.mock import AsyncMock
 
-    workspace, transaction = analytics_db
-    other_workspace, pr_id, run_id, model_id = uuid4(), uuid4(), uuid4(), uuid4()
-    review_run = uuid4()
-    raw_events = []
+    _, transaction = analytics_db
+    workspace = UUID("7849c27e-81ef-4651-8982-719c84d95e7d")
+    pr_id = UUID("aba01c5a-66a4-5b57-97f2-1db4d93de929")
+    run_id = UUID("455db9e6-ff8d-5aea-baed-72b11b609348")
+    original_run = UUID("95562c2a-c095-4f15-8d1b-35cab031c991")
+    other_workspace, model_id, review_run = uuid4(), uuid4(), uuid4()
+    if guard == "other_run":
+        run_id = original_run
+    if guard == "other_pr":
+        pr_id = uuid4()
     with monkeypatch.context() as patch:
-        patch.setattr(ingestion, "reject_false_openers", AsyncMock())
+        patch.setattr(ingestion, "_reject_false_openers", AsyncMock())
         for scope in (workspace, other_workspace):
             for item in (
                 event(
@@ -942,74 +966,98 @@ async def test_historical_correction_is_scoped_read_only_and_idempotent(analytic
                     scope,
                     EventName.PR_OPENED,
                     PROpenedPayload(
-                        opening_run_id=run_id,
+                        opening_run_id=original_run if guard == "different_opener" else run_id,
                         originating_model_id=model_id,
                         model_attribution_quality="configured",
                     ),
                     pr_id=pr_id,
                     repository_id=uuid4(),
                 ),
-                event(
-                    scope,
-                    EventName.PR_RUN_LINKED,
-                    PRRunLinkedPayload(link_role="opening"),
-                    pr_id=pr_id,
-                    run_id=run_id,
-                ),
-                event(
-                    scope,
-                    EventName.PR_RUN_LINKED,
-                    PRRunLinkedPayload(link_role="review"),
-                    pr_id=pr_id,
-                    run_id=review_run,
+                event(scope, outcome, PRStatePayload(), pr_id=pr_id, day=13),
+                event(scope, EventName.PR_OBSERVED, PRObservedPayload(additions=42), pr_id=pr_id),
+                *(
+                    event(
+                        scope,
+                        EventName.PR_RUN_LINKED,
+                        PRRunLinkedPayload(link_role=role),
+                        pr_id=pr_id,
+                        run_id=linked_run,
+                    )
+                    for role, linked_run in (
+                        ("opening", run_id),
+                        ("follow_up", run_id),
+                        ("review", review_run),
+                        ("opening", original_run),
+                    )
                 ),
             ):
-                raw_events.append(item)
                 await ingestion.ingest(item)
     async with transaction() as conn:
-        before = (await conn.execute(text("SELECT * FROM events ORDER BY event_id"))).all()
-        runs = (
-            await conn.execute(text("SELECT * FROM run_projection ORDER BY workspace_id"))
-        ).all()
-        assert await ingestion.reject_false_openers(
-            conn, workspace_id=workspace, pr_id=pr_id, apply=False
-        ) == [pr_id]
-        assert (
-            await conn.scalar(
-                text("SELECT count(*) FROM pr_projection WHERE opening_run_id IS NOT NULL")
+        if guard in {"boundary", "within", "earlier", "missing_start"}:
+            skew = {
+                "boundary": timedelta(hours=24),
+                "within": timedelta(minutes=5),
+                "earlier": timedelta(days=-1),
+                "missing_start": None,
+            }[guard]
+            await conn.execute(
+                text("UPDATE run_projection SET started_at = :started"),
+                {"started": DAY + skew if skew is not None else None},
             )
-            == 2
+        elif guard == "missing_pr":
+            await conn.execute(text("DELETE FROM pr_projection"))
+        elif guard == "missing_run":
+            await conn.execute(text("DELETE FROM run_projection"))
+        preserved_tables = (
+            "events",
+            "run_projection",
+            "pr_usage_projection",
+            "additive_event_projection",
         )
-        assert await ingestion.reject_false_openers(conn, workspace_id=workspace, pr_id=pr_id) == [
-            pr_id
-        ]
-        assert await ingestion.reject_false_openers(conn, workspace_id=workspace, pr_id=pr_id) == []
-        for item in raw_events:
-            if item.workspace_id == workspace:
-                await ingestion._project(conn, item)
-        assert (await conn.execute(text("SELECT * FROM events ORDER BY event_id"))).all() == before
-        assert (
-            await conn.execute(text("SELECT thread_id FROM run_projection ORDER BY workspace_id"))
-        ).all() == [(row.thread_id,) for row in runs]
-        rows = (
-            (
-                await conn.execute(
-                    text(
-                        "SELECT workspace_id, opening_run_id, originating_model_id FROM pr_projection"
-                    )
-                )
-            )
-            .tuples()
-            .all()
-        )
-        assert set(rows) == {(workspace, None, None), (other_workspace, run_id, model_id)}
-        links = (
-            (await conn.execute(text("SELECT workspace_id, link_role FROM pr_run_link_projection")))
-            .tuples()
-            .all()
-        )
-        assert set(links) == {
-            (workspace, "review"),
-            (other_workspace, "opening"),
-            (other_workspace, "review"),
+        before = {
+            table: (await conn.execute(text(f"SELECT * FROM {table}"))).all()
+            for table in preserved_tables
         }
+        prs_before = (
+            (await conn.execute(text("SELECT * FROM pr_projection ORDER BY workspace_id")))
+            .mappings()
+            .all()
+        )
+        links_before = set((await conn.execute(text("SELECT * FROM pr_run_link_projection"))).all())
+        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0017")
+        prs_after = (
+            (await conn.execute(text("SELECT * FROM pr_projection ORDER BY workspace_id")))
+            .mappings()
+            .all()
+        )
+        links_after = set((await conn.execute(text("SELECT * FROM pr_run_link_projection"))).all())
+        for old, new in zip(prs_before, prs_after, strict=True):
+            expected = dict(old)
+            if old["workspace_id"] == workspace and guard == "contradicted":
+                expected.update(
+                    opening_run_id=None,
+                    originating_model_id=None,
+                    model_attribution_quality="unavailable",
+                    updated_at=new["updated_at"],
+                )
+            assert dict(new) == expected
+        assert links_after == {
+            row
+            for row in links_before
+            if not (
+                guard in {"contradicted", "different_opener"}
+                and row.workspace_id == workspace
+                and row.run_id == run_id
+                and row.link_role == "opening"
+            )
+        }
+        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0017")
+        assert (
+            await conn.execute(text("SELECT * FROM pr_projection ORDER BY workspace_id"))
+        ).mappings().all() == prs_after
+        assert (
+            set((await conn.execute(text("SELECT * FROM pr_run_link_projection"))).all())
+            == links_after
+        )
+        for table in preserved_tables:
+            assert (await conn.execute(text(f"SELECT * FROM {table}"))).all() == before[table]
