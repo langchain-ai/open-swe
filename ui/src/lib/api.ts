@@ -579,15 +579,43 @@ export interface WorkspaceUpdate {
   prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
+  setup_script?: string
+  update_script?: string
 }
 
-/** The fields `createWorkspace`/`updateWorkspace` are guaranteed to return. */
+export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
+
+/**
+ * A workspace as `GET /workspaces/{slug}` returns it. The first five fields
+ * are what `createWorkspace`/`updateWorkspace` guarantee; the rest describe
+ * the sandbox image and its last rebuild.
+ */
 export interface WorkspaceRecord {
   slug: string
   name: string
   prompt: string
   repos: Array<string>
   slack_channel_ids: Array<string>
+  setup_script?: string
+  update_script?: string
+  base_snapshot_id?: string | null
+  snapshot_id?: string | null
+  snapshot_name?: string | null
+  snapshot_status?: WorkspaceSnapshotStatus
+  status_message?: string | null
+  mem_bytes?: number | null
+  vcpus?: number | null
+  fs_capacity_bytes?: number | null
+  refresh_status?: WorkspaceRefreshStatus
+  refresh_kind?: "full" | "update" | null
+  refresh_finished_at?: string | null
+  refresh_error?: string | null
+}
+
+/** What `POST /workspaces/{slug}/refresh` answers. */
+export interface WorkspaceRefreshStart {
+  started: boolean
+  run_id: string
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -1029,6 +1057,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  refreshWorkspace: (slug: string) =>
+    request<WorkspaceRefreshStart>(
+      `/workspaces/${encodeURIComponent(slug)}/refresh`,
+      { method: "POST" }
+    ),
   updateWorkspace: (slug: string, body: WorkspaceUpdate) =>
     request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`, {
       method: "PUT",

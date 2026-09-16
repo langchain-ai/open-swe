@@ -13,7 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { api, type TeamSettings } from "@/lib/api"
 
-import { FableSection, SlackIntegrationSection } from "./admin"
+import { SlackIntegrationSection } from "./admin"
+import { FableSection } from "@/features/settings/components/WorkspaceTeamSettingsSections"
 
 afterEach(cleanup)
 

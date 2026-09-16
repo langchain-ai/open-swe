@@ -12,7 +12,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { WorkspacesSection } from "./WorkspacesSection"
-import { api, ApiError } from "@/lib/api"
+import { api } from "@/lib/api"
 
 const clients: Array<QueryClient> = []
 
@@ -24,6 +24,10 @@ afterEach(() => {
 })
 
 function renderSection(isAdmin: boolean) {
+  // The route supplies the link to each workspace's page; a button stands in.
+  const renderConfigure = (workspace: { slug: string; name: string }) => (
+    <button type="button">{`Configure ${workspace.name}`}</button>
+  )
   // The pickers browse Slack and the GitHub installation; tests that care
   // mock these before rendering, the rest get empty directories.
   if (!vi.isMockFunction(api.listSlackChannels)) {
@@ -41,13 +45,13 @@ function renderSection(isAdmin: boolean) {
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <WorkspacesSection isAdmin={isAdmin} />
+      <WorkspacesSection isAdmin={isAdmin} renderConfigure={renderConfigure} />
     </QueryClientProvider>
   )
 }
 
 describe("WorkspacesSection", () => {
-  it("shows refresh outcomes and an edit control for admins", async () => {
+  it("shows refresh outcomes and a configure control for admins", async () => {
     vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
       workspaces: [
@@ -85,8 +89,12 @@ describe("WorkspacesSection", () => {
     expect(screen.getByText(/Refresh failed/)).toBeTruthy()
     expect(screen.getByText("setup script exited 1")).toBeTruthy()
     expect(screen.getByText("Refresh log")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Edit Default" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Edit Preview" })).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Configure Default" })
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Configure Preview" })
+    ).toBeTruthy()
   })
 
   it("renders a workspace's repos under its row, and a Default badge on the default workspace", async () => {
@@ -187,125 +195,6 @@ describe("WorkspacesSection", () => {
       await screen.findByText("No workspaces are configured.")
     ).toBeTruthy()
     expect(screen.getByText(/ask a workspace admin/)).toBeTruthy()
-  })
-
-  it("loads the full record on Edit and prefills the existing prompt", async () => {
-    vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
-      default_slug: "core",
-      workspaces: [
-        {
-          slug: "core",
-          name: "Core",
-          repos: ["acme/api"],
-          slack_channel_ids: ["C0000000001"],
-          is_default: true,
-          has_snapshot: true,
-        },
-      ],
-    })
-    const getWorkspaceSpy = vi.spyOn(api, "getWorkspace").mockResolvedValue({
-      slug: "core",
-      name: "Core",
-      prompt: "Existing instructions for core",
-      repos: ["acme/api"],
-      slack_channel_ids: ["C0000000001"],
-    })
-
-    renderSection(true)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Edit Core" }))
-    const promptField = (await screen.findByLabelText(
-      "Instructions"
-    )) as HTMLTextAreaElement
-    expect(promptField.value).toBe("Existing instructions for core")
-    expect(getWorkspaceSpy).toHaveBeenCalledWith("core")
-  })
-
-  it("saves edited repos with the trimmed list and the loaded prompt", async () => {
-    vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
-      default_slug: "core",
-      workspaces: [
-        {
-          slug: "core",
-          name: "Core",
-          repos: ["acme/api"],
-          slack_channel_ids: ["C0000000001"],
-          is_default: true,
-          has_snapshot: true,
-        },
-      ],
-    })
-    vi.spyOn(api, "getWorkspace").mockResolvedValue({
-      slug: "core",
-      name: "Core",
-      prompt: "Existing instructions for core",
-      repos: ["acme/api"],
-      slack_channel_ids: ["C0000000001"],
-    })
-    const updateSpy = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
-      slug: "core",
-      name: "Core",
-      prompt: "Existing instructions for core",
-      repos: ["acme/api", "acme/web"],
-      slack_channel_ids: ["C0000000001"],
-    })
-
-    renderSection(true)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Edit Core" }))
-    await screen.findByLabelText("Instructions")
-    fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
-    fireEvent.change(await screen.findByLabelText("Add a repository by name"), {
-      target: { value: " acme/web " },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Add" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save 2 repositories" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() => expect(updateSpy).toHaveBeenCalled())
-    expect(updateSpy).toHaveBeenCalledWith("core", {
-      name: "Core",
-      repos: ["acme/api", "acme/web"],
-      slack_channel_ids: ["C0000000001"],
-      prompt: "Existing instructions for core",
-    })
-  })
-
-  it("renders a 409 conflict's detail message in the alert region", async () => {
-    vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
-      default_slug: "core",
-      workspaces: [
-        {
-          slug: "core",
-          name: "Core",
-          repos: ["acme/api"],
-          slack_channel_ids: [],
-          is_default: true,
-          has_snapshot: true,
-        },
-      ],
-    })
-    vi.spyOn(api, "getWorkspace").mockResolvedValue({
-      slug: "core",
-      name: "Core",
-      prompt: "",
-      repos: ["acme/api"],
-      slack_channel_ids: [],
-    })
-    vi.spyOn(api, "updateWorkspace").mockRejectedValue(
-      new ApiError(409, "repository acme/api already belongs to workspace core")
-    )
-
-    renderSection(true)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Edit Core" }))
-    await screen.findByLabelText("Instructions")
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    const alert = await screen.findByRole("alert")
-    expect(alert.textContent).toBe(
-      "repository acme/api already belongs to workspace core"
-    )
   })
 
   it("creates a workspace from the create form with a repository and a picked channel", async () => {

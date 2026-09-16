@@ -11,7 +11,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
-import { ReviewTeamSettings } from "./review"
+import { ReviewTeamSettings } from "@/features/settings/components/ReviewTeamSettings"
 import type { TeamSettings } from "@/lib/api"
 
 afterEach(() => {
