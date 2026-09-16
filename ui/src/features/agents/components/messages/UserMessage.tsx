@@ -153,7 +153,11 @@ export function UserMessage({ message }: { message: Message }) {
                 : "text-muted-foreground"
             }`}
           >
-            {message.deliveryStatus === "failed" ? "Failed to send" : "Sending"}
+            {message.deliveryStatus === "failed"
+              ? "Failed to send"
+              : images.length > 0
+                ? "Preparing environment…"
+                : "Sending"}
           </div>
         )}
         {!message.timestampIsFallback && (!isSystem || expanded) && (

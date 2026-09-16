@@ -3,6 +3,7 @@
 import base64
 import binascii
 import logging
+import time
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -36,6 +37,7 @@ from agent.slack.client import (
     update_slack_trace_reply_for_web_handoff,
 )
 from agent.source_context import SourceContext
+from agent.thread_images import offload_image_blocks, provision_image_store
 from agent.threads.access import (
     _ensure_dashboard_github_token,
     agent_version_metadata,
@@ -429,6 +431,39 @@ def _validate_command_images(content: Any, *, model_id: str | None) -> None:
         _image_blocks(images, model_id=model_id)
 
 
+async def _offload_command_images(
+    thread_id: str, content: list[dict[str, Any]], *, metadata: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """``content`` with its images stored in the thread's sandbox and referenced.
+
+    Runs before the run is created so the bytes never reach a checkpoint; this
+    provisions the thread's sandbox when it has none yet. Any failure keeps the
+    bytes inline, where the agent middleware offloads them once the run starts.
+    """
+    workspace = metadata.get("workspace") or metadata.get("environment")
+    started = time.monotonic()
+    try:
+        store = await provision_image_store(
+            thread_id, workspace_slug=workspace if isinstance(workspace, str) else None
+        )
+        offloaded = await offload_image_blocks(list(content), store)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not offload run images before the run; leaving them inline",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
+        return content
+    logger.info(
+        "Offloaded run images before the run",
+        extra={
+            "thread_id": thread_id,
+            "offload_duration_ms": round((time.monotonic() - started) * 1000),
+        },
+    )
+    return [block for block in offloaded if isinstance(block, dict)] if offloaded else content
+
+
 async def _enrich_run_start_command(
     thread_id: str,
     login: str,
@@ -544,6 +579,8 @@ async def _enrich_run_start_command(
 
     if content is None:
         content = ""
+    if command_images and not offload_requested and isinstance(content, list):
+        content = await _offload_command_images(thread_id, content, metadata=metadata)
     sender_id = f"github:{login}"
     injected = injected_dynamic_context_hashes_from_metadata(metadata)
     persisted_message_ids: set[str] = set()

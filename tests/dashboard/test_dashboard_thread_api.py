@@ -14,6 +14,7 @@ from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
 from agent.dashboard.ttft import AssistantTextObservation
+from agent.thread_images import LocalImageStore
 from agent.threads import diffs as thread_diffs
 from agent.threads import handlers
 from agent.threads import listing as thread_listing
@@ -494,6 +495,86 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
+
+
+def _image_run_start_command(image: thread_runs.DashboardImageBody) -> dict:
+    return {
+        "method": "run.start",
+        "params": {
+            "input": {
+                "messages": [
+                    {
+                        "type": "human",
+                        "content": [
+                            {
+                                "type": "image",
+                                "base64": image.base64,
+                                "mime_type": image.mime_type,
+                                "file_name": "shot.png",
+                            },
+                            {"type": "text", "text": "see attached"},
+                        ],
+                    }
+                ]
+            },
+            "config": {"configurable": {"agent_model_id": _VISION_MODEL, "agent_effort": "medium"}},
+        },
+    }
+
+
+def _image_block(enriched: dict) -> dict:
+    content = enriched["params"]["input"]["messages"][-1]["content"]
+    assert isinstance(content, list)
+    [block] = [item for item in content if item.get("type") == "image"]
+    return block
+
+
+async def test_enrich_run_start_command_stores_images_before_the_run(monkeypatch, tmp_path) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    provisioned: list[tuple[str, str | None]] = []
+    store = LocalImageStore(tmp_path / "images")
+
+    async def fake_provision(thread_id: str, *, workspace_slug: str | None) -> LocalImageStore:
+        provisioned.append((thread_id, workspace_slug))
+        return store
+
+    patch_thread_module(monkeypatch, "provision_image_store", fake_provision)
+
+    enriched = await thread_runs._enrich_run_start_command(
+        "new-tid", "octocat", _image_run_start_command(_image()), metadata={}, creating=True
+    )
+
+    block = _image_block(enriched)
+    assert "base64" not in block
+    assert block["mime_type"] == "image/png"
+    assert block["file_name"] == "shot.png"
+    assert (tmp_path / "images" / f"{block['file_id']}.png").read_bytes() == b"image"
+    assert provisioned == [("new-tid", "default")]
+    assert created["metadata"]["title"] == "see attached"
+
+
+async def test_enrich_run_start_command_keeps_images_inline_when_no_store_is_reachable(
+    monkeypatch,
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    patch_thread_module(
+        monkeypatch,
+        "provision_image_store",
+        AsyncMock(side_effect=RuntimeError("sandbox provider down")),
+    )
+    image = _image()
+
+    enriched = await thread_runs._enrich_run_start_command(
+        "new-tid", "octocat", _image_run_start_command(image), metadata={}, creating=True
+    )
+
+    block = _image_block(enriched)
+    assert block["base64"] == image.base64
+    assert "file_id" not in block
 
 
 def _thread_with_metadata(metadata: dict) -> dict:

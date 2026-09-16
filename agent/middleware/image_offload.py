@@ -10,9 +10,7 @@ in only for the provider call.
 """
 
 import base64
-import binascii
 import logging
-import uuid
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -26,9 +24,14 @@ from agent.desktop import is_desktop_run
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
 from agent.thread_images import (
+    ContentBlock,
     ImageStore,
+    as_image_block,
+    has_inline_image,
     image_file_name,
     image_owner_threads,
+    image_reference,
+    offload_image_blocks,
     open_image_store,
 )
 
@@ -36,8 +39,6 @@ logger = logging.getLogger(__name__)
 
 IMAGE_UNAVAILABLE_TEXT = "[image no longer available]"
 _REHYDRATE_CACHE_SIZE = 32
-
-type ContentBlock = dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -61,85 +62,27 @@ class ImageRunContext:
         )
 
 
-def _as_block(item: object) -> ContentBlock | None:
-    if isinstance(item, dict) and item.get("type") == "image":
-        return item
-    return None
-
-
-def _inline_image(block: ContentBlock) -> tuple[str, str] | None:
-    """``(base64, mime_type)`` for an image block that still carries its bytes."""
-    encoded = block.get("base64")
-    mime_type = block.get("mime_type")
-    if isinstance(encoded, str) and encoded and isinstance(mime_type, str) and mime_type:
-        return encoded, mime_type
-    return None
-
-
-def _reference(block: ContentBlock) -> tuple[str, str] | None:
-    """``(file_id, mime_type)`` for an offloaded image block."""
-    file_id = block.get("file_id")
-    mime_type = block.get("mime_type")
-    if (
-        isinstance(file_id, str)
-        and file_id
-        and isinstance(mime_type, str)
-        and "base64" not in block
-    ):
-        return file_id, mime_type
-    return None
-
-
 def _has_inline_image(message: BaseMessage) -> bool:
-    content = message.content
-    return isinstance(content, list) and any(
-        (block := _as_block(item)) is not None and _inline_image(block) is not None
-        for item in content
-    )
+    return has_inline_image(message.content)
 
 
 def _has_reference(message: BaseMessage) -> bool:
     content = message.content
     return isinstance(content, list) and any(
-        (block := _as_block(item)) is not None and _reference(block) is not None for item in content
+        (block := as_image_block(item)) is not None and image_reference(block) is not None
+        for item in content
     )
 
 
 async def offload_message_images(message: BaseMessage, store: ImageStore) -> BaseMessage | None:
     """A copy of ``message`` with its inline images stored and referenced.
 
-    Returns ``None`` when nothing was offloaded. Images the store cannot take
-    (unknown type, undecodable bytes) stay inline.
+    Returns ``None`` when nothing was offloaded.
     """
     if not _has_inline_image(message):
         return None
-    content: list[object] = []
-    offloaded = False
-    for item in message.content:
-        block = _as_block(item)
-        inline = _inline_image(block) if block is not None else None
-        if block is None or inline is None:
-            content.append(item)
-            continue
-        encoded, mime_type = inline
-        image_id = uuid.uuid4().hex
-        name = image_file_name(image_id, mime_type)
-        if name is None:
-            content.append(item)
-            continue
-        try:
-            raw = base64.b64decode(encoded, validate=True)
-        except binascii.Error, ValueError:
-            content.append(item)
-            continue
-        await store.put(name, raw)
-        reference: ContentBlock = {
-            key: value for key, value in block.items() if key not in {"base64", "data", "url"}
-        }
-        reference["file_id"] = image_id
-        content.append(reference)
-        offloaded = True
-    if not offloaded:
+    content = await offload_image_blocks(list(message.content), store)
+    if content is None:
         return None
     return message.model_copy(update={"content": content})
 
@@ -259,8 +202,8 @@ class ImageOffloadMiddleware(OpenSWEMiddleware):
     ) -> AnyMessage:
         content: list[object] = []
         for item in message.content:
-            block = _as_block(item)
-            reference = _reference(block) if block is not None else None
+            block = as_image_block(item)
+            reference = image_reference(block) if block is not None else None
             if block is None or reference is None:
                 content.append(item)
                 continue

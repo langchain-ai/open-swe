@@ -8,10 +8,13 @@ them to object storage later without touching the message format.
 """
 
 import asyncio
+import base64
+import binascii
 import logging
 import posixpath
 import re
 import shlex
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -30,6 +33,8 @@ IMAGE_EXTENSIONS: dict[str, str] = {
 }
 _MIME_TYPES = {extension: mime for mime, extension in IMAGE_EXTENSIONS.items()}
 _IMAGE_NAME_RE = re.compile(r"^(?P<id>[0-9a-f]{32})\.(?P<ext>png|jpg|gif|webp)$")
+
+type ContentBlock = dict[str, object]
 
 
 def image_file_name(image_id: str, mime_type: str) -> str | None:
@@ -74,6 +79,77 @@ class ImageStore(Protocol):
     async def get(self, name: str) -> bytes | None:
         """The stored bytes, or ``None`` when no such image exists."""
         ...
+
+
+def as_image_block(item: object) -> ContentBlock | None:
+    if isinstance(item, dict) and item.get("type") == "image":
+        return item
+    return None
+
+
+def inline_image(block: ContentBlock) -> tuple[str, str] | None:
+    """``(base64, mime_type)`` for an image block that still carries its bytes."""
+    encoded = block.get("base64")
+    mime_type = block.get("mime_type")
+    if isinstance(encoded, str) and encoded and isinstance(mime_type, str) and mime_type:
+        return encoded, mime_type
+    return None
+
+
+def image_reference(block: ContentBlock) -> tuple[str, str] | None:
+    """``(file_id, mime_type)`` for an offloaded image block."""
+    file_id = block.get("file_id")
+    mime_type = block.get("mime_type")
+    if (
+        isinstance(file_id, str)
+        and file_id
+        and isinstance(mime_type, str)
+        and "base64" not in block
+    ):
+        return file_id, mime_type
+    return None
+
+
+def has_inline_image(content: object) -> bool:
+    return isinstance(content, list) and any(
+        (block := as_image_block(item)) is not None and inline_image(block) is not None
+        for item in content
+    )
+
+
+async def offload_image_blocks(content: list[object], store: ImageStore) -> list[object] | None:
+    """``content`` with its inline images stored and referenced by ``file_id``.
+
+    Returns ``None`` when nothing was offloaded. Images the store cannot take
+    (unknown type, undecodable bytes) stay inline.
+    """
+    result: list[object] = []
+    offloaded = False
+    for item in content:
+        block = as_image_block(item)
+        inline = inline_image(block) if block is not None else None
+        if block is None or inline is None:
+            result.append(item)
+            continue
+        encoded, mime_type = inline
+        image_id = uuid.uuid4().hex
+        name = image_file_name(image_id, mime_type)
+        if name is None:
+            result.append(item)
+            continue
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except binascii.Error, ValueError:
+            result.append(item)
+            continue
+        await store.put(name, raw)
+        reference: ContentBlock = {
+            key: value for key, value in block.items() if key not in {"base64", "data", "url"}
+        }
+        reference["file_id"] = image_id
+        result.append(reference)
+        offloaded = True
+    return result if offloaded else None
 
 
 class SandboxImageStore:
@@ -139,4 +215,18 @@ async def open_image_store(thread_id: str, *, desktop: bool = False) -> ImageSto
     from agent.sandboxes.state import get_sandbox_backend
 
     backend = await get_sandbox_backend(thread_id)
+    return SandboxImageStore(backend, await resolve_sandbox_work_dir(backend))
+
+
+async def provision_image_store(thread_id: str, *, workspace_slug: str | None) -> ImageStore:
+    """The store for a cloud thread, creating its sandbox when it has none yet.
+
+    Used before a run exists so its input can already carry references. The
+    sandbox id is persisted to the thread, so the run reconnects to this
+    sandbox instead of provisioning another.
+    """
+    from agent.sandboxes.lifecycle import ensure_sandbox_for_thread
+    from agent.sandboxes.paths import resolve_sandbox_work_dir
+
+    backend = await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace_slug)
     return SandboxImageStore(backend, await resolve_sandbox_work_dir(backend))
