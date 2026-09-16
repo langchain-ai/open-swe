@@ -47,7 +47,7 @@ describe("app commands", () => {
     const cloud = {
       id: "cloud-1",
       title: "Fix cloud search",
-      repos: [],
+      repos: [] as Array<string>,
     } as AgentThread
     const local: DesktopLocalThreadSummary = {
       id: "local-1",

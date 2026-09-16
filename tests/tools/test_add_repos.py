@@ -77,7 +77,7 @@ class _Harness:
 
 
 @pytest.fixture
-def harness(monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories) -> _Harness:
+def harness(monkeypatch: pytest.MonkeyPatch, fake_repository_writes: FakeRepositories) -> _Harness:
     monkeypatch.setattr(
         "agent.run_config.get_config",
         lambda: {"configurable": {"thread_id": "thread-1", "github_login": "octocat"}},
@@ -96,7 +96,7 @@ def harness(monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
         "agent.dashboard.agent_instructions.get_repo_agent_instructions", no_instructions
     )
 
-    one = fake_repositories.add("acme/one")
+    one = fake_repository_writes.add("acme/one")
     threads = _FakeThreads({"repository_ids": [str(one.id)]})
     monkeypatch.setattr(add_repos_tool, "get_client", lambda url: _FakeClient(threads))
 
@@ -110,7 +110,7 @@ def harness(monkeypatch: pytest.MonkeyPatch, fake_repositories: FakeRepositories
 
     monkeypatch.setattr(add_repos_tool, "get_sandbox_backend", sandbox)
     monkeypatch.setattr(add_repos_tool, "resolve_sandbox_work_dir", work_dir)
-    return _Harness(threads, backend, fake_repositories, one)
+    return _Harness(threads, backend, fake_repository_writes, one)
 
 
 _VERIFIED_ONE = _block(

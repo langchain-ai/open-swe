@@ -205,8 +205,14 @@ def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
 
 @pytest.fixture
 def fake_repositories(monkeypatch: pytest.MonkeyPatch) -> FakeRepositories:
-    """Route every ``Repository`` lookup and upsert through an in-memory table."""
+    """Route ``Repository`` lookups through an in-memory table."""
     return FakeRepositories().install(monkeypatch)
+
+
+@pytest.fixture
+def fake_repository_writes(monkeypatch: pytest.MonkeyPatch) -> FakeRepositories:
+    """``fake_repositories``, with writes kept in memory too. Never with ``registry_db``."""
+    return FakeRepositories().install(monkeypatch, patch_save=True)
 
 
 @pytest.fixture(autouse=True)
