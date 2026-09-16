@@ -263,6 +263,54 @@ describe("AgentStreamProvider", () => {
     expect(onThreadCreated).not.toHaveBeenCalled()
   })
 
+  it("returns to the same runtime after the idle sweep expires", () => {
+    vi.useFakeTimers()
+    try {
+      const view = render(
+        wrapper(
+          <AgentStreamProvider threadId="one">
+            <Probe />
+          </AgentStreamProvider>
+        )
+      )
+      const first = useStreamPool.getState().entries[0]!.id
+      view.rerender(
+        wrapper(
+          <AgentStreamProvider threadId="two">
+            <Probe />
+          </AgentStreamProvider>
+        )
+      )
+      act(() => vi.advanceTimersByTime(80_000))
+      view.rerender(
+        wrapper(
+          <AgentStreamProvider threadId="one">
+            <Probe />
+          </AgentStreamProvider>
+        )
+      )
+      expect(view.container.textContent).toBe("one")
+      expect(useStreamPool.getState().activeId).toBe(first)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("releases all retained handles when leaving the provider", () => {
+    const view = render(
+      wrapper(
+        <AgentStreamProvider threadId="one">
+          <Probe />
+        </AgentStreamProvider>
+      )
+    )
+    expect(Object.keys(useStreamPool.getState().handles)).toHaveLength(1)
+    view.unmount()
+    expect(useStreamPool.getState().entries).toEqual([])
+    expect(useStreamPool.getState().handles).toEqual({})
+    expect(useStreamPool.getState().binding).toBeNull()
+  })
+
   it("never announces local threads", () => {
     const onThreadCreated = vi.fn()
     render(
