@@ -43,7 +43,7 @@ from agent.utils.thread_ops import (
 from agent.utils.thread_ops import queue_message_for_thread
 from agent.webhooks import common
 from agent.workspaces.routing import resolve_workspace, workspace_for_repo
-from agent.workspaces.store import WORKSPACES, parse_workspace_tag
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
@@ -942,14 +942,21 @@ async def _process_slack_mention_impl(
     # resolved here, before the model is, because the model default and the
     # Fable flag are the resolved workspace's.
     if is_first_mention:
+        # A DM is one person's own space rather than a routed channel, so it opens
+        # in the instance default unless they named a workspace; an environment
+        # tool can move it afterwards and metadata carries that to later messages.
         thread_workspace = (
-            await resolve_workspace(
-                tag=tagged_slug,
-                repo=resolution.routing_repo,
-                slack_channel_id=channel_id,
-                login=mapped_login,
-            )
-        ).slug
+            DEFAULT_WORKSPACE_SLUG
+            if dm_session and not tagged_slug
+            else (
+                await resolve_workspace(
+                    tag=tagged_slug,
+                    repo=resolution.routing_repo,
+                    slack_channel_id=channel_id,
+                    login=mapped_login,
+                )
+            ).slug
+        )
     else:
         thread_workspace = await common.get_thread_workspace(thread_id)
 
@@ -1077,6 +1084,11 @@ async def _process_slack_mention_impl(
     if mapped_login:
         configurable["github_login"] = mapped_login
         logins_by_user_id[user_id] = mapped_login
+    # A DM is reachable by exactly one person, so the admin capability cannot leak
+    # to anyone else; the factory still rechecks the sender against the configured
+    # admins, and a non-admin's DM gets nothing extra.
+    if dm_session:
+        configurable["admin_thread"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace
