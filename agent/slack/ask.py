@@ -38,7 +38,7 @@ CHANNEL_CONTEXT_MAX_TOKENS = 5000
 # characters to the token holds the budget closely enough.
 _CHANNEL_CONTEXT_MAX_CHARS = CHANNEL_CONTEXT_MAX_TOKENS * 4
 _CHANNEL_CONTEXT_TRIMMED = "[earlier messages omitted to stay inside the context budget]"
-_NO_CHANNEL_CONTEXT = "(unavailable — read the channel yourself if the request needs it)"
+_NO_CHANNEL_CONTEXT = "(unavailable — this is not a public channel, or it has no messages)"
 _CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
 _START_FAILURE = "Open SWE could not start that request. Try again in a moment."
 

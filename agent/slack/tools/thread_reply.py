@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
+from slack_sdk.models.blocks import Block
 
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -30,6 +31,25 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 logger = logging.getLogger(__name__)
 
 
+def _invalid_blocks(blocks: list[dict[str, Any]] | None) -> str | None:
+    """The first Block Kit problem Slack's own models find, or None."""
+    for index, block in enumerate(blocks or []):
+        if not isinstance(block, dict):
+            return f"block {index} is not an object"
+        label = f"block {index} ({block.get('type') or 'no type'})"
+        try:
+            parsed = Block.parse(block)
+        except Exception as exc:  # noqa: BLE001
+            return f"{label}: {exc}"
+        if parsed is None:
+            return f"{label}: unrecognized block type"
+        try:
+            parsed.validate_json()
+        except Exception as exc:  # noqa: BLE001
+            return f"{label}: {exc}"
+    return None
+
+
 async def slack_thread_reply(
     message: str,
     options: list[str] | None = None,
@@ -38,13 +58,22 @@ async def slack_thread_reply(
     should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
     """Implement the `slack_thread_reply` tool."""
+    if problem := _invalid_blocks(blocks):
+        return {
+            "success": False,
+            "error": f"Block Kit is invalid: {problem}",
+            "retry": True,
+            "hint": "Nothing was posted and the asker is still waiting. Fix the block named "
+            "above and call this tool again; if the second attempt fails too, send `message` "
+            "on its own without `blocks`.",
+        }
     config = get_config()
     cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
     if cfg.slack_ask is True:
-        return await _ephemeral_reply(cfg, message, blocks, state)
+        return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
     active = await get_active_slack_thread(
         client,
@@ -136,8 +165,21 @@ async def _ephemeral_reply(
     cfg: RunConfig,
     message: str,
     blocks: list[dict[str, Any]] | None,
+    options: list[str] | None,
     state: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    if options:
+        return {
+            "success": False,
+            "error": "options cannot be answered on an ephemeral reply",
+            "retry": True,
+            "hint": (
+                "Slack cannot route a choice button on an ephemeral message back to this run, "
+                "so nothing was posted. Call this tool again without `options`: put the choice "
+                "in `message` as a question, or use `blocks` with link buttons, which do work "
+                "here."
+            ),
+        }
     slack_thread = cfg.slack_thread
     channel_id = slack_thread.channel_id if slack_thread else ""
     user_id = slack_thread.triggering_user_id if slack_thread else ""

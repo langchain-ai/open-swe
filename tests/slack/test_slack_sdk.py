@@ -61,9 +61,35 @@ async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
     ]
 
 
+_PUBLIC_CHANNEL = {
+    "ok": True,
+    "channel": {
+        "id": "C1",
+        "is_channel": True,
+        "is_private": False,
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
+    },
+}
+
+
+@pytest.fixture
+def private_agent_thread(monkeypatch):
+    from agent.slack.tools import read_channel_messages
+
+    async def is_private() -> bool:
+        return True
+
+    monkeypatch.setattr(read_channel_messages, "_thread_is_private", is_private)
+
+
+@pytest.mark.usefixtures("private_agent_thread")
 async def test_read_channel_tool_marks_threads_and_skips_joins(slack_api):
+    from agent.slack.client import clear_slack_channel_info_cache
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
 
+    clear_slack_channel_info_cache()
+    slack_api.respond(_PUBLIC_CHANNEL)
     slack_api.respond(
         {
             "ok": True,
@@ -89,7 +115,35 @@ async def test_read_channel_tool_marks_threads_and_skips_joins(slack_api):
     assert formatted.index("Deploys are failing") < formatted.index("Opened a PR")
     assert "[thread: 2 replies, thread_ts=2.0]" in formatted
     assert "joined" not in formatted
-    assert slack_api.calls[0] == ("conversations.history", {"channel": "C1", "limit": "5"})
+    assert ("conversations.history", {"channel": "C1", "limit": "5"}) in slack_api.calls
+
+
+@pytest.mark.usefixtures("private_agent_thread")
+async def test_read_channel_tool_refuses_a_private_channel(slack_api):
+    from agent.slack.client import clear_slack_channel_info_cache
+    from agent.slack.tools.read_channel_messages import slack_read_channel_messages
+
+    clear_slack_channel_info_cache()
+    slack_api.respond({"ok": True, "channel": {"id": "C1", "is_channel": True, "is_private": True}})
+    result = await slack_read_channel_messages("C1")
+
+    assert result["success"] is False
+    assert "public" in result["error"]
+    assert [call[0] for call in slack_api.calls] == ["conversations.info"]
+
+
+async def test_read_channel_tool_refuses_a_shared_thread(slack_api, monkeypatch):
+    from agent.slack.tools import read_channel_messages
+
+    async def is_private() -> bool:
+        return False
+
+    monkeypatch.setattr(read_channel_messages, "_thread_is_private", is_private)
+    result = await read_channel_messages.slack_read_channel_messages("C1")
+
+    assert result["success"] is False
+    assert "private thread" in result["error"]
+    assert slack_api.calls == []
 
 
 @pytest.mark.parametrize(

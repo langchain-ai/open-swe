@@ -1413,13 +1413,40 @@ _SLACK_NOISE_SUBTYPES = frozenset(
 )
 
 
+async def slack_channel_is_public(channel_id: str) -> bool:
+    """Whether a channel is one anybody in the workspace can already read.
+
+    Channel history is fetched with the deployment's bot token, which says
+    nothing about who is asking, so only a channel with no membership to leak
+    may be read this way: not private, not a DM or group DM, and not shared with
+    another organization.
+    """
+    channel = await get_slack_channel_info(channel_id)
+    if not isinstance(channel, dict):
+        return False
+    return (
+        channel.get("is_channel") is True
+        and channel.get("is_private") is False
+        and channel.get("is_im") is not True
+        and channel.get("is_mpim") is not True
+        and channel.get("is_ext_shared") is False
+        and channel.get("is_pending_ext_shared") is False
+    )
+
+
 async def fetch_slack_channel_messages(channel_id: str, limit: int = 30) -> list[dict[str, Any]]:
-    """The most recent top-level messages in a channel, oldest first.
+    """The most recent top-level messages in a public channel, oldest first.
 
     Thread replies are not in channel history, so a message that has any carries
     its `reply_count` and `thread_ts` for `slack_read_thread_messages` to follow.
     """
     if not SLACK_BOT_TOKEN or not channel_id:
+        return []
+    if not await slack_channel_is_public(channel_id):
+        logger.info(
+            "Refused to read history for a non-public Slack channel",
+            extra={"slack_channel": channel_id},
+        )
         return []
 
     capped = max(1, min(limit, SLACK_CHANNEL_HISTORY_MAX_MESSAGES))
