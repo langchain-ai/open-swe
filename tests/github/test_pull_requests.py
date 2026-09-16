@@ -1,15 +1,26 @@
 """PostgreSQL regressions for pull requests and their thread/review links."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agent.github import pull_requests
-from agent.github.pull_requests import PullRequest, ThreadLink
+from agent.github.pull_requests import (
+    PullRequest,
+    PullRequestCheck,
+    PullRequestReviewThread,
+    ThreadLink,
+)
 from agent.github.repositories import Repository
 from agent.users import User
 
 pytestmark = pytest.mark.usefixtures("registry_db")
+
+HEAD_SHA = "a" * 40
+OLDER_SHA = "b" * 40
+EARLIER = datetime(2026, 1, 1, tzinfo=UTC)
+LATER = datetime(2026, 2, 1, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +31,26 @@ def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _pr() -> PullRequest:
     return PullRequest(owner="lc", repo="repo", number=7)
+
+
+def _check(
+    external_id: str,
+    *,
+    kind: pull_requests.CheckKind = "check_run",
+    status: str = "completed",
+    conclusion: str = "success",
+    head_sha: str = HEAD_SHA,
+    github_updated_at: datetime | None = None,
+) -> PullRequestCheck:
+    return PullRequestCheck(
+        head_sha=head_sha,
+        kind=kind,
+        external_id=external_id,
+        name=external_id,
+        status=status if kind == "check_run" else "",
+        conclusion=conclusion,
+        github_updated_at=github_updated_at,
+    )
 
 
 def _client_returning(*pages: list[dict[str, object]]) -> MagicMock:
@@ -220,3 +251,121 @@ async def test_backfill_leaves_existing_reviews_untouched(monkeypatch: pytest.Mo
     stored = await PullRequest.get("lc", "repo", 7)
     assert stored is not None
     assert [review.published_at for review in stored.reviews] == [published_at]
+
+
+async def test_a_save_stamped_before_the_stored_one_does_not_roll_github_fields_back() -> None:
+    await PullRequest(
+        owner="lc", repo="repo", number=7, title="Newer", state="merged", github_updated_at=LATER
+    ).save()
+
+    stale = await PullRequest(
+        owner="lc", repo="repo", number=7, title="Older", state="open", github_updated_at=EARLIER
+    ).save()
+
+    assert (stale.title, stale.state, stale.github_updated_at) == ("Newer", "merged", LATER)
+
+
+async def test_a_save_stamped_after_the_stored_one_wins() -> None:
+    await PullRequest(
+        owner="lc", repo="repo", number=7, title="Older", github_updated_at=EARLIER
+    ).save()
+
+    fresh = await PullRequest(
+        owner="lc", repo="repo", number=7, title="Newer", state="merged", github_updated_at=LATER
+    ).save()
+
+    assert (fresh.title, fresh.state, fresh.github_updated_at) == ("Newer", "merged", LATER)
+
+
+async def test_an_unstamped_save_still_overwrites_and_keeps_the_known_stamp() -> None:
+    await PullRequest(
+        owner="lc", repo="repo", number=7, title="Stamped", github_updated_at=LATER
+    ).save()
+
+    legacy = await PullRequest(owner="lc", repo="repo", number=7, title="Unstamped").save()
+
+    assert (legacy.title, legacy.github_updated_at) == ("Unstamped", LATER)
+
+
+async def test_replace_checks_updates_matches_in_place_and_drops_every_other_sha() -> None:
+    saved = await PullRequest(owner="lc", repo="repo", number=7, head_sha=OLDER_SHA).save()
+    await saved.replace_checks(OLDER_SHA, [_check("lint", head_sha=OLDER_SHA)])
+    repushed = await PullRequest(owner="lc", repo="repo", number=7, head_sha=HEAD_SHA).save()
+    first = await repushed.replace_checks(HEAD_SHA, [_check("lint"), _check("test")])
+
+    replaced = await first.replace_checks(
+        HEAD_SHA, [_check("lint", conclusion="failure"), _check("typecheck")]
+    )
+
+    assert {(check.head_sha, check.name) for check in replaced.checks} == {
+        (HEAD_SHA, "lint"),
+        (HEAD_SHA, "typecheck"),
+    }
+    lint = next(check for check in replaced.checks if check.name == "lint")
+    assert lint.conclusion == "failure"
+    assert lint.id == next(check for check in first.checks if check.name == "lint").id
+
+
+async def test_upsert_check_only_accepts_a_check_github_stamped_later() -> None:
+    saved = await PullRequest(owner="lc", repo="repo", number=7, head_sha=HEAD_SHA).save()
+    await saved.upsert_check(_check("lint", conclusion="failure", github_updated_at=LATER))
+
+    stale = await saved.upsert_check(
+        _check("lint", conclusion="success", github_updated_at=EARLIER)
+    )
+    fresh = await saved.upsert_check(_check("lint", conclusion="success", github_updated_at=LATER))
+
+    assert [check.conclusion for check in stale.checks] == ["failure"]
+    assert [check.conclusion for check in fresh.checks] == ["success"]
+
+
+async def test_check_summary_and_state_follow_the_current_head() -> None:
+    saved = await PullRequest(owner="lc", repo="repo", number=7, head_sha=HEAD_SHA).save(
+        synced=True
+    )
+
+    stored = await saved.replace_checks(
+        HEAD_SHA,
+        [
+            _check("lint", conclusion="failure"),
+            _check("build", status="in_progress", conclusion=""),
+            _check("flaky", conclusion="skipped"),
+            _check("legacy", kind="status", conclusion="error"),
+            _check("ok"),
+        ],
+    )
+
+    summary = stored.check_summary()
+    assert {failure["name"] for failure in summary.failing} == {"lint", "legacy"}
+    assert (summary.pending, summary.inconclusive) == (1, 1)
+    assert stored.check_state == "failing"
+
+
+async def test_check_state_is_unknown_until_a_sync_has_run() -> None:
+    saved = await PullRequest(owner="lc", repo="repo", number=7, head_sha=HEAD_SHA).save()
+    assert saved.check_state == "unknown"
+
+    synced = await PullRequest(owner="lc", repo="repo", number=7, head_sha=HEAD_SHA).save(
+        synced=True
+    )
+
+    assert synced.last_synced_at is not None
+    assert synced.check_state == "passing"
+
+
+async def test_replace_review_threads_keeps_node_ids_and_drops_the_rest() -> None:
+    saved = await PullRequest(owner="lc", repo="repo", number=7).save()
+    first = await saved.replace_review_threads(
+        [
+            PullRequestReviewThread(node_id="n1", path="a.py", is_resolved=False),
+            PullRequestReviewThread(node_id="n2", path="b.py", is_resolved=False),
+        ]
+    )
+
+    replaced = await first.replace_review_threads(
+        [PullRequestReviewThread(node_id="n1", path="a.py", is_resolved=True)]
+    )
+
+    assert [thread.node_id for thread in replaced.review_threads] == ["n1"]
+    assert replaced.unresolved_review_threads == []
+    assert replaced.review_threads[0].id == first.review_threads[0].id

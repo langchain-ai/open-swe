@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Response
 
+from agent.github import pull_request_events as events
 from agent.github import webhook as service
 from agent.schedules import store as schedules
 from agent.webhooks import common
@@ -90,6 +91,10 @@ async def github_webhook(
 
     if is_pull_request_event:
         action = payload.get("action", "")
+        # ``update_agent_thread_pr_state`` stores the row itself, so only the
+        # actions it never sees need the standalone ingest.
+        if action not in common.GH_PR_AGENT_STATE_ACTIONS:
+            background_tasks.add_task(events.ingest_pull_request_event, payload)
         if action not in common.SUPPORTED_GH_PULL_REQUEST_ACTIONS:
             common.logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
             return {
@@ -147,7 +152,12 @@ async def github_webhook(
             event_type,
             delivery_id,
         )
+        if event_type in {"check_run", "status"}:
+            background_tasks.add_task(events.ingest_check_event, payload, event_type)
         return {"status": "accepted", "message": "Processing GitHub CI event"}
+
+    if event_type in {"pull_request_review", "pull_request_review_comment"}:
+        background_tasks.add_task(events.ingest_review_event, payload)
 
     if is_issue_event:
         action = payload.get("action", "")

@@ -1,69 +1,56 @@
-"""Live GitHub pull-request health for dashboard threads."""
+"""Pull-request health for the dashboard thread panel, PostgreSQL first.
+
+A stored row recent enough to answer for GitHub is rendered straight out of the
+tables; anything missing or stale is read live with the signed-in user's token
+and written back in the background, so the next read is served from the tables.
+Both paths emit the same payload.
+
+The caller has already been authorized: the tracked pull requests come from the
+thread's own metadata, and the thread was checked readable before this module
+is reached. A row is therefore served without a second repository check.
+"""
 
 import asyncio
-import re
+import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 import httpx2
 
+from agent.database import postgres
 from agent.github.http import (
     GITHUB_API_BASE,
     GITHUB_GRAPHQL,
     github_client,
     github_request,
 )
-
-_OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
-_REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
-_SHA_PATTERN = re.compile(r"[0-9a-fA-F]{40,64}")
-_FAILING_CHECK_CONCLUSIONS = frozenset(
-    {"failure", "timed_out", "action_required", "startup_failure"}
+from agent.github.pull_request_sync import REVIEW_THREADS_QUERY, schedule_pull_request_sync
+from agent.github.pull_request_terms import (
+    FAILING_CHECK_CONCLUSIONS,
+    FAILING_STATUS_STATES,
+    INCONCLUSIVE_CHECK_CONCLUSIONS,
+    SHA_PATTERN,
+    identity_key,
+    pull_request_identity,
+    pull_request_max_age,
 )
-_INCONCLUSIVE_CHECK_CONCLUSIONS = frozenset({"cancelled", "stale", "skipped", "neutral"})
-_REVIEW_THREADS_QUERY = """
-query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          isResolved
-          path
-          line
-          originalLine
-          comments(first: 1) {
-            nodes {
-              author { login }
-              body
-              url
-            }
-          }
-        }
-      }
-    }
-  }
+from agent.github.pull_requests import PullRequest
+
+__all__ = [
+    "REVIEW_THREADS_QUERY",
+    "SHA_PATTERN",
+    "get_pull_request_statuses",
+    "pull_request_identity",
+]
+
+logger = logging.getLogger(__name__)
+
+_STORED_STATES: dict[str, str] = {
+    "merged": "merged",
+    "closed": "closed",
+    "open": "open",
+    "draft": "open",
 }
-"""
-
-
-def pull_request_identity(record: object) -> tuple[str, str, int] | None:
-    if not isinstance(record, Mapping):
-        return None
-    full_name = record.get("repo_full_name")
-    number = record.get("number")
-    if not isinstance(full_name, str) or full_name.count("/") != 1:
-        return None
-    owner, repo = full_name.split("/", 1)
-    if (
-        not _OWNER_PATTERN.fullmatch(owner)
-        or not _REPO_PATTERN.fullmatch(repo)
-        or repo in {".", ".."}
-    ):
-        return None
-    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
-        return None
-    return owner, repo, number
 
 
 def _unavailable_pull_request(record: object) -> dict[str, Any]:
@@ -97,11 +84,52 @@ def _merge_conflict_state(pull: Mapping[str, Any]) -> str:
     return "unknown"
 
 
+def _stored_merge_conflict_state(mergeable_state: str) -> str:
+    if mergeable_state == "dirty":
+        return "conflicting"
+    return "mergeable" if mergeable_state == "clean" else "unknown"
+
+
 def _live_state(pull: Mapping[str, Any]) -> str | None:
     if pull.get("merged") is True or isinstance(pull.get("merged_at"), str):
         return "merged"
     state = pull.get("state")
     return state if state in {"open", "closed"} else None
+
+
+def _stored_pull_request_status(row: PullRequest, result: dict[str, Any]) -> dict[str, Any]:
+    """Render a stored row into the payload a live read would have produced.
+
+    ``checksAvailable`` follows ``last_synced_at``: a sync that could not read
+    the checks leaves the previous set standing rather than an empty one, so a
+    synced row always has a check set worth rendering.
+    """
+    summary = row.check_summary()
+    result.update(
+        {
+            "statusAvailable": True,
+            "state": _STORED_STATES[row.state],
+            "isDraft": row.draft,
+            "mergeConflictState": _stored_merge_conflict_state(row.mergeable_state),
+            "checksAvailable": True,
+            "failingChecks": [dict(failure) for failure in summary.failing],
+            "pendingCheckCount": summary.pending,
+            "inconclusiveCheckCount": summary.inconclusive,
+            "commentsAvailable": True,
+            "unresolvedReviewThreadCount": len(row.unresolved_review_threads),
+            "unresolvedReviewThreads": [
+                {
+                    "author": thread.author or None,
+                    "body": thread.body,
+                    "path": thread.path,
+                    "line": thread.line,
+                    "url": thread.url or None,
+                }
+                for thread in row.unresolved_review_threads
+            ],
+        }
+    )
+    return result
 
 
 async def _fetch_pull_request(
@@ -191,7 +219,7 @@ def _normalize_checks(
         conclusion = run.get("conclusion")
         if status != "completed":
             pending += 1
-        elif conclusion in _FAILING_CHECK_CONCLUSIONS:
+        elif conclusion in FAILING_CHECK_CONCLUSIONS:
             failing.append(
                 {
                     "name": run.get("name") if isinstance(run.get("name"), str) else "",
@@ -205,13 +233,13 @@ def _normalize_checks(
                     ),
                 }
             )
-        elif conclusion in _INCONCLUSIVE_CHECK_CONCLUSIONS:
+        elif conclusion in INCONCLUSIVE_CHECK_CONCLUSIONS:
             inconclusive += 1
     for status in statuses:
         state = status.get("state")
         if state == "pending":
             pending += 1
-        elif state in {"failure", "error"}:
+        elif state in FAILING_STATUS_STATES:
             failing.append(
                 {
                     "name": (
@@ -239,7 +267,7 @@ async def _fetch_unresolved_review_threads(
                 "POST",
                 GITHUB_GRAPHQL,
                 json={
-                    "query": _REVIEW_THREADS_QUERY,
+                    "query": REVIEW_THREADS_QUERY,
                     "variables": {
                         "owner": owner,
                         "repo": repo,
@@ -297,19 +325,10 @@ async def _fetch_unresolved_review_threads(
         return None
 
 
-async def _pull_request_status(client: httpx2.AsyncClient, record: object) -> dict[str, Any]:
-    identity = pull_request_identity(record)
-    if identity is None:
-        return _unavailable_pull_request(record)
+async def _pull_request_status(
+    client: httpx2.AsyncClient, identity: tuple[str, str, int], result: dict[str, Any]
+) -> dict[str, Any]:
     owner, repo, number = identity
-    result = _unavailable_pull_request(record)
-    result.update(
-        {
-            "repoFullName": f"{owner}/{repo}",
-            "number": number,
-            "url": f"https://github.com/{owner}/{repo}/pull/{number}",
-        }
-    )
     pull, review_threads = await asyncio.gather(
         _fetch_pull_request(client, owner, repo, number),
         _fetch_unresolved_review_threads(client, owner, repo, number),
@@ -336,7 +355,7 @@ async def _pull_request_status(client: httpx2.AsyncClient, record: object) -> di
             "mergeConflictState": _merge_conflict_state(pull),
         }
     )
-    if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
+    if not isinstance(sha, str) or not SHA_PATTERN.fullmatch(sha):
         return result
     runs, statuses = await asyncio.gather(
         _fetch_check_runs(client, owner, repo, sha),
@@ -355,7 +374,61 @@ async def _pull_request_status(client: httpx2.AsyncClient, record: object) -> di
     return result
 
 
+async def _stored_rows(
+    identities: Sequence[tuple[str, str, int]],
+) -> dict[tuple[str, str, int], PullRequest]:
+    """Fresh stored rows for the identities that have one, keyed by identity."""
+    if not identities or not postgres.configured():
+        return {}
+    max_age = pull_request_max_age()
+    try:
+        rows = await PullRequest.get_all(identities)
+    except Exception:
+        logger.warning("Pull request status could not read stored rows", exc_info=True)
+        return {}
+    return {
+        identity_key((row.owner, row.repo, row.number)): row
+        for row in rows
+        if row.synced_within(max_age)
+    }
+
+
 async def get_pull_request_statuses(records: Sequence[object], token: str) -> list[dict[str, Any]]:
-    """Return live status for every tracked pull request record."""
+    """Return status for every tracked pull request record, stored rows first."""
+    identities = [
+        identity for record in records if (identity := pull_request_identity(record)) is not None
+    ]
+    stored = await _stored_rows(identities)
+
+    results: list[dict[str, Any]] = []
+    live: list[tuple[int, tuple[str, str, int]]] = []
+    for record in records:
+        identity = pull_request_identity(record)
+        if identity is None:
+            results.append(_unavailable_pull_request(record))
+            continue
+        owner, repo, number = identity
+        result = _unavailable_pull_request(record)
+        result.update(
+            {
+                "repoFullName": f"{owner}/{repo}",
+                "number": number,
+                "url": f"https://github.com/{owner}/{repo}/pull/{number}",
+            }
+        )
+        row = stored.get(identity_key(identity))
+        if row is None:
+            live.append((len(results), identity))
+        else:
+            result = _stored_pull_request_status(row, result)
+        results.append(result)
+
+    if not live:
+        return results
+
     async with github_client(token=token) as client:
-        return [await _pull_request_status(client, record) for record in records]
+        for index, identity in live:
+            results[index] = await _pull_request_status(client, identity, results[index])
+    for _, (owner, repo, number) in live:
+        schedule_pull_request_sync(owner, repo, number, token=token)
+    return results

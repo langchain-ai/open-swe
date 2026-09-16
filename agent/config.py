@@ -236,6 +236,21 @@ ENV.var(
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
+    "PULL_REQUEST_SYNC_INTERVAL_SECONDS",
+    "Seconds between backup pull request sweeps that catch missed webhooks; 0 disables.",
+    default="900",
+)
+ENV.var(
+    "PULL_REQUEST_SYNC_MAX_AGE_SECONDS",
+    "How stale an open pull request's last sync may be before a sweep re-reads it.",
+    default="3600",
+)
+ENV.var(
+    "PULL_REQUEST_SYNC_BATCH",
+    "Most pull requests one backup sweep re-reads.",
+    default="50",
+)
+ENV.var(
     "GITHUB_OAUTH_PROVIDER_ID", "LangSmith OAuth provider id for the legacy brokered GitHub auth."
 )
 ENV.var(
@@ -317,6 +332,12 @@ ENV.var(
     "NOTION_MCP_CLIENT_NAME",
     "Client name registered with the Notion MCP OAuth server.",
     default="Open SWE",
+)
+ENV.var(
+    "PULL_REQUEST_STATUS_MAX_AGE_SECONDS",
+    "How old a stored pull request may be before the dashboard re-reads it from GitHub "
+    "instead of serving the PostgreSQL row.",
+    default="600",
 )
 ENV.var("RUN_COMPLETE_WEBHOOK_SECRET", "Token authenticating /webhooks/run-complete.", secret=True)
 ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks.")
