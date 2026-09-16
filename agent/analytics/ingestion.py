@@ -2,12 +2,13 @@
 
 import json
 from datetime import UTC
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import BigInteger, Uuid, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.analytics.events import EventEnvelope, EventName
+from agent.analytics.events import EventEnvelope, EventName, PROpenedPayload
 from agent.analytics.summaries import mark_dirty
 from agent.config import ENV
 from agent.database import transaction
@@ -51,11 +52,16 @@ async def ingest(event: EventEnvelope) -> bool:
             subject_id = event.event_id
         elif event.event_name == EventName.FEEDBACK_WITHDRAWN:
             subject_id = event.payload.model_dump()["submission_event_id"]
-        if subject_id is not None:
-            # Serialize creation and outcomes even before a projection row exists.
+        opening_run_id: UUID | None = None
+        if event.event_name == EventName.RUN_STARTED:
+            opening_run_id = event.run_id
+        elif event.event_name == EventName.PR_OPENED:
+            opening_run_id = cast(PROpenedPayload, event.payload).opening_run_id
+        # Serialize creation and outcomes even before a projection row exists.
+        for lock_id in sorted({item for item in (subject_id, opening_run_id) if item}, key=str):
             await conn.execute(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),
-                {"subject": f"analytics:{event.workspace_id}:{subject_id}"},
+                {"subject": f"analytics:{event.workspace_id}:{lock_id}"},
             )
         inserted = await conn.scalar(
             _INSERT_ID, {"event_id": event.event_id, "occurred_at": event.occurred_at}

@@ -461,9 +461,9 @@ async def test_late_run_start_restores_attribution(analytics_db, effective_first
         assert row["technical_status"] == "completed"
 
 
-@pytest.mark.parametrize("run_first", [False, True])
+@pytest.mark.parametrize("delivery", ["pr_first", "run_first", "concurrent"])
 async def test_pr_uses_opening_runs_configured_model_in_either_delivery_order(
-    analytics_db, run_first
+    analytics_db, delivery
 ):
     workspace, transaction = analytics_db
     pr_id, run_id, configured_model, routed_model = uuid4(), uuid4(), uuid4(), uuid4()
@@ -484,8 +484,11 @@ async def test_pr_uses_opening_runs_configured_model_in_either_delivery_order(
         pr_id=pr_id,
         repository_id=uuid4(),
     )
-    for item in (started, opened) if run_first else (opened, started):
-        await ingestion.ingest(item)
+    if delivery == "concurrent":
+        await asyncio.gather(ingestion.ingest(started), ingestion.ingest(opened))
+    else:
+        for item in (started, opened) if delivery == "run_first" else (opened, started):
+            await ingestion.ingest(item)
     for item in (started, opened):
         assert not await ingestion.ingest(item)
 
