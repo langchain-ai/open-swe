@@ -976,6 +976,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 await cached_team_settings(settings_workspace)
             )
 
+    slack_ask_mode = _slack_ask_mode(cfg)
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
@@ -1079,6 +1080,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
+    # A `/oswe` question always runs on the fast route and never routes
+    # adaptively. Applied after the thread's settings are stored, so continuing
+    # the thread on the web picks the model up from the usual defaults.
+    if slack_ask_mode:
+        adaptive_model_routing = False
+        model_id, profile_effort = routing_defaults["fast"]
+        subagent_model_id, subagent_effort = routing_defaults["fast"]
+
     config["metadata"] = {
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
@@ -1142,7 +1151,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
-    slack_ask_mode = _slack_ask_mode(cfg)
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
