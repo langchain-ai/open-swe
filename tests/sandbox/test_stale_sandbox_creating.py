@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.sandboxes.state import get_or_create_sandbox_backend_proxy, set_sandbox_backend
+from agent.sandboxes.state import (
+    SANDBOX_CONNECTIONS,
+    get_or_create_sandbox_backend_proxy,
+    set_sandbox_backend,
+)
 
 
 @pytest.mark.asyncio
@@ -143,8 +147,8 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ensure_sandbox_drops_cached_backend_that_disagrees_with_metadata() -> None:
-    """A reset on another worker rebinds the thread; this worker's cache is stale."""
+async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> None:
+    """A reset on another worker rebinds the thread; this worker still holds the old box."""
     thread_id = "thread-stale-cache"
     SANDBOX_BACKENDS.clear()
     stale_backend = MagicMock()
@@ -188,6 +192,21 @@ async def test_ensure_sandbox_drops_cached_backend_that_disagrees_with_metadata(
     assert result is proxy
     assert proxy.current is new_backend
     connect_sandbox.assert_awaited_once_with("sandbox-new")
-    # The stale cached id must never be written back over the metadata binding.
+    # Only a sandbox created in this call binds the thread; reconnecting never does.
     update_thread.assert_not_awaited()
+    assert "sandbox-old" not in SANDBOX_CONNECTIONS
+    assert SANDBOX_CONNECTIONS["sandbox-new"] is new_backend
     SANDBOX_BACKENDS.clear()
+
+
+def test_set_sandbox_backend_drops_connection_to_the_previous_sandbox() -> None:
+    thread_id = "thread-move"
+    old = MagicMock(id="sandbox-old")
+    new = MagicMock(id="sandbox-new")
+
+    set_sandbox_backend(thread_id, old)
+    assert SANDBOX_CONNECTIONS["sandbox-old"] is old
+
+    set_sandbox_backend(thread_id, new)
+    assert "sandbox-old" not in SANDBOX_CONNECTIONS
+    assert SANDBOX_CONNECTIONS["sandbox-new"] is new
