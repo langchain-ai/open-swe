@@ -10,7 +10,13 @@ import { api } from "@/lib/api"
 export function ReviewTab({ thread }: { thread: AgentThread }) {
   const navigate = useNavigate()
   const pr = thread.pr
-  const [owner, repo] = thread.repoFullName.split("/")
+  // The PR record names its own repo; the thread's repo only identifies it when
+  // the thread targets exactly one.
+  const prRepo =
+    thread.pullRequests?.find((entry) => entry.number === pr?.number)
+      ?.repoFullName ??
+    (thread.repos.length === 1 ? thread.repos[0] : undefined)
+  const [owner, repo] = (prRepo ?? "").split("/")
   const number = pr?.number ?? null
   const enabled = Boolean(owner && repo && number !== null)
 

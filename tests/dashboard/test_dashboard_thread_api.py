@@ -285,13 +285,12 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert stamped["trigger_kind"] == "user"
     assert stamped["participant_logins"] == {"octocat": True}
     assert stamped["title"] == "Fix the flaky test"
-    assert stamped["repo_owner"] == "octo"
-    assert stamped["repo_name"] == "repo"
+    assert stamped["repos"] == [{"owner": "octo", "name": "repo"}]
 
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["github_login"] == "octocat"
     assert configurable["source"] == "dashboard"
-    assert configurable["repo"] == {"owner": "octo", "name": "repo"}
+    assert configurable["repos"] == [{"owner": "octo", "name": "repo"}]
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
     assert configurable["invocation_id"] == enriched["params"]["metadata"]["invocation_id"]
@@ -590,7 +589,7 @@ async def test_thread_summary_includes_pull_requests_across_repositories() -> No
     assert summary["diffStats"] == {"files": 1, "additions": 4, "deletions": 0}
 
 
-async def test_thread_summary_uses_configured_repo_for_display() -> None:
+async def test_thread_summary_uses_configured_repos_for_display() -> None:
     metadata = {
         "repo": {"owner": "trusted", "name": "default"},
         "working_repo_full_name": "observed/checkout",
@@ -598,8 +597,7 @@ async def test_thread_summary_uses_configured_repo_for_display() -> None:
 
     summary = await thread_summary._thread_summary(_thread_with_metadata(metadata))
 
-    assert summary["repo"] == "default"
-    assert summary["repoFullName"] == "trusted/default"
+    assert summary["repos"] == ["trusted/default"]
     assert "workingRepoFullName" not in summary
     assert metadata["repo"] == {"owner": "trusted", "name": "default"}
 
@@ -1177,7 +1175,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         {"owner_login", "owner_type", "visibility", "system_authorization"}
         & enriched["params"]["metadata"].keys()
     )
-    assert configurable["repo"] == {"owner": "octo", "name": "repo"}
+    assert configurable["repos"] == [{"owner": "octo", "name": "repo"}]
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
     assert updates[-1]["model"] == _VISION_MODEL
@@ -2841,8 +2839,54 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
 
     result = await thread_diffs.get_dashboard_thread_working_tree_diff("thread-1", "owner")
 
-    assert result == live
+    assert result["status"] == "ready"
+    assert result["files"] == live["files"]
+    assert result["summary"] == live["summary"]
+    assert result["repos"] == [
+        {
+            "repoFullName": "acme/repo",
+            "status": "ready",
+            "truncated": False,
+            "summary": live["summary"],
+        }
+    ]
     read_diff.assert_awaited_once_with(sandbox, "/work", "HEAD", None, repo_path="/work/repo")
+
+
+async def test_working_tree_diff_merges_every_repository(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "repos": [{"owner": "acme", "name": "one"}, {"owner": "acme", "name": "two"}],
+    }
+
+    def diff_for(path: str) -> dict[str, object]:
+        name = path.rsplit("/", 1)[-1]
+        return {
+            "status": "ready",
+            "files": [{"path": f"{name}.py", "previousPath": None, "additions": 1, "deletions": 0}],
+            "truncated": name == "two",
+            "summary": {"files": 1, "additions": 1, "deletions": 0},
+        }
+
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    sandbox = object()
+    patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(return_value=sandbox))
+    monkeypatch.setattr(
+        "agent.sandboxes.paths.resolve_sandbox_work_dir",
+        AsyncMock(return_value="/work"),
+    )
+
+    async def read_diff(_sandbox, _work_dir, _base, _head, *, repo_path=None, **_kwargs):
+        return diff_for(repo_path)
+
+    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
+
+    result = await thread_diffs.get_dashboard_thread_working_tree_diff("thread-1", "owner")
+
+    assert [file["path"] for file in result["files"]] == ["one/one.py", "two/two.py"]
+    assert result["summary"] == {"files": 2, "additions": 2, "deletions": 0}
+    assert result["truncated"] is True
+    assert [entry["repoFullName"] for entry in result["repos"]] == ["acme/one", "acme/two"]
 
 
 async def test_working_tree_diff_raises_when_the_sandbox_is_unreachable(monkeypatch) -> None:
@@ -2901,6 +2945,50 @@ async def test_branch_diff_without_a_pull_request_compares_against_the_base(monk
     )
     assert result["prNumber"] is None
     assert result["baseSha"] == "merge-base"
+
+
+async def test_branch_diff_without_a_pull_request_compares_every_repository(monkeypatch) -> None:
+    metadata = {
+        "repos": [{"owner": "acme", "name": "one"}, {"owner": "acme", "name": "two"}],
+        "base_branch": "main",
+        "branch_name": "open-swe/feature",
+    }
+    patch_thread_module(monkeypatch, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    patch_thread_module(monkeypatch, "_github_token_for_login", AsyncMock(return_value="token"))
+
+    async def build_compare(_client, full_name, _base, _head):
+        name = full_name.split("/", 1)[1]
+        return {
+            "base_sha": f"{name}-base",
+            "head_sha": f"{name}-head",
+            "truncated": name == "two",
+            "files": [{"path": f"{name}.py", "previousPath": None}],
+        }
+
+    patch_thread_module(monkeypatch, "build_compare_diff_files", build_compare)
+
+    result = await thread_diffs.get_dashboard_thread_branch_diff("thread-1", "owner")
+
+    assert [file["path"] for file in result["files"]] == ["one/one.py", "two/two.py"]
+    assert result["truncated"] is True
+    assert result["baseSha"] is None
+    assert result["headSha"] is None
+    assert result["repos"] == [
+        {
+            "repoFullName": "acme/one",
+            "baseSha": "one-base",
+            "headSha": "one-head",
+            "truncated": False,
+            "files": 1,
+        },
+        {
+            "repoFullName": "acme/two",
+            "baseSha": "two-base",
+            "headSha": "two-head",
+            "truncated": True,
+            "files": 1,
+        },
+    ]
 
 
 async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:

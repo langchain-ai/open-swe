@@ -44,8 +44,7 @@ describe("AutomationRuns", () => {
     const run = {
       id: "run-posted",
       title: "Scheduled: Dependency check",
-      repo: "open-swe",
-      repoFullName: "langchain-ai/open-swe",
+      repos: ["langchain-ai/open-swe"],
       branch: "main",
       model: "Default",
       source: "schedule",

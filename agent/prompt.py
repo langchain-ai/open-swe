@@ -7,6 +7,7 @@ from pathlib import Path
 from agent.config import ENV
 from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 from agent.prompts import load_prompt, render_prompt
+from agent.run_config import Repo
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -184,12 +185,28 @@ def construct_sender_context(
     return "\n\n".join(section for section in sections if section)
 
 
+def _render_repositories_section(repos: Sequence[Repo]) -> str:
+    """Name the repositories this thread works in, however many there are."""
+    named = [repo for repo in repos if repo]
+    if not named:
+        return ""
+    if len(named) == 1:
+        return f"When a repository is not explicitly mentioned, use `{named[0].full_name}`."
+    listed = "\n".join(f"- `{repo.full_name}`" for repo in named)
+    return (
+        "This thread works in several repositories, each cloned side by side under the "
+        f"working directory:\n{listed}\n"
+        "A task may span any of them; pick the ones the request actually concerns, and do "
+        "not assume a change belongs to only one."
+    )
+
+
 def construct_system_prompt(
     working_dir: str,
     dashboard_base_url: str = "",
     linear_project_id: str = "",
     linear_issue_number: str = "",
-    default_repo: dict[str, str] | None = None,
+    repos: Sequence[Repo] = (),
     plan_mode: bool = False,
     plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
@@ -206,12 +223,9 @@ def construct_system_prompt(
     if continued_from_collaborative:
         untrusted_section += f"\n\n{load_prompt('system/continued-from-collaborative.md')}"
     default_prompt_section = _load_default_prompt()
-    if default_repo and default_repo.get("owner") and default_repo.get("name"):
-        repo_line = (
-            "When a repository is not explicitly mentioned, use "
-            f"`{default_repo['owner']}/{default_repo['name']}`."
-        )
-        default_prompt_section += f"\n\n{repo_line}"
+    repositories_section = _render_repositories_section(repos)
+    if repositories_section:
+        default_prompt_section += f"\n\n{repositories_section}"
     commit_pr_section = load_prompt("system/commit-pr.md")
     if source == "desktop":
         commit_pr_section += f"\n\n{load_prompt('system/commit-pr-desktop.md')}"

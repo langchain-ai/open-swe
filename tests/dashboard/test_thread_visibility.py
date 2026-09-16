@@ -141,8 +141,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
         "latest_run_status": "success",
         "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
         "participant_logins": {"alice": True, "bob": True},
-        "repo_owner": "acme",
-        "repo_name": "app",
+        "repos": [{"owner": "acme", "name": "app"}],
     }
     client.threads.get_state.return_value = {
         "values": {
@@ -161,7 +160,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert metadata["source"] == metadata["origin"] == "dashboard"
     assert metadata["continued_from_thread_id"] == "private-thread"
     assert metadata["title"] == "Fix the flaky build"
-    assert metadata["repo_owner"] == "acme"
+    assert metadata["repos"] == [{"owner": "acme", "name": "app"}]
     assert metadata["participant_logins"] == {"bob": True}
     assert metadata["graph_id"] == "agent"
     for key in ("source_context", "sandbox_id", "latest_run_id", "latest_run_status"):

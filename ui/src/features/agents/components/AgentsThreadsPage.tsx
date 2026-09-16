@@ -454,7 +454,7 @@ function ThreadCard({ thread }: { thread: AgentThread }) {
               {thread.title}
             </p>
             <p className="mt-1 truncate text-[11px] text-muted-foreground/70">
-              {thread.repoFullName || "No repository"}
+              {thread.repos.join(", ") || "No repository"}
             </p>
           </div>
         </div>
@@ -545,7 +545,8 @@ function ThreadListItem({ thread }: { thread: AgentThread }) {
       >
         <p className="truncate text-sm text-foreground">{thread.title}</p>
         <p className="truncate text-[11px] text-muted-foreground/70">
-          {thread.repoFullName || "No repo"} · {displayStatus(thread.status)}
+          {thread.repos.join(", ") || "No repository"} ·{" "}
+          {displayStatus(thread.status)}
           {isResolved ? " · Resolved" : ""} ·{" "}
           {formatRelativeTime(thread.updatedAt)}
         </p>

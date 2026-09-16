@@ -43,13 +43,22 @@ function ThreadProjectIndicator({
     ...prefs.filters,
     enabled: !localThread && Boolean(session.data),
   })
-  const repo = !localThread ? thread?.repoFullName.trim() : undefined
+  const repos = localThread
+    ? []
+    : (thread?.repos.map((repo) => repo.trim()).filter(Boolean) ?? [])
   const projectName = localThread
     ? projects.find((project) => project.cwd === localThread.cwd)?.name
-    : (cloudProjects.data?.find(
-        (project) => project.repoFullName.toLowerCase() === repo?.toLowerCase()
-      )?.name ?? (repo ? thread?.repo || repo : undefined))
+    : repos
+        .map(
+          (repo) =>
+            cloudProjects.data?.find(
+              (project) =>
+                project.repoFullName.toLowerCase() === repo.toLowerCase()
+            )?.name ?? repo
+        )
+        .join(", ")
   if (!projectName) return null
+  const tooltip = repos.length > 1 ? repos.join(", ") : projectName
 
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
@@ -65,7 +74,7 @@ function ThreadProjectIndicator({
       >
         <Folder className="size-4" />
       </TooltipTrigger>
-      <TooltipPopup>{projectName}</TooltipPopup>
+      <TooltipPopup>{tooltip}</TooltipPopup>
     </Tooltip>
   )
 }

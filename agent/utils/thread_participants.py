@@ -11,8 +11,10 @@ from agent.dashboard.agent_overrides import resolve_github_login
 from agent.dashboard.user_mappings import get_mapping, login_for_email, login_for_slack_id
 from agent.github.comments import fetch_github_thread_participants
 from agent.github.thread_token import get_github_token
+from agent.run_config import RunConfig
 from agent.slack.client import fetch_slack_thread_messages
 from agent.source_context import SourceContext
+from agent.thread_repos import thread_repos
 from agent.utils.json_types import as_json_object, thread_metadata
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
@@ -114,20 +116,18 @@ def _context(configurable: dict[str, Any], metadata: dict[str, Any]) -> SourceCo
     return SourceContext.parse(merged)
 
 
-def _repo_config(configurable: dict[str, Any], metadata: dict[str, Any]) -> dict[str, str] | None:
-    repo = configurable.get("repo") or metadata.get("repo")
-    if (
-        isinstance(repo, dict)
-        and isinstance(repo.get("owner"), str)
-        and isinstance(repo.get("name"), str)
-    ):
-        if repo["owner"] and repo["name"]:
-            return {"owner": repo["owner"], "name": repo["name"]}
-    owner = metadata.get("repo_owner")
-    name = metadata.get("repo_name")
-    if isinstance(owner, str) and owner and isinstance(name, str) and name:
-        return {"owner": owner, "name": name}
-    return None
+def _issue_repo(configurable: dict[str, Any], metadata: dict[str, Any]) -> dict[str, str] | None:
+    """The repository holding the GitHub issue or PR this thread follows.
+
+    The run config names it when the issue does; otherwise the thread's one
+    repository, and nothing when the thread works in several.
+    """
+    cfg = RunConfig.parse(configurable)
+    repo = cfg.target_repo
+    if repo is None:
+        stored = thread_repos(metadata)
+        repo = stored[0] if len(stored) == 1 else None
+    return repo.model_dump() if repo else None
 
 
 async def resolve_thread_participant_logins(
@@ -174,7 +174,7 @@ async def resolve_thread_participant_logins(
         issue_number = (
             context.github_issue.number if context.github_issue else None
         ) or context.pr_number
-        repo = _repo_config(configurable, metadata)
+        repo = _issue_repo(configurable, metadata)
         token = get_github_token(config)
         if not repo or not issue_number or not token:
             return None, 0, "GitHub thread context is incomplete"

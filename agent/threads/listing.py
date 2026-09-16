@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 
+from agent.thread_repos import thread_repos
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
@@ -14,7 +15,6 @@ from agent.threads.summary import (
     _assert_thread_readable,
     _is_automation_thread,
     _is_thread_resolved,
-    _metadata_repo,
     _metadata_string,
     _refresh_latest_run_metadata,
     _thread_id,
@@ -113,10 +113,10 @@ def _metadata_matches_filters(
     admin_threads: bool | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
-    thread_repo = _metadata_repo(metadata)[2]
-    if repo and thread_repo.lower() != repo.lower():
+    repos = thread_repos(metadata)
+    if repo and not any(candidate.key == repo.strip().lower() for candidate in repos):
         return False
-    if ownerless and thread_repo:
+    if ownerless and repos:
         return False
     if admin_threads is not None and (metadata.get("admin_thread") is True) is not admin_threads:
         return False
@@ -137,7 +137,11 @@ def _metadata_matches_filters(
         if not _search_matches(
             [
                 metadata.get("title", "Untitled agent"),
-                *_metadata_repo(metadata),
+                *(
+                    part
+                    for candidate in repos
+                    for part in (candidate.owner, candidate.name, candidate.full_name)
+                ),
                 metadata.get("branch_name"),
                 metadata.get("base_branch"),
                 metadata.get("pr_url"),
@@ -176,11 +180,11 @@ def _summary_matches_filters(
         pull_requests = summary.get("pullRequests")
         pull_requests = pull_requests if isinstance(pull_requests, list) else []
         pr = summary.get("pr")
+        summary_repos = summary.get("repos")
         if not _search_matches(
             [
                 summary.get("title"),
-                summary.get("repo"),
-                summary.get("repoFullName"),
+                *(summary_repos if isinstance(summary_repos, list) else ()),
                 summary.get("branch"),
                 *(pr.values() if isinstance(pr, dict) else ()),
                 *(
@@ -411,18 +415,15 @@ async def list_dashboard_thread_projects(
     )
     projects: dict[str, dict[str, Any]] = {}
     for thread in candidates:
-        _, name, full_name = _metadata_repo(_thread_metadata(thread))
-        if not full_name:
-            continue
-        key = full_name.lower()
         updated_at = _thread_updated_ms(thread)
-        current = projects.get(key)
-        if current is None or updated_at > current["updatedAt"]:
-            projects[key] = {
-                "repoFullName": full_name,
-                "name": name,
-                "updatedAt": updated_at,
-            }
+        for repo in thread_repos(_thread_metadata(thread)):
+            current = projects.get(repo.key)
+            if current is None or updated_at > current["updatedAt"]:
+                projects[repo.key] = {
+                    "repoFullName": repo.full_name,
+                    "name": repo.name,
+                    "updatedAt": updated_at,
+                }
     for project in projects.values():
         owner, _, repo_name = str(project["repoFullName"]).partition("/")
         project["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG

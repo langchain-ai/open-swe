@@ -13,6 +13,7 @@ from agent.dashboard.oauth import require_same_origin_for_mutations, require_ses
 from agent.dispatch import dispatch_agent_run
 from agent.slack.client import post_slack_thread_reply
 from agent.source_context import SourceContext
+from agent.thread_repos import REPOS_METADATA_KEY, repos_metadata, thread_repos
 from agent.threads.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_CANCELLED,
@@ -31,7 +32,6 @@ from agent.threads.plan_store import (
     write_plan_to_sandbox,
 )
 from agent.threads.summary import (
-    repo_config_from_metadata,
     thread_is_promptable,
     thread_is_readable,
     thread_source,
@@ -396,9 +396,9 @@ async def dispatch_followup(
     login = metadata.get("github_login")
     if isinstance(login, str) and login:
         configurable["github_login"] = login
-    repo = repo_config_from_metadata(metadata)
-    if repo:
-        configurable["repo"] = repo
+    repos = thread_repos(metadata)
+    if repos:
+        configurable[REPOS_METADATA_KEY] = repos_metadata(repos)
     context = SourceContext.from_metadata(metadata)
     if context.slack_thread is not None:
         configurable["slack_thread"] = context.dump()["slack_thread"]

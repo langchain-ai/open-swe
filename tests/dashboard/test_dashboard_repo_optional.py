@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from agent.run_config import Repo
 from agent.threads import runs as thread_runs
 from agent.threads import summary as thread_summary
 from tests.conftest import patch_thread_module
@@ -12,28 +13,52 @@ async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
     return f"https://smith.example/t/{thread_id}"
 
 
-def test_resolve_repo_config_parses_request_repo() -> None:
-    assert thread_runs._resolve_repo_config("octo/repo") == {"owner": "octo", "name": "repo"}
+def test_resolve_repos_accepts_either_request_field() -> None:
+    assert thread_runs._resolve_repos("octo/repo", None) == [Repo(owner="octo", name="repo")]
+    assert thread_runs._resolve_repos(None, ["octo/one", "octo/two"]) == [
+        Repo(owner="octo", name="one"),
+        Repo(owner="octo", name="two"),
+    ]
+    assert thread_runs._resolve_repos("octo/one", ["octo/one", "octo/two"]) == [
+        Repo(owner="octo", name="one"),
+        Repo(owner="octo", name="two"),
+    ]
 
 
-def test_resolve_repo_config_returns_empty_when_no_repo_given() -> None:
-    assert thread_runs._resolve_repo_config(None) == {}
-    assert thread_runs._resolve_repo_config("") == {}
-    assert thread_runs._resolve_repo_config("not-a-repo") == {}
+def test_resolve_repos_returns_empty_when_no_repo_given() -> None:
+    assert thread_runs._resolve_repos(None, None) == []
+    assert thread_runs._resolve_repos("", []) == []
+    assert thread_runs._resolve_repos("not-a-repo", ["also-not-a-repo"]) == []
 
 
-async def test_thread_summary_blanks_repo_when_absent() -> None:
+async def test_thread_summary_has_no_repos_when_absent() -> None:
     summary = await thread_summary._thread_summary(
         {"thread_id": "t1", "metadata": {"source": "dashboard", "title": "no repo run"}}
     )
-    assert summary["repo"] == ""
-    assert summary["repoFullName"] == ""
+    assert summary["repos"] == []
 
 
-async def test_thread_summary_keeps_repo_when_present() -> None:
+async def test_thread_summary_lists_every_repo() -> None:
     summary = await thread_summary._thread_summary(
         {
             "thread_id": "t2",
+            "metadata": {
+                "source": "dashboard",
+                "title": "repo run",
+                "repos": [
+                    {"owner": "octo", "name": "repo"},
+                    {"owner": "octo", "name": "other"},
+                ],
+            },
+        }
+    )
+    assert summary["repos"] == ["octo/repo", "octo/other"]
+
+
+async def test_thread_summary_falls_back_to_legacy_single_repo_metadata() -> None:
+    summary = await thread_summary._thread_summary(
+        {
+            "thread_id": "t3",
             "metadata": {
                 "source": "dashboard",
                 "title": "repo run",
@@ -42,8 +67,7 @@ async def test_thread_summary_keeps_repo_when_present() -> None:
             },
         }
     )
-    assert summary["repo"] == "repo"
-    assert summary["repoFullName"] == "octo/repo"
+    assert summary["repos"] == ["octo/repo"]
 
 
 async def test_thread_summary_classifies_legacy_schedule_metadata() -> None:
@@ -172,7 +196,7 @@ def test_create_thread_record_omits_repo_less_marker_when_repo_unset(
         thread_runs._create_dashboard_thread_record(
             "thread-id",
             login="octo",
-            repo_config={},
+            repos=[],
             prompt="do work",
         )
     )
@@ -181,7 +205,7 @@ def test_create_thread_record_omits_repo_less_marker_when_repo_unset(
         thread_runs._build_dashboard_configurable("thread-id", "octo", {"source": "dashboard"})
     )
     assert "repo_explicitly_none" not in configurable
-    assert "repo" not in configurable
+    assert "repos" not in configurable
 
 
 def test_build_configurable_marks_repo_less_config_when_explicit(
@@ -195,10 +219,30 @@ def test_build_configurable_marks_repo_less_config_when_explicit(
         )
     )
     assert configurable["repo_explicitly_none"] is True
-    assert "repo" not in configurable
+    assert "repos" not in configurable
 
 
-def test_build_configurable_includes_repo_when_configured(
+def test_build_configurable_includes_every_repo_when_configured(
+    dashboard_run_client: _FakeLangGraphClient,
+) -> None:
+    configurable = asyncio.run(
+        thread_runs._build_dashboard_configurable(
+            "thread-id",
+            "octo",
+            {
+                "source": "dashboard",
+                "repos": [{"owner": "octo", "name": "repo"}, {"owner": "octo", "name": "other"}],
+            },
+        )
+    )
+    assert configurable["repos"] == [
+        {"owner": "octo", "name": "repo"},
+        {"owner": "octo", "name": "other"},
+    ]
+    assert "repo_explicitly_none" not in configurable
+
+
+def test_build_configurable_reads_legacy_single_repo_metadata(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
     configurable = asyncio.run(
@@ -208,5 +252,4 @@ def test_build_configurable_includes_repo_when_configured(
             {"source": "dashboard", "repo_owner": "octo", "repo_name": "repo"},
         )
     )
-    assert configurable["repo"] == {"owner": "octo", "name": "repo"}
-    assert "repo_explicitly_none" not in configurable
+    assert configurable["repos"] == [{"owner": "octo", "name": "repo"}]

@@ -4,7 +4,7 @@ import base64
 import binascii
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -31,11 +31,18 @@ from agent.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from agent.invocation import new_invocation_id, with_invocation_id
+from agent.run_config import Repo, dedupe_repos
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
 )
 from agent.source_context import SourceContext
+from agent.thread_repos import (
+    REPO_EXPLICITLY_NONE_METADATA_KEY,
+    REPOS_METADATA_KEY,
+    repos_metadata,
+    thread_repos,
+)
 from agent.threads.access import (
     _ensure_dashboard_github_token,
     agent_version_metadata,
@@ -46,8 +53,6 @@ from agent.threads.summary import (
     _is_thread_resolved,
     _metadata_model_id,
     _now_ms,
-    _parse_repo,
-    repo_config_from_metadata,
     thread_source,
 )
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
@@ -188,26 +193,28 @@ def _user_message_content(
 
 
 async def _resolve_requested_workspace(
-    requested: object, repo_config: dict[str, str] | None, *, login: str | None
+    requested: object, repos: Sequence[Repo], *, login: str | None
 ) -> str:
     """The workspace a new dashboard thread lands in.
 
     An explicit pick from the composer wins when it names a real workspace;
-    otherwise the repository's owner, then the signed-in user's default,
-    else the instance default.
+    otherwise the first of the thread's repositories a workspace owns, then the
+    signed-in user's default, else the instance default.
     """
     tag = requested if isinstance(requested, str) and requested.strip() else None
-    repo = (
-        (repo_config["owner"], repo_config["name"])
-        if repo_config and repo_config.get("owner") and repo_config.get("name")
-        else None
+    return (
+        await resolve_workspace(
+            tag=tag, repos=[(repo.owner, repo.name) for repo in repos], login=login
+        )
+    ).slug
+
+
+def _resolve_repos(repo: object, repos: object) -> list[Repo]:
+    """The repositories a create request names, through either field."""
+    listed = repos if isinstance(repos, list) else []
+    return dedupe_repos(
+        [Repo.parse_full_name(repo), *(Repo.parse_full_name(item) for item in listed)]
     )
-    return (await resolve_workspace(tag=tag, repo=repo, login=login)).slug
-
-
-def _resolve_repo_config(repo: str | None) -> dict[str, str]:
-    """Resolve the run's repo from the request, or ``{}`` when none is given."""
-    return _parse_repo(repo) or {}
 
 
 async def _create_dashboard_thread_record(
@@ -215,7 +222,7 @@ async def _create_dashboard_thread_record(
     *,
     login: str,
     email: str | None = None,
-    repo_config: dict[str, str],
+    repos: Sequence[Repo],
     repo_explicitly_none: bool = False,
     prompt: str,
     images: list[DashboardImageBody] | None = None,
@@ -246,7 +253,6 @@ async def _create_dashboard_thread_record(
     if images and not model_supports_images(str(metadata_model)):
         metadata_model = resolved_model
         metadata_effort = resolved_effort
-    has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
     initial_title = title or prompt[:80] or "New agent"
     metadata: dict[str, Any] = {
         "source": DASHBOARD_SOURCE,
@@ -276,11 +282,10 @@ async def _create_dashboard_thread_record(
         metadata["workspace"] = workspace
     if not title:
         metadata["title_seed"] = initial_title
-    if has_repo:
-        metadata["repo_owner"] = repo_config["owner"]
-        metadata["repo_name"] = repo_config["name"]
+    if repos:
+        metadata[REPOS_METADATA_KEY] = repos_metadata(repos)
     elif repo_explicitly_none:
-        metadata["repo_explicitly_none"] = True
+        metadata[REPO_EXPLICITLY_NONE_METADATA_KEY] = True
 
     client = langgraph_client()
     await client.threads.create(
@@ -308,11 +313,11 @@ async def _build_dashboard_configurable(
         "github_login": login,
         "user_email": await resolve_run_email(login, profile),
     }
-    repo_config = repo_config_from_metadata(metadata)
-    if repo_config:
-        configurable["repo"] = repo_config
-    elif metadata.get("repo_explicitly_none") is True:
-        configurable["repo_explicitly_none"] = True
+    repos = thread_repos(metadata)
+    if repos:
+        configurable[REPOS_METADATA_KEY] = repos_metadata(repos)
+    elif metadata.get(REPO_EXPLICITLY_NONE_METADATA_KEY) is True:
+        configurable[REPO_EXPLICITLY_NONE_METADATA_KEY] = True
     for key, value in SourceContext.from_metadata(metadata).dump().items():
         configurable.setdefault(key, value)
     if metadata.get("plan_mode") is True:
@@ -487,10 +492,10 @@ async def _enrich_run_start_command(
 
     if creating:
         # First ``run.start`` for a client-minted thread id: stamp the full
-        # dashboard thread record (owner, title, repo, model) and validate any
+        # dashboard thread record (owner, title, repos, model) and validate any
         # attached images against the resolved model before the run is
-        # forwarded to LangGraph. The repo hint rides in the client
-        # configurable; it never reaches the run config (which is rebuilt from
+        # forwarded to LangGraph. The repository hints ride in the client
+        # configurable; they never reach the run config (which is rebuilt from
         # the stamped metadata below).
         visibility = (
             client_configurable.get("visibility")
@@ -498,13 +503,15 @@ async def _enrich_run_start_command(
         )
         if visibility not in ("public", "private"):
             raise HTTPException(422, "visibility must be public or private")
-        repo_config = _parse_repo(client_configurable.get("repo")) or {}
+        repos = _resolve_repos(
+            client_configurable.get("repo"), client_configurable.get(REPOS_METADATA_KEY)
+        )
         thread = await _create_dashboard_thread_record(
             thread_id,
             login=login,
             email=email,
-            repo_config=repo_config,
-            repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
+            repos=repos,
+            repo_explicitly_none=client_configurable.get(REPO_EXPLICITLY_NONE_METADATA_KEY) is True,
             visibility=visibility,
             prompt=_command_prompt_text(content),
             images=command_images,
@@ -514,7 +521,7 @@ async def _enrich_run_start_command(
             model_selection=model_selection or "auto",
             workspace=await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),
-                repo_config,
+                repos,
                 login=login,
             ),
         )

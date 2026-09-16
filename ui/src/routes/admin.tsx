@@ -252,7 +252,7 @@ function RunningAgentsSection() {
                       {thread.title}
                     </p>
                     <p className="truncate font-mono text-[11px] text-muted-foreground">
-                      {thread.repoFullName || "no repo"} · {thread.id}
+                      {thread.repos.join(", ") || "no repo"} · {thread.id}
                     </p>
                   </Link>
                   <Button

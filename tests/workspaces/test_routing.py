@@ -33,7 +33,7 @@ async def _seed() -> None:
 async def test_thread_wins_over_everything() -> None:
     await _seed()
     result = await routing.resolve_workspace(
-        thread_workspace="default", tag="oss", repo=("acme", "oss"), slack_channel_id="C0SS"
+        thread_workspace="default", tag="oss", repos=[("acme", "oss")], slack_channel_id="C0SS"
     )
     assert result == routing.WorkspaceResolution("default", "thread")
 
@@ -45,10 +45,10 @@ async def test_tag_then_repo_then_channel_then_user_default(fake_store: FakeStor
     )
     assert (await routing.resolve_workspace(tag="oss")).resolved_by == "tag"
     assert (
-        await routing.resolve_workspace(tag="missing", repo=("acme", "oss"))
+        await routing.resolve_workspace(tag="missing", repos=[("acme", "oss")])
     ).resolved_by == "repo"
     assert (
-        await routing.resolve_workspace(repo=("acme", "unowned"), slack_channel_id="C0SS")
+        await routing.resolve_workspace(repos=[("acme", "unowned")], slack_channel_id="C0SS")
     ).slug == "oss"
     assert (await routing.resolve_workspace(slack_channel_id="C0SS")).resolved_by == "channel"
     assert (await routing.resolve_workspace(login="alice")).resolved_by == "user_default"
@@ -115,4 +115,6 @@ async def test_an_unreadable_database_is_not_an_unowned_repository(
 
     assert await routing.workspace_for_repo("acme", "oss") is None
     assert await routing.workspace_for_slack_channel("C0SS") is None
-    assert (await routing.resolve_workspace(repo=("acme", "oss"))).resolved_by == "instance_default"
+    assert (
+        await routing.resolve_workspace(repos=[("acme", "oss")])
+    ).resolved_by == "instance_default"

@@ -84,11 +84,10 @@ export function buildPaletteResults(
         (!searchQuery ||
           [
             thread.title,
-            thread.repo,
-            thread.repoFullName,
+            ...thread.repos,
             thread.branch,
             thread.pr?.url ?? "",
-            `${thread.repoFullName}#${thread.pr?.number ?? ""}`,
+            ...thread.repos.map((repo) => `${repo}#${thread.pr?.number ?? ""}`),
           ]
             .join(" ")
             .toLowerCase()

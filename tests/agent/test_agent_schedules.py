@@ -1114,8 +1114,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert "participant_logins" not in metadata
     assert "triggering_user_email" not in metadata
     assert metadata["admin_thread"] is True
-    assert metadata["repo_owner"] == "langchain-ai"
-    assert metadata["repo_name"] == "open-swe"
+    assert metadata["repos"] == [{"owner": "langchain-ai", "name": "open-swe"}]
     run = fake_client.runs.created[0]
     assert run["thread_id"] == thread_id
     assert run["assistant_id"] == "agent"
@@ -1130,7 +1129,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert "github_login" not in run["config"]["configurable"]
     assert "user_email" not in run["config"]["configurable"]
     assert run["config"]["configurable"]["admin_thread"] is True
-    assert run["config"]["configurable"]["repo"] == record["repo"]
+    assert run["config"]["configurable"]["repos"] == [record["repo"]]
 
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_thread_id"] == thread_id

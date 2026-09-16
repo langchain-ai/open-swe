@@ -18,8 +18,10 @@ from agent.input_messages import (
     system_introduction,
 )
 from agent.prompts import render_prompt
+from agent.run_config import Repo, dedupe_repos
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
+from agent.thread_repos import REPOS_METADATA_KEY, repos_metadata
 from agent.webhooks import common
 
 
@@ -178,7 +180,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     mapped_login = await common.resolve_login_from_email_async(user_email) if user_email else None
     # The repository's workspace is the one this run lands in, so its team
     # default model and Fable flag are the ones the vision fallback checks.
-    workspace = await common.workspace_for_repo_config(repo_config)
+    repos = dedupe_repos([Repo.parse(repo_config)])
+    workspace = await common.workspace_for_repos(repos)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
@@ -218,7 +221,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         linear_issue_number = parts[1]
 
     configurable: dict[str, Any] = {
-        "repo": repo_config,
+        REPOS_METADATA_KEY: repos_metadata(repos),
         "linear_issue": {
             "id": issue_id,
             "title": title,
@@ -243,7 +246,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     await common.upsert_agent_thread_metadata(
         thread_id,
         source="linear",
-        repo_config=repo_config,
+        repos=repos,
         github_login=mapped_login or "",
         user_email=user_email or "",
         title=title or identifier or "Linear issue",

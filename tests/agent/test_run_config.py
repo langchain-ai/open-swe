@@ -78,6 +78,37 @@ def test_repo_full_name_needs_both_halves():
     assert Repo.parse("a/b") is None
 
 
+def test_target_repo_is_none_when_several_repos_are_in_play():
+    cfg = RunConfig.parse({"repos": [{"owner": "a", "name": "b"}, {"owner": "a", "name": "c"}]})
+    assert cfg.target_repo is None
+    assert cfg.repositories == [Repo(owner="a", name="b"), Repo(owner="a", name="c")]
+
+
+def test_target_repo_prefers_the_named_github_target():
+    cfg = RunConfig.parse(
+        {
+            "repos": [{"owner": "a", "name": "b"}, {"owner": "a", "name": "c"}],
+            "github_pr_or_issue": {"number": 4, "repo": {"owner": "other", "name": "fork"}},
+        }
+    )
+    assert cfg.target_repo == Repo(owner="other", name="fork")
+
+    from_url = RunConfig.parse(
+        {
+            "repos": [{"owner": "a", "name": "b"}, {"owner": "a", "name": "c"}],
+            "github_issue": {"number": 4, "url": "https://github.com/other/fork/issues/4"},
+        }
+    )
+    assert from_url.target_repo == Repo(owner="other", name="fork")
+
+
+def test_target_repo_falls_back_to_the_only_repository():
+    assert RunConfig.parse({"repo": {"owner": "a", "name": "b"}}).target_repo == Repo(
+        owner="a", name="b"
+    )
+    assert RunConfig.parse({}).target_repo is None
+
+
 def test_is_eval_covers_both_flags():
     assert RunConfig.parse({"eval": True}).is_eval
     assert RunConfig.parse({"reviewer_eval": True}).is_eval

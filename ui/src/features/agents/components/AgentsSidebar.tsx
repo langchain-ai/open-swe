@@ -292,9 +292,9 @@ export function AgentsSidebar({
     includeResolved: prefs.filters.includeResolved,
     enabled: !localOnly,
   })
-  const activeInProject = Boolean(
-    projectMode && activeThread?.repoFullName.trim()
-  )
+  const activeThreadRepos =
+    activeThread?.repos.map((repo) => repo.trim()).filter(Boolean) ?? []
+  const activeInProject = Boolean(projectMode && activeThreadRepos.length > 0)
   const recentThreads = [
     ...(activeThread && !activeInProject ? [activeThread] : []),
     ...pageThreads.filter((thread) => thread.id !== activeThread?.id),
@@ -324,22 +324,19 @@ export function AgentsSidebar({
   // Fold a local checkout into the cloud project of the same name so the repo
   // renders as one folder; project keys are otherwise full identities.
   const serverProjects = projectsQuery.data ?? []
-  const activeProject = activeThread?.repoFullName.trim()
-    ? {
-        repoFullName: activeThread.repoFullName,
-        name: activeThread.repo,
-        updatedAt: activeThread.updatedAt,
-      }
-    : undefined
-  const cloudProjects =
-    activeProject &&
-    !serverProjects.some(
-      (project) =>
-        project.repoFullName.toLowerCase() ===
-        activeProject.repoFullName.toLowerCase()
+  const activeProjects = activeThreadRepos
+    .filter(
+      (repo) =>
+        !serverProjects.some(
+          (project) => project.repoFullName.toLowerCase() === repo.toLowerCase()
+        )
     )
-      ? [activeProject, ...serverProjects]
-      : serverProjects
+    .map((repo) => ({
+      repoFullName: repo,
+      name: repo.split("/").at(-1) ?? repo,
+      updatedAt: activeThread?.updatedAt ?? 0,
+    }))
+  const cloudProjects = [...activeProjects, ...serverProjects]
   const aliases = cloudProjectAliases(cloudProjects)
   const alignedLocalItems = applyProjectKeyAliases(localItems, aliases)
   const pinnedItems = [
@@ -382,8 +379,10 @@ export function AgentsSidebar({
             updatedAt: project.updatedAt,
             activeThread:
               activeInProject &&
-              activeThread?.repoFullName.toLowerCase() ===
-                project.repoFullName.toLowerCase()
+              activeThreadRepos.some(
+                (repo) =>
+                  repo.toLowerCase() === project.repoFullName.toLowerCase()
+              )
                 ? activeThread
                 : undefined,
             threads:

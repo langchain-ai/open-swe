@@ -18,6 +18,7 @@ there would drop it for good. Everything else — :func:`workspace_for_repo`,
 """
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -136,7 +137,7 @@ async def repo_is_routable(owner: str, name: str) -> bool:
 async def _resolve_from_store(
     *,
     tag: str | None,
-    repo: tuple[str, str] | None,
+    repos: Sequence[tuple[str, str]],
     slack_channel_id: str | None,
     login: str | None,
 ) -> WorkspaceResolution | None:
@@ -147,7 +148,7 @@ async def _resolve_from_store(
             tagged = ""
         if tagged and await _slug_exists(tagged):
             return WorkspaceResolution(tagged, "tag")
-    if repo is not None:
+    for repo in repos:
         owner = await _repo_owner(*repo)
         if owner is not None:
             return WorkspaceResolution(owner, "repo")
@@ -166,15 +167,16 @@ async def resolve_workspace(
     *,
     thread_workspace: str | None = None,
     tag: str | None = None,
-    repo: tuple[str, str] | None = None,
+    repos: Sequence[tuple[str, str]] = (),
     slack_channel_id: str | None = None,
     login: str | None = None,
 ) -> WorkspaceResolution:
+    """The workspace a run belongs to; the first of ``repos`` a workspace owns decides."""
     if thread_workspace and thread_workspace.strip():
         return WorkspaceResolution(thread_workspace.strip(), "thread")
     try:
         resolved = await _resolve_from_store(
-            tag=tag, repo=repo, slack_channel_id=slack_channel_id, login=login
+            tag=tag, repos=repos, slack_channel_id=slack_channel_id, login=login
         )
     except WorkspaceLookupError:
         # Fail soft here on purpose: this decides where work runs, and a run in

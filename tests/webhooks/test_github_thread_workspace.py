@@ -17,9 +17,7 @@ async def test_trigger_or_queue_run_prefers_the_threads_saved_workspace(
 ) -> None:
     monkeypatch.setattr(webhook_common, "authorize_github_thread", AsyncMock())
     monkeypatch.setattr(webhook_common, "get_thread_workspace", AsyncMock(return_value=saved))
-    monkeypatch.setattr(
-        webhook_common, "workspace_for_repo_config", AsyncMock(return_value="moved-to")
-    )
+    monkeypatch.setattr(webhook_common, "workspace_for_repos", AsyncMock(return_value="moved-to"))
     upsert = AsyncMock()
     dispatch = AsyncMock()
     monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", upsert)

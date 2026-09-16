@@ -495,11 +495,11 @@ function ThreadHoverCard({
           {compactAge(item.updatedAt)}
         </span>
       </div>
-      {item.projectLabel && (
+      {item.projectLabels.length > 0 && (
         <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
           <FolderIcon className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate text-[12px]">
-            {item.projectLabel}
+            {item.projectLabels.join(", ")}
           </span>
         </div>
       )}

@@ -6,6 +6,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 import posixpath
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -27,13 +28,14 @@ from agent.input_messages import (
     system_introduction,
 )
 from agent.prompts import load_prompt
-from agent.run_config import Repo
+from agent.run_config import Repo, dedupe_repos
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
+from agent.thread_repos import repos_metadata
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import (
@@ -584,10 +586,10 @@ async def process_slack_mention(
     try:
         await _process_slack_mention_impl(request, repo)
     except Exception as exc:  # noqa: BLE001
-        await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
+        await _notify_slack_processing_error(request, repo.repos if repo else (), exc)
 
 
-async def process_slack_plan_approval(request: SlackRequest, repo: Repo | None) -> None:
+async def process_slack_plan_approval(request: SlackRequest, repos: Sequence[Repo]) -> None:
     from agent.threads.plan_api import approve_plan_for_thread
     from agent.threads.plan_store import make_plan_approver
 
@@ -601,11 +603,11 @@ async def process_slack_plan_approval(request: SlackRequest, repo: Repo | None) 
             ),
         )
     except Exception as exc:  # noqa: BLE001
-        await _notify_slack_processing_error(request, repo, exc)
+        await _notify_slack_processing_error(request, repos, exc)
 
 
 async def _notify_slack_processing_error(
-    request: SlackRequest, repo: Repo | None, exc: BaseException
+    request: SlackRequest, repos: Sequence[Repo], exc: BaseException
 ) -> None:
     """Mark the agent thread errored when one exists, then always tell the Slack thread."""
     thread_id = request.thread_id
@@ -617,7 +619,7 @@ async def _notify_slack_processing_error(
         except Exception:  # noqa: BLE001
             thread_id = None
     if thread_id:
-        await _mark_slack_thread_errored(thread_id, request, repo)
+        await _mark_slack_thread_errored(thread_id, request, repos)
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
@@ -657,7 +659,7 @@ def _slack_thread_visibility(channel_context: dict[str, Any] | None) -> str:
 
 
 async def _mark_slack_thread_errored(
-    thread_id: str, request: SlackRequest, repo: Repo | None
+    thread_id: str, request: SlackRequest, repos: Sequence[Repo]
 ) -> None:
     try:
         owner_login = await _slack_login(request.user_id)
@@ -674,7 +676,7 @@ async def _mark_slack_thread_errored(
             await common.upsert_agent_thread_metadata(
                 thread_id,
                 source="slack",
-                repo_config=repo.model_dump() if repo else None,
+                repos=repos,
                 title=clean_text,
                 source_context=SourceContext(
                     slack_thread=SlackThreadRef(
@@ -710,7 +712,7 @@ async def _process_slack_mention_impl(
     request: SlackRequest, repo_resolution: common.SlackRepoResolution | None
 ) -> None:
     resolution = repo_resolution or common.SlackRepoResolution()
-    repo = resolution.repo
+    repos = list(resolution.repos)
     channel_id = request.channel_id
     thread_ts = request.thread_ts
     event_ts = request.event_ts
@@ -935,7 +937,7 @@ async def _process_slack_mention_impl(
         thread_workspace = (
             await resolve_workspace(
                 tag=tagged_slug,
-                repo=resolution.routing_repo,
+                repos=resolution.routing_repos,
                 slack_channel_id=channel_id,
                 login=mapped_login,
             )
@@ -1036,14 +1038,16 @@ async def _process_slack_mention_impl(
     if code_channel and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
-    if repo is not None and not resolution.explicit:
-        repo = await _workspace_scoped_default_repo(repo, thread_workspace)
-    repo_dict = repo.model_dump() if repo else None
+    if repos and not resolution.explicit:
+        repos = dedupe_repos(
+            [await _workspace_scoped_default_repo(repo, thread_workspace) for repo in repos]
+        )
 
     repo_hint_section = (
-        f"## Default Repository Hint\n{repo.full_name}\n"
-        "Use this only if the Slack conversation does not identify a different repository.\n\n"
-        if repo
+        "## Default Repository Hint\n"
+        + "".join(f"{repo.full_name}\n" for repo in repos)
+        + "Use this only if the Slack conversation does not identify a different repository.\n\n"
+        if repos
         else ""
     )
     operational_context = (
@@ -1058,7 +1062,7 @@ async def _process_slack_mention_impl(
     )
 
     configurable: dict[str, Any] = {
-        "repo": repo_dict,
+        "repos": repos_metadata(repos),
         "slack_thread": slack_thread_context,
         "user_email": user_email,
         "source": "slack",
@@ -1090,7 +1094,7 @@ async def _process_slack_mention_impl(
     persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="slack",
-        repo_config=repo_dict,
+        repos=repos,
         github_login=mapped_login or "",
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
@@ -1154,7 +1158,8 @@ async def _process_slack_mention_impl(
             await common.set_context_bar(
                 channel_id,
                 common.repo_context_bar_items(
-                    repo_dict, dashboard_url=common.dashboard_thread_url(thread_id) or ""
+                    repos[0].model_dump() if len(repos) == 1 else None,
+                    dashboard_url=common.dashboard_thread_url(thread_id) or "",
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)

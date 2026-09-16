@@ -19,6 +19,7 @@ from agent.slack.client import (
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
 from agent.slack.events import claim_slack_event
 from agent.source_context import SourceContext
+from agent.thread_repos import REPOS_METADATA_KEY, repos_metadata, thread_repos
 
 logger = logging.getLogger(__name__)
 
@@ -126,14 +127,9 @@ def _summary_configurable(
         "stop_summary": True,
     }
 
-    repo = metadata.get("repo")
-    if isinstance(repo, Mapping) and repo.get("owner") and repo.get("name"):
-        configurable["repo"] = dict(repo)
-    else:
-        owner = metadata.get("repo_owner")
-        name = metadata.get("repo_name")
-        if isinstance(owner, str) and owner and isinstance(name, str) and name:
-            configurable["repo"] = {"owner": owner, "name": name}
+    repos = thread_repos(metadata)
+    if repos:
+        configurable[REPOS_METADATA_KEY] = repos_metadata(repos)
 
     for metadata_key, config_key in (
         ("github_login", "github_login"),

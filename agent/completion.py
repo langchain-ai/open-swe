@@ -27,11 +27,13 @@ from agent.invocation import resolve_invocation_id, with_invocation_id
 from agent.linear.notifications import post_linear_notification
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
+from agent.run_config import repo_from_github_url
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
+from agent.thread_repos import thread_repos
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
@@ -206,15 +208,18 @@ async def _post_failure_reply(
         return False
 
     if source in ("github", "github_issue"):
-        repo_config = metadata.get("repo")
         number = ctx.pr_number
         if number is None and ctx.github_issue is not None:
             number = ctx.github_issue.number
-        if isinstance(repo_config, dict) and isinstance(number, int):
+        repos = thread_repos(metadata)
+        repo = repo_from_github_url(ctx.github_issue.url if ctx.github_issue else None) or (
+            repos[0] if len(repos) == 1 else None
+        )
+        if repo and isinstance(number, int):
             token = await get_github_app_installation_token()
             if token:
                 return await post_github_comment(
-                    repo_config,
+                    repo.model_dump(),
                     number,
                     _failure_text(status, reason_code=reason_code),
                     token=token,

@@ -39,8 +39,9 @@ def _run_config(
     )
     dumped = cfg.dump()
     result = {key: dumped[key] for key in allowed if dumped.get(key) is not None}
-    if cfg.github_issue and isinstance(dumped.get("repo"), Mapping):
-        result["source_repo"] = dumped["repo"]
+    source_repo = cfg.target_repo if cfg.github_issue else None
+    if source_repo is not None:
+        result["source_repo"] = source_repo.model_dump()
         if source_installation_id is not None:
             result["source_installation_id"] = source_installation_id
     result["thread_id"] = thread_id
@@ -129,9 +130,10 @@ async def manage_baby_sit(
             "error": "GitHub App installation is unavailable for this repository",
         }
     source_installation_id = installation_id
-    if cfg.github_issue and cfg.repo:
+    source_repo = cfg.target_repo if cfg.github_issue else None
+    if source_repo is not None:
         source_installation_id = await get_github_app_installation_id_for_repo(
-            cfg.repo.owner, cfg.repo.name
+            source_repo.owner, source_repo.name
         )
     try:
         watch = await start_watch(

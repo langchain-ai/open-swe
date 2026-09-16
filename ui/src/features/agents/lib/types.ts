@@ -361,8 +361,8 @@ export interface AgentThread {
   visibility?: "public" | "private"
   id: string
   title: string
-  repo: string
-  repoFullName: string
+  /** `owner/name` full names the thread targets, in the order added. */
+  repos: Array<string>
   branch: string
   model: string
   effort?: string | null

@@ -14,6 +14,7 @@ from agent.dashboard.agent_instructions import (
     get_repo_agent_instructions,
 )
 from agent.prompt import construct_system_prompt
+from agent.run_config import Repo
 from tests.conftest import FakeStore
 
 
@@ -96,8 +97,36 @@ def test_construct_system_prompt_contains_only_repository_instructions() -> None
 
 
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:
-    result = asyncio.run(server._resolve_repo_custom_instructions(None))
+    result = asyncio.run(server._resolve_repo_custom_instructions([]))
     assert result is None
+
+
+def test_resolve_repo_custom_instructions_concatenates_every_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_repo_agent_instructions(owner: str, repo: str) -> str | None:
+        return f"{owner}/{repo} rules" if repo != "quiet" else None
+
+    monkeypatch.setattr(
+        "agent.dashboard.agent_instructions.get_repo_agent_instructions",
+        fake_get_repo_agent_instructions,
+    )
+
+    result = asyncio.run(
+        server._resolve_repo_custom_instructions(
+            [
+                Repo(owner="acme", name="one"),
+                Repo(owner="acme", name="quiet"),
+                Repo(owner="acme", name="two"),
+            ]
+        )
+    )
+
+    assert result is not None
+    assert "`acme/one`" in result
+    assert "acme/one rules" in result
+    assert "`acme/two`" in result
+    assert "quiet" not in result
 
 
 @pytest.mark.asyncio

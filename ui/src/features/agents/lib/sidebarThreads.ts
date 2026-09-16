@@ -12,8 +12,9 @@ interface SidebarThreadItemBase {
   id: string
   location: SidebarThreadLocation
   title: string
-  projectKey: string | null
-  projectLabel: string | null
+  /** Every project the thread belongs to; a multi-repo thread lists under each. */
+  projectKeys: Array<string>
+  projectLabels: Array<string>
   model: string
   source?: AgentSource
   threadCategory?: string
@@ -67,22 +68,40 @@ function pullRequestRef(
   if (latest) {
     return { repoFullName: latest.repoFullName, number: latest.number }
   }
-  if (!thread.pr || thread.repoFullName.split("/").length !== 2)
-    return undefined
-  return { repoFullName: thread.repoFullName, number: thread.pr.number }
+  // Without a PR record the repo is only unambiguous when the thread has one.
+  const [only] = thread.repos
+  if (!thread.pr || thread.repos.length !== 1 || !only) return undefined
+  if (only.split("/").length !== 2) return undefined
+  return { repoFullName: only, number: thread.pr.number }
+}
+
+/** Short repo name, so a cloud project folds together with a local checkout. */
+function repoShortName(fullName: string): string {
+  return fullName.split("/").at(-1)?.trim() ?? ""
 }
 
 export function cloudSidebarThread(
   thread: AgentThread
 ): CloudSidebarThreadItem {
-  const projectLabel = thread.repo.trim() || null
+  const repos = thread.repos
+    .map((repo) => repo.trim())
+    .filter((repo) => repo.length > 0)
+  const projectKeys: Array<string> = []
+  const projectLabels: Array<string> = []
+  for (const repo of repos) {
+    const key = sidebarProjectKey(repo)
+    const label = repoShortName(repo) || repo
+    if (!key || projectKeys.includes(key)) continue
+    projectKeys.push(key)
+    projectLabels.push(label)
+  }
   return {
     key: `cloud:${thread.id}`,
     id: thread.id,
     location: "cloud",
     title: thread.title,
-    projectKey: sidebarProjectKey(thread.repoFullName.trim() || projectLabel),
-    projectLabel,
+    projectKeys,
+    projectLabels,
     model: thread.model,
     source: thread.source,
     threadCategory: thread.threadCategory,
@@ -104,13 +123,14 @@ export function localSidebarThread(
   activity: DesktopLocalActivity[string] | undefined
 ): LocalSidebarThreadItem {
   const projectLabel = project?.name.trim() || localProjectName(thread.cwd)
+  const projectKey = sidebarProjectKey(project?.cwd ?? thread.cwd)
   return {
     key: `local:${thread.id}`,
     id: thread.id,
     location: "local",
     title: thread.title,
-    projectKey: sidebarProjectKey(project?.cwd ?? thread.cwd),
-    projectLabel,
+    projectKeys: projectKey ? [projectKey] : [],
+    projectLabels: projectLabel ? [projectLabel] : [],
     model: thread.modelId ?? "Default",
     source: "dashboard",
     threadCategory: "interactive",
@@ -136,9 +156,10 @@ export function sidebarProjectOptions(
 ): Array<SidebarProjectOption> {
   const projects = new Map<string, string>()
   for (const thread of threads) {
-    if (thread.projectKey && thread.projectLabel) {
-      projects.set(thread.projectKey, thread.projectLabel)
-    }
+    thread.projectKeys.forEach((key, index) => {
+      const label = thread.projectLabels[index]
+      if (key && label) projects.set(key, label)
+    })
   }
   for (const project of localProjects) {
     const key = sidebarProjectKey(project.cwd)
@@ -158,13 +179,15 @@ export function cloudProjectKeysByLabel(
 ): Map<string, string> {
   const keysByLabel = new Map<string, Set<string>>()
   for (const item of items) {
-    if (item.location !== "cloud" || !item.projectKey || !item.projectLabel) {
-      continue
-    }
-    const label = item.projectLabel.trim().toLowerCase()
-    const keys = keysByLabel.get(label) ?? new Set<string>()
-    keys.add(item.projectKey)
-    keysByLabel.set(label, keys)
+    if (item.location !== "cloud") continue
+    item.projectKeys.forEach((key, index) => {
+      const rawLabel = item.projectLabels[index]
+      if (!key || !rawLabel) return
+      const label = rawLabel.trim().toLowerCase()
+      const keys = keysByLabel.get(label) ?? new Set<string>()
+      keys.add(key)
+      keysByLabel.set(label, keys)
+    })
   }
   return new Map(
     [...keysByLabel]
@@ -183,9 +206,12 @@ export function applyProjectKeyAliases(
   aliases: ReadonlyMap<string, string>
 ): Array<SidebarThreadItem> {
   return items.map((item) => {
-    if (item.location !== "local" || !item.projectLabel) return item
-    const alias = aliases.get(item.projectLabel.trim().toLowerCase())
-    return alias ? { ...item, projectKey: alias } : item
+    if (item.location !== "local") return item
+    const projectKeys = item.projectKeys.map((key, index) => {
+      const label = item.projectLabels[index]
+      return (label && aliases.get(label.trim().toLowerCase())) || key
+    })
+    return { ...item, projectKeys }
   })
 }
 
@@ -204,11 +230,14 @@ export function groupSidebarThreadsByProject(
   )
   const recents: Array<SidebarThreadItem> = []
   for (const thread of sortSidebarThreads(threads, mode)) {
-    const bucket = thread.projectKey
-      ? buckets.get(thread.projectKey)
-      : undefined
-    if (bucket) bucket.threads.push(thread)
-    else recents.push(thread)
+    let bucketed = false
+    for (const key of thread.projectKeys) {
+      const bucket = buckets.get(key)
+      if (!bucket) continue
+      bucket.threads.push(thread)
+      bucketed = true
+    }
+    if (!bucketed) recents.push(thread)
   }
   return {
     projects: [...buckets.values()]

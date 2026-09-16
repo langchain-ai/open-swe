@@ -13,8 +13,7 @@ function thread(overrides: Partial<AgentThread> = {}): AgentThread {
   return {
     id: crypto.randomUUID(),
     title: "Thread",
-    repo: "open-swe",
-    repoFullName: "langchain-ai/open-swe",
+    repos: ["langchain-ai/open-swe"],
     branch: "main",
     model: "default",
     source: "dashboard",
@@ -104,15 +103,17 @@ describe("groupThreadsForView", () => {
   it("groups dynamic repositories alphabetically with an empty fallback", () => {
     const groups = groupThreadsForView(
       [
-        thread({ repoFullName: "z/repo" }),
-        thread({ repoFullName: "a/repo" }),
-        thread({ repoFullName: "" }),
+        thread({ repos: ["z/repo"] }),
+        thread({ repos: ["a/repo"] }),
+        thread({ repos: [] }),
+        thread({ repos: ["a/repo", "z/repo"] }),
       ],
       "repo"
     )
 
     expect(groups.map((group) => group.label)).toEqual([
       "a/repo",
+      "a/repo, z/repo",
       "No repository",
       "z/repo",
     ])

@@ -1,5 +1,6 @@
 from typing import Any
 
+from agent.run_config import Repo
 from agent.webhooks import common
 from agent.workspaces import routing
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
@@ -28,18 +29,19 @@ async def test_get_thread_workspace_prefers_workspace_then_environment(monkeypat
     assert await common.get_thread_workspace("t1") is None
 
 
-async def test_workspace_for_repo_config_resolves_owner_and_falls_back_to_default(
+async def test_workspace_for_repos_takes_the_first_owned_one_then_the_default(
     registry_db: None,
 ) -> None:
-    repo_config = {"owner": "acme", "name": "oss"}
-    assert await common.workspace_for_repo_config(repo_config) == "default"
+    repos = [Repo(owner="acme", name="unowned"), Repo(owner="acme", name="oss")]
+    assert await common.workspace_for_repos(repos) == "default"
 
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
 
-    assert await common.workspace_for_repo_config(repo_config) == "oss"
+    assert await common.workspace_for_repos(repos) == "oss"
+    assert await common.workspace_for_repos([]) == "default"
 
 
-async def test_workspace_for_repo_config_falls_back_when_the_store_fails(monkeypatch) -> None:
+async def test_workspace_for_repos_falls_back_when_the_store_fails(monkeypatch) -> None:
     """An unreadable binding must not stop a run, only misroute it loudly."""
 
     async def unreadable(full_name: str) -> str | None:
@@ -47,4 +49,4 @@ async def test_workspace_for_repo_config_falls_back_when_the_store_fails(monkeyp
 
     monkeypatch.setattr(routing.WORKSPACES, "owner_of_repo", unreadable)
 
-    assert await common.workspace_for_repo_config({"owner": "acme", "name": "oss"}) == "default"
+    assert await common.workspace_for_repos([Repo(owner="acme", name="oss")]) == "default"

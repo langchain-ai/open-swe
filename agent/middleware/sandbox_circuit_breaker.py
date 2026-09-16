@@ -86,22 +86,16 @@ async def _get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
 
 
 def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
-    if not cfg.repo:
+    repo = cfg.target_repo
+    if repo is None:
         return None
-    repo = {"owner": cfg.repo.owner, "name": cfg.repo.name}
-
-    target = cfg.github_pr_or_issue
-    if target is not None:
-        if target.repo and target.repo.owner and target.repo.name:
-            repo = {"owner": target.repo.owner, "name": target.repo.name}
-        if target.number is not None:
-            return repo, target.number
-
-    if cfg.github_issue is not None and cfg.github_issue.number is not None:
-        return repo, cfg.github_issue.number
-
-    if cfg.pr_number is not None:
-        return repo, cfg.pr_number
+    for number in (
+        cfg.github_pr_or_issue.number if cfg.github_pr_or_issue else None,
+        cfg.github_issue.number if cfg.github_issue else None,
+        cfg.pr_number,
+    ):
+        if number is not None:
+            return repo.model_dump(), number
     return None
 
 

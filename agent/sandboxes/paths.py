@@ -3,10 +3,12 @@
 import logging
 import posixpath
 import shlex
-from collections.abc import AsyncIterable, Iterable
+from collections.abc import AsyncIterable, Iterable, Sequence
 from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
+
+from agent.run_config import Repo
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,17 @@ async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: s
 
     work_dir = await resolve_sandbox_work_dir(sandbox_backend)
     return posixpath.join(work_dir, repo_name)
+
+
+async def resolve_repo_dirs(
+    sandbox_backend: SandboxBackendProtocol, repos: Sequence[Repo]
+) -> dict[str, str]:
+    """``full_name`` → clone directory for every complete repository."""
+    named = [repo for repo in repos if repo]
+    if not named:
+        return {}
+    work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+    return {repo.full_name: posixpath.join(work_dir, repo.name) for repo in named}
 
 
 async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:

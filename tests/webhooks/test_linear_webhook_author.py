@@ -45,7 +45,7 @@ def _run_process(
         thread_id,
         *,
         source,
-        repo_config=None,
+        repos=(),
         github_login="",
         user_email="",
         title="",

@@ -199,7 +199,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert captured["binding"]["thread_ts"] == new_ts
     metadata = captured["thread_update"]["metadata"]
     assert metadata["source"] == "slack"
-    assert metadata["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
+    assert metadata["repos"] == [{"owner": "langchain-ai", "name": "open-swe"}]
     assert metadata["github_login"] == "alice"
     assert metadata["triggering_user_email"] == "alice@example.com"
     assert metadata["source_context"]["slack_thread"]["thread_ts"] == new_ts
@@ -213,7 +213,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert dispatch["thread_id"] == expected_thread_id
     assert dispatch["source"] == "slack"
     assert dispatch["configurable"]["slack_thread"]["thread_ts"] == new_ts
-    assert dispatch["configurable"]["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
+    assert dispatch["configurable"]["repos"] == [{"owner": "langchain-ai", "name": "open-swe"}]
     assert dispatch["configurable"]["github_login"] == "alice"
     assert dispatch["configurable"]["agent_model_id"] == "anthropic:claude-sonnet-4-5"
     assert "Breakout Instructions" in dispatch["content"]

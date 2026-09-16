@@ -90,11 +90,14 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
           <span className="min-w-0 truncate" title={thread.model}>
             {thread.model}
           </span>
-          {thread.repo && (
+          {thread.repos.length > 0 && (
             <>
               <span className="shrink-0">·</span>
-              <span className="min-w-0 truncate" title={thread.repo}>
-                {thread.repo}
+              <span
+                className="min-w-0 truncate"
+                title={thread.repos.join(", ")}
+              >
+                {thread.repos.join(", ")}
               </span>
             </>
           )}
