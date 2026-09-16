@@ -1039,6 +1039,11 @@ export const api = {
       `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/close`,
       { method: "POST" }
     ),
+  markPullRequestReady: (pr: OpenPullRequest) =>
+    request<{ ready: boolean }>(
+      `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/ready`,
+      { method: "POST" }
+    ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
       `/my-pull-requests/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`

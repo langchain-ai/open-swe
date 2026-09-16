@@ -892,6 +892,15 @@ async def gh_get_commit_status(owner: str, repo: str, sha: str) -> JSONResponse:
 async def gh_graphql(request: Request) -> JSONResponse:
     body = await request.json()
     variables = body.get("variables", {})
+    query = body.get("query", "")
+    if "MarkPullRequestReady" in query:
+        node_id = variables.get("pullRequestId")
+        ready = fakes.mark_pull_ready(node_id) if isinstance(node_id, str) else None
+        if ready is None:
+            return JSONResponse({"errors": [{"message": "Could not resolve to a node"}]})
+        return JSONResponse(
+            {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}}
+        )
     owner = variables.get("owner")
     repo = variables.get("repo")
     number = variables.get("number")
@@ -900,12 +909,21 @@ async def gh_graphql(request: Request) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
+    if "PullRequestReadyNodeId" in query:
+        return JSONResponse(
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {"id": fakes.pull_node_id(pr), "isDraft": pr["draft"]}
+                    }
+                }
+            }
+        )
     review_threads = {
         "nodes": [fakes.review_thread_graphql(thread) for thread in pr["review_threads"]],
         "pageInfo": {"hasNextPage": False, "endCursor": None},
     }
     pull_request: dict[str, Any] = {"reviewThreads": review_threads}
-    query = body.get("query", "")
     if "PullRequestFixReviews" in query:
         pull_request.update(
             {

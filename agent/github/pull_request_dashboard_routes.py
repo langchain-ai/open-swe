@@ -22,6 +22,7 @@ from agent.github.pull_request_status import (
     load_open_pull_request,
     pull_request_identity,
 )
+from agent.github.ready_pull_request import ReadyPullRequestResult, mark_pull_request_ready
 
 router = APIRouter(tags=["pull-requests"])
 
@@ -97,3 +98,13 @@ async def api_close_my_pull_request(
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     return await close_pull_request(owner, repo, number, token)
+
+
+@router.post("/my-pull-requests/{owner}/{repo}/{number}/ready")
+async def api_ready_my_pull_request(
+    owner: str, repo: str, number: int, session: dict[str, Any] = SESSION_DEP
+) -> ReadyPullRequestResult:
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await mark_pull_request_ready(owner, repo, number, token)

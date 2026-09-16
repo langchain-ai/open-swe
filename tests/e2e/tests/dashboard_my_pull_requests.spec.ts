@@ -195,6 +195,47 @@ test.describe("my pull requests", () => {
     ).toBe("closed");
   });
 
+  test("takes a draft out of draft from its own card", async ({ page }) => {
+    const draft = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Still a draft",
+      draft: true,
+      ...approved,
+    });
+    const ready = await seedOpenPullRequest(page, {
+      repo: COMPANION,
+      title: "Already ready",
+      ...approved,
+    });
+
+    await openMine(page);
+    await expectStatus(row(page, draft), "Draft");
+    await expect(
+      row(page, ready).getByRole("button", { name: "Mark ready" }),
+    ).toHaveCount(0);
+
+    // The bulk action shares the button name, so it only counts inside the bar.
+    await select(page, draft, ready);
+    const bulkReady = bulkBar(page).getByRole("button", { name: "Mark ready" });
+    await expect(bulkReady).toBeDisabled();
+    await expect(bulkReady).toHaveAttribute(
+      "title",
+      "Every selected PR must be a draft",
+    );
+    await selectBox(page, ready).uncheck();
+    await expect(bulkReady).toBeEnabled();
+
+    await row(page, draft).getByRole("button", { name: "Mark ready" }).click();
+    await expect(
+      page.getByText(`Marked ${DEMO}#${draft.number} ready for review`),
+    ).toBeVisible();
+
+    expect(
+      (await readPullRequest(page, "fakeorg", "demo", draft.number)).draft,
+    ).toBe(false);
+    await expect(row(page, draft)).not.toContainText("Draft");
+  });
+
   test("queues fixes only when every selected PR is broken", async ({
     page,
   }) => {

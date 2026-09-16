@@ -27,6 +27,7 @@ vi.mock("@/lib/api", () => ({
     pullRequestThreadStatus: vi.fn(),
     mergePullRequest: vi.fn(),
     closePullRequest: vi.fn(),
+    markPullRequestReady: vi.fn(),
     repoMergeMethods: vi.fn(),
     openPullRequestThread: vi.fn(),
   },
@@ -899,6 +900,91 @@ describe("My PRs", () => {
     expect(toast.error).toHaveBeenCalledWith("Closed 1 of 2 pull requests", {
       description: "acme/other#2: Close rejected",
     })
+  })
+
+  it("closes a single pull request only after confirmation", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1)],
+    })
+    vi.mocked(api.closePullRequest).mockResolvedValue({ closed: true })
+    mount()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    fireEvent.click(within(card).getByRole("button", { name: "Close" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText("Close 1 pull request?")).toBeTruthy()
+    expect(within(dialog).getByText("acme/app#1")).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(api.closePullRequest).not.toHaveBeenCalled()
+    expect(screen.getByText("Change 1")).toBeTruthy()
+    fireEvent.click(within(card).getByRole("button", { name: "Close" }))
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Close pull requests",
+      })
+    )
+    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
+    expect(api.closePullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 1 })
+    )
+    expect(toast.success).toHaveBeenCalledWith("Closed acme/app#1")
+  })
+
+  it("marks a draft ready for review from its own card", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { draft: true }), pull(2, { repo: "acme/other" })],
+    })
+    vi.mocked(api.markPullRequestReady).mockResolvedValue({ ready: true })
+    mount()
+    await screen.findByText("Change 2")
+    const shown = cards()
+    expect(statuses(shown[0]!)).toEqual(["Draft"])
+    expect(
+      within(shown[1]!).queryByRole("button", { name: "Mark ready" })
+    ).toBeNull()
+    fireEvent.click(
+      within(shown[0]!).getByRole("button", { name: "Mark ready" })
+    )
+    await waitFor(() =>
+      expect(api.markPullRequestReady).toHaveBeenCalledWith(
+        expect.objectContaining({ number: 1, draft: true })
+      )
+    )
+    const marked = await within(shown[0]!).findByRole("button", {
+      name: "Marked ready",
+    })
+    expect((marked as HTMLButtonElement).disabled).toBe(true)
+    expect(toast.success).toHaveBeenCalledWith(
+      "Marked acme/app#1 ready for review"
+    )
+  })
+
+  it("marks ready in bulk only when every selected pull request is a draft", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { draft: true }), pull(2, { repo: "acme/other" })],
+    })
+    vi.mocked(api.markPullRequestReady).mockResolvedValue({ ready: true })
+    mount()
+    await screen.findByText("Change 2")
+    await selectAll()
+    const ready = bulkButton("Mark ready")
+    expect(ready.disabled).toBe(true)
+    expect(ready.title).toBe("Every selected PR must be a draft")
+    fireEvent.click(ready)
+    expect(api.markPullRequestReady).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByLabelText("Select PR #2 in acme/other"))
+    await waitFor(() => expect(bulkButton("Mark ready").disabled).toBe(false))
+    fireEvent.click(bulkButton("Mark ready"))
+    await waitFor(() =>
+      expect(api.markPullRequestReady).toHaveBeenCalledTimes(1)
+    )
+    expect(toast.success).toHaveBeenCalledWith(
+      "Marked 1 pull request ready for review"
+    )
+    expect(titles()).toEqual(["Change 1", "Change 2"])
   })
 
   it("disables the bulk fix when the selection mixes fixable and healthy PRs", async () => {

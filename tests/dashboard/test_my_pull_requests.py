@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from agent.github import pull_request_dashboard_routes as pr_routes
 from agent.github import pull_request_status as prs
+from agent.github import ready_pull_request as ready
 from agent.review import routes as review_routes
 
 
@@ -349,3 +350,81 @@ async def test_review_indicators_require_repo_access_before_reading(monkeypatch)
     )
     await review_routes.api_get_review_summaries(payload, session={"sub": "octocat"})
     lookup.assert_awaited_once_with([("acme", "allowed", 1)])
+
+
+def _node_lookup(node_id, is_draft):
+    return response({"data": {"repository": {"pullRequest": {"id": node_id, "isDraft": is_draft}}}})
+
+
+async def test_marking_ready_resolves_the_node_id_then_confirms_the_mutation(monkeypatch):
+    monkeypatch.setattr(ready, "github_client", client)
+    monkeypatch.setattr(ready, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
+    request = AsyncMock(
+        side_effect=[
+            _node_lookup("PR_node_7", True),
+            response(
+                {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}}
+            ),
+        ]
+    )
+    monkeypatch.setattr(ready, "github_request", request)
+    result = await ready.mark_pull_request_ready("acme", "app", 7, "user-token")
+    assert result == ready.ReadyPullRequestResult(ready=True)
+    assert [call.args[1:] for call in request.await_args_list] == [
+        ("POST", "https://fake-gh/graphql"),
+        ("POST", "https://fake-gh/graphql"),
+    ]
+    assert request.await_args_list[0].kwargs["json"]["variables"] == {
+        "owner": "acme",
+        "repo": "app",
+        "number": 7,
+    }
+    assert request.await_args_list[1].kwargs["json"]["variables"] == {"pullRequestId": "PR_node_7"}
+
+
+async def test_a_pull_request_already_out_of_draft_is_ready_without_a_mutation(monkeypatch):
+    monkeypatch.setattr(ready, "github_client", client)
+    request = AsyncMock(side_effect=[_node_lookup("PR_node_7", False)])
+    monkeypatch.setattr(ready, "github_request", request)
+    assert await ready.mark_pull_request_ready("acme", "app", 7, "user-token") == (
+        ready.ReadyPullRequestResult(ready=True)
+    )
+    assert request.await_count == 1
+
+
+async def test_a_refused_mutation_surfaces_githubs_own_message(monkeypatch):
+    monkeypatch.setattr(ready, "github_client", client)
+    monkeypatch.setattr(
+        ready,
+        "github_request",
+        AsyncMock(
+            side_effect=[
+                _node_lookup("PR_node_7", True),
+                response({"errors": [{"message": "Resource not accessible by integration"}]}),
+            ]
+        ),
+    )
+    with pytest.raises(HTTPException, match="Resource not accessible by integration"):
+        await ready.mark_pull_request_ready("acme", "app", 7, "user-token")
+
+
+async def test_marking_ready_rejects_an_invalid_pull_request():
+    with pytest.raises(HTTPException) as error:
+        await ready.mark_pull_request_ready("acme", "app", 0, "user-token")
+    assert error.value.status_code == 422
+
+
+async def test_ready_route_forwards_the_pull_request_and_requires_a_token(monkeypatch):
+    token = AsyncMock(return_value="user-token")
+    mark = AsyncMock(return_value=ready.ReadyPullRequestResult(ready=True))
+    monkeypatch.setattr(pr_routes, "get_valid_access_token", token)
+    monkeypatch.setattr(pr_routes, "mark_pull_request_ready", mark)
+    assert await pr_routes.api_ready_my_pull_request("acme", "app", 7, {"sub": "octocat"}) == (
+        ready.ReadyPullRequestResult(ready=True)
+    )
+    mark.assert_awaited_once_with("acme", "app", 7, "user-token")
+    token.return_value = None
+    with pytest.raises(HTTPException) as error:
+        await pr_routes.api_ready_my_pull_request("acme", "app", 7, {"sub": "octocat"})
+    assert error.value.status_code == 401
+    assert mark.await_count == 1

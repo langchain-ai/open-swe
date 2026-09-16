@@ -300,6 +300,19 @@ def find_pull_by_sha(owner: str, repo: str, sha: str) -> dict[str, Any] | None:
     )
 
 
+def pull_node_id(pull: dict[str, Any]) -> str:
+    return f"PR_node_{pull['owner']}_{pull['repo']}_{pull['number']}"
+
+
+def mark_pull_ready(node_id: str) -> dict[str, Any] | None:
+    pull = next((pull for pull in PULLS if pull_node_id(pull) == node_id), None)
+    if pull is None:
+        return None
+    pull["draft"] = False
+    pull["updated_at"] = github_timestamp()
+    return pull
+
+
 def update_pull_health(number: int, values: dict[str, Any]) -> dict[str, Any] | None:
     pull = find_pull(number)
     if pull is None:

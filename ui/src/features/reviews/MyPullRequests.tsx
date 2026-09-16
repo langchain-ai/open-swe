@@ -58,7 +58,7 @@ const mergeMethodLabels: Record<MergeMethod, string> = {
   rebase: "Rebase merge",
 }
 
-type BulkAction = "close" | "fix" | "merge"
+type BulkAction = "close" | "fix" | "merge" | "ready"
 
 interface BulkRequest {
   action: BulkAction
@@ -104,6 +104,10 @@ async function runBulkAction(
   if (action === "close") {
     const result = await api.closePullRequest(pr)
     if (!result.closed) throw new Error("GitHub did not confirm the close.")
+  } else if (action === "ready") {
+    const result = await api.markPullRequestReady(pr)
+    if (!result.ready)
+      throw new Error("GitHub did not confirm the ready for review.")
   } else if (action === "merge") {
     if (!method) throw new Error("Choose a merge method.")
     const result = await api.mergePullRequest(pr, method)
@@ -134,6 +138,16 @@ function forgetPullRequest(
           }
         : data
   )
+}
+
+function refreshPullRequest(
+  queryClient: QueryClient,
+  login: string,
+  pr: { repo: string; number: number }
+) {
+  void queryClient.invalidateQueries({
+    queryKey: ["my-pr-details", login, pr.repo, pr.number],
+  })
 }
 
 function useOpenPullRequests(
@@ -344,6 +358,55 @@ function FixPullRequest({ pr, login }: { pr: OpenPullRequest; login: string }) {
   )
 }
 
+function MarkPullRequestReady({
+  pr,
+  onReady,
+}: {
+  pr: OpenPullRequest
+  onReady: () => void
+}) {
+  const ready = useMutation({
+    mutationFn: async () => {
+      const result = await api.markPullRequestReady(pr)
+      if (!result.ready)
+        throw new Error("GitHub did not confirm the ready for review.")
+    },
+    onSuccess: () => {
+      toast.success(`Marked ${pr.repo}#${pr.number} ready for review`)
+      onReady()
+    },
+    onError: (error) =>
+      toast.error(`Could not mark ${pr.repo}#${pr.number} ready`, {
+        description: error.message,
+      }),
+    retry: false,
+  })
+  return (
+    <div>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={ready.isPending || ready.isSuccess}
+        aria-live="polite"
+        onClick={() => ready.mutate()}
+      >
+        {ready.isPending
+          ? "Marking ready…"
+          : ready.isSuccess
+            ? "Marked ready"
+            : ready.isError
+              ? "Retry mark ready"
+              : "Mark ready"}
+      </Button>
+      {ready.error && (
+        <p role="alert" className="mt-1 text-destructive">
+          {ready.error.message}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function BulkCloseDialog({
   pullRequests,
   onCancel,
@@ -387,6 +450,59 @@ function BulkCloseDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+function ClosePullRequest({
+  pr,
+  onClosed,
+}: {
+  pr: OpenPullRequest
+  onClosed: () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const close = useMutation({
+    mutationFn: async () => {
+      const result = await api.closePullRequest(pr)
+      if (!result.closed) throw new Error("GitHub did not confirm the close.")
+    },
+    onSuccess: () => {
+      toast.success(`Closed ${pr.repo}#${pr.number}`)
+      onClosed()
+    },
+    onError: (error) =>
+      toast.error(`Could not close ${pr.repo}#${pr.number}`, {
+        description: error.message,
+      }),
+    retry: false,
+  })
+  return (
+    <div>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={close.isPending || close.isSuccess}
+        aria-live="polite"
+        onClick={() => setConfirming(true)}
+      >
+        {close.isPending ? "Closing…" : close.isError ? "Retry close" : "Close"}
+      </Button>
+      {confirming && (
+        <BulkCloseDialog
+          pullRequests={[pr]}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false)
+            close.mutate()
+          }}
+        />
+      )}
+      {close.error && (
+        <p role="alert" className="mt-1 text-destructive">
+          {close.error.message}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -526,19 +642,26 @@ function BulkActions({
         void queryClient.invalidateQueries({
           queryKey: ["pr-thread-status", login],
         })
+      else if (action === "ready")
+        for (const pr of succeeded) refreshPullRequest(queryClient, login, pr)
       else for (const pr of succeeded) forgetPullRequest(queryClient, login, pr)
       onSettled(succeeded)
-      const verb =
-        action === "close"
-          ? "Closed"
-          : action === "merge"
-            ? "Merged"
-            : "Queued fixes for"
       const total = succeeded.length + failures.length
-      const noun = `pull request${total === 1 ? "" : "s"}`
-      if (failures.length === 0) toast.success(`${verb} ${total} ${noun}`)
+      const counted =
+        failures.length === 0
+          ? `${total} pull request${total === 1 ? "" : "s"}`
+          : `${succeeded.length} of ${total} pull request${total === 1 ? "" : "s"}`
+      const message =
+        action === "close"
+          ? `Closed ${counted}`
+          : action === "merge"
+            ? `Merged ${counted}`
+            : action === "ready"
+              ? `Marked ${counted} ready for review`
+              : `Queued fixes for ${counted}`
+      if (failures.length === 0) toast.success(message)
       else
-        toast.error(`${verb} ${succeeded.length} of ${total} ${noun}`, {
+        toast.error(message, {
           description: failures
             .map((failure) => `${failure.key}: ${failure.message}`)
             .join("\n"),
@@ -549,6 +672,7 @@ function BulkActions({
   const active = bulk.isPending ? bulk.variables.action : null
   const fixable = selected.every((pr) => isFixable(pr) && !pr.detailsLoading)
   const mergeable = selected.every(isMergeable)
+  const drafts = selected.every((pr) => pr.draft === true)
   return (
     <div
       role="group"
@@ -594,6 +718,15 @@ function BulkActions({
         onClick={() => setPrompt("merge")}
       >
         {active === "merge" ? "Merging…" : "Merge"}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={bulk.isPending || !drafts}
+        title={drafts ? undefined : "Every selected PR must be a draft"}
+        onClick={() => bulk.mutate({ action: "ready", pullRequests: selected })}
+      >
+        {active === "ready" ? "Marking ready…" : "Mark ready"}
       </Button>
       {prompt === "close" && (
         <BulkCloseDialog
@@ -707,14 +840,16 @@ function PullRequestCard({
   selected,
   onSelect,
   review,
-  onMerged,
+  onRemoved,
+  onReady,
 }: {
   pr: OpenPullRequest
   login: string
   selected: boolean
   onSelect: (include: boolean) => void
   review: ReactNode
-  onMerged: () => void
+  onRemoved: () => void
+  onReady: () => void
 }) {
   return (
     <li
@@ -810,10 +945,16 @@ function PullRequestCard({
             </div>
           )}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            {isFixable(pr) && <FixPullRequest pr={pr} login={login} />}
-            {isMergeable(pr) && (
-              <MergePullRequest pr={pr} onMerged={onMerged} />
-            )}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+              {isFixable(pr) && <FixPullRequest pr={pr} login={login} />}
+              {isMergeable(pr) && (
+                <MergePullRequest pr={pr} onMerged={onRemoved} />
+              )}
+              {pr.draft === true && (
+                <MarkPullRequestReady pr={pr} onReady={onReady} />
+              )}
+              <ClosePullRequest pr={pr} onClosed={onRemoved} />
+            </div>
             <PullRequestLinks
               repo={pr.repo}
               number={pr.number}
@@ -1147,11 +1288,12 @@ export function MyPullRequests({
                       <span>Not reviewed</span>
                     )
                   }
-                  onMerged={() => {
+                  onRemoved={() => {
                     forgetPullRequest(queryClient, login, pr)
                     if (visible.length === 1 && page > 0)
                       onFiltersChange({ page: page - 1 || undefined }, true)
                   }}
+                  onReady={() => refreshPullRequest(queryClient, login, pr)}
                 />
               ))}
               {visible.length === 0 && (
