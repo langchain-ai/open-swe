@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from agent.dashboard import skills as store
+from agent.skill_store import store
 from agent.tools.admin_gate import require_admin
 
 _ACTION = "manage organization skills"
@@ -14,7 +14,7 @@ async def save_organization_skill(
     name: str, description: str, instructions: str = ""
 ) -> dict[str, Any]:
     """Implement the `save_organization_skill` tool."""
-    if error := require_admin(_ACTION):
+    if error := await require_admin(_ACTION):
         return {"ok": False, "error": error}
     try:
         body = store.SkillCreate(name=name, description=description, instructions=instructions)
@@ -36,7 +36,7 @@ async def save_organization_skill(
 
 async def delete_organization_skill(name: str) -> dict[str, Any]:
     """Implement the `delete_organization_skill` tool."""
-    if error := require_admin(_ACTION):
+    if error := await require_admin(_ACTION):
         return {"ok": False, "error": error}
     try:
         await store.delete_organization_skill(name)

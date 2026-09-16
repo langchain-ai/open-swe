@@ -1,9 +1,23 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import langgraph_sdk
 import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import get_agent
+
+
+@pytest.fixture(autouse=True, params=["public", "private"])
+def saved_thread_scope(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(
+                return_value={"metadata": {"visibility": request.param, "owner_login": "octocat"}}
+            )
+        )
+    )
+    monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
 
 
 class _DummyAgent:
@@ -48,7 +62,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.server.cached_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
@@ -121,7 +135,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.server.cached_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
@@ -186,7 +200,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.server.cached_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
@@ -199,7 +213,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
                 "reasoning_effort": "high",
             },
         ),
-        patch("agent.server.get_team_fable_enabled", new_callable=AsyncMock, return_value=False),
+        patch("agent.server.cached_fable_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
         patch("agent.server.construct_system_prompt", return_value="prompt"),

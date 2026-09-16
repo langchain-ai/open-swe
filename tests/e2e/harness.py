@@ -37,7 +37,11 @@ from e2e_env import (  # noqa: E402
     BOT_USER_ID,
     DEMO_CHANNEL,
     HUMAN_USER,
+    OWNER,
+    REPO,
     REPO_ROOT,
+    SECOND_OWNER,
+    SECOND_REPO,
     TEST_USERS,
 )
 from fastapi import HTTPException, Request  # noqa: E402
@@ -117,7 +121,7 @@ async def control_state() -> JSONResponse:
 
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
-    """Snapshot captures/deletes the environment tools asked the platform for."""
+    """Snapshot captures/deletes the workspace tools asked the platform for."""
     return JSONResponse({"captured": fakes.SNAPSHOTS, "deleted": fakes.DELETED_SNAPSHOTS})
 
 
@@ -169,8 +173,27 @@ async def control_queued(thread_id: str = "") -> JSONResponse:
     return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
 
 
+_MAPPINGS_SEEDED = False
+
+
+async def _seed_test_user_mappings() -> None:
+    """Link each named test user's Slack id to their dashboard login, as the real
+    Slack-link flow would, so the webhook's account gate lets them through."""
+    global _MAPPINGS_SEEDED
+    if _MAPPINGS_SEEDED:
+        return
+    from agent.dashboard.user_mappings import upsert_mapping
+
+    for user in TEST_USERS:
+        await upsert_mapping(
+            github_login=user["login"], work_email=user["email"], slack_user_id=user["slack_id"]
+        )
+    _MAPPINGS_SEEDED = True
+
+
 async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> httpx2.Response:
     """POST a signed Events-API delivery to the real /webhooks/slack route."""
+    await _seed_test_user_mappings()
     raw = json.dumps(payload).encode()
     req_ts = str(int(time.time()))
     base = f"v0:{req_ts}:{raw.decode()}".encode()
@@ -335,7 +358,7 @@ async def control_login(request: Request) -> JSONResponse:
     form = await request.json()
     login = str(form.get("login", "dev-user"))
     email = str(form.get("email", "dev@example.com"))
-    token = issue_session(login=login, email=email, avatar_url=None)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid.uuid7()))
     resp = JSONResponse({"ok": True, "login": login, "email": email})
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -368,7 +391,7 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
     if not email:
         match = next((u for u in TEST_USERS if u["login"] == login), None)
         email = match["email"] if match else f"{login}@example.com"
-    token = issue_session(login=login, email=email, avatar_url=None)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid.uuid7()))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -416,7 +439,7 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
-    token = issue_session(login=login, email=email, avatar_url=None)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid.uuid7()))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -577,6 +600,18 @@ async def mock_github_pr(owner: str, repo: str, number: int) -> HTMLResponse:  #
 
 
 # --- fake GitHub REST API (open_pull_request hits this) --------------------
+@app.get("/fake-gh/installation/repositories")
+async def gh_installation_repositories() -> JSONResponse:
+    return JSONResponse(
+        {
+            "repositories": [
+                {"full_name": "fakeorg/demo"},
+                {"full_name": "anotherorg/companion"},
+            ]
+        }
+    )
+
+
 def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
     return {
         "number": pr["number"],
@@ -599,6 +634,15 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "changed_files": len(pr["files"]),
         "created_at": pr["created_at"],
     }
+
+
+@app.get("/fake-gh/installation/repositories")
+async def gh_list_installation_repositories() -> JSONResponse:
+    repositories = [
+        {"full_name": f"{OWNER}/{REPO}"},
+        {"full_name": f"{SECOND_OWNER}/{SECOND_REPO}"},
+    ]
+    return JSONResponse({"total_count": len(repositories), "repositories": repositories})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
@@ -736,7 +780,11 @@ async def slack_post_message(request: Request) -> JSONResponse:
         blocks=body.get("blocks"),
         is_bot=True,
     )
-    return _ok({"ts": ts, "message": {"ts": ts}})
+    message: dict[str, Any] = {"ts": ts}
+    thread_ts = body.get("thread_ts") or ""
+    if thread_ts:
+        message["thread_ts"] = thread_ts
+    return _ok({"ts": ts, "message": message})
 
 
 @app.post("/fake-slack/chat.update")

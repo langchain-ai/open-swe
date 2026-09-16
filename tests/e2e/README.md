@@ -22,7 +22,7 @@ code runs for real.
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
 | `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
 | `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
-| Environment tools, store records, snapshot naming + status       | **real**                                                                   |
+| Workspace tools, store records, snapshot naming + status       | **real**                                                                   |
 | Electron UI, main process, IPC, git diff                         | **real**                                                                   |
 | Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                      |
 | LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the local sandbox has nothing to snapshot         |
@@ -109,6 +109,11 @@ and **playwright-report-3**; Desktop uploads **playwright-report-desktop**. Each
 contains `playwright-report/` and `test-results/`. Download the relevant artifact,
 then `pnpm exec playwright show-report <unzipped-dir>` (or drag a `trace.zip` onto
 <https://trace.playwright.dev>) to replay.
+
+The backend requires PostgreSQL: export `POSTGRES_URI` before running the suite
+or `langgraph dev` (a throwaway `docker run -d -p 5433:5432 -e POSTGRES_PASSWORD=postgres postgres:16`
+with `POSTGRES_URI=postgresql://postgres:postgres@localhost:5433/postgres` is enough).
+CI provides one as a job service.
 
 Poke at it by hand (from the repo root):
 

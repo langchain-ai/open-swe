@@ -111,12 +111,12 @@ def _render_repo_instructions_section(instructions: str | None) -> str:
     return render_prompt("system/repo-instructions.md", instructions=instructions.strip())
 
 
-def _render_environment_section(name: str | None, instructions: str | None) -> str:
+def _render_workspace_section(name: str | None, instructions: str | None) -> str:
     if not instructions or not instructions.strip():
         return ""
     label = f" ({name.strip()})" if name and name.strip() else ""
     return render_prompt(
-        "system/environment-instructions.md",
+        "system/workspace-instructions.md",
         label=label,
         instructions=instructions.strip(),
     )
@@ -193,14 +193,18 @@ def construct_system_prompt(
     plan_mode: bool = False,
     plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
-    environment_name: str | None = None,
-    environment_instructions: str | None = None,
-    admin_environments: bool = False,
+    workspace_name: str | None = None,
+    workspace_instructions: str | None = None,
+    admin_workspaces: bool = False,
     source: str = "dashboard",
     slack_context: bool = False,
     sandbox_file_downloads: bool = False,
+    continued_from_collaborative: bool = False,
 ) -> str:
     del linear_project_id, linear_issue_number
+    untrusted_section = EXTERNAL_UNTRUSTED_COMMENTS_SECTION
+    if continued_from_collaborative:
+        untrusted_section += f"\n\n{load_prompt('system/continued-from-collaborative.md')}"
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
         repo_line = (
@@ -250,18 +254,18 @@ def construct_system_prompt(
         ),
         task_execution_section=load_prompt("system/task-execution.md"),
         dependency_section=load_prompt("system/dependencies.md"),
-        external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
+        external_untrusted_comments_section=untrusted_section,
         commit_pr_section=commit_pr_section,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
-        environment_section=_render_environment_section(environment_name, environment_instructions),
-        admin_environment_section=(
-            load_prompt("system/admin-environment.md") if admin_environments else ""
+        workspace_section=_render_workspace_section(workspace_name, workspace_instructions),
+        admin_workspace_section=(
+            load_prompt("system/admin-workspace.md") if admin_workspaces else ""
         ),
         shared_base_section=(
-            "- If a user asks to change the managed workspace environment, direct them to start "
+            "- If a user asks to change the workspace's sandbox setup, direct them to start "
             "an admin thread in the Web UI and require them to be a workspace admin. Admin threads "
             "cannot be started from Slack or with agent thread tools.\n\n"
-            if not admin_environments
+            if not admin_workspaces
             else ""
         )
         + render_open_swe_shared_base(sandbox_file_downloads=sandbox_file_downloads),

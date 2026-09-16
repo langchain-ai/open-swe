@@ -44,3 +44,4 @@ def test_resolve_identity_from_config_uses_user_noreply_email() -> None:
     assert identity.commit_name == "Mason"
     assert identity.commit_email == "4321+mason-gh@users.noreply.github.com"
     assert identity.github_login == "mason-gh"
+    assert not identity.github_profile

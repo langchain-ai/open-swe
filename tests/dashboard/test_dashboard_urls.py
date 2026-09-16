@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.dashboard import routes as dashboard_routes
+from agent.dashboard import oauth as dashboard_oauth
 from agent.utils import dashboard_links
 
 
@@ -32,6 +32,56 @@ def test_bundled_dashboard_lives_on_the_backend_origin(
     assert dashboard_links.dashboard_thread_url("t1") == "https://backend.example/agents/t1"
 
 
+def test_deployed_dashboard_app_proxies_even_with_a_bundled_build(
+    monkeypatch: pytest.MonkeyPatch, bundled: Path
+) -> None:
+    """open-swe's own deployment: a dashboard app on its own host, fronting a
+    Platform backend that bundles a build and is reached through that host."""
+    monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dev.open-swe.langchain.dev")
+    monkeypatch.setenv("LANGGRAPH_URL", "https://open-swe-preview-abc.us.langgraph.app")
+
+    assert dashboard_links.dashboard_is_same_origin() is True
+    assert dashboard_links.dashboard_proxies_requests() is True
+
+
+@pytest.mark.parametrize("explicit_base", [None, "https://backend.example"])
+def test_bundled_dashboard_proxies_nothing(
+    monkeypatch: pytest.MonkeyPatch, bundled: Path, explicit_base: str | None
+) -> None:
+    monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_API_BASE_URL", raising=False)
+    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+    if explicit_base:
+        monkeypatch.setenv("DASHBOARD_BASE_URL", explicit_base)
+    else:
+        monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+
+    assert dashboard_links.dashboard_proxies_requests() is False
+
+
+def test_fresh_platform_deployment_without_a_backend_url_proxies_nothing(
+    monkeypatch: pytest.MonkeyPatch, bundled: Path
+) -> None:
+    monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.delenv("LANGGRAPH_URL", raising=False)
+
+    assert dashboard_links.dashboard_proxies_requests() is False
+
+
+def test_dev_server_the_backend_fronts_can_proxy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path / "no-build"))
+    monkeypatch.setenv("DASHBOARD_DEV_SERVER_URL", "http://localhost:3000")
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+
+    assert dashboard_links.dashboard_proxies_requests() is True
+
+
 def test_dev_proxied_dashboard_lives_on_the_backend_origin(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -43,7 +93,7 @@ def test_dev_proxied_dashboard_lives_on_the_backend_origin(
 
     assert dashboard_links.dashboard_base_url() == "http://localhost:2024"
     assert dashboard_links.dashboard_is_same_origin() is True
-    assert dashboard_routes._frontend_base_url() == "http://localhost:2024"
+    assert dashboard_oauth.frontend_base_url() == "http://localhost:2024"
 
 
 def test_no_dashboard_means_no_links(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,7 +123,7 @@ def test_same_origin_https_session_cookie_is_lax(
     monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
 
     assert dashboard_links.dashboard_is_same_origin() is True
-    assert dashboard_routes._cookie_security() == (True, "lax")
+    assert dashboard_oauth.cookie_security() == (True, "lax")
 
 
 def test_cross_origin_https_session_cookie_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -81,14 +131,14 @@ def test_cross_origin_https_session_cookie_is_none(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example")
 
     assert dashboard_links.dashboard_is_same_origin() is False
-    assert dashboard_routes._cookie_security() == (True, "none")
+    assert dashboard_oauth.cookie_security() == (True, "none")
 
 
 def test_local_http_session_cookie_is_lax_and_not_secure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://localhost:3000")
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "http://localhost:2024")
 
-    assert dashboard_routes._cookie_security() == (False, "lax")
+    assert dashboard_oauth.cookie_security() == (False, "lax")
 
 
 def test_local_dev_model_check_needs_an_explicit_localhost_dashboard(

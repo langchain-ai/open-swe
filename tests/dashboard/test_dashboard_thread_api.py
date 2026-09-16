@@ -9,17 +9,20 @@ from xml.etree import ElementTree
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import routes
+from agent.dashboard import deps, options_routes, profiles
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
-from agent.dashboard.threads import api as thread_api
-from agent.dashboard.threads import diffs as thread_diffs
-from agent.dashboard.threads import listing as thread_listing
-from agent.dashboard.threads import proxy as thread_proxy
-from agent.dashboard.threads import runs as thread_runs
-from agent.dashboard.threads import summary as thread_summary
+from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
 from agent.dashboard.ttft import AssistantTextObservation
-from tests.conftest import patch_thread_module
+from agent.threads import diffs as thread_diffs
+from agent.threads import handlers
+from agent.threads import listing as thread_listing
+from agent.threads import proxy as thread_proxy
+from agent.threads import routes as thread_routes
+from agent.threads import runs as thread_runs
+from agent.threads import summary as thread_summary
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.conftest import FakeStore, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -55,7 +58,7 @@ async def test_rename_thread_trims_title_and_clears_seed(monkeypatch) -> None:
         lambda: SimpleNamespace(threads=SimpleNamespace(update=update)),
     )
 
-    result = await routes.api_rename_thread(
+    result = await thread_routes.api_rename_thread(
         "thread-1",
         thread_runs.ThreadRenameBody(title="  New title  "),
         {"sub": "alice", "email": "alice@example.com"},
@@ -106,7 +109,7 @@ def test_langgraph_proxy_headers_include_api_key(monkeypatch) -> None:
 
 
 async def test_resolve_agent_model_choice_applies_profile_before_team_default(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
@@ -116,13 +119,14 @@ async def test_resolve_agent_model_choice_applies_profile_before_team_default(mo
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
         None,
         None,
+        None,
     )
 
     assert (model_id, effort) == (_TEXT_ONLY_MODEL, "high")
 
 
 async def test_resolve_agent_model_choice_applies_request_before_profile(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
@@ -132,13 +136,14 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
         "anthropic:claude-opus-5",
         "high",
+        None,
     )
 
     assert (model_id, effort) == ("anthropic:claude-opus-5", "high")
 
 
 async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _VISION_MODEL, "medium"
 
     patch_thread_module(monkeypatch, "get_team_default_model", fake_team_default)
@@ -147,13 +152,14 @@ async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(m
         {"default_model": "anthropic:claude-opus-5", "reasoning_effort": "high"},
         "fireworks:accounts/fireworks/models/glm-5p2",
         "high",
+        None,
     )
 
     assert (model_id, effort) == (_VISION_MODEL, "medium")
 
 
 async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
@@ -164,7 +170,7 @@ async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> N
 
 
 async def test_resolve_agent_model_id_applies_profile_override(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
@@ -179,7 +185,7 @@ async def test_resolve_agent_model_id_applies_profile_override(monkeypatch) -> N
 
 
 async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
@@ -190,7 +196,7 @@ async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -
 
 
 async def test_resolve_agent_model_id_deprecated_override_uses_team_default(monkeypatch) -> None:
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         return _TEXT_ONLY_MODEL, "high"
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
@@ -228,7 +234,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     async def fake_profile(login: str) -> dict[str, object]:
         return dict(profile)
 
-    async def fake_team_default(role: str) -> tuple[str, str]:
+    async def fake_team_default(role: str, workspace: str | None = None) -> tuple[str, str]:
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
@@ -299,6 +305,143 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"
+
+
+async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
+    monkeypatch, fake_store: FakeStore, registry_db
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
+
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "config": {"configurable": {"repo": "acme/oss"}},
+        },
+    }
+
+    await thread_runs._enrich_run_start_command(
+        "new-tid",
+        "octocat",
+        command,
+        metadata={},
+        creating=True,
+    )
+
+    created_metadata = created["metadata"]
+    assert isinstance(created_metadata, dict)
+    assert created_metadata["workspace"] == "oss"
+
+
+async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
+    monkeypatch, fake_store: FakeStore, registry_db
+) -> None:
+    """A new thread's model default comes from the repo's own workspace, not `default`."""
+    created: dict[str, object] = {}
+
+    async def fake_profile(login: str) -> dict[str, object]:
+        return {}
+
+    async def fake_ensure_token(login: str) -> None:
+        return None
+
+    async def fake_resolve_email(login: str, prof: dict[str, object]) -> str:
+        return f"{login}@example.com"
+
+    patch_thread_module(monkeypatch, "get_profile", fake_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
+    await upsert_team_settings(
+        TeamSettingsUpdate(
+            default_agent_model="anthropic:claude-sonnet-5",
+            default_agent_reasoning_effort="high",
+        ),
+        workspace="default",
+    )
+    await upsert_team_settings(
+        TeamSettingsUpdate(
+            default_agent_model="openai:gpt-6-astra",
+            default_agent_reasoning_effort="low",
+        ),
+        workspace="oss",
+    )
+
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "config": {"configurable": {"repo": "acme/oss"}},
+        },
+    }
+
+    await thread_runs._enrich_run_start_command(
+        "new-tid",
+        "octocat",
+        command,
+        metadata={},
+        creating=True,
+    )
+
+    created_metadata = created["metadata"]
+    assert isinstance(created_metadata, dict)
+    assert created_metadata["workspace"] == "oss"
+    assert created_metadata["resolved_model"] == "openai:gpt-6-astra"
+    assert created_metadata["resolved_effort"] == "low"
+
+
+@pytest.mark.parametrize(
+    ("login", "visibility", "requested_admin", "expected_admin"),
+    [
+        ("workspace-admin", "private", False, True),
+        ("workspace-admin", "public", True, False),
+        ("teammate", "private", True, False),
+    ],
+)
+async def test_private_threads_created_by_admins_get_admin_permissions(
+    monkeypatch,
+    login: str,
+    visibility: str,
+    requested_admin: bool,
+    expected_admin: bool,
+) -> None:
+    created: dict[str, object] = {}
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Update settings"}]},
+            "config": {
+                "configurable": {
+                    "visibility": visibility,
+                    "admin_thread": requested_admin,
+                }
+            },
+        },
+    }
+
+    enriched = await thread_runs._enrich_run_start_command(
+        "new-tid",
+        login,
+        command,
+        metadata={},
+        creating=True,
+        email=f"{login}@example.com",
+    )
+
+    stamped = created["metadata"]
+    assert isinstance(stamped, dict)
+    assert stamped["visibility"] == visibility
+    assert (stamped.get("admin_thread") is True) is expected_admin
+    configurable = enriched["params"]["config"]["configurable"]
+    assert (configurable.get("admin_thread") is True) is expected_admin
 
 
 async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model(
@@ -514,14 +657,14 @@ async def test_terminal_sandbox_requires_existing_sandbox(monkeypatch) -> None:
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    assert await thread_api.get_dashboard_terminal_sandbox("tid", "teammate") == (
+    assert await handlers.get_dashboard_terminal_sandbox("tid", "teammate") == (
         "sandbox-123",
         "repo",
     )
 
     metadata["sandbox_id"] = "__creating__"
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_terminal_sandbox("tid", "teammate")
+        await handlers.get_dashboard_terminal_sandbox("tid", "teammate")
     assert exc_info.value.status_code == 404
 
 
@@ -989,16 +1132,27 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     command = {
         "method": "run.start",
         "params": {
+            "metadata": {
+                "owner_login": "attacker",
+                "owner_type": "system",
+                "visibility": "private",
+                "system_authorization": {
+                    "schedule_id": "admin-schedule",
+                    "invocation_id": "stolen",
+                },
+            },
             "config": {
                 "configurable": {
                     "github_login": "attacker",
                     "user_email": "attacker@example.com",
                     "source": "github",
+                    "invocation_id": "stolen",
+                    "prepare_run_id": "stolen",
                     "repo": {"owner": "evil", "name": "repo"},
                     "agent_model_id": _VISION_MODEL,
                     "agent_effort": "medium",
                 }
-            }
+            },
         },
     }
 
@@ -1018,10 +1172,27 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     assert configurable["github_login"] == "octocat"
     assert configurable["user_email"] == "octocat@example.com"
     assert configurable["source"] == "dashboard"
+    assert configurable["invocation_id"] != "stolen"
+    assert not (
+        {"owner_login", "owner_type", "visibility", "system_authorization"}
+        & enriched["params"]["metadata"].keys()
+    )
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
     assert updates[-1]["model"] == _VISION_MODEL
+
+    offloaded = await thread_runs._enrich_run_start_command(
+        "tid",
+        "octocat",
+        {
+            "method": "run.start",
+            "params": {"config": {"configurable": {"offload_conversation": True}}},
+        },
+        metadata=updates[-1],
+    )
+    assert offloaded["params"]["config"]["configurable"]["model_selection"] == "explicit"
+    assert updates[-1]["model_selection"] == "explicit"
 
 
 async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch) -> None:
@@ -1429,7 +1600,7 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     # Read endpoints succeed for non-owners (org members).
-    state = await thread_api.get_dashboard_thread_state("tid", "teammate")
+    state = await handlers.get_dashboard_thread_state("tid", "teammate")
     assert "values" in state
 
     # stream/events preflight should not raise.
@@ -1503,7 +1674,7 @@ async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(mon
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    state = await thread_api.get_dashboard_thread_state("tid", "owner")
+    state = await handlers.get_dashboard_thread_state("tid", "owner")
 
     assert "next" not in state
 
@@ -1527,7 +1698,7 @@ async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_state("tid", "owner")
+        await handlers.get_dashboard_thread_state("tid", "owner")
     assert exc_info.value.status_code == 404
 
 
@@ -1551,7 +1722,7 @@ async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypa
     patch_thread_module(monkeypatch, "get_thread_active_status", unknown_activity)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "tid",
             "octocat",
             thread_runs.ThreadMessageBody(content="hello"),
@@ -1582,7 +1753,7 @@ async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypa
     patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "tid",
             "teammate",
             thread_runs.ThreadMessageBody(content="ship it"),
@@ -1641,7 +1812,7 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "get_thread_active_status", active)
     patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue)
 
-    await thread_api.send_dashboard_message(
+    await handlers.send_dashboard_message(
         "tid",
         "teammate",
         thread_runs.ThreadMessageBody(content="ship it"),
@@ -1679,7 +1850,7 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
     patch_thread_module(monkeypatch, "get_thread_active_status", active)
     patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue)
 
-    await thread_api.send_dashboard_message(
+    await handlers.send_dashboard_message(
         "tid",
         "owner",
         thread_runs.ThreadMessageBody(content="ship it"),
@@ -1715,6 +1886,34 @@ async def test_thread_summary_defaults_to_not_resolved() -> None:
     assert summary["resolvedAt"] is None
 
 
+async def test_resolve_all_dashboard_threads_marks_each_unresolved_thread(monkeypatch) -> None:
+    updates: list[tuple[str, dict[str, object]]] = []
+    threads = [{"thread_id": "one"}, {"thread_id": "two"}]
+
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append((thread_id, metadata))
+
+    patch_thread_module(
+        monkeypatch,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+    monkeypatch.setattr(
+        handlers, "list_unresolved_dashboard_threads", AsyncMock(return_value=threads)
+    )
+    patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
+
+    count = await handlers.resolve_all_dashboard_threads("octocat", email="octocat@example.com")
+
+    assert count == 2
+    assert {thread_id for thread_id, _ in updates} == {"one", "two"}
+    assert all(metadata["resolved"] is True for _, metadata in updates)
+    handlers.list_unresolved_dashboard_threads.assert_awaited_once_with(
+        "octocat", email="octocat@example.com"
+    )
+
+
 async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
     updates: list[dict[str, object]] = []
 
@@ -1738,7 +1937,7 @@ async def test_resolve_dashboard_thread_marks_resolved(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
-    summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=True)
+    summary = await handlers.resolve_dashboard_thread("tid", "octocat", resolved=True)
 
     assert updates[-1]["resolved"] is True
     assert isinstance(updates[-1]["resolved_at_ms"], int)
@@ -1773,7 +1972,7 @@ async def test_resolve_dashboard_thread_clears_resolved(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
-    summary = await thread_api.resolve_dashboard_thread("tid", "octocat", resolved=False)
+    summary = await handlers.resolve_dashboard_thread("tid", "octocat", resolved=False)
 
     assert updates[-1]["resolved"] is False
     assert updates[-1]["resolved_at_ms"] is None
@@ -1793,7 +1992,7 @@ async def test_resolve_dashboard_thread_rejects_unsurfaced_thread(monkeypatch) -
     patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.resolve_dashboard_thread("tid", "teammate", resolved=True)
+        await handlers.resolve_dashboard_thread("tid", "teammate", resolved=True)
     assert exc_info.value.status_code == 404
 
 
@@ -2219,7 +2418,7 @@ async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata
 
 
 async def test_list_dashboard_thread_projects_discovers_metadata_without_summaries(
-    monkeypatch,
+    monkeypatch, fake_store: FakeStore
 ) -> None:
     threads = _make_threads(5, resolved_before=0)
     cast(dict[str, object], threads[0]["metadata"]).update(
@@ -2258,12 +2457,45 @@ async def test_list_dashboard_thread_projects_discovers_metadata_without_summari
             "repoFullName": "langchain-ai/open-swe",
             "name": "open-swe",
             "updatedAt": 50,
+            "workspace": "default",
         },
         {
             "repoFullName": "langchain-ai/langgraph",
             "name": "langgraph",
             "updatedAt": 30,
+            "workspace": "default",
         },
+    ]
+
+
+async def test_list_dashboard_thread_projects_resolves_workspace_from_repo(
+    monkeypatch, fake_store: FakeStore, registry_db
+) -> None:
+    threads = _make_threads(1, resolved_before=0)
+    cast(dict[str, object], threads[0]["metadata"]).update(
+        {"repo_owner": "acme", "repo_name": "oss", "updated_at_ms": 10}
+    )
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+    patch_thread_module(
+        monkeypatch,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=FakeThreads()),
+    )
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
+
+    result = await thread_listing.list_dashboard_thread_projects("octocat")
+
+    assert result == [
+        {
+            "repoFullName": "acme/oss",
+            "name": "oss",
+            "updatedAt": 10,
+            "workspace": "oss",
+        }
     ]
 
 
@@ -2492,14 +2724,14 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
 @pytest.mark.asyncio
 async def test_get_my_profile_drops_deprecated_models() -> None:
     with patch(
-        "agent.dashboard.routes.get_profile",
+        "agent.dashboard.profiles.get_profile",
         new_callable=AsyncMock,
         return_value={
             "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
             "reasoning_effort": "high",
         },
     ):
-        payload = await routes.get_my_profile({"sub": "octocat"})
+        payload = await profiles.get_my_profile({"sub": "octocat"})
 
     assert "default_model" not in payload
     assert "reasoning_effort" not in payload
@@ -2509,22 +2741,22 @@ async def test_get_my_profile_drops_deprecated_models() -> None:
 async def test_options_omits_fable_when_disabled() -> None:
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.dashboard.options_routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.dashboard.options_routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.dashboard.options_routes.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
     ):
-        payload = await routes.options()
+        payload = await options_routes.options()
     assert _FABLE not in [m["id"] for m in payload["models"]]
 
 
@@ -2532,22 +2764,22 @@ async def test_options_omits_fable_when_disabled() -> None:
 async def test_options_includes_fable_when_enabled() -> None:
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.dashboard.options_routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.dashboard.options_routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.dashboard.options_routes.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
     ):
-        payload = await routes.options()
+        payload = await options_routes.options()
     assert _FABLE in [m["id"] for m in payload["models"]]
     openai_model = next(m for m in payload["models"] if m["id"] == _VISION_MODEL)
     assert openai_model["context_window"] == 272_000
@@ -2561,22 +2793,22 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     fable_pair = (_FABLE, "high")
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.dashboard.options_routes.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.dashboard.options_routes.get_team_default_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.dashboard.options_routes.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
     ):
-        payload = await routes.options()
+        payload = await options_routes.options()
     model_ids = [m["id"] for m in payload["models"]]
     assert _FABLE not in model_ids
     assert payload["default_agent_model"] != _FABLE
@@ -2733,7 +2965,7 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.cancel_dashboard_thread("thread-1", "owner")
+    result = await handlers.cancel_dashboard_thread("thread-1", "owner")
 
     assert calls[2] == (
         "cancel_many",
@@ -2773,7 +3005,7 @@ async def test_cancel_dashboard_thread_rejects_non_owner(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException):
-        await thread_api.cancel_dashboard_thread("thread-1", "someone-else")
+        await handlers.cancel_dashboard_thread("thread-1", "someone-else")
 
     assert cancelled is False
 
@@ -2815,7 +3047,7 @@ async def test_admin_cancel_dashboard_thread_interrupts_all_active_runs(monkeypa
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
-    result = await thread_api.admin_cancel_dashboard_thread("thread-1")
+    result = await handlers.admin_cancel_dashboard_thread("thread-1")
 
     assert calls[2] == (
         "cancel_many",
@@ -2855,26 +3087,26 @@ async def test_admin_cancel_dashboard_thread_does_not_update_on_cancel_failure(m
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.admin_cancel_dashboard_thread("thread-1")
+        await handlers.admin_cancel_dashboard_thread("thread-1")
 
     assert exc_info.value.status_code == 502
     assert updated is False
 
 
-async def test_admin_cancel_thread_route_delegates_without_owner_identity(monkeypatch) -> None:
+async def test_admin_cancel_thread_route_preserves_actor_identity(monkeypatch) -> None:
     cancel = AsyncMock(return_value={"id": "thread-1", "status": "interrupted"})
-    monkeypatch.setattr(routes, "admin_cancel_dashboard_thread", cancel)
+    monkeypatch.setattr(thread_routes, "admin_cancel_dashboard_thread", cancel)
 
-    result = await routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
+    result = await thread_routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
 
     assert result == {"id": "thread-1", "status": "interrupted"}
-    cancel.assert_awaited_once_with("thread-1")
+    cancel.assert_awaited_once_with("thread-1", "admin", email=None)
 
 
 def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
 
     with pytest.raises(HTTPException) as exc_info:
-        routes._require_admin({"sub": "not-admin", "email": "user@example.com"})
+        deps.require_admin({"sub": "not-admin", "email": "user@example.com"})
 
     assert exc_info.value.status_code == 403

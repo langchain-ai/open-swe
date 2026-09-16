@@ -1,3 +1,4 @@
+import { Suspense, lazy, useEffect, useState } from "react"
 import {
   HeadContent,
   Outlet,
@@ -18,6 +19,22 @@ import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
+import { isPerfHudEnabled } from "@/lib/perf/trace"
+
+const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
+
+/** Client-only: the flag lives in localStorage, so the server render never shows it. */
+function PerfHudMount() {
+  const [enabled, setEnabled] = useState(false)
+  // oxlint-disable-next-line react/set-state-in-effect
+  useEffect(() => setEnabled(isPerfHudEnabled()), [])
+  if (!enabled) return null
+  return (
+    <Suspense fallback={null}>
+      <PerfHud />
+    </Suspense>
+  )
+}
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem("open-swe-theme");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
 
@@ -78,9 +95,17 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        {typeof window !== "undefined" &&
+          window.openSweDesktop && (
+            // Rendered first so later no-drag elements carve out of it; the
+            // desktop preload styles it. Preload-injected DOM would be cleared
+            // when React takes over the document, so it lives here instead.
+            <div aria-hidden data-desktop-drag-strip="" />
+          )}
         <ThemeSync />
         <QueryClientProvider client={queryClient}>
           <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+          <PerfHudMount />
           {import.meta.env.VITE_DEVTOOLS !== "false" && (
             <>
               <TanStackDevtools

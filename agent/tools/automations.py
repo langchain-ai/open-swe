@@ -5,14 +5,20 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from agent.dashboard import schedules
+from agent.schedules import store as schedules
 from agent.tools.admin_gate import configurable, require_admin
 
 logger = logging.getLogger(__name__)
 
 
-def _identity() -> tuple[str, str | None] | None:
+async def _identity() -> tuple[str, str | None] | None:
     cfg = configurable()
+    if cfg.source == "schedule":
+        record = await schedules.authorized_admin_schedule(cfg)
+        if not record:
+            return None
+        login = record.get("created_by") or f"system:schedule:{record['id']}"
+        return login, record.get("user_email") or None
     if not cfg.github_login:
         return None
     return cfg.github_login, cfg.user_email or None
@@ -27,14 +33,15 @@ def _error(exc: Exception) -> dict[str, Any]:
 
 async def list_automations() -> dict[str, Any]:
     """Implement the `list_automations` tool."""
-    if error := require_admin("manage workspace automations"):
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     return {"ok": True, "automations": await schedules.list_agent_schedules()}
 
 
 async def create_automation(
     prompt: str,
-    schedule: str,
+    schedule: str | None = None,
+    trigger: schedules.AutomationTrigger = "schedule",
     name: str | None = None,
     repo: str | None = None,
     model_id: str | None = None,
@@ -44,9 +51,9 @@ async def create_automation(
     admin_thread: bool = False,
 ) -> dict[str, Any]:
     """Implement the `create_automation` tool."""
-    if error := require_admin("manage workspace automations"):
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
-    identity = _identity()
+    identity = await _identity()
     if identity is None:
         return {"ok": False, "error": "No GitHub identity is available for this admin thread."}
     login, email = identity
@@ -56,6 +63,7 @@ async def create_automation(
             schedules.ScheduleCreateBody(
                 prompt=prompt,
                 schedule=schedule,
+                trigger=trigger,
                 name=name,
                 repo=repo,
                 model_id=model_id,
@@ -66,6 +74,7 @@ async def create_automation(
             ),
             email=email,
             allow_admin_thread=True,
+            use_workspace_credentials=configurable().source == "schedule",
         )
     except Exception as exc:
         return _error(exc)
@@ -76,6 +85,7 @@ async def update_automation(
     automation_id: str,
     prompt: str | None = None,
     schedule: str | None = None,
+    trigger: schedules.AutomationTrigger | None = None,
     name: str | None = None,
     repo: str | None = None,
     clear_repo: bool = False,
@@ -88,9 +98,9 @@ async def update_automation(
     admin_thread: bool | None = None,
 ) -> dict[str, Any]:
     """Implement the `update_automation` tool."""
-    if error := require_admin("manage workspace automations"):
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
-    identity = _identity()
+    identity = await _identity()
     if identity is None:
         return {"ok": False, "error": "No GitHub identity is available for this admin thread."}
     if clear_repo and repo is not None:
@@ -103,6 +113,7 @@ async def update_automation(
     values: dict[str, Any] = {
         "prompt": prompt,
         "schedule": schedule,
+        "trigger": trigger,
         "name": name,
         "model_id": model_id,
         "effort": effort,
@@ -122,6 +133,7 @@ async def update_automation(
             schedules.ScheduleUpdateBody(**values),
             email=identity[1],
             allow_admin_thread=True,
+            use_workspace_credentials=configurable().source == "schedule",
         )
     except Exception as exc:
         return _error(exc)
@@ -130,7 +142,7 @@ async def update_automation(
 
 async def trigger_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `trigger_automation` tool."""
-    if error := require_admin("manage workspace automations"):
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     try:
         result = await schedules.trigger_agent_schedule(automation_id)
@@ -141,7 +153,7 @@ async def trigger_automation(automation_id: str) -> dict[str, Any]:
 
 async def delete_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `delete_automation` tool."""
-    if error := require_admin("manage workspace automations"):
+    if error := await require_admin("manage workspace automations"):
         return {"ok": False, "error": error}
     try:
         await schedules.delete_agent_schedule(automation_id)

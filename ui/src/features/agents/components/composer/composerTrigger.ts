@@ -9,7 +9,7 @@
 export type ComposerTriggerKind = "path" | "slash-command" | "skill-command"
 
 /** Slash commands open-swe understands. `model` opens the picker rather than editing the prompt. */
-export type ComposerSlashCommand = "plan" | "default" | "model"
+export type ComposerSlashCommand = "plan" | "default" | "model" | "offload"
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind

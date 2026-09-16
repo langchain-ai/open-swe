@@ -15,7 +15,9 @@ from agent.slack.client import (
     store_slack_run_mapping,
 )
 from agent.source_context import SourceContext
+from agent.threads.summary import thread_is_private
 from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
 _MESSAGE_MAX_CHARS = 2800
@@ -42,6 +44,11 @@ def _new_slack_context(
         "triggering_user_name": current.get("triggering_user_name", ""),
         "triggering_user_email": current.get("triggering_user_email", ""),
         "triggering_event_ts": thread_ts,
+        **{
+            key: current[key]
+            for key in ("team_id", "triggering_bot_id", "triggering_bot_app_id")
+            if key in current
+        },
     }
 
 
@@ -95,6 +102,15 @@ async def slack_move_thread(
         }
 
     client = langgraph_client()
+    try:
+        metadata = thread_metadata(await client.threads.get(thread_id))
+    except Exception:
+        return {"success": False, "error": "Cannot verify thread credential scope"}
+    if thread_is_private(metadata):
+        return {
+            "success": False,
+            "error": "Private threads cannot be moved; start a separate public thread instead",
+        }
     active = await get_active_slack_thread(client, thread_id, configured_slack)
     if not active:
         return {"success": False, "error": "Current Slack location is unavailable"}

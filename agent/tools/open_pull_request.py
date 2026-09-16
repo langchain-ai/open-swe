@@ -1,4 +1,4 @@
-"""Open a GitHub pull request attributed to the triggering user."""
+"""Open a GitHub pull request using the thread's credential scope."""
 
 import logging
 from typing import Any
@@ -8,10 +8,12 @@ import httpx2
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.dashboard.agent_usage import record_agent_pr_usage
-from agent.dashboard.plan_store import get_plan_content
+from agent.analytics.usage import record_agent_pr_usage
+from agent.credential_scope import pr_author_login, private_credential_login
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
+from agent.github.pull_requests import PullRequest, ThreadLink
+from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,
@@ -25,12 +27,12 @@ from agent.slack.code_channels import (
     set_context_bar,
     set_view,
 )
+from agent.threads.plan_store import get_plan_content
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
-_USER_TOKEN_SOURCES = ("slack", "linear", "dashboard")
 _REFERENCES_HEADING = "## References"
 _ACCESS_FAILURE_CODE = "github_app_access_missing_or_repo_not_found"
 _BRANCH_FAILURE_CODE = "github_pr_branch_not_visible"
@@ -50,31 +52,39 @@ _REPORTED_RESPONSE_HEADERS = (
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
-    """Return ``(token, kind)`` for opening the PR.
+    """Use the initiator's OAuth for user-owned threads and the bot for system threads."""
+    login = await pr_author_login()
+    if login is None:
+        return await get_github_app_installation_token(), "bot"
+    from agent.dashboard.profiles import get_valid_access_token
 
-    Prefers the triggering user's OAuth token (so the PR is created *as them*)
-    for Slack/Linear/dashboard runs with a mapped GitHub login, resolving it by
-    login from the dashboard OAuth store. Falls back to the GitHub App
-    installation token (creator = open-swe[bot]) for GitHub-triggered runs,
-    unmapped users, or bot-token-only deployments — preserving today's behavior.
+    token = await get_valid_access_token(login)
+    if not token:
+        raise GitHubUserAuthRequired(RunConfig.from_runtime().source or "private", login)
+    return token, "user"
 
-    The token is resolved by login rather than read from the shared thread
-    metadata: Slack thread ids are shared across a conversation, so a cached
-    token could belong to a prior triggering user.
-    """
-    cfg = RunConfig.from_runtime()
-    source = cfg.source
-    github_login = cfg.github_login
 
-    if source in _USER_TOKEN_SOURCES and github_login and github_login.strip():
-        from agent.dashboard.profiles import get_valid_access_token
-
-        user_token = await get_valid_access_token(github_login.strip())
-        if user_token:
-            return user_token, "user"
-        logger.info("No valid user token for %s; opening PR as open-swe[bot]", github_login.strip())
-
-    return await get_github_app_installation_token(), "bot"
+async def _workspace_has_repository(client: httpx2.AsyncClient, owner: str, repo: str) -> bool:
+    token = await get_github_app_installation_token()
+    if not token:
+        return False
+    page = 1
+    while True:
+        response = await client.get(
+            f"{GITHUB_API}/installation/repositories",
+            headers=_auth_headers(token),
+            params={"per_page": "100", "page": str(page)},
+        )
+        if response.status_code != 200:
+            return False
+        repositories = response.json().get("repositories", [])
+        if any(
+            item.get("full_name", "").lower() == f"{owner}/{repo}".lower() for item in repositories
+        ):
+            return True
+        if len(repositories) < 100:
+            return False
+        page += 1
 
 
 def _auth_headers(token: str) -> dict[str, str]:
@@ -591,6 +601,14 @@ async def _record_pr_telemetry(
             merged=merged,
             created_at=details.get("created_at") or pr.get("created_at"),
             merged_at=details.get("merged_at") or pr.get("merged_at"),
+            invocation_id=cfg.invocation_id,
+            model_id=cfg.agent_model_id,
+            source=cfg.source,
+            repository_private=(
+                details.get("base", {}).get("repo", {}).get("private")
+                if isinstance(details.get("base"), dict)
+                else None
+            ),
         )
         if isinstance(thread_id, str) and thread_id:
             repo_private = None
@@ -601,6 +619,7 @@ async def _record_pr_telemetry(
             pr_title = details.get("title") or pr.get("title")
             pr_user = details.get("user") or pr.get("user")
             author = pr_user.get("login") if isinstance(pr_user, dict) else None
+            author_id = pr_user.get("id") if isinstance(pr_user, dict) else None
             author_avatar_url = pr_user.get("avatar_url") if isinstance(pr_user, dict) else None
             diff_stats = {
                 "files": changed_files,
@@ -655,6 +674,28 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            try:
+                await PullRequest(
+                    owner=owner,
+                    repo=repo,
+                    number=pr_number,
+                    state=pr_state,
+                    title=pr_title if isinstance(pr_title, str) else "",
+                    head_ref=head,
+                    base_ref=base,
+                    author=author if isinstance(author, str) else "",
+                    author_github_id=author_id if isinstance(author_id, int) else None,
+                    resolves_thread=resolves_thread,
+                    threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
+                ).save(repository_private=repo_private)
+            except Exception:  # noqa: BLE001
+                # The PR exists on GitHub either way; failing the tool over the
+                # registry write would lose the agent's work.
+                logger.warning(
+                    "Failed to record pull request",
+                    extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+                    exc_info=True,
+                )
             active = await get_active_slack_thread(
                 get_client(),
                 thread_id,
@@ -820,6 +861,22 @@ async def _open_pull_request(
         )
 
     async with httpx2.AsyncClient(timeout=30.0) as client:
+        if (
+            kind == "user"
+            and await private_credential_login() is None
+            and not await _workspace_has_repository(client, owner, repo)
+        ):
+            return _access_failure_payload(
+                owner=owner,
+                repo=repo,
+                head=head,
+                base=base,
+                token_kind=kind,
+                http_status=None,
+                reason="Could not verify the target repository belongs to the workspace GitHub App installation",
+                branch_pushed=None,
+                failed_step="workspace_repo",
+            )
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,

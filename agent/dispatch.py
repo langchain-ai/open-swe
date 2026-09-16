@@ -25,6 +25,7 @@ busy-check and the custom store-queue) with one function that uses:
 """
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -213,7 +214,9 @@ def prepare_run_config(
     if metadata is not None:
         merged_metadata.update(metadata)
     invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
+    started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
+    configurable.setdefault("invocation_started_at", started_at)
     configurable[V3_STREAMING_CONFIG_KEY] = True
     run_config["configurable"] = configurable
     run_config["metadata"] = with_invocation_id(merged_metadata, invocation_id)
@@ -224,7 +227,7 @@ async def create_durable_run(
     thread_id: str,
     assistant_id: str,
     *,
-    input: RunInput,
+    input: RunInput | dict[str, Any],
     source: str,
     config: LangGraphRunConfig | None = None,
     metadata: dict[str, Any] | None = None,

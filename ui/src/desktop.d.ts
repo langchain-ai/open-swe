@@ -157,6 +157,7 @@ declare global {
   interface Window {
     openSweDesktop?: {
       isDesktop: true
+      writeClipboard: (value: string) => Promise<void>
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{
@@ -195,6 +196,7 @@ declare global {
         variable: string | null
         canSignIn?: boolean
       }>
+      openLocalTrace: (threadId: string) => Promise<boolean>
       signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {

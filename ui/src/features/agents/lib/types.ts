@@ -199,12 +199,14 @@ export interface Project {
 }
 
 export type SlackNotificationMode = "always" | "on_action"
+export type AutomationTrigger = "schedule" | "github_issue_opened"
 
 export interface AgentSchedule {
   id: string
   name: string
   prompt: string
-  schedule: string
+  schedule: string | null
+  trigger: AutomationTrigger
   scope: "workspace"
   repo: string | null
   slackChannelId?: string | null
@@ -356,6 +358,7 @@ export interface AgentPullRequestContextResponse {
 }
 
 export interface AgentThread {
+  visibility?: "public" | "private"
   id: string
   title: string
   repo: string
@@ -363,6 +366,7 @@ export interface AgentThread {
   branch: string
   model: string
   effort?: string | null
+  modelSelection?: "auto" | "explicit" | null
   planMode?: boolean
   planStatus?: string | null
   adminThread?: boolean

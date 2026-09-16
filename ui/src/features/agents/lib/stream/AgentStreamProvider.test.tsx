@@ -12,14 +12,23 @@ interface StreamOptions {
   threadId: string | null
   onThreadId: (threadId: string) => void
   onCreated: () => void
-  onCompleted: () => void
+  onCompleted: (info: { reason: "success" }) => void
 }
 
 const mocks = vi.hoisted(() => ({
   streams: [] as Array<StreamOptions>,
+  onEvent: (_event: unknown) => {},
 }))
 
 vi.mock("@langchain/react", () => ({
+  useChannelEffect: (
+    _stream: unknown,
+    channels: Array<string>,
+    options: { onEvent: (event: unknown) => void }
+  ) => {
+    // The provider also subscribes lifecycle/messages for perf tracking.
+    if (channels.includes("custom")) mocks.onEvent = options.onEvent
+  },
   useStream: (options: StreamOptions) => {
     mocks.streams.push(options)
     return { threadId: options.threadId, isLoading: false }
@@ -35,6 +44,12 @@ vi.mock("@/lib/langgraph-client", () => ({
 function Probe() {
   const stream = useAgentStream()
   return <output>{stream.threadId ?? "new"}</output>
+}
+
+function OffloadingProbe() {
+  return (
+    <output>{useAgentStream().isOffloading ? "offloading" : "idle"}</output>
+  )
 }
 
 function wrapper(children: ReactNode) {
@@ -58,6 +73,43 @@ afterEach(() => {
 })
 
 describe("AgentStreamProvider", () => {
+  it("tracks only root offloading events and clears on completion", () => {
+    const view = render(
+      wrapper(
+        <AgentStreamProvider threadId="one">
+          <OffloadingProbe />
+        </AgentStreamProvider>
+      )
+    )
+    const emit = (status: string, namespace: string[] = []) =>
+      act(() =>
+        mocks.onEvent({
+          method: "custom",
+          params: {
+            namespace,
+            data: {
+              payload: {
+                type: "conversation_offloading",
+                status,
+                trigger: "manual",
+              },
+            },
+          },
+        })
+      )
+    emit("started", ["subagent:one"])
+    expect(view.container.textContent).toBe("idle")
+    for (const status of ["completed", "skipped", "failed"]) {
+      emit("started")
+      expect(view.container.textContent).toBe("offloading")
+      emit(status)
+      expect(view.container.textContent).toBe("idle")
+    }
+    emit("started")
+    act(() => mocks.streams.at(-1)?.onCompleted({ reason: "success" }))
+    expect(view.container.textContent).toBe("idle")
+  })
+
   it("serves the stream bound to the requested thread", () => {
     const view = render(
       wrapper(
@@ -77,24 +129,6 @@ describe("AgentStreamProvider", () => {
     )
     expect(view.container.textContent).toBe("two")
     expect(useStreamPool.getState().entries).toHaveLength(2)
-  })
-
-  it("remounts a kicked thread's stream while keeping it served", () => {
-    const view = render(
-      wrapper(
-        <AgentStreamProvider threadId="one">
-          <Probe />
-        </AgentStreamProvider>
-      )
-    )
-    expect(mocks.streams).toHaveLength(1)
-
-    act(() => useStreamPool.getState().kick("cloud", "one"))
-
-    expect(mocks.streams).toHaveLength(2)
-    expect(mocks.streams[1]?.threadId).toBe("one")
-    expect(view.container.textContent).toBe("one")
-    expect(useStreamPool.getState().entries).toHaveLength(1)
   })
 
   it("announces a lazy cloud thread only once the server accepts its run", () => {

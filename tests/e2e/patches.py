@@ -29,8 +29,7 @@ def apply() -> None:
 
     from agent import server
     from agent.github import token as auth
-    from agent.slack import client as slack_utils
-    from agent.slack import code_channels as slack_code_channels
+    from agent.slack import http as slack_http
     from agent.utils import authorship
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
@@ -65,8 +64,7 @@ def apply() -> None:
 
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
-    slack_utils.SLACK_API_BASE_URL = FAKE_SLACK_API
-    slack_code_channels.SLACK_API_BASE_URL = FAKE_SLACK_API
+    slack_http.SLACK_API_BASE_URL = FAKE_SLACK_API
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.
@@ -76,38 +74,41 @@ def apply() -> None:
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
     from agent.dashboard import profiles
-    from agent.dashboard.threads import access as thread_access
     from agent.github import pull_request_context, pull_request_status
+    from agent.threads import access as thread_access
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
         return "dummy-user-oauth-token"
 
+    from agent.webhooks import common as webhook_common
+
     profiles.get_valid_access_token = _dummy_user_token
     thread_access.get_valid_access_token = _dummy_user_token
+    webhook_common.get_valid_access_token = _dummy_user_token
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox
     # provider, so there is nothing to capture from — record the request in the
-    # fake store instead. The environment tools, store writes, name/tag scheme
+    # fake store instead. The workspace tools, store writes, name/tag scheme
     # and status transitions all still run for real.
-    from agent.dashboard import environments as environments_store
     from agent.sandboxes.providers import langsmith as langsmith_integration
+    from agent.workspaces import store as workspaces_store
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
     # The capture path refuses to run off the langsmith provider; with that
     # provider's snapshot API faked above, the E2E's local sandbox is capturable.
-    environments_store.require_capture_support = lambda: None
+    workspaces_store.require_capture_support = lambda: None
 
     # A refresh boots its own builder to run the scripts in. There is no platform
     # to boot one from here, so the local provider stands in and nothing is
     # reclaimed afterwards; the scripts, the capture and the record all run for real.
-    from agent.dashboard import environment_refresh
+    from agent.workspaces import refresh as workspace_refresh
 
-    environment_refresh.require_capture_support = lambda: None
-    environment_refresh._create_builder_sandbox = _fake_builder_sandbox
-    environment_refresh._release_builder_sandbox = _release_nothing
+    workspace_refresh.require_capture_support = lambda: None
+    workspace_refresh._create_builder_sandbox = _fake_builder_sandbox
+    workspace_refresh._release_builder_sandbox = _release_nothing
 
     _applied = True
 

@@ -60,6 +60,27 @@ function openModelPane() {
 }
 
 describe("ModelPicker", () => {
+  it("reaches Auto and models with the keyboard while routing automatically", () => {
+    const { onSelectionChange, panel } = openPicker({ selection: null })
+
+    fireEvent.keyDown(panel, { key: "ArrowRight" })
+    fireEvent.keyDown(panel, { key: "ArrowDown" })
+    fireEvent.keyDown(panel, { key: "Enter" })
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      modelId: "openai:gpt-5.6-sol",
+      effort: "xhigh",
+    })
+
+    fireEvent.click(screen.getByRole("button", { expanded: false }))
+    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
+      key: "ArrowRight",
+    })
+    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
+      key: "Enter",
+    })
+    expect(onSelectionChange).toHaveBeenLastCalledWith(null)
+  })
+
   it("labels the trigger with the selected model and effort", () => {
     render(
       <ModelPicker
@@ -72,6 +93,33 @@ describe("ModelPicker", () => {
     expect(
       screen.getByRole("button", { name: /GPT-5.6 Sol Extra High/ })
     ).toBeTruthy()
+  })
+
+  it("shows the routed mode on the trigger and the model on hover", () => {
+    render(
+      <ModelPicker
+        models={MODELS}
+        selection={null}
+        onSelectionChange={vi.fn()}
+        routed={{ route: "fast", modelId: "google_genai:gemini-3.8-flash" }}
+      />
+    )
+
+    const trigger = screen.getByRole("button", { name: "Auto Fast" })
+    expect(trigger).toBeTruthy()
+    expect(trigger.title).toBe("Routed model: Gemini 3.8 Flash")
+  })
+
+  it("shows plain Auto when no routed model is known yet", () => {
+    render(
+      <ModelPicker
+        models={MODELS}
+        selection={null}
+        onSelectionChange={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
   })
 
   it("shows the selected model's context, reasoning and model row", () => {
@@ -123,7 +171,12 @@ describe("ModelPicker", () => {
       within(models)
         .getAllByRole("option")
         .map((option) => option.textContent)
-    ).toEqual(["GPT-5.6 Sol High", "Gemini 3.8 Flash Medium", "Kimi K3 High"])
+    ).toEqual([
+      "Auto",
+      "GPT-5.6 Sol High",
+      "Gemini 3.8 Flash Medium",
+      "Kimi K3 High",
+    ])
 
     fireEvent.change(screen.getByLabelText("Search models"), {
       target: { value: "kimi" },
