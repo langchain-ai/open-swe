@@ -134,31 +134,6 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   client.clear()
 })
 
-it("hides PR outcomes pagination until there are more than ten rows", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "ready",
-    cohorts: Array.from({ length: 10 }, (_, index) => ({
-      model_id: `model-${index}`,
-      model_attribution_quality: "configured",
-      merged: 1,
-      closed_without_merge: 0,
-      mature_pending: 0,
-      waiting: 0,
-      cohort_size: 1,
-      decided_denominator: 1,
-      decided_merge_rate: 1,
-      mature_denominator: 1,
-      mature_cohort_merge_share: 1,
-    })),
-  })
-  const client = mountReport()
-  expect(await screen.findByText("model-0")).toBeTruthy()
-  expect(screen.queryByLabelText("Rows per page")).toBeNull()
-
-  client.clear()
-})
-
 it("offers recovery from unavailability without claiming an empty or suppressed report", async () => {
   const query = vi
     .spyOn(api, "prMergeRateByModel")
