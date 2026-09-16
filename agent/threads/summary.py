@@ -5,16 +5,18 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlencode
+from uuid import UUID  # noqa: TC003
 
 from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.github.repositories import Repository
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
 from agent.source_context import SourceContext
-from agent.thread_repos import thread_repositories
+from agent.thread_repos import thread_repository_names
 from agent.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -295,9 +297,10 @@ async def _thread_summary(
     *,
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
+    repositories: Mapping[UUID, Repository] | None = None,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
-    repositories = await thread_repositories(metadata)
+    repo_names = await thread_repository_names(metadata, repositories)
     created_at = metadata.get("created_at_ms")
     if not isinstance(created_at, (int, float)):
         created_at = _thread_timestamp_ms(thread, "created_at")
@@ -336,7 +339,7 @@ async def _thread_summary(
     summary: dict[str, Any] = {
         "id": thread_id,
         "title": title,
-        "repos": [repository.full_name for repository in repositories],
+        "repos": repo_names,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
@@ -397,8 +400,8 @@ async def _thread_summary(
         legacy_repo = (
             f"{pr_ref.owner}/{pr_ref.repo}"
             if pr_ref
-            else repositories[0].full_name
-            if len(repositories) == 1
+            else repo_names[0]
+            if len(repo_names) == 1
             else "unknown/unknown"
         )
         legacy_record = {

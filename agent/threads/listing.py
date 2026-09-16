@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from agent.github.repositories import Repository
-from agent.thread_repos import legacy_repo, thread_repository_ids
+from agent.thread_repos import legacy_repo, repository_names, thread_repository_ids
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
@@ -102,17 +102,6 @@ def _search_matches(values: Sequence[object], query: str) -> bool:
     return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
 
 
-def _thread_repo_names(
-    metadata: Mapping[str, Any], repositories: Mapping[UUID, Repository]
-) -> list[str]:
-    """``full_name`` for every repository the thread links to, ids first, legacy after."""
-    ids = thread_repository_ids(metadata)
-    if ids:
-        return [row.full_name for id in ids if (row := repositories.get(id)) is not None]
-    legacy = legacy_repo(metadata)
-    return [legacy.full_name] if legacy else []
-
-
 async def _repositories_by_id(threads: Sequence[ThreadLike]) -> dict[UUID, Repository]:
     """One lookup for every repository id any of ``threads`` links to."""
     ids: list[UUID] = []
@@ -180,7 +169,7 @@ def _metadata_matches_filters(
                 metadata.get("title", "Untitled agent"),
                 *(
                     part
-                    for full_name in _thread_repo_names(metadata, repositories or {})
+                    for full_name in repository_names(metadata, repositories or {})
                     for part in (full_name, *full_name.split("/"))
                 ),
                 metadata.get("branch_name"),
@@ -257,6 +246,7 @@ async def _summarize_thread(
     thread: ThreadLike,
     *,
     refresh_active_run: bool = True,
+    repositories: Mapping[UUID, Repository] | None = None,
 ) -> dict[str, Any]:
     latest_run_status = latest_run_id = None
     if refresh_active_run and _should_refresh_latest_run(thread):
@@ -267,6 +257,7 @@ async def _summarize_thread(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
+        repositories=repositories,
     )
 
 
@@ -275,6 +266,9 @@ async def _summarize_threads(
     threads: list[ThreadLike],
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
+    # One repository lookup for the whole page; rendering a thread must not
+    # cost a query of its own.
+    repositories = await _repositories_by_id(threads)
 
     async def summarize(thread: ThreadLike) -> dict[str, Any]:
         if not _should_refresh_latest_run(thread):
@@ -282,11 +276,13 @@ async def _summarize_threads(
                 client,
                 thread,
                 refresh_active_run=False,
+                repositories=repositories,
             )
         async with semaphore:
             return await _summarize_thread(
                 client,
                 thread,
+                repositories=repositories,
             )
 
     return list(await asyncio.gather(*(summarize(thread) for thread in threads)))
@@ -416,7 +412,7 @@ async def _pinned_thread_summaries(
     login: str,
     email: str | None,
 ) -> list[dict[str, Any]]:
-    async def load(thread_id: str) -> dict[str, Any] | None:
+    async def load(thread_id: str) -> ThreadLike | None:
         try:
             thread = await client.threads.get(thread_id)
         except Exception:  # noqa: BLE001
@@ -426,12 +422,18 @@ async def _pinned_thread_summaries(
             _thread_metadata(thread), login, email
         ):
             return None
-        return await _summarize_thread(client, thread)
+        return thread
 
-    summaries = await asyncio.gather(
+    loaded = await asyncio.gather(
         *(load(thread_id) for thread_id in await list_thread_pin_ids(login))
     )
-    return [summary for summary in summaries if summary is not None]
+    threads = [thread for thread in loaded if thread is not None]
+    repositories = await _repositories_by_id(threads)
+    return list(
+        await asyncio.gather(
+            *(_summarize_thread(client, thread, repositories=repositories) for thread in threads)
+        )
+    )
 
 
 async def list_dashboard_pinned_threads(
@@ -462,7 +464,7 @@ async def list_dashboard_thread_projects(
     projects: dict[str, dict[str, Any]] = {}
     for thread in candidates:
         updated_at = _thread_updated_ms(thread)
-        for full_name in _thread_repo_names(_thread_metadata(thread), repositories):
+        for full_name in repository_names(_thread_metadata(thread), repositories):
             current = projects.get(full_name.lower())
             if current is None or updated_at > current["updatedAt"]:
                 projects[full_name.lower()] = {

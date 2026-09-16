@@ -9,7 +9,7 @@ them to a :class:`Repository` row and writers never produce them.
 import logging
 from collections.abc import Iterable, Mapping
 from typing import Any
-from uuid import UUID
+from uuid import UUID  # noqa: TC003
 
 from agent.github.repositories import Repository
 from agent.run_config import Repo
@@ -56,6 +56,33 @@ async def thread_repositories(metadata: Mapping[str, Any]) -> list[Repository]:
         return await Repository.get_many(ids)
     legacy = legacy_repo(metadata)
     return [await Repository.ensure(legacy.full_name)] if legacy else []
+
+
+def repository_names(
+    metadata: Mapping[str, Any], repositories: Mapping[UUID, Repository]
+) -> list[str]:
+    """``full_name`` for every repository the thread names, from rows already fetched."""
+    ids = thread_repository_ids(metadata)
+    if ids:
+        return [row.full_name for id in ids if (row := repositories.get(id)) is not None]
+    legacy = legacy_repo(metadata)
+    return [legacy.full_name] if legacy else []
+
+
+async def thread_repository_names(
+    metadata: Mapping[str, Any],
+    repositories: Mapping[UUID, Repository] | None = None,
+) -> list[str]:
+    """:func:`repository_names`, fetching the rows when the caller has none.
+
+    Unlike :func:`thread_repositories` this never registers a row, so rendering
+    a thread stays a read. Pass ``repositories`` for a page of threads so the
+    page costs one lookup instead of one per thread.
+    """
+    if repositories is None:
+        ids = thread_repository_ids(metadata)
+        repositories = {row.id: row for row in await Repository.get_many(ids)}
+    return repository_names(metadata, repositories)
 
 
 def repository_ids_metadata(repositories: Iterable[Repository]) -> list[str]:
