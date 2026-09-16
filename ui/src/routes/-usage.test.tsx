@@ -194,7 +194,7 @@ it("shows plain-language PR outcomes while keeping cohort details available", as
   client.clear()
 })
 
-it("shortens model paths across usage tables", async () => {
+it("shortens model paths while preserving providers across usage tables", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
     ...captured,
     status: "ready",
@@ -238,7 +238,7 @@ it("shortens model paths across usage tables", async () => {
   })
 
   const client = mountReport()
-  expect(await screen.findAllByText("glm-5p3-flash")).toHaveLength(2)
+  expect(await screen.findAllByText("fireworks:glm-5p3-flash")).toHaveLength(2)
   expect(screen.queryByText(/accounts\/fireworks\/models/)).toBeNull()
   client.clear()
 })
