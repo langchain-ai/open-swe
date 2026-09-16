@@ -56,6 +56,10 @@ class ModelSelectionState(AgentState):
     plan_mode: NotRequired[bool]
 
 
+def normalize_route(route: PersistedRoute) -> Route:
+    return "fast" if route == "fast_alt" else route
+
+
 async def _emit_routed_model(
     models: Mapping[str, BaseChatModel],
     route_model_ids: Mapping[str, str],
@@ -108,7 +112,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         if state.get("plan_mode") if plan_mode is None else plan_mode:
             return "performance"
         if model_route := state.get("model_route"):
-            return "fast" if model_route == "fast_alt" else model_route
+            return normalize_route(model_route)
         if self._routing_mode == "performance":
             return "performance"
         messages = state.get("messages", [])
@@ -156,9 +160,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             if request.state.get("plan_mode")
             else request.state.get("model_route", "balanced")
         )
-        if route == "fast_alt":
-            route = "fast"
-        model = self._models.get(route) or self._models.get("balanced")
+        model = self._models.get(normalize_route(route)) or self._models.get("balanced")
         if model is None:
             model = self._models["balanced"]
         return await handler(request.override(model=model))
