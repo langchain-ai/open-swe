@@ -602,8 +602,8 @@ async def test_pr_attribution_migration_repairs_only_trustworthy_opening_run(ana
                     "opened": DAY,
                 },
             )
-        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0013")
-        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0013")
+        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0015")
+        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0015")
     async with transaction() as conn:
         rows = {
             row["pr_id"]: row["originating_model_id"]
