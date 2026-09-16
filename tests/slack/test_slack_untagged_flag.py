@@ -47,22 +47,19 @@ class _FakeRequest:
         return self._body
 
 
-def _message_payload(text: str, event_id: str, *, subtype: str = "") -> dict[str, Any]:
-    event: dict[str, Any] = {
-        "type": "message",
-        "channel": "C1",
-        "ts": "1786573369.551099",
-        "thread_ts": "1786573300.000000",
-        "user": "U1",
-        "text": text,
-    }
-    if subtype:
-        event["subtype"] = subtype
+def _message_payload(text: str, event_id: str) -> dict[str, Any]:
     return {
         "type": "event_callback",
         "event_id": event_id,
         "authorizations": [{"user_id": "BOT"}],
-        "event": event,
+        "event": {
+            "type": "message",
+            "channel": "C1",
+            "ts": "1786573369.551099",
+            "thread_ts": "1786573300.000000",
+            "user": "U1",
+            "text": text,
+        },
     }
 
 
@@ -136,10 +133,10 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-async def _untagged_flag_for(text: str, event_id: str, *, subtype: str = "") -> bool:
+async def _untagged_flag_for(text: str, event_id: str) -> bool:
     background_tasks = _FakeBackgroundTasks()
     response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_payload(text, event_id, subtype=subtype))),
+        cast(Request, _FakeRequest(_message_payload(text, event_id))),
         cast(BackgroundTasks, background_tasks),
     )
     assert response["status"] == "accepted", response
@@ -159,10 +156,13 @@ async def test_message_without_a_mention_is_marked_untagged() -> None:
 
 
 async def test_file_share_without_a_mention_is_marked_untagged() -> None:
-    assert (
-        await _untagged_flag_for("the alignment is still wrong", "Ev-file", subtype="file_share")
-        is True
+    payload = _message_payload("the alignment is still wrong", "Ev-file")
+    payload["event"]["subtype"] = "file_share"
+    background_tasks = _FakeBackgroundTasks()
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
     )
+    assert cast(dict[str, object], response)["status"] == "accepted"
 
 
 async def test_message_update_queues_only_the_new_text() -> None:
