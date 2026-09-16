@@ -9,6 +9,11 @@ from langgraph.runtime import Runtime
 from agent import reviewer
 
 
+@pytest.fixture(autouse=True)
+def mock_repo_dir_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(reviewer, "resolve_repo_dir", AsyncMock(return_value="/workspace/repo"))
+
+
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     prompt = reviewer._reviewer_system_prompt(
         "/workspace/repo",

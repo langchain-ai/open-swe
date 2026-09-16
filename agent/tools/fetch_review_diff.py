@@ -6,7 +6,7 @@ from typing import Any
 from agent.review.diff import changed_files, materialize_review_diff, review_diff_range
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
-from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.paths import resolve_repo_dir
 
 _MAX_CHANGED_FILES = 200
 _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -31,10 +31,10 @@ async def fetch_review_diff() -> dict[str, Any]:
             re_review=bool(cfg.re_review),
         )
         sandbox_backend = get_cached_sandbox_backend(thread_id)
-        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+        repo_dir = await resolve_repo_dir(sandbox_backend, repo_name)
         materialized = await materialize_review_diff(
             sandbox_backend,
-            work_dir=f"{work_dir}/{repo_name}",
+            work_dir=repo_dir,
             base_ref=base_ref,
             head_ref=head_ref,
             merge_base=merge_base,

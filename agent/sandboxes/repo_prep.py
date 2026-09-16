@@ -39,14 +39,18 @@ def _prep_command(
     q_repo_dir = shlex.quote(repo_dir)
     q_full_name = shlex.quote(f"{repo_owner}/{repo_name}")
     q_repo_name = shlex.quote(repo_name)
+    q_origin = shlex.quote(f"https://github.com/{repo_owner}/{repo_name}.git")
     q_head = shlex.quote(head_sha) if head_sha else ""
 
     lines = [
         "set -e",
-        f"if [ -d {q_repo_dir}/.git ]; then",
+        f"if git -C {q_repo_dir} rev-parse --git-dir >/dev/null 2>&1; then",
         # Tolerate fetch-all failures: the targeted head/base fetches below
         # are what the checkout actually needs.
         f"  cd {q_repo_dir} && {{ git fetch --all --quiet || true; }}",
+        f"elif [ -d {q_repo_dir} ]; then",
+        f"  cd {q_repo_dir} && git init --quiet",
+        f"  if git remote get-url origin >/dev/null 2>&1; then git remote set-url origin {q_origin}; else git remote add origin {q_origin}; fi",
         "else",
         f"  cd {q_work_dir} && gh repo clone {q_full_name} && cd {q_repo_name}",
         "fi",
