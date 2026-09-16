@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import BigInteger, Uuid, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from agent.analytics.attribution import reject_false_openers
 from agent.analytics.events import EventEnvelope, EventName, PROpenedPayload
 from agent.analytics.summaries import mark_dirty
 from agent.config import ENV
@@ -53,7 +54,7 @@ async def ingest(event: EventEnvelope) -> bool:
         elif event.event_name == EventName.FEEDBACK_WITHDRAWN:
             subject_id = event.payload.model_dump()["submission_event_id"]
         opening_run_id: UUID | None = None
-        if event.event_name == EventName.RUN_STARTED:
+        if event.event_name in {EventName.RUN_STARTED, EventName.PR_RUN_LINKED}:
             opening_run_id = event.run_id
         elif event.event_name == EventName.PR_OPENED:
             opening_run_id = cast(PROpenedPayload, event.payload).opening_run_id
@@ -117,6 +118,7 @@ async def _repair_pr_attribution(
     pr_id: UUID | None = None,
     run_id: UUID | None = None,
 ) -> None:
+    await reject_false_openers(conn, workspace_id=workspace_id, pr_id=pr_id, run_id=run_id)
     await conn.execute(
         text(
             """
@@ -273,6 +275,9 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "link_role": event.payload.model_dump()["link_role"],
                 "occurred_at": event.occurred_at,
             },
+        )
+        await reject_false_openers(
+            conn, workspace_id=event.workspace_id, pr_id=event.pr_id, run_id=event.run_id
         )
     elif name == EventName.FEEDBACK_SUBMITTED:
         payload = event.payload.model_dump(mode="json")

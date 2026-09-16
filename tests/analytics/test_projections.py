@@ -7,14 +7,16 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import emitter, identity, ingestion
+from agent.analytics import attribution, emitter, identity, ingestion
 from agent.analytics.events import (
     EventName,
     FeedbackSubmittedPayload,
     FeedbackWithdrawnPayload,
     FindingStatePayload,
     FindingSurfacedPayload,
+    PRObservedPayload,
     PROpenedPayload,
+    PRRunLinkedPayload,
     PRStatePayload,
     RunCompletedPayload,
     RunCostRecordedPayload,
@@ -796,3 +798,220 @@ async def test_run_start_preserves_preparation_link_in_either_delivery_order(
         assert row["preparation_run_id"] == preparation_id
         assert row["started_at"] == DAY
         assert row["terminal_at"] == DAY + timedelta(days=1)
+
+
+@pytest.mark.parametrize(
+    "order", [(0, 1, 2), (2, 1, 0), (1, 0, 2), (0, 2, 1), (1, 2, 0), (2, 0, 1), "concurrent"]
+)
+@pytest.mark.parametrize("has_model", [False, True])
+async def test_false_opening_is_rejected_across_delivery_and_replay(analytics_db, order, has_model):
+    workspace, transaction = analytics_db
+    pr_id, run_id, model_id = uuid4(), uuid4(), uuid4()
+    events = [
+        event(
+            workspace,
+            EventName.PR_OPENED,
+            PROpenedPayload(
+                opening_run_id=run_id,
+                originating_model_id=model_id if has_model else None,
+                model_attribution_quality="configured" if has_model else "unavailable",
+            ),
+            pr_id=pr_id,
+            repository_id=uuid4(),
+        ),
+        event(
+            workspace,
+            EventName.RUN_STARTED,
+            RunStartedPayload(configured_model_id=model_id, model_attribution_quality="configured"),
+            run_id=run_id,
+            day=12,
+        ),
+        event(
+            workspace,
+            EventName.PR_RUN_LINKED,
+            PRRunLinkedPayload(link_role="opening"),
+            pr_id=pr_id,
+            run_id=run_id,
+            day=12,
+        ),
+    ]
+    follow_up = event(
+        workspace,
+        EventName.PR_RUN_LINKED,
+        PRRunLinkedPayload(link_role="follow_up"),
+        pr_id=pr_id,
+        run_id=run_id,
+        day=12,
+    )
+    merged = event(workspace, EventName.PR_MERGED, PRStatePayload(), pr_id=pr_id, day=13)
+    await ingestion.ingest(merged)
+    await ingestion.ingest(
+        event(workspace, EventName.PR_OBSERVED, PRObservedPayload(additions=42), pr_id=pr_id)
+    )
+    await ingestion.ingest(follow_up)
+    if order == "concurrent":
+        await asyncio.gather(*(ingestion.ingest(item) for item in events))
+        order = (0, 1, 2)
+    else:
+        for index in order:
+            await ingestion.ingest(events[index])
+    async with transaction() as conn:
+        for _ in range(2):
+            for index in reversed(order):
+                await ingestion._project(conn, events[index])
+            await ingestion._repair_pr_attribution(conn, workspace_id=workspace)
+        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
+        assert row["opening_run_id"] is None
+        assert row["originating_model_id"] is None
+        assert row["model_attribution_quality"] == "unavailable"
+        assert row["current_state"] == "merged"
+        assert row["latest_transition_at"] == DAY + timedelta(days=13)
+        links = (
+            (await conn.execute(text("SELECT run_id, link_role FROM pr_run_link_projection")))
+            .tuples()
+            .all()
+        )
+        assert links == [(run_id, "follow_up")]
+        assert await conn.scalar(text("SELECT additions FROM pr_usage_projection")) == 42
+        assert await conn.scalar(text("SELECT count(*) FROM events")) == 6
+    for item in events:
+        assert not await ingestion.ingest(item)
+
+
+@pytest.mark.parametrize(
+    "skew", [None, timedelta(minutes=5), timedelta(hours=24), timedelta(days=-1)]
+)
+async def test_opening_without_definite_contradiction_is_preserved(analytics_db, skew):
+    workspace, transaction = analytics_db
+    pr_id, run_id, model_id = uuid4(), uuid4(), uuid4()
+    if skew is not None:
+        started = event(
+            workspace,
+            EventName.RUN_STARTED,
+            RunStartedPayload(configured_model_id=model_id, model_attribution_quality="configured"),
+            run_id=run_id,
+        ).model_copy(update={"occurred_at": DAY + skew})
+        await ingestion.ingest(started)
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.PR_OPENED,
+            PROpenedPayload(opening_run_id=run_id, model_attribution_quality="unavailable"),
+            pr_id=pr_id,
+            repository_id=uuid4(),
+        )
+    )
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.PR_RUN_LINKED,
+            PRRunLinkedPayload(link_role="opening"),
+            pr_id=pr_id,
+            run_id=run_id,
+        )
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
+        assert row["opening_run_id"] == run_id
+        assert row["originating_model_id"] == (model_id if skew is not None else None)
+        assert await conn.scalar(text("SELECT link_role FROM pr_run_link_projection")) == "opening"
+
+
+async def test_historical_correction_is_scoped_read_only_and_idempotent(analytics_db, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    workspace, transaction = analytics_db
+    other_workspace, pr_id, run_id, model_id = uuid4(), uuid4(), uuid4(), uuid4()
+    review_run = uuid4()
+    raw_events = []
+    with monkeypatch.context() as patch:
+        patch.setattr(ingestion, "reject_false_openers", AsyncMock())
+        for scope in (workspace, other_workspace):
+            for item in (
+                event(
+                    scope,
+                    EventName.RUN_STARTED,
+                    RunStartedPayload(
+                        configured_model_id=model_id, model_attribution_quality="configured"
+                    ),
+                    run_id=run_id,
+                    thread_id=uuid4(),
+                    day=12,
+                ),
+                event(
+                    scope,
+                    EventName.PR_OPENED,
+                    PROpenedPayload(
+                        opening_run_id=run_id,
+                        originating_model_id=model_id,
+                        model_attribution_quality="configured",
+                    ),
+                    pr_id=pr_id,
+                    repository_id=uuid4(),
+                ),
+                event(
+                    scope,
+                    EventName.PR_RUN_LINKED,
+                    PRRunLinkedPayload(link_role="opening"),
+                    pr_id=pr_id,
+                    run_id=run_id,
+                ),
+                event(
+                    scope,
+                    EventName.PR_RUN_LINKED,
+                    PRRunLinkedPayload(link_role="review"),
+                    pr_id=pr_id,
+                    run_id=review_run,
+                ),
+            ):
+                raw_events.append(item)
+                await ingestion.ingest(item)
+    async with transaction() as conn:
+        before = (await conn.execute(text("SELECT * FROM events ORDER BY event_id"))).all()
+        runs = (
+            await conn.execute(text("SELECT * FROM run_projection ORDER BY workspace_id"))
+        ).all()
+        assert await attribution.reject_false_openers(
+            conn, workspace_id=workspace, pr_id=pr_id, apply=False
+        ) == [pr_id]
+        assert (
+            await conn.scalar(
+                text("SELECT count(*) FROM pr_projection WHERE opening_run_id IS NOT NULL")
+            )
+            == 2
+        )
+        assert await attribution.reject_false_openers(
+            conn, workspace_id=workspace, pr_id=pr_id
+        ) == [pr_id]
+        assert (
+            await attribution.reject_false_openers(conn, workspace_id=workspace, pr_id=pr_id) == []
+        )
+        for item in raw_events:
+            if item.workspace_id == workspace:
+                await ingestion._project(conn, item)
+        assert (await conn.execute(text("SELECT * FROM events ORDER BY event_id"))).all() == before
+        assert (
+            await conn.execute(text("SELECT thread_id FROM run_projection ORDER BY workspace_id"))
+        ).all() == [(row.thread_id,) for row in runs]
+        rows = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT workspace_id, opening_run_id, originating_model_id FROM pr_projection"
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+        assert set(rows) == {(workspace, None, None), (other_workspace, run_id, model_id)}
+        links = (
+            (await conn.execute(text("SELECT workspace_id, link_role FROM pr_run_link_projection")))
+            .tuples()
+            .all()
+        )
+        assert set(links) == {
+            (workspace, "review"),
+            (other_workspace, "opening"),
+            (other_workspace, "review"),
+        }
