@@ -34,20 +34,17 @@ durable record.
 2. **Open a proposal PR.** Copy [`TEMPLATE.md`](TEMPLATE.md), choose the next unused four-digit
    number, and add `NNNN-short-title.md` with status `Draft`. Link the canonical discussion. Number
    collisions are resolved during review; numbers do not imply priority.
-3. **Merge the draft.** Maintainers review the document for clarity, scope, and completeness.
-   Merging publishes the draft on `main`; it does **not** accept the proposal. Discussion should
-   continue in the linked public forum so feedback is not split across closed PRs and private
-   conversations.
-4. **Resolve it.** The author incorporates material feedback. Maintainers responsible for the
-   affected area determine rough consensus and open or approve a small PR changing the status to
-   `Accepted`, `Rejected`, or `Withdrawn`, adding a dated resolution and its rationale. A proposal
-   without sufficient consensus remains a draft or is rejected; acceptance is never implied by
-   inactivity.
-5. **Implement separately.** Implementation PRs link the accepted OEP. An accepted OEP records
+3. **Review and decide in the PR.** The author incorporates material feedback. Maintainers
+   responsible for the affected area determine rough consensus. Before merging, set the status to
+   `Accepted` (or `Active` for a process OEP). Merging to `main` approves the proposal; the PR records
+   the decision and rationale, so no separate resolution section is needed. Rejected or withdrawn
+   proposals are closed without merging. A proposal without sufficient consensus remains an open
+   draft PR; acceptance is never implied by inactivity.
+4. **Implement separately.** Implementation PRs link the accepted OEP. An accepted OEP records
    direction, not a guarantee that every implementation detail or the implementation itself will
    ship.
 
-Maintainers may fast-track an uncontroversial or urgent decision, but the proposal and resolution
+Maintainers may fast-track an uncontroversial or urgent decision, but the approved proposal
 must still be recorded on `main`. Anyone may author an OEP; no editor, sponsor, scheduled meeting,
 or separate repository is required.
 
@@ -55,16 +52,16 @@ or separate repository is required.
 
 | Status | Meaning |
 |---|---|
-| `Draft` | Published for discussion; no decision has been made. |
+| `Draft` | Proposed in an open PR; no decision has been made. |
 | `Active` | A process OEP that remains in force and may evolve. |
 | `Accepted` | The direction is approved; implementation may proceed. |
 | `Rejected` | The proposal was considered and declined. |
 | `Withdrawn` | The authors no longer propose it. |
 | `Superseded` | A later OEP replaces this decision. |
 
-Accepted, rejected, withdrawn, and superseded OEPs are historical records. Substantive changes
-require a new OEP; corrections and links may be added in place. Active process OEPs may evolve
-through normal pull requests.
+Accepted and superseded OEPs are historical records on `main`; rejected and withdrawn proposals
+remain in closed PRs. Substantive changes require a new OEP; corrections and links may be added in
+place. Active process OEPs may evolve through normal pull requests.
 
 ## Required content
 
@@ -73,9 +70,8 @@ Keep an OEP as short as the decision allows. Every OEP includes:
 - number, title, authors, status, creation date, and discussion link;
 - a summary and motivation;
 - the proposed decision, including scope and non-goals;
-- security and privacy implications;
-- meaningful alternatives and unresolved questions; and
-- after a decision, a dated resolution with rationale.
+- security and privacy implications; and
+- meaningful alternatives and unresolved questions.
 
 Delete empty optional sections rather than filling them with boilerplate. Diagrams, prototypes,
 and implementation links are welcome when they clarify the decision.
@@ -87,13 +83,12 @@ The process borrows selectively from established systems:
 - [Go proposals](https://github.com/golang/proposal/blob/master/README.md) begin with lightweight
   discussion and require a design document only when needed. OEPs retain that proportionality but
   keep the durable proposal in the Open SWE repository.
-- [Python PEPs](https://peps.python.org/pep-0001/) separate publishing a draft from accepting it,
-  preserve rejected decisions, and record a canonical discussion and resolution. OEPs keep those
-  durable-history properties without editors, delegates, or a separate rendering system.
+- [Python PEPs](https://peps.python.org/pep-0001/) preserve decisions and record a canonical
+  discussion. OEPs keep that durable history in documents and PRs without editors, delegates,
+  or a separate rendering system.
 - [Rust RFCs](https://rust-lang.github.io/rfcs/0002-rfc-process.html) use Markdown pull requests to
-  build rough consensus before implementation. OEPs use the same familiar contribution path, but
-  draft proposals are merged to `main` before resolution so work-in-progress decisions remain
-  discoverable.
+  build rough consensus before implementation. OEPs use the same familiar contribution path:
+  discussion happens in the PR, and merging records approval.
 - [Kubernetes KEPs](https://github.com/kubernetes/enhancements/blob/master/keps/sig-architecture/0000-kep-process/README.md)
   emphasize cross-project coordination, risks, and durable project knowledge. Their release and
   production-readiness machinery is intentionally omitted here.

@@ -35,8 +35,3 @@ Which credible alternatives were considered, and why is this direction preferred
 ## Unresolved questions
 
 Which decisions must be settled before acceptance? Delete this section when there are none.
-
-## Resolution
-
-Added when the status changes from `Draft`: date, decision, rationale, and a link to the public
-resolution.
