@@ -1245,12 +1245,15 @@ async def _process_slack_mention_impl(
                 triggering_user_id=user_id,
                 agent_thread_id=thread_id,
             )
-    if not code_channel and isinstance(run_id, str) and run_id:
+    # A DM gets no thinking status: the session names no Slack thread to hang one
+    # on, and a per-message anchor cannot be cleared reliably — every message
+    # funnels into the one agent thread, so a finishing run sees the next one
+    # still active and leaves its own indicator spinning for good.
+    if not code_channel and not dm_session and isinstance(run_id, str) and run_id:
         await show_slack_thinking_status(
             client=langgraph_client,
             thread_id=thread_id,
             run_id=run_id,
             channel_id=channel_id,
-            # The session timestamp names no Slack thread to hang a status on.
-            thread_ts=(reply_thread_ts or original_message_ts) if dm_session else thread_ts,
+            thread_ts=thread_ts,
         )
