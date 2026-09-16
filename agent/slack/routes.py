@@ -10,6 +10,13 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
+from agent.slack.ask import (
+    ASK_COMMAND,
+    MAX_QUESTION_CHARS,
+    SlackAskRequest,
+    ask_thread_id,
+    process_slack_ask,
+)
 from agent.slack.client import SlackChannelContext
 from agent.slack.dm import DM_SESSION_TS, dm_session_enabled, is_dm_channel
 from agent.slack.failures import (
@@ -39,6 +46,7 @@ from agent.slack.responses import (
     ignored,
 )
 from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
@@ -567,6 +575,54 @@ async def slack_webhook(
         return ignored("Duplicate Slack event delivery")
 
     return await answer_slack_request(target, dispatch)
+
+
+@router.post("/webhooks/slack/commands")
+async def slack_command(
+    request: common.Request, background_tasks: common.BackgroundTasks
+) -> SlashCommandResponse:
+    """Answer a single `/oswe` question, ephemerally and without a Slack thread."""
+    body = await request.body()
+    _verify_signature(request, body, "commands")
+
+    form = common.parse_qs(body.decode("utf-8"))
+    value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    channel_id = value("channel_id")
+    user_id = value("user_id")
+    command = value("command")
+    question = value("text")
+    if not (channel_id and user_id):
+        return ephemeral("That command was invalid.")
+    if not question:
+        return ephemeral(
+            f"Ask a question: `{command or ASK_COMMAND} how does thread routing work?`"
+        )
+    if len(question) > MAX_QUESTION_CHARS:
+        return ephemeral(
+            f"That question is too long for `{command or ASK_COMMAND}`. "
+            "Tag Open SWE in a message instead."
+        )
+
+    event_id = f"slack-ask:{value('trigger_id') or hashlib.sha256(body).hexdigest()}"
+    if not await common.claim_slack_event(event_id):
+        return ephemeral("Open SWE is already working on that question.")
+    thread_id = ask_thread_id(channel_id, user_id)
+    background_tasks.add_task(
+        process_slack_ask,
+        SlackAskRequest(
+            channel_id=channel_id,
+            user_id=user_id,
+            question=question,
+            thread_id=thread_id,
+            command=command or ASK_COMMAND,
+            team_id=value("team_id"),
+        ),
+    )
+    acknowledgement = "Working on it — the answer will appear here, visible only to you."
+    dashboard_url = dashboard_thread_url(thread_id)
+    if dashboard_url:
+        acknowledgement += f" <{dashboard_url}|Follow along in Web>"
+    return ephemeral(acknowledgement)
 
 
 @router.post("/webhooks/slack/code-channel-commands")

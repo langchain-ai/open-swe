@@ -95,6 +95,11 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("visibility", "public") != "public"
 
 
+def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
+    """A `/oswe` question thread: readable and promptable, but kept out of thread lists."""
+    return metadata.get("unlisted") is True
+
+
 def thread_is_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> bool:

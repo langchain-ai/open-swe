@@ -109,6 +109,7 @@ from agent.slack.client import (
     lookup_slack_thread_id,  # noqa: F401
     normalize_slack_channel_context,  # noqa: F401
     parse_slack_ts,  # noqa: F401
+    post_slack_ephemeral_message,
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
@@ -542,6 +543,7 @@ async def upsert_agent_thread_metadata(
     visibility: str = "public",
     owner_login: str = "",
     owner_type: str = "user",
+    unlisted: bool = False,
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -577,6 +579,10 @@ async def upsert_agent_thread_metadata(
         metadata["title"] = title[:80]
     if workspace:
         metadata["workspace"] = workspace
+    # Only ever set here: the dashboard clears it when someone continues the
+    # thread on the web, and that promotion must survive later Slack events.
+    if unlisted:
+        metadata["unlisted"] = True
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -931,6 +937,7 @@ async def post_account_link_prompt(
     user_email: str | None,
     reason: str = "unlinked",
     agent_thread_id: str | None = None,
+    ephemeral: bool = False,
 ) -> None:
     """Prompt a Slack user to connect their account via the dashboard.
 
@@ -962,7 +969,12 @@ async def post_account_link_prompt(
             "again."
         )
     try:
-        await post_slack_thread_reply(channel_id, thread_ts, text, agent_thread_id=agent_thread_id)
+        if ephemeral:
+            await post_slack_ephemeral_message(channel_id, user_id, text)
+        else:
+            await post_slack_thread_reply(
+                channel_id, thread_ts, text, agent_thread_id=agent_thread_id
+            )
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 

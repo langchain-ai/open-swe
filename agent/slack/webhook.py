@@ -623,7 +623,7 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
-async def _workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo | None:
+async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo | None:
     """Keep a defaulted repository unless it belongs to another workspace.
 
     Nobody named this repository, so it did not pick the workspace. Handing an
@@ -1056,7 +1056,7 @@ async def _process_slack_mention_impl(
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
     if repo is not None and not resolution.explicit:
-        repo = await _workspace_scoped_default_repo(repo, thread_workspace)
+        repo = await workspace_scoped_default_repo(repo, thread_workspace)
     repo_dict = repo.model_dump() if repo else None
 
     repo_hint_section = (
