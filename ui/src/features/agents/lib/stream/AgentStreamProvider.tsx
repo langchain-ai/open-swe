@@ -152,6 +152,12 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     if (!stream.isLoading) pool().streamLive(entry.id)
   }, [entry.id, pool, stream.isLoading])
 
+  useEffect(() => {
+    const thread = stream.getThread()
+    if (!thread) return
+    return thread.onError(() => pool().streamLive(entry.id))
+  }, [entry.id, pool, stream])
+
   return null
 }
 
