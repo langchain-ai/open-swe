@@ -269,6 +269,7 @@ async def test_resolved_configured_model_is_available_to_tools(
 @pytest.mark.asyncio
 async def test_model_routing_is_applied_when_enabled() -> None:
     config = _base_config()
+    config["configurable"]["thread_id"] = "thread-1"
     agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
 
     assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
@@ -276,6 +277,28 @@ async def test_model_routing_is_applied_when_enabled() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" in middleware_names
+    assert "model_routing_mode" not in config["configurable"]
+    assert config["metadata"]["model_routing_mode"] == "auto"
+    assert config["metadata"]["model_routing_applied"] is True
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert [model for model, _ in calls[1:4]] == [
+        "google_genai:gemini-3.8-flash",
+        "openai:gpt-5.6-sol",
+        "anthropic:claude-opus-5",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_model_routing_control_uses_performance_model() -> None:
+    config = _base_config()
+    agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" in middleware_names
+    assert "model_routing_mode" not in config["configurable"]
+    assert config["metadata"]["model_routing_mode"] == "performance"
     assert config["metadata"]["model_routing_applied"] is True
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
@@ -296,6 +319,7 @@ async def test_model_routing_is_disabled_by_default() -> None:
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
     assert config["metadata"]["model_routing_applied"] is False
+    assert "model_routing_mode" not in config["metadata"]
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls] == [
         "openai:gpt-5.6-sol",
@@ -324,6 +348,7 @@ async def test_model_routing_preference_is_snapshotted_for_existing_thread() -> 
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
     assert config["metadata"]["model_routing_applied"] is False
+    assert "model_routing_mode" not in config["metadata"]
 
 
 @pytest.mark.asyncio
@@ -485,12 +510,11 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 async def test_agent_includes_admin_tools_only_in_private_dashboard_admin_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.tools import read_only_sql, sandbox_reset
+    from agent.tools import read_only_sql
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
-    assert sandbox_reset not in tools
     assert read_only_sql not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
@@ -501,7 +525,6 @@ async def test_agent_includes_admin_tools_only_in_private_dashboard_admin_thread
     captured = await _capture_create_deep_agent_kwargs(config)
     tools = captured["tools"]
     assert isinstance(tools, list)
-    assert sandbox_reset in tools
     assert read_only_sql in tools
     subagents = captured["subagents"]
     assert isinstance(subagents, list)

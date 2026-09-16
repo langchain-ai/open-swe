@@ -1033,6 +1033,7 @@ GH_PR_AGENT_STATE_ACTIONS = frozenset(
 )
 _TERMINAL_PR_STATES = frozenset(["closed", "merged"])
 _PRS_CLOSED_ATTENTION_REASON = "prs_closed"
+PR_MERGED_FEEDBACK_KEY = "pr_merged"
 
 
 def _pr_linked(metadata: Mapping[str, Any]) -> bool:
@@ -1355,20 +1356,32 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
 
 
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
-    try:
-        await create_langsmith_thread_feedback(
+    """Record merge feedback on the thread's trace under two keys.
+
+    ``github_pr_merged:<url>`` stays unique per PR; ``pr_merged`` is constant
+    across threads so LangSmith can filter and count merges project-wide.
+
+    Args:
+        thread_id: LangGraph thread the PR was opened from.
+        pr_url: Stored as the feedback comment.
+    """
+    source_info = {"source": "github_pr_merged", "thread_id": thread_id, "pr_url": pr_url}
+    await asyncio.gather(
+        create_langsmith_thread_feedback(
             thread_id,
             f"github_pr_merged:{pr_url}",
             score=1.0,
             comment=f"Agent-authored pull request merged: {pr_url}",
-            source_info={
-                "source": "github_pr_merged",
-                "thread_id": thread_id,
-                "pr_url": pr_url,
-            },
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("Failed to record merged PR feedback for thread %s", thread_id, exc_info=True)
+            source_info=source_info,
+        ),
+        create_langsmith_thread_feedback(
+            thread_id,
+            PR_MERGED_FEEDBACK_KEY,
+            score=1.0,
+            comment=pr_url,
+            source_info=source_info,
+        ),
+    )
 
 
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
