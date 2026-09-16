@@ -24,6 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { safeModelLabel } from "@/lib/modelLabel"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/usage")({
@@ -34,17 +35,6 @@ export const Route = createFileRoute("/usage")({
 })
 
 const PAGE_SIZES = [10, 25, 50, 100] as const
-
-function safeModelLabel(model: string) {
-  const sanitized = model.replace(/[^A-Za-z0-9._:/+-]/g, "-")
-  return (
-    sanitized
-      .split("/")
-      .at(-1)
-      ?.slice(0, 48)
-      .replace(/^-+|-+$/g, "") ?? ""
-  )
-}
 
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "7d": "Last 7 days",
