@@ -151,6 +151,7 @@ from agent.sandboxes.state import (
 )
 from agent.schedules.store import authorized_admin_schedule
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
+from agent.slack.dm import is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
@@ -383,6 +384,11 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = PLAN_MODE_EXCLUDED_TOOLS | f
     }
 )
 
+# A reaction signals "seen, working on it" to a room. A DM is a two-person
+# conversation where the reply itself is that signal, so reacting there is only
+# clutter on every message the person sends.
+DM_EXCLUDED_TOOLS: frozenset[str] = frozenset({"slack_add_reaction"})
+
 
 def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     """Provider guards for subagent model calls.
@@ -579,6 +585,13 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
     if cfg.source not in {"slack", "schedule", "incidents_agent"} or cfg.slack_thread is None:
         return False
     return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
+
+
+def _slack_dm_run(cfg: RunConfig) -> bool:
+    """Whether this run answers in a bot DM rather than a channel."""
+    return _slack_tools_enabled(cfg) and is_dm_channel(
+        cfg.slack_thread.channel_context if cfg.slack_thread else None
+    )
 
 
 def _make_model_or_defer(
@@ -1194,6 +1207,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    elif _slack_dm_run(cfg):
+        static_tools = [
+            tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
+        ]
     incident_automatic = incident_session is not None and incident_session.explicit_request is None
     if incident_session is not None:
         static_tools.extend(incident_session.tools)
