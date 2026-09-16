@@ -176,7 +176,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # store Slack uses, so PRs open *as the triggering user* and the thread is
     # tagged for the dashboard.
     mapped_login = await common.resolve_login_from_email_async(user_email) if user_email else None
-    # The repository's workspace is the one this run lands in, so its team
+    # The repository's workspace is the one this run lands in, so its
     # default model and Fable flag are the ones the vision fallback checks.
     workspace = await common.workspace_for_repo_config(repo_config)
 

@@ -20,7 +20,7 @@ def test_resolve_prompt_default_repo_never_loads_team_default(
     monkeypatch: pytest.MonkeyPatch, config: RunConfig, expected: dict[str, str] | None
 ) -> None:
     async def fake_get_workspace_default_repo() -> dict[str, str] | None:
-        raise AssertionError("team default should not be loaded")
+        raise AssertionError("workspace default should not be loaded")
 
     monkeypatch.setattr(server, "get_workspace_default_repo", fake_get_workspace_default_repo)
 

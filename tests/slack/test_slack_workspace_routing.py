@@ -80,7 +80,7 @@ async def test_a_bound_channel_outranks_a_defaulted_repository(
 ) -> None:
     """A repository nobody named does not decide the workspace.
 
-    `get_slack_repo_config` almost always produces one — the team default or
+    `get_slack_repo_config` almost always produces one — the workspace default or
     `SLACK_REPO_*` — so if a defaulted repository counted, a bound channel's
     workspace would never win.
     """

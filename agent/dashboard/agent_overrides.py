@@ -116,8 +116,8 @@ def _normalize_profile_model_pair(
         return model_id, effort
     # A stored selection whose exact id dropped out of the supported set (e.g. an
     # Opus minor-version bump) stays on its provider rather than being discarded
-    # and silently deferring to the team default. An absent/unknown-provider
-    # selection still returns (None, None) so the team default applies.
+    # and silently deferring to the workspace default. An absent/unknown-provider
+    # selection still returns (None, None) so the workspace default applies.
     if isinstance(model_id, str):
         provider_pair = provider_fallback_pair(model_id, effort)
         if provider_pair is not None:
@@ -152,9 +152,9 @@ async def resolve_agent_model_id(
 ) -> str:
     """Resolve the agent model ID using the same precedence as ``get_agent``.
 
-    Order: per-thread override → profile override → team default.
+    Order: per-thread override → profile override → the workspace's default.
 
-    ``workspace`` is the workspace the run will land in, whose team default
+    ``workspace`` is the workspace the run will land in, whose default
     applies; omitting it reads ``default``'s, which is only right for a run
     that lands there.
     """

@@ -582,7 +582,7 @@ async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseC
     """Resolve the model for the diff-grouping pass.
 
     Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
-    otherwise the team default, which itself inherits the reviewer subagent
+    otherwise the workspace default, which itself inherits the reviewer subagent
     model when no grouping-specific model is configured.
     """
     if cfg.grouping_model_id:
@@ -992,12 +992,12 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             (subagent_model_id, subagent_effort),
         ) = await cached_workspace_default_model_pair("reviewer", cfg.workspace_slug)
         logger.info(
-            "Using team default reviewer model: model=%s effort=%s",
+            "Using workspace default reviewer model: model=%s effort=%s",
             model_id,
             reasoning_effort,
         )
         logger.info(
-            "Using team default reviewer subagent model: model=%s effort=%s",
+            "Using workspace default reviewer subagent model: model=%s effort=%s",
             subagent_model_id,
             subagent_effort,
         )

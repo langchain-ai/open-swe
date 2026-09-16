@@ -1,9 +1,11 @@
-"""Team-wide Open SWE Review (Bugbot) settings stored in LangGraph Store.
+"""Workspace settings: model defaults, review toggles and guidelines, the gateway
+and Fable toggles, and the default repository, stored in the LangGraph Store.
 
-One record per workspace keeps that workspace's instance-wide reviewer
-configuration in one place, keyed by workspace slug (the pre-workspaces
-record lives at the ``"default"`` key, so the default workspace needs no
-migration). Per-repo style prompts live in :mod:`agent.review.styles`.
+They resolve by tier. The instance record (the pre-workspaces "team settings"
+record, still under its original key) applies to every workspace; a
+workspace's own record holds only the fields an admin overrode there. Per-user
+profile settings and a thread's ``configurable`` layer on top in the callers
+that honour them. Per-repo style prompts live in :mod:`agent.review.styles`.
 """
 
 import logging
@@ -34,14 +36,14 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 logger = logging.getLogger(__name__)
 
 INSTANCE_SETTINGS_NAMESPACE: list[str] = ["team_settings"]
-# The instance record keeps the key workspace settings had before workspaces existed,
-# so an upgrade needs no data migration.
+# The instance record keeps the key the pre-workspaces ("team settings") record
+# used, so an upgrade needs no data migration.
 INSTANCE_SETTINGS_KEY = "default"
 # One sparse record per workspace slug: a field that is missing or None
 # inherits the instance value.
 WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 
-# Cap the org-wide guidelines so a runaway value can't dominate the reviewer
+# Cap the guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
@@ -61,10 +63,11 @@ class WorkspaceSettingsUpdate(BaseModel):
     review_draft_prs: bool | None = None
     pr_summaries: bool | None = None
     review_trace_links: bool | None = None
-    # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
-    # LANGSMITH_GATEWAY_ENABLED deployment default.
-    # Tri-state adaptive model routing toggle: True/False is authoritative,
-    # None is off (routing is opt-in until an admin enables it org-wide).
+    # Tri-state LLM Gateway toggle: True/False is authoritative. None on the
+    # instance inherits the LANGSMITH_GATEWAY_ENABLED deployment default; None on
+    # a workspace inherits the instance.
+    # Tri-state adaptive model routing toggle: True/False is authoritative. None
+    # on the instance is off (routing is opt-in); None on a workspace inherits.
     model_routing_enabled: bool | None = None
     gateway_enabled: bool | None = None
     fable_enabled: bool | None = None
@@ -373,7 +376,7 @@ def resolve_settings_workspace(explicit: str | None = None) -> str:
 
     The name is slugified, so one spelling of a workspace cannot address a
     record another spelling misses. A name with nothing to slugify reads as the
-    instance default: the HTTP layer rejects those before they reach here, and a
+    default workspace: the HTTP layer rejects those before they reach here, and a
     run must not die over a settings lookup.
     """
     candidate = explicit
@@ -534,7 +537,7 @@ async def get_workspace_default_model(
     role: Literal["agent", "reviewer", "chat"],
     workspace: str | None = None,
 ) -> tuple[str, str]:
-    """Return the team-wide default ``(model_id, reasoning_effort)`` for ``role``.
+    """Return the default ``(model_id, reasoning_effort)`` for ``role`` in ``workspace``.
 
     Always returns a valid pair, resolved in order: the admin-configured pair if
     still supported; otherwise the newest supported model for the same provider
@@ -543,7 +546,7 @@ async def get_workspace_default_model(
     :func:`agent.dashboard.options.default_model_pair`.
 
     ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
-    admin setting is unset/invalid it inherits the team **agent** default.
+    admin setting is unset/invalid it inherits the **agent** default.
     """
     settings = await get_workspace_settings(workspace)
     if role == "chat":
@@ -635,11 +638,11 @@ def get_workspace_fast_alt_probability(settings: Mapping[str, Any]) -> float:
 
 
 async def get_workspace_default_grouping_model(workspace: str | None = None) -> tuple[str, str]:
-    """Return the team-wide default ``(model_id, reasoning_effort)`` for the
+    """Return the default ``(model_id, reasoning_effort)`` for the
     review diff-grouping pass.
 
     When no grouping-specific model is configured (or it's no longer
-    supported), inherit the team **reviewer subagent** default — the grouping
+    supported), inherit the **reviewer subagent** default — the grouping
     pass is a cheap, fast companion to the reviewer, so it should track that
     cheaper tier rather than the primary reviewer model.
     """
@@ -708,7 +711,7 @@ async def get_workspace_review_trace_links_enabled(workspace: str | None = None)
 
 
 async def get_workspace_model_routing_enabled(workspace: str | None = None) -> bool:
-    """Return whether adaptive model routing is enabled org-wide."""
+    """Return whether adaptive model routing is enabled for the workspace."""
     settings = await get_workspace_settings(workspace)
     value = settings.get("model_routing_enabled")
     return value if isinstance(value, bool) else False
@@ -722,19 +725,19 @@ async def get_workspace_gateway_enabled(workspace: str | None = None) -> bool | 
 
 
 async def get_workspace_fable_enabled(workspace: str | None = None) -> bool:
-    """Return whether Fable models are enabled for the team."""
+    """Return whether Fable models are enabled for the workspace."""
     settings = await get_workspace_settings(workspace)
     value = settings.get("fable_enabled")
     return bool(value) if isinstance(value, bool) else False
 
 
 async def get_effective_gateway_enabled(workspace: str | None = None) -> bool:
-    """Resolve whether LLM Gateway routing is on: team setting, else env default."""
+    """Resolve whether LLM Gateway routing is on: the workspace's setting, else the env default."""
     return resolve_gateway_enabled(await get_workspace_gateway_enabled(workspace))
 
 
 async def get_org_review_guidelines(workspace: str | None = None) -> str | None:
-    """Return the org-wide reviewer guidelines supplement, if configured."""
+    """Return the reviewer guidelines the workspace resolves to, if any."""
     settings = await get_workspace_settings(workspace)
     value = settings.get("org_guidelines")
     if isinstance(value, str) and value.strip():
@@ -746,7 +749,7 @@ async def get_workspace_default_subagent_model(
     role: Literal["agent", "reviewer"],
     workspace: str | None = None,
 ) -> tuple[str, str]:
-    """Return the team-wide default subagent ``(model_id, reasoning_effort)`` for ``role``."""
+    """Return the default subagent ``(model_id, reasoning_effort)`` for ``role`` in ``workspace``."""
     settings = await get_workspace_settings(workspace)
     if role == "agent":
         model = settings.get("default_agent_subagent_model")

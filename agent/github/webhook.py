@@ -474,7 +474,7 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     """Auto-review a PR that has just been opened or marked ready-for-review.
 
     Drafts are gated by the PR author's ``review_draft_prs`` profile flag
-    (with the team-wide setting as a fallback).
+    (with the workspace's setting as a fallback).
     """
     pull_request = payload.get("pull_request", {})
     is_draft = bool(pull_request.get("draft"))

@@ -2798,7 +2798,7 @@ async def test_options_includes_fable_when_enabled() -> None:
 
 @pytest.mark.asyncio
 async def test_options_gates_stale_fable_default_when_disabled() -> None:
-    # A stale Fable team default must not be advertised as the default while Fable
+    # A stale Fable workspace default must not be advertised as the default while Fable
     # is omitted from the selectable list, or the Cloud Agents page would offer a
     # default that PUT /profile then rejects.
     fable_pair = (_FABLE, "high")

@@ -272,7 +272,7 @@ async def test_pr_ready_draft_user_default_falls_back_to_team_on(
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
-    # User profile exists but review_draft_prs is None — inherit team default.
+    # User profile exists but review_draft_prs is None — inherit the workspace default.
     monkeypatch.setattr(
         webhook_common,
         "get_profile",
@@ -294,7 +294,7 @@ async def test_pr_ready_draft_no_profile_falls_back_to_team_off(
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
-    # External contributor — inherit team default (off).
+    # External contributor — inherit the workspace default (off).
     monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(
         webhook_common,
@@ -405,7 +405,7 @@ async def test_converted_to_draft_keeps_watch_when_team_default_drafts_on(
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": True},
         ),
-        # Author inherits team default — team has drafts on.
+        # Author inherits the workspace default — drafts on.
         patch(
             "agent.webhooks.common.get_profile",
             new_callable=AsyncMock,

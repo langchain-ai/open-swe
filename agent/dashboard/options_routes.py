@@ -1,4 +1,4 @@
-"""Selectable models and team defaults offered to the profile editor."""
+"""Selectable models and the defaults a workspace resolves to, offered to the profile editor."""
 
 from typing import Any
 
@@ -24,9 +24,9 @@ router = APIRouter(tags=["options"])
 async def options(workspace: str = DEFAULT_WORKSPACE_SLUG) -> dict[str, Any]:
     """The models and defaults a composer may offer for ``workspace``.
 
-    Model defaults and the Fable flag are per workspace, so a picker that asked
-    without one would advertise ``default``'s settings wherever the run will
-    not land there.
+    Model defaults and the Fable flag resolve per workspace (the instance record
+    plus the workspace's overrides), so a picker that asked without one would
+    advertise the default workspace's values wherever the run will not land there.
     """
     try:
         workspace = slugify(workspace)

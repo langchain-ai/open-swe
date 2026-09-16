@@ -1,4 +1,4 @@
-"""Team-wide opt-in list of repos that Open SWE Review may auto-review.
+"""Instance-wide opt-in list of repos that Open SWE Review may auto-review.
 
 A single record keyed ``"default"`` holds the list. Repos default to
 **disabled** — webhooks for repos absent from the list are ignored, so an

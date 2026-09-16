@@ -794,8 +794,8 @@ async def get_slack_repo_config(
             logger.exception("Failed to apply dashboard default_repo for Slack user")
 
     if not repo_config:
-        # A channel bound to a workspace takes that workspace's default
-        # repository, not whatever `default` happens to have configured.
+        # A channel bound to a workspace takes the default repository that
+        # workspace resolves to: its own override, else the instance record's.
         repo_config = await get_workspace_default_repo(
             await workspace_for_slack_channel(channel_id)
         )
@@ -1254,8 +1254,8 @@ async def draft_review_enabled_for_author(
             override = profile.get("review_draft_prs")
             if isinstance(override, bool):
                 return override
-    team = await get_workspace_settings(await workspace_for_repo_config(repo_config))
-    return bool(team.get("review_draft_prs"))
+    settings = await get_workspace_settings(await workspace_for_repo_config(repo_config))
+    return bool(settings.get("review_draft_prs"))
 
 
 async def fetch_open_pr_for_branch(

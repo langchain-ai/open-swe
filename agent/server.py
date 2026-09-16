@@ -289,7 +289,7 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
     try:
         return await get_workspace_default_repo(workspace_slug(cfg))
     except Exception:
-        logger.debug("Failed to load team default repo for prompt", exc_info=True)
+        logger.debug("Failed to load the workspace default repo for prompt", exc_info=True)
         return None
 
 
@@ -916,7 +916,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         thread_settings, settings_changed = normalize_thread_settings(
             {} if local_run else await load_thread_settings(client, thread_id)
         )
-    # Team/profile settings are accepted stale for a short TTL so graph factories
+    # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     if local_run:
         from agent.dashboard.options import default_model_pair
@@ -959,7 +959,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
     title_model_id, title_effort = title_defaults
-    logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
+    logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
     if profile_login and profile:
         overridden_model, overridden_effort = normalize_profile_overrides(profile)
@@ -987,7 +987,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
-    # User preference overrides the org-wide toggle; None inherits it.
+    # User preference overrides the workspace's toggle; None inherits it.
     adaptive_model_routing = profile_model_routing_enabled(profile)
     if adaptive_model_routing is None:
         adaptive_model_routing = (

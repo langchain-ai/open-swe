@@ -1,4 +1,4 @@
-"""Short-TTL reads of one workspace's workspace settings.
+"""Short-TTL reads of the settings one workspace resolves to.
 
 Graph factories read these on every run, so they are cached. The cache lives in
 a module-level dict shared by every run in the process, which is why the slug is
@@ -38,7 +38,7 @@ def _key(prefix: str, workspace: str) -> str:
 async def cached_workspace_settings(workspace: str | None) -> dict[str, Any]:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
-        _key("team:settings", slug),
+        _key("settings:settings", slug),
         SETTINGS_TTL_SECONDS,
         lambda: get_workspace_settings(slug),
     )
@@ -49,7 +49,7 @@ async def cached_workspace_default_model_pair(
 ) -> tuple[tuple[str, str], tuple[str, str]]:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
-        _key(f"team-default-model-pair:{kind}", slug),
+        _key(f"settings:default-model-pair:{kind}", slug),
         SETTINGS_TTL_SECONDS,
         lambda: get_workspace_default_model_pair(kind, slug),
     )
@@ -60,7 +60,7 @@ async def cached_workspace_default_model(
 ) -> tuple[str, str]:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
-        _key(f"team-default-model:{role}", slug),
+        _key(f"settings:default-model:{role}", slug),
         SETTINGS_TTL_SECONDS,
         lambda: get_workspace_default_model(role, slug),
     )
@@ -69,7 +69,7 @@ async def cached_workspace_default_model(
 async def cached_agent_routing_models(workspace: str | None) -> dict[str, tuple[str, str]]:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
-        _key("team:agent-routing-models", slug),
+        _key("settings:agent-routing-models", slug),
         SETTINGS_TTL_SECONDS,
         lambda: get_workspace_agent_routing_models(slug),
     )
@@ -78,7 +78,7 @@ async def cached_agent_routing_models(workspace: str | None) -> dict[str, tuple[
 async def cached_thread_title_model(workspace: str | None) -> tuple[str, str]:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
-        _key("team:thread-title-model", slug),
+        _key("settings:thread-title-model", slug),
         SETTINGS_TTL_SECONDS,
         lambda: get_workspace_default_thread_title_model(slug),
     )
@@ -87,7 +87,7 @@ async def cached_thread_title_model(workspace: str | None) -> tuple[str, str]:
 async def cached_gateway_enabled(workspace: str | None) -> bool:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
-        _key("team:gateway-enabled", slug),
+        _key("settings:gateway-enabled", slug),
         SETTINGS_TTL_SECONDS,
         lambda: get_effective_gateway_enabled(slug),
     )
@@ -96,7 +96,7 @@ async def cached_gateway_enabled(workspace: str | None) -> bool:
 async def cached_fable_enabled(workspace: str | None) -> bool:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
-        _key("team:fable-enabled", slug),
+        _key("settings:fable-enabled", slug),
         SETTINGS_TTL_SECONDS,
         lambda: get_workspace_fable_enabled(slug),
     )
@@ -105,7 +105,7 @@ async def cached_fable_enabled(workspace: str | None) -> bool:
 async def cached_model_routing_enabled(workspace: str | None) -> bool:
     slug = resolve_settings_workspace(workspace)
     return await ttl_cache.cached(
-        _key("team:model-routing-enabled", slug),
+        _key("settings:model-routing-enabled", slug),
         SETTINGS_TTL_SECONDS,
         lambda: get_workspace_model_routing_enabled(slug),
     )

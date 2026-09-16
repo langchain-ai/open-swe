@@ -352,7 +352,7 @@ def validate_local_dev_llm_config() -> None:
     This check only runs in localhost development environments and is
     intended to catch missing credentials for the default model specified
     via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
-    from team, profile, or thread configuration and is not validated here.
+    from workspace, profile, or thread configuration and is not validated here.
 
     Only an explicitly configured localhost dashboard URL counts: the derived
     default follows LANGGRAPH_URL, which is unset (so localhost) on a fresh

@@ -159,7 +159,7 @@ async def _resolve_chat_model(cfg: RunConfig) -> tuple[str, str]:
     canonical = canonical_model_pair(model_id, effort)
     if canonical is not None:
         return canonical
-    # Team review-chat default, which itself inherits the Agent default if unset.
+    # Workspace review-chat default, which itself inherits the Agent default if unset.
     return await cached_workspace_default_model("chat", cfg.workspace_slug)
 
 

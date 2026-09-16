@@ -130,7 +130,7 @@ async def _resolve_agent_model_choice(
         fable_enabled=await get_workspace_fable_enabled(workspace),
     )
     if not isinstance(resolved_effort, str):
-        raise ValueError("team default model must include a reasoning effort")
+        raise ValueError("workspace default model must include a reasoning effort")
     return resolved_model, resolved_effort
 
 
