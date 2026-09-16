@@ -279,7 +279,7 @@ async def test_model_routing_is_applied_when_enabled() -> None:
     assert "ModelSelectionMiddleware" in middleware_names
     assert "model_routing_mode" not in config["configurable"]
     assert config["metadata"]["model_routing_mode"] == "auto"
-    assert "model_routing_applied" not in config["metadata"]
+    assert config["metadata"]["model_routing_applied"] is True
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
         "google_genai:gemini-3.8-flash",
@@ -299,9 +299,13 @@ async def test_model_routing_control_uses_performance_model() -> None:
     assert "ModelSelectionMiddleware" in middleware_names
     assert "model_routing_mode" not in config["configurable"]
     assert config["metadata"]["model_routing_mode"] == "performant"
-    assert "model_routing_applied" not in config["metadata"]
+    assert config["metadata"]["model_routing_applied"] is True
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
-    assert calls[0][0] == "anthropic:claude-opus-5"
+    assert [model for model, _ in calls[1:4]] == [
+        "google_genai:gemini-3.8-flash",
+        "openai:gpt-5.6-sol",
+        "anthropic:claude-opus-5",
+    ]
 
 
 @pytest.mark.asyncio
@@ -314,7 +318,8 @@ async def test_model_routing_is_disabled_by_default() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
-    assert "model_routing_applied" not in config["metadata"]
+    assert config["metadata"]["model_routing_applied"] is False
+    assert "model_routing_mode" not in config["metadata"]
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls] == [
         "openai:gpt-5.6-sol",
@@ -342,7 +347,8 @@ async def test_model_routing_preference_is_snapshotted_for_existing_thread() -> 
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
-    assert "model_routing_applied" not in config["metadata"]
+    assert config["metadata"]["model_routing_applied"] is False
+    assert "model_routing_mode" not in config["metadata"]
 
 
 @pytest.mark.asyncio

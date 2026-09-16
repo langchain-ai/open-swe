@@ -6,7 +6,7 @@ from typing import Any, Literal, NotRequired
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
-from langgraph.config import get_config, get_stream_writer
+from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
@@ -66,21 +66,6 @@ def fast_alt_bucket(thread_id: str | None) -> float:
     """Deterministic [0, 1) bucket for a thread, from the first 8 hex digits of SHA-256."""
     digest = hashlib.sha256((thread_id or "").encode("utf-8")).hexdigest()
     return int(digest[:8], 16) / float(0xFFFF_FFFF)
-
-
-def _mark_model_routing_applied() -> None:
-    """Mark the current invocation as model-routed."""
-    try:
-        config = get_config()
-        metadata = config.setdefault("metadata", {})
-        metadata["model_routing_applied"] = True
-        from langsmith.run_helpers import get_current_run_tree
-
-        run_tree = get_current_run_tree()
-        if run_tree is not None:
-            run_tree.metadata["model_routing_applied"] = True
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not mark model routing metadata", exc_info=True)
 
 
 async def _emit_routed_model(
@@ -177,12 +162,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     ) -> dict[str, Route]:
         del runtime
         route = await self.select_route(state)
-        if (
-            self._routing_mode == "auto"
-            and not state.get("model_route")
-            and not state.get("plan_mode")
-        ):
-            _mark_model_routing_applied()
+        if self._routing_mode == "auto":
             await _emit_routed_model(self._models, self._route_model_ids, route)
         if state.get("plan_mode"):
             return {}

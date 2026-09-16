@@ -81,13 +81,13 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
 
 
 @pytest.mark.asyncio
-async def test_performant_mode_skips_classifier_and_routing_metadata(
+async def test_performant_mode_skips_classifier_and_routing_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mark_applied = MagicMock()
+    events: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        "agent.middleware.model_selection._mark_model_routing_applied",
-        mark_applied,
+        "agent.middleware.model_selection.get_stream_writer",
+        lambda: events.append,
     )
     middleware, models, classifier = _middleware(routing_mode="performant")
     state = {"messages": [HumanMessage(content="Update the README")]}
@@ -97,18 +97,11 @@ async def test_performant_mode_skips_classifier_and_routing_metadata(
     assert state["model_route"] == "performance"
     assert (await _invoke(middleware, state)).model is models["performance"]
     classifier.assert_not_awaited()
-    mark_applied.assert_not_called()
+    assert events == []
 
 
 @pytest.mark.asyncio
-async def test_routing_decision_only_runs_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    mark_applied = MagicMock()
-    monkeypatch.setattr(
-        "agent.middleware.model_selection._mark_model_routing_applied",
-        mark_applied,
-    )
+async def test_routing_decision_only_runs_once() -> None:
     middleware, _, classifier = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
@@ -116,7 +109,6 @@ async def test_routing_decision_only_runs_once(
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
     classifier.assert_awaited_once()
-    mark_applied.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -252,7 +244,7 @@ async def test_routed_model_event_omitted_without_a_known_model_id(
 
 
 @pytest.mark.asyncio
-async def test_plan_mode_uses_performance_without_routing_event(
+async def test_plan_mode_streams_the_overriding_performance_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[dict[str, Any]] = []
@@ -279,7 +271,12 @@ async def test_plan_mode_uses_performance_without_routing_event(
     assert await middleware.abefore_model(cast(Any, entered_plan_mode), MagicMock()) == {}
     assert await middleware.abefore_model(cast(Any, started_in_plan_mode), MagicMock()) == {}
 
-    assert events == []
+    performance = {
+        "type": "model_routed",
+        "route": "performance",
+        "model_id": "anthropic:claude-opus-5",
+    }
+    assert events == [performance, performance]
     classifier.assert_not_awaited()
     assert (await _invoke(middleware, entered_plan_mode)).model is models["performance"]
     assert (await _invoke(middleware, started_in_plan_mode)).model is models["performance"]
