@@ -185,6 +185,7 @@ class RunConfig(BaseModel):
 
     # Model selection
     agent_model_id: str | None = None
+    resolved_agent_model_id: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
     reviewer_model_id: str | None = None
@@ -199,6 +200,7 @@ class RunConfig(BaseModel):
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     stop_summary: bool | None = None
+    slack_ask: bool | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
 

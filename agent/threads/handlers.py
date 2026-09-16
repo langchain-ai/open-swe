@@ -250,6 +250,8 @@ async def send_dashboard_message(
     handoff_metadata = dict(metadata)
     metadata_update: dict[str, Any] = {
         "source": DASHBOARD_SOURCE,
+        # Continuing on the web promotes a `/oswe` question thread for good.
+        "unlisted": False,
         "updated_at_ms": now_ms,
         "feedback_last_activity_at_ms": now_ms,
         "plan_mode": body.plan_mode,

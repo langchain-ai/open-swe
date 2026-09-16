@@ -8,6 +8,7 @@ import {
 } from "react"
 import { MultiFileDiff } from "@pierre/diffs/react"
 import { DiffView } from "./DiffView"
+import { SqlResultTable, parseSqlResult } from "./SqlResultTable"
 import { formatToolDisplay } from "./toolExecutionDisplay"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
@@ -212,6 +213,10 @@ export const ToolExecution = memo(function ToolExecution({
         <span className="text-yellow-400">Editing {getFileName(path)}...</span>
       </div>
     )
+  }
+
+  if (toolKind === "sql" && status === "completed" && parseSqlResult(output)) {
+    return <SqlResultTable output={output} />
   }
 
   const displayName = formatToolDisplay(title, toolKind, input, projectPath)

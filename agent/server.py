@@ -152,6 +152,7 @@ from agent.sandboxes.state import (
 )
 from agent.schedules.store import authorized_admin_schedule
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
+from agent.slack.dm import is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
@@ -182,6 +183,7 @@ from agent.tools import (
     open_pull_request,
     output_iframe,
     publish_workspace,
+    read_only_sql,
     read_user_settings,
     recreate_sandbox,
     refresh_workspace_start,
@@ -255,6 +257,17 @@ DEEP_AGENT_TOOL_NAMES = {
 DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
+)
+# A `/oswe` request has a channel but no Slack thread, so only the tools that act
+# on one are out of reach. Everything else, writes included, stays available.
+SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
+    {
+        "manage_code_channel",
+        "manage_incident",
+        "slack_add_reaction",
+        "slack_attach_html",
+        "slack_move_thread",
+    }
 )
 
 
@@ -390,6 +403,11 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = PLAN_MODE_EXCLUDED_TOOLS | f
     }
 )
 
+# A reaction signals "seen, working on it" to a room. A DM is a two-person
+# conversation where the reply itself is that signal, so reacting there is only
+# clutter on every message the person sends.
+DM_EXCLUDED_TOOLS: frozenset[str] = frozenset({"slack_add_reaction"})
+
 
 def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     """Provider guards for subagent model calls.
@@ -429,6 +447,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "manage_thread",
         "notify_automation_channel",
         "read_incident",
+        "read_only_sql",
         "read_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -585,7 +604,27 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
     """Return whether the run has trusted Slack source context."""
     if cfg.source not in {"slack", "schedule", "incidents_agent"} or cfg.slack_thread is None:
         return False
+    if _slack_ask_mode(cfg):
+        return bool(cfg.slack_thread.channel_id.strip())
     return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
+
+
+def _slack_ask_mode(cfg: RunConfig) -> bool:
+    """A `/oswe` question: one ephemeral answer, no Slack thread to post into."""
+    return (
+        cfg.slack_ask is True
+        and cfg.slack_thread is not None
+        and bool(cfg.slack_thread.triggering_user_id.strip())
+    )
+
+
+def _slack_dm_run(cfg: RunConfig) -> bool:
+    """Whether this run answers in a bot DM the owner runs as one session."""
+    return (
+        _slack_tools_enabled(cfg)
+        and cfg.slack_thread is not None
+        and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
+    )
 
 
 def _make_model_or_defer(
@@ -855,6 +894,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 admin_workspaces=self._admin_workspaces,
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
+                slack_ask=_slack_ask_mode(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
             ),
@@ -960,6 +1000,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 await cached_team_settings(settings_workspace)
             )
 
+    slack_ask_mode = _slack_ask_mode(cfg)
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
@@ -1063,6 +1104,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
+    # A `/oswe` question always runs on the fast route and never routes
+    # adaptively. Applied after the thread's settings are stored, so continuing
+    # the thread on the web picks the model up from the usual defaults.
+    if slack_ask_mode:
+        adaptive_model_routing = False
+        model_id, profile_effort = routing_defaults["fast"]
+        subagent_model_id, subagent_effort = routing_defaults["fast"]
+
     config["metadata"] = {
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
@@ -1108,6 +1157,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     source = cfg.source or "dashboard"
     configurable["source"] = source
+    configurable["resolved_agent_model_id"] = model_id
     user_email = cfg.user_email or ""
 
     # Plan mode is entered only when the model decides to (the `enter_plan_mode`
@@ -1195,6 +1245,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         submit_thread_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
+        *((read_only_sql,) if admin_thread and source == "dashboard" else ()),
     ]
     if credential_login is None:
         personal_tools = (
@@ -1206,6 +1257,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
+    elif _slack_dm_run(cfg):
+        static_tools = [
+            tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
+        ]
     incident_automatic = incident_session is not None and incident_session.explicit_request is None
     if incident_session is not None:
         static_tools.extend(incident_session.tools)
@@ -1368,6 +1423,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     excluded=(
                         STOP_SUMMARY_EXCLUDED_TOOLS
                         if stop_summary_mode
+                        else SLACK_ASK_EXCLUDED_TOOLS
+                        if slack_ask_mode
                         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
                         if incident_automatic
                         else DEEP_AGENT_EXCLUDED_TOOLS

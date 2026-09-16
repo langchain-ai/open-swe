@@ -26,6 +26,7 @@ from agent.threads.summary import (
     _thread_updated_ms,
     _ThreadSortBy,
     thread_is_readable,
+    thread_is_unlisted,
     thread_source,
 )
 from agent.utils.json_types import JsonObject, ThreadLike
@@ -138,6 +139,8 @@ def _metadata_matches_filters(
     repositories: Mapping[UUID, Repository] | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
+    if thread_is_unlisted(metadata):
+        return False
     ids = thread_repository_ids(metadata)
     legacy = legacy_repo(metadata)
     if repo:
@@ -387,6 +390,7 @@ async def list_unresolved_dashboard_threads(
                     thread_id
                     and thread_source(thread_metadata) in _SURFACED_SOURCES
                     and thread_is_readable(thread_metadata, login, email)
+                    and not thread_is_unlisted(thread_metadata)
                     and not _is_thread_resolved(thread_metadata)
                 ):
                     seen.setdefault(thread_id, thread)

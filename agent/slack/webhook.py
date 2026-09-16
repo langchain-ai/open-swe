@@ -31,6 +31,7 @@ from agent.input_messages import (
 from agent.prompts import load_prompt
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
+from agent.slack.dm import dm_thread_title, is_dm_session
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
@@ -44,13 +45,14 @@ from agent.utils.thread_ops import (
 from agent.utils.thread_ops import queue_message_for_thread
 from agent.webhooks import common
 from agent.workspaces.routing import resolve_workspace, workspace_for_repo
-from agent.workspaces.store import WORKSPACES, parse_workspace_tag
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
 _MENTION_PREAMBLE = f"{load_prompt('runs/slack-mentioned.md')}\n\n"
 _UNTAGGED_REPLY_PREAMBLE = f"{load_prompt('runs/slack-untagged-reply.md')}\n\n"
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
+_DM_CONTEXT = load_prompt("runs/slack-dm.md")
 _MESSAGE_UPDATE_PREAMBLE = f"{load_prompt('runs/slack-message-update.md')}\n\n"
 
 
@@ -625,7 +627,7 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
-async def _workspace_scoped_default_repo(
+async def workspace_scoped_default_repo(
     candidate: Repository, workspace: str | None
 ) -> Repository | None:
     """Keep a defaulted repository unless it belongs to another workspace.
@@ -656,6 +658,11 @@ async def _slack_login(user_id: str, user_email: str | None = None) -> str | Non
     return await common.login_for_email(user_email) if user_email else None
 
 
+def _slack_thread_title(request_text: str, dm_session: bool, name: str) -> str:
+    """A DM thread is named for the person, not for whatever they asked first."""
+    return dm_thread_title(name) if dm_session else request_text
+
+
 def _slack_thread_visibility(channel_context: dict[str, Any] | None) -> str:
     """Bot DMs are private to the person; anything in a channel is collaborative."""
     if isinstance(channel_context, dict) and channel_context.get("is_im") is True:
@@ -669,6 +676,7 @@ async def _mark_slack_thread_errored(
     try:
         owner_login = await _slack_login(request.user_id)
         visibility = _slack_thread_visibility(request.channel_context)
+        dm_session = request.dm_session or is_dm_session(request.channel_context, request.thread_ts)
         # An unlinked sender is turned away at the account gate; a private thread
         # nobody owns would be unreachable, so persist nothing for them.
         if not request.triggering_bot_id and (visibility == "public" or owner_login):
@@ -682,7 +690,8 @@ async def _mark_slack_thread_errored(
                 thread_id,
                 source="slack",
                 repositories=repositories,
-                title=clean_text,
+                title=_slack_thread_title(clean_text, dm_session, request.user_name),
+                static_title=dm_session,
                 source_context=SourceContext(
                     slack_thread=SlackThreadRef(
                         channel_id=request.channel_id,
@@ -736,6 +745,7 @@ async def _process_slack_mention_impl(
     treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
     untagged_reply = request.untagged_reply
     code_channel = request.code_channel
+    dm_session = request.dm_session or is_dm_session(channel_context, thread_ts)
 
     if not channel_id or not thread_ts or not event_ts:
         common.logger.warning(
@@ -928,7 +938,9 @@ async def _process_slack_mention_impl(
     )
 
     mapped_login = await _slack_login(user_id, user_email) if allowed_bot is None else None
-    thread_model_choice = await common.get_thread_model_choice(thread_id)
+    # A DM always answers on the person's own default model: a per-thread model
+    # choice is never routed into it.
+    thread_model_choice = None if dm_session else await common.get_thread_model_choice(thread_id)
 
     # Routing comes before the run's repository: a repository nobody named
     # must not outrank the channel's binding, and once a workspace has won, a
@@ -939,14 +951,21 @@ async def _process_slack_mention_impl(
     # resolved here, before the model is, because the model default and the
     # Fable flag are the resolved workspace's.
     if is_first_mention:
+        # A DM is one person's own space rather than a routed channel, so it opens
+        # in the instance default unless they named a workspace; an environment
+        # tool can move it afterwards and metadata carries that to later messages.
         thread_workspace = (
-            await resolve_workspace(
-                tag=tagged_slug,
-                repositories=resolution.routing_repos,
-                slack_channel_id=channel_id,
-                login=mapped_login,
-            )
-        ).slug
+            DEFAULT_WORKSPACE_SLUG
+            if dm_session and not tagged_slug
+            else (
+                await resolve_workspace(
+                    tag=tagged_slug,
+                    repositories=resolution.routing_repos,
+                    slack_channel_id=channel_id,
+                    login=mapped_login,
+                )
+            ).slug
+        )
     else:
         thread_workspace = await common.get_thread_workspace(thread_id)
 
@@ -1040,12 +1059,12 @@ async def _process_slack_mention_impl(
         slack_thread_context["triggering_bot_id"] = allowed_bot.bot_id
         slack_thread_context["triggering_bot_app_id"] = allowed_bot.app_id
         slack_thread_context["team_id"] = allowed_bot.team_id
-    if code_channel and reply_thread_ts:
+    if (code_channel or dm_session) and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
     if repositories and not resolution.explicit:
         scoped = [
-            await _workspace_scoped_default_repo(repository, thread_workspace)
+            await workspace_scoped_default_repo(repository, thread_workspace)
             for repository in repositories
         ]
         repositories = [repository for repository in scoped if repository is not None]
@@ -1066,6 +1085,7 @@ async def _process_slack_mention_impl(
         f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
         + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
+        + (f"\n\n{_DM_CONTEXT}" if dm_session else "")
     )
 
     configurable: dict[str, Any] = {
@@ -1077,6 +1097,11 @@ async def _process_slack_mention_impl(
     if mapped_login:
         configurable["github_login"] = mapped_login
         logins_by_user_id[user_id] = mapped_login
+    # A DM is reachable by exactly one person, so the admin capability cannot leak
+    # to anyone else; the factory still rechecks the sender against the configured
+    # admins, and a non-admin's DM gets nothing extra.
+    if dm_session:
+        configurable["admin_thread"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace
@@ -1104,7 +1129,12 @@ async def _process_slack_mention_impl(
         repositories=repositories,
         github_login=mapped_login or "",
         user_email=user_email or "",
-        title=clean_text if is_first_mention else "",
+        # A DM offers its title on every message: the upsert keeps the first one
+        # written, so a name Slack could not resolve earlier still lands later.
+        title=_slack_thread_title(clean_text, dm_session, user_name)
+        if (is_first_mention or dm_session)
+        else "",
+        static_title=dm_session,
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         workspace=thread_workspace,
         # Everyone who has spoken in the Slack thread keeps their Open SWE
@@ -1138,7 +1168,10 @@ async def _process_slack_mention_impl(
         if staged_files:
             operational_context += f"\n\n{_slack_files_section(staged_files)}"
 
-    explicitly_tagged = _interrupts_active_run(
+    # Anything said in a DM is said to Open SWE, and the person expects the next
+    # thing they type to redirect the work in front of them rather than queue
+    # behind it.
+    explicitly_tagged = dm_session or _interrupts_active_run(
         text,
         bot_user_id,
         treat_all_messages_as_mentions=treat_all_messages_as_mentions,
@@ -1237,5 +1270,8 @@ async def _process_slack_mention_impl(
             thread_id=thread_id,
             run_id=run_id,
             channel_id=channel_id,
-            thread_ts=thread_ts,
+            # A DM session names no Slack thread, so the status hangs on the
+            # message being answered and the session owns only that one.
+            thread_ts=(reply_thread_ts or original_message_ts) if dm_session else thread_ts,
+            session_ts=thread_ts if dm_session else "",
         )

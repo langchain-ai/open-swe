@@ -940,6 +940,28 @@ def test_resolves_thread_flag_is_forwarded_to_telemetry(monkeypatch: pytest.Monk
     assert record_telemetry.await_args.kwargs["resolves_thread"] is True
 
 
+def test_existing_pr_does_not_record_later_run_as_opening(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
+    monkeypatch.setattr(opr, "get_github_app_installation_token", AsyncMock(return_value="bot-tok"))
+    record_telemetry = AsyncMock()
+    monkeypatch.setattr(opr, "_record_pr_telemetry", record_telemetry)
+    existing = {"html_url": "https://x/pull/4", "number": 4, "user": {"login": "octo"}}
+    _install_client(
+        monkeypatch,
+        _RoutingClient(
+            post=_FakeResponse(422, {"message": "already exists"}),
+            get_routes={"/pulls": _FakeResponse(200, [existing])},
+        ),
+    )
+
+    result = _open()
+
+    assert result["created"] is False
+    assert record_telemetry.await_args.kwargs["record_opening"] is False
+
+
 def test_resolves_thread_flag_defaults_to_false(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
 
@@ -976,6 +998,7 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
             "source": "slack",
             "thread_id": "t1",
             "github_login": "octo",
+            "resolved_agent_model_id": "openai:gpt-5.6-sol",
             "run_id": "old-run" if top_level_run_id else "run-1",
             "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
         },
@@ -1011,6 +1034,9 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
         resolves_thread=True,
     )
 
+    usage = opr.record_agent_pr_usage
+    usage.assert_awaited_once()
+    assert usage.await_args.kwargs["model_id"] == "openai:gpt-5.6-sol"
     langgraph.threads.update.assert_awaited_once()
     assert langgraph.threads.update.await_args is not None
     metadata = langgraph.threads.update.await_args.kwargs["metadata"]

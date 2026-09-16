@@ -59,6 +59,7 @@ export type AcpToolKind =
   | "fetch"
   | "slack"
   | "linear"
+  | "sql"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"
