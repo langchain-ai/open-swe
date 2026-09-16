@@ -46,12 +46,39 @@ A workspace has an immutable slug and a display name, plus:
   workspace.
 - **MCP connections**, moved from the instance-wide set into the workspace.
 - **Settings** that are team settings today: model defaults, review toggles, organization
-  guidelines, gateway and Fable toggles, default repository. Each workspace has its own record.
-  A new workspace starts from the hardcoded defaults; inheriting from `default` is a later change.
+  guidelines, gateway and Fable toggles, default repository. These are tiered; see
+  "Settings tiers" below.
 
 Instance-level configuration stays in the environment: the GitHub App and its installation, the
 Slack app, model provider keys, sandbox provider and sandbox credentials, `CONFIGURED_ADMINS`, the
 sign-in allowlist, and the base snapshot fallback.
+
+### Settings tiers
+
+Settings resolve from the least to the most specific tier, each overriding the one before:
+
+1. **Instance.** The team settings record as it existed before workspaces, kept under its
+   original Store key so an upgrade needs no migration. Admins edit it on the Admin page.
+2. **Workspace.** A sparse record of overrides per workspace slug. A field that is unset inherits
+   the instance value, so a new workspace behaves exactly like the instance until an admin
+   changes something. `GET /dashboard/api/workspaces/{slug}/settings` returns the effective
+   values and the overrides separately; `PUT` replaces the overrides, and a `null` field means
+   "inherit".
+3. **User.** The existing profile fields (model and effort, subagent model, default repository,
+   adaptive routing, draft-PR review) override the workspace's effective settings for that user's
+   runs.
+4. **Thread.** A run's `configurable` (`agent_model_id`, `agent_effort`, `repo`) overrides all
+   of the above for that thread.
+
+MCP connections follow the same shape without a thread tier: **instance** connections
+(`/dashboard/api/mcps`) are loaded for every run, the **workspace** connections are added, then
+the **user's** personal connections. A later tier's connection replaces a same-named one from
+the tier before, which is how a workspace or a user swaps in different credentials for a shared
+server. The `default` workspace's existing connections stay where they are; admins move a
+connection to the instance tier by recreating it there.
+
+An inherited default repository is still subject to ownership: a workspace never uses a
+default repository that another workspace owns, even when it inherited it from the instance.
 
 ### Storage, run context, and API
 
@@ -120,7 +147,6 @@ are answered 503 so GitHub retries them rather than routing them to `default` or
 - Per-workspace roles or membership. Everyone sees everything in this version.
 - Per-workspace GitHub or Slack apps. One App and one Slack team per instance.
 - Routing individual Slack messages within a channel to different workspaces.
-- Settings inheritance from `default`. Likely later.
 - Per-workspace memory. The existing per-user memory stores are unchanged for now.
 - The controls a public workspace needs beyond partitioning: repository-scoped tokens, a per-workspace MCP allowlist for externally triggered runs, and public-safe prompts and outputs. Those are the next proposal and depend on this one.
 
@@ -151,8 +177,6 @@ workspace they belong to.
 ## Unresolved questions
 
 - Should memory become per workspace, per user and workspace, or stay per user?
-- Which settings should inherit from `default` when that lands, and which must not, such as MCP
-  connections?
 - Confirm the follow-up scope for public workspaces listed under non-goals.
 
 Repository ownership itself is resolved: `workspace_repository` keys on `repository.id`, so a

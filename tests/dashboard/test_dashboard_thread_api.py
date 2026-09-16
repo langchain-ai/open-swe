@@ -339,7 +339,7 @@ async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
 async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
     monkeypatch, fake_store: FakeStore, registry_db
 ) -> None:
-    """A new thread's model default comes from the repo's own workspace, not `default`."""
+    """A new thread's model default is the repo's workspace override, not the instance record."""
     created: dict[str, object] = {}
 
     async def fake_profile(login: str) -> dict[str, object]:
@@ -361,8 +361,7 @@ async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
         TeamSettingsUpdate(
             default_agent_model="anthropic:claude-sonnet-5",
             default_agent_reasoning_effort="high",
-        ),
-        workspace="default",
+        )
     )
     await upsert_team_settings(
         TeamSettingsUpdate(

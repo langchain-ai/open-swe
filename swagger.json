@@ -1583,6 +1583,7 @@
         "type": "object"
       },
       "TeamSettingsUpdate": {
+        "description": "A settings record at either tier.\n\nEvery field is optional. On the instance record, None means the hardcoded\ndefault; on a workspace's record, None inherits the instance value.",
         "properties": {
           "default_agent_model": {
             "anyOf": [
@@ -1849,9 +1850,15 @@
             "title": "Default Thread Title Reasoning Effort"
           },
           "fable_enabled": {
-            "default": false,
-            "title": "Fable Enabled",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fable Enabled"
           },
           "gateway_enabled": {
             "anyOf": [
@@ -1887,19 +1894,37 @@
             "title": "Org Guidelines"
           },
           "pr_summaries": {
-            "default": true,
-            "title": "Pr Summaries",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Summaries"
           },
           "review_draft_prs": {
-            "default": false,
-            "title": "Review Draft Prs",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Draft Prs"
           },
           "review_trace_links": {
-            "default": true,
-            "title": "Review Trace Links",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Trace Links"
           }
         },
         "title": "TeamSettingsUpdate",
@@ -2608,6 +2633,27 @@
           "name"
         ],
         "title": "WorkspaceCreate",
+        "type": "object"
+      },
+      "WorkspaceSettingsView": {
+        "description": "What a workspace's settings editor needs: the effective values and which of them it set.",
+        "properties": {
+          "effective": {
+            "additionalProperties": true,
+            "title": "Effective",
+            "type": "object"
+          },
+          "overrides": {
+            "additionalProperties": true,
+            "title": "Overrides",
+            "type": "object"
+          }
+        },
+        "required": [
+          "effective",
+          "overrides"
+        ],
+        "title": "WorkspaceSettingsView",
         "type": "object"
       },
       "WorkspaceUpdate": {
@@ -4134,6 +4180,244 @@
         "tags": [
           "dashboard",
           "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/mcps": {
+      "get": {
+        "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MCPConnectionPublic"
+                  },
+                  "title": "Response Api List Instance Mcps Dashboard Api Mcps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Instance Mcps",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/mcps/{name}": {
+      "delete": {
+        "operationId": "api_delete_instance_mcp_dashboard_api_mcps__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Instance Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "api_save_instance_mcp_dashboard_api_mcps__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPConnectionPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Save Instance Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/mcps/{name}/discover": {
+      "post": {
+        "operationId": "api_discover_instance_mcp_dashboard_api_mcps__name__discover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MCPConnectionUpdate"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MCPToolDescription"
+                  },
+                  "title": "Response Api Discover Instance Mcp Dashboard Api Mcps  Name  Discover Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Discover Instance Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/mcps/{name}/headers/reveal": {
+      "post": {
+        "operationId": "api_reveal_instance_mcp_headers_dashboard_api_mcps__name__headers_reveal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Reveal Instance Mcp Headers",
+        "tags": [
+          "dashboard"
         ]
       }
     },
@@ -7970,19 +8254,8 @@
     },
     "/dashboard/api/team-settings": {
       "get": {
+        "description": "The instance record: what every workspace inherits.",
         "operationId": "api_get_team_settings_dashboard_api_team_settings_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "workspace",
-            "required": false,
-            "schema": {
-              "default": "default",
-              "title": "Workspace",
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -7995,16 +8268,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "security": [
@@ -8020,18 +8283,6 @@
       },
       "put": {
         "operationId": "api_put_team_settings_dashboard_api_team_settings_put",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "workspace",
-            "required": false,
-            "schema": {
-              "default": "default",
-              "title": "Workspace",
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -10555,6 +10806,110 @@
         "summary": "Api Reveal Workspace Mcp Headers",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/settings": {
+      "get": {
+        "operationId": "api_get_workspace_settings_dashboard_api_workspaces__workspace__settings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Workspace Settings",
+        "tags": [
+          "dashboard",
+          "team-settings"
+        ]
+      },
+      "put": {
+        "operationId": "api_put_workspace_settings_dashboard_api_workspaces__workspace__settings_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Put Workspace Settings",
+        "tags": [
+          "dashboard",
+          "team-settings"
         ]
       }
     },

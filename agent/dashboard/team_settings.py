@@ -8,7 +8,7 @@ migration). Per-repo style prompts live in :mod:`agent.review.styles`.
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
@@ -27,13 +27,19 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.run_config import RunConfig
-from agent.store import get_value, now_iso, put_value
+from agent.store import delete_value, get_value, now_iso, put_value
 from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
-from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, slugify
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
 
 TEAM_SETTINGS_NAMESPACE: list[str] = ["team_settings"]
+# The instance record keeps the key team settings had before workspaces existed,
+# so an upgrade needs no data migration.
+INSTANCE_SETTINGS_KEY = "default"
+# One sparse record per workspace slug: a field that is missing or None
+# inherits the instance value.
+WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 
 # Cap the org-wide guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
@@ -46,16 +52,22 @@ ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
 
 
 class TeamSettingsUpdate(BaseModel):
-    review_draft_prs: bool = False
-    pr_summaries: bool = True
-    review_trace_links: bool = True
+    """A settings record at either tier.
+
+    Every field is optional. On the instance record, None means the hardcoded
+    default; on a workspace's record, None inherits the instance value.
+    """
+
+    review_draft_prs: bool | None = None
+    pr_summaries: bool | None = None
+    review_trace_links: bool | None = None
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
     # Tri-state adaptive model routing toggle: True/False is authoritative,
     # None is off (routing is opt-in until an admin enables it org-wide).
     model_routing_enabled: bool | None = None
     gateway_enabled: bool | None = None
-    fable_enabled: bool = False
+    fable_enabled: bool | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -371,86 +383,129 @@ def resolve_settings_workspace(explicit: str | None = None) -> str:
         return DEFAULT_WORKSPACE_SLUG
 
 
+_STALE_FIELDS = (
+    "trigger_mode",
+    "autofix_mode",
+    "autofix_severity_threshold",
+    "autofix_enabled",
+    "review_author_context_enabled",
+    "review_tracing_project",
+    "transcription_model",
+)
+
+
+def _set_fields(record: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The fields of a stored record that carry a value.
+
+    None-valued fields fall through to the tier below, so legacy records (or
+    PUTs that cleared a selection) never pin a null; an explicit 0 fast_alt
+    probability stays, since zero is a valid "experiment off".
+    """
+    if not record:
+        return {}
+    return {
+        k: v
+        for k, v in record.items()
+        if v is not None or k == "default_agent_routing_fast_alt_probability"
+    }
+
+
+def _finish(merged: dict[str, Any]) -> dict[str, Any]:
+    for stale_field in _STALE_FIELDS:
+        merged.pop(stale_field, None)
+    return normalize_team_settings_for_response(merged)
+
+
+async def _instance_record() -> dict[str, Any]:
+    return _set_fields(await get_value(TEAM_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY))
+
+
+async def _workspace_record(slug: str) -> dict[str, Any]:
+    return _set_fields(await get_value(WORKSPACE_SETTINGS_NAMESPACE, slug))
+
+
+async def get_instance_settings() -> dict[str, Any]:
+    """The instance record merged over the hardcoded defaults.
+
+    Every workspace inherits these; see :func:`get_team_settings` for what a
+    run actually sees.
+    """
+    defaults = _default_settings()
+    try:
+        instance = await _instance_record()
+    except Exception:
+        logger.warning("instance settings lookup failed; using defaults", exc_info=True)
+        return defaults
+    return _finish({**defaults, **instance})
+
+
 async def get_team_settings(workspace: str | None = None) -> dict[str, Any]:
-    """The team record merged over the hardcoded defaults.
+    """The settings a run in ``workspace`` sees.
+
+    Tiered: the hardcoded defaults, then the instance record, then the
+    workspace's own overrides. Per-user profile settings and the thread's
+    ``configurable`` layer on top of this in the callers that honour them.
 
     Fail-soft on purpose: the agent, the reviewer, and every webhook read this
     to pick a model, so an unreachable store must degrade to the defaults
     rather than fail every run at once.
     """
     defaults = _default_settings()
+    slug = resolve_settings_workspace(workspace)
     try:
-        value = await get_value(TEAM_SETTINGS_NAMESPACE, resolve_settings_workspace(workspace))
+        instance = await _instance_record()
+        overrides = await _workspace_record(slug)
     except Exception:
         logger.warning("team settings lookup failed; using defaults", exc_info=True)
         return defaults
-    if value is None:
-        return defaults
-    # Skip None-valued model fields so legacy records (or PUTs that cleared the
-    # selection) still surface the hardcoded default instead of a null, but keep
-    # an explicit 0 fast_alt probability: zero is a valid "experiment off".
-    overlay = {
-        k: v
-        for k, v in value.items()
-        if v is not None or k == "default_agent_routing_fast_alt_probability"
-    }
-    merged = {**defaults, **overlay}
-    for stale_field in (
-        "trigger_mode",
-        "autofix_mode",
-        "autofix_severity_threshold",
-        "autofix_enabled",
-        "review_author_context_enabled",
-        "review_tracing_project",
-        "transcription_model",
-    ):
-        merged.pop(stale_field, None)
-    return normalize_team_settings_for_response(merged)
+    return _finish({**defaults, **instance, **overrides})
+
+
+class WorkspaceSettingsView(TypedDict):
+    """What a workspace's settings editor needs: the effective values and which of them it set."""
+
+    effective: dict[str, Any]
+    overrides: dict[str, Any]
+
+
+async def get_workspace_settings(slug: str) -> WorkspaceSettingsView:
+    overrides = await _workspace_record(slug)
+    overrides.pop("updated_at", None)
+    return {"effective": await get_team_settings(slug), "overrides": overrides}
+
+
+def _record_values(update: TeamSettingsUpdate) -> dict[str, Any]:
+    return {**update.model_dump(), "updated_at": now_iso()}
+
+
+async def upsert_instance_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
+    value = _record_values(update)
+    await put_value(TEAM_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
+    return value
+
+
+async def upsert_workspace_settings(slug: str, update: TeamSettingsUpdate) -> WorkspaceSettingsView:
+    """Replace the workspace's overrides; a field left None inherits the instance value."""
+    value = {k: v for k, v in _record_values(update).items() if v is not None}
+    await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
+    return await get_workspace_settings(slug)
+
+
+async def delete_workspace_settings(slug: str) -> None:
+    await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
 
 
 async def upsert_team_settings(
     update: TeamSettingsUpdate, workspace: str | None = None
 ) -> dict[str, Any]:
-    value: dict[str, Any] = {
-        "review_draft_prs": update.review_draft_prs,
-        "pr_summaries": update.pr_summaries,
-        "review_trace_links": update.review_trace_links,
-        "model_routing_enabled": update.model_routing_enabled,
-        "gateway_enabled": update.gateway_enabled,
-        "fable_enabled": update.fable_enabled,
-        "org_guidelines": update.org_guidelines,
-        "default_agent_model": update.default_agent_model,
-        "default_agent_reasoning_effort": update.default_agent_reasoning_effort,
-        "default_agent_subagent_model": update.default_agent_subagent_model,
-        "default_agent_subagent_reasoning_effort": update.default_agent_subagent_reasoning_effort,
-        "default_agent_routing_fast_model": update.default_agent_routing_fast_model,
-        "default_agent_routing_fast_reasoning_effort": update.default_agent_routing_fast_reasoning_effort,
-        "default_agent_routing_fast_alt_model": update.default_agent_routing_fast_alt_model,
-        "default_agent_routing_fast_alt_reasoning_effort": (
-            update.default_agent_routing_fast_alt_reasoning_effort
-        ),
-        "default_agent_routing_fast_alt_probability": (
-            update.default_agent_routing_fast_alt_probability
-        ),
-        "default_agent_routing_balanced_model": update.default_agent_routing_balanced_model,
-        "default_agent_routing_balanced_reasoning_effort": update.default_agent_routing_balanced_reasoning_effort,
-        "default_agent_routing_performance_model": update.default_agent_routing_performance_model,
-        "default_agent_routing_performance_reasoning_effort": update.default_agent_routing_performance_reasoning_effort,
-        "default_repo": update.default_repo,
-        "default_reviewer_model": update.default_reviewer_model,
-        "default_reviewer_reasoning_effort": update.default_reviewer_reasoning_effort,
-        "default_reviewer_subagent_model": update.default_reviewer_subagent_model,
-        "default_reviewer_subagent_reasoning_effort": update.default_reviewer_subagent_reasoning_effort,
-        "default_grouping_model": update.default_grouping_model,
-        "default_grouping_reasoning_effort": update.default_grouping_reasoning_effort,
-        "default_chat_model": update.default_chat_model,
-        "default_chat_reasoning_effort": update.default_chat_reasoning_effort,
-        "default_thread_title_model": update.default_thread_title_model,
-        "default_thread_title_reasoning_effort": update.default_thread_title_reasoning_effort,
-        "updated_at": now_iso(),
-    }
-    await put_value(TEAM_SETTINGS_NAMESPACE, resolve_settings_workspace(workspace), value)
-    return value
+    """Write the instance record, or ``workspace``'s overrides when one is named.
+
+    Returns what a read now sees at that tier.
+    """
+    if workspace is None:
+        await upsert_instance_settings(update)
+        return await get_instance_settings()
+    return (await upsert_workspace_settings(slugify(workspace), update))["effective"]
 
 
 async def get_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
@@ -711,17 +766,37 @@ def _normalized_workspace(raw: str) -> str:
         raise HTTPException(400, str(exc)) from exc
 
 
+async def _existing_workspace(raw: str) -> str:
+    slug = _normalized_workspace(raw)
+    if await WORKSPACES.get(slug) is None:
+        raise HTTPException(404, "workspace not found")
+    return slug
+
+
 @router.get("/team-settings")
-async def api_get_team_settings(
-    workspace: str = DEFAULT_WORKSPACE_SLUG, _session: dict[str, Any] = SESSION_DEP
-) -> dict[str, Any]:
-    return await get_team_settings(_normalized_workspace(workspace))
+async def api_get_team_settings(_session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
+    """The instance record: what every workspace inherits."""
+    return await get_instance_settings()
 
 
 @router.put("/team-settings")
 async def api_put_team_settings(
-    body: TeamSettingsUpdate,
-    workspace: str = DEFAULT_WORKSPACE_SLUG,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    body: TeamSettingsUpdate, _admin: dict[str, Any] = ADMIN_DEP
 ) -> dict[str, Any]:
-    return await upsert_team_settings(body, _normalized_workspace(workspace))
+    return await upsert_instance_settings(body)
+
+
+@router.get("/workspaces/{workspace}/settings")
+async def api_get_workspace_settings(
+    workspace: str, _session: dict[str, Any] = SESSION_DEP
+) -> WorkspaceSettingsView:
+    return await get_workspace_settings(await _existing_workspace(workspace))
+
+
+@router.put("/workspaces/{workspace}/settings")
+async def api_put_workspace_settings(
+    workspace: str,
+    body: TeamSettingsUpdate,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> WorkspaceSettingsView:
+    return await upsert_workspace_settings(await _existing_workspace(workspace), body)
