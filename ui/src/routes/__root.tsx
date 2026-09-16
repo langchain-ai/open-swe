@@ -20,6 +20,7 @@ import { ThemeSync } from "@/lib/ThemeSync"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 import { isPerfHudEnabled } from "@/lib/perf/trace"
+import { openExternalLinksInNewWindow } from "@/lib/external-links"
 
 const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
 
@@ -85,6 +86,12 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   const { queryClient } = useRouter().options.context
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const warmupScript = apiWarmupScript(pathname)
+
+  useEffect(() => {
+    document.addEventListener("click", openExternalLinksInNewWindow)
+    return () =>
+      document.removeEventListener("click", openExternalLinksInNewWindow)
+  }, [])
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
