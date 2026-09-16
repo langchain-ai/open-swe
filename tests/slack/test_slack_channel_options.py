@@ -55,9 +55,14 @@ def _install(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> list[float
 
     monkeypatch.setattr(channel_options, "slack_client", fake_slack_client)
     slept: list[float] = []
+    real_sleep = asyncio.sleep
 
     async def fake_sleep(seconds: float) -> None:
+        # Record the wait but still yield once: the module patches the asyncio
+        # module itself, and tests rely on a zero sleep to let deferred
+        # callbacks run.
         slept.append(seconds)
+        await real_sleep(0)
 
     monkeypatch.setattr(channel_options.asyncio, "sleep", fake_sleep)
     return slept
